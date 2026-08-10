@@ -29,6 +29,8 @@ while ((line = Console.ReadLine()) is not null)
                 mode = "read-only"
             }),
             "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
+            "build-item-catalog" => BuildItemCatalog(request),
+            "scan-collection" => HelperResponse.Success(request.Id, CollectionSnapshotBuilder.Scan()),
             "scan-transfer-stash" => ScanTransferStash(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
@@ -56,6 +58,15 @@ HelperResponse ScanTransferStash(HelperRequest request)
         ?? throw new JsonException("scan-transfer-stash requires a path parameter.");
     return HelperResponse.Success(request.Id, TransferStashScanner.Scan(parameters.Path));
 }
+
+HelperResponse BuildItemCatalog(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
+        ?? throw new JsonException("build-item-catalog requires an installationPath parameter.");
+    return HelperResponse.Success(request.Id, ItemCatalogBuilder.Build(parameters.InstallationPath));
+}
+
+internal sealed record BuildItemCatalogRequest(string InstallationPath);
 
 internal sealed record HelperRequest(string Id, string Method, JsonElement? Params);
 

@@ -50,3 +50,28 @@ Discovery checks registered Steam libraries and GOG installations for a valid
 roots. Transfer-stash candidates are parsed before they are returned. A broken
 or unsupported candidate is reported with its own error instead of failing the
 entire discovery operation.
+
+## Game item catalog
+
+~~~json
+{"id":"4","method":"build-item-catalog","params":{"installationPath":"C:\\path\\to\\Grim Dawn"}}
+~~~
+
+The helper reads the base game and installed gdx1 through gdx9 archives in
+ascending priority order. It overlays English tags and whole DBR records, then
+returns collection-eligible Epic and Legendary gear with canonical record,
+name, rarity, slot, levels, set relationship, bitmap reference, and content
+pack. Formulae, enemy-only gear, sandbox records, and unresolved internal names
+are excluded.
+
+## Collection snapshot
+
+~~~json
+{"id":"5","method":"scan-collection","params":{}}
+~~~
+
+This is the desktop's read-only milestone endpoint. It combines discovery,
+catalog parsing, and every validated transfer-stash scan. The result contains
+the complete catalog, per-rarity totals, currently available counts, content
+packs, source-stash hashes, and non-fatal source warnings. It does not yet
+persist lifetime discovery; that becomes the SQLite layer's responsibility.

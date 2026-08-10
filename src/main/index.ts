@@ -1,6 +1,11 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { IPC_CHANNELS, type AppStatus, type GrimDawnDiscovery } from '@shared/contracts'
+import {
+  IPC_CHANNELS,
+  type AppStatus,
+  type CollectionSnapshot,
+  type GrimDawnDiscovery
+} from '@shared/contracts'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 
 function createHelperClient(): GrimDawnHelperClient {
@@ -41,22 +46,30 @@ function registerIpcHandlers(helper: GrimDawnHelperClient): void {
     IPC_CHANNELS.discoverGrimDawn,
     (): Promise<GrimDawnDiscovery> => helper.request<GrimDawnDiscovery>('discover-grim-dawn')
   )
+  ipcMain.handle(
+    IPC_CHANNELS.scanCollection,
+    (): Promise<CollectionSnapshot> => helper.request<CollectionSnapshot>('scan-collection')
+  )
 }
 
 async function runSmokeTest(helper: GrimDawnHelperClient): Promise<void> {
   try {
     await helper.request('health')
-    const discovery = await helper.request<GrimDawnDiscovery>('discover-grim-dawn')
+    const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
       (count, location) => count + location.transferStashes.length,
       0
     )
+    const collected = snapshot.rarities.reduce((count, rarity) => count + rarity.collected, 0)
     console.log(
       JSON.stringify({
         helper: 'available',
         installations: discovery.installations.length,
         saveLocations: discovery.saveLocations.length,
-        transferStashes: stashCount
+        transferStashes: stashCount,
+        catalogItems: snapshot.items.length,
+        collected
       })
     )
     helper.dispose()

@@ -3,13 +3,16 @@ import {
   IPC_CHANNELS,
   type AppStatus,
   type CairnCodexApi,
+  type CollectionSnapshot,
   type GrimDawnDiscovery
 } from '@shared/contracts'
 
 const api: CairnCodexApi = {
   getAppStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getAppStatus) as Promise<AppStatus>,
   discoverGrimDawn: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.discoverGrimDawn) as Promise<GrimDawnDiscovery>
+    ipcRenderer.invoke(IPC_CHANNELS.discoverGrimDawn) as Promise<GrimDawnDiscovery>,
+  scanCollection: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.scanCollection) as Promise<CollectionSnapshot>
 }
 
 contextBridge.exposeInMainWorld('cairnCodex', api)

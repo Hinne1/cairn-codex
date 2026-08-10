@@ -32,6 +32,19 @@ The layout was read-only validated against a current five-tab v11 stash with
 211 items and an empty v5 downgrade stash. Every encrypted block boundary was
 validated; neither source file was copied or retained.
 
+The ARZ and ARC algorithms were adapted into the dependency-light readers in
+Gdia/GameData. They preserve GDIA's archive order and whole-record replacement
+semantics while replacing its DataAccess, logging, WinForms, and image
+dependencies with narrow Cairn Codex models. LZ4 block decompression is supplied
+by the separately licensed K4os.Compression.LZ4 package.
+
+The game-data path was read-only validated against database.arz and Text_EN.arc
+from the base game, GDX1, GDX2, and GDX3. The current installation produces
+82,297 overlaid source records, 19,138 English tags, and 3,369 eligible
+Epic/Legendary gear records. All six discovered transfer stashes parsed without
+warnings; the 211-item Documents stash matched 206 copies (174 unique records),
+with its five non-matches correctly outside the Epic/Legendary catalog.
+
 ## Important integration finding
 
 Current GDIA does not use these C# `Write` methods as its production live-item
@@ -51,6 +64,5 @@ Consequences for Cairn Codex:
 
 ## Deferred source areas
 
-- `Parser/Arz` and `Parser/Arc` for the game database and localized resources.
 - `IAGrim/Parsers/Arz` for higher-level item interpretation.
 - `HookDll` only if live-game integration is selected after the read-only MVP.

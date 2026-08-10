@@ -38,7 +38,7 @@ export class GrimDawnHelperClient {
       const timeout = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`Grim Dawn helper timed out while handling ${method}.`))
-      }, this.options.requestTimeoutMs ?? 15_000)
+      }, this.options.requestTimeoutMs ?? 60_000)
 
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),

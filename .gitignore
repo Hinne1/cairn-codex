@@ -1,0 +1,25 @@
+# Node / Electron
+node_modules/
+dist/
+out/
+.vite/
+coverage/
+*.log
+
+# .NET
+**/bin/
+**/obj/
+*.user
+
+# Local application data
+*.db
+*.db-shm
+*.db-wal
+backups/
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+

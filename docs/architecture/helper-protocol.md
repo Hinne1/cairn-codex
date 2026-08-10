@@ -27,3 +27,14 @@ Error response:
 The protocol is versioned independently of either executable. Binary item data
 will be base64 encoded at this boundary unless profiling demonstrates that a
 separate binary transport is necessary.
+
+## Read-only transfer-stash scan
+
+```json
+{"id":"2","method":"scan-transfer-stash","params":{"path":"C:\\path\\to\\transfer.gst"}}
+```
+
+The result includes the source path, size, SHA-256 hash, modification time,
+stash version and mode, tabs, and every serialized item field currently known
+to the imported GDIA parser. A scan is rejected if the file metadata changes
+while it is being read.

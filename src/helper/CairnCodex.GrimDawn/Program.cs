@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CairnCodex.GrimDawn;
 
 const int ProtocolVersion = 1;
 var jsonOptions = new JsonSerializerOptions
@@ -11,11 +12,12 @@ var jsonOptions = new JsonSerializerOptions
 string? line;
 while ((line = Console.ReadLine()) is not null)
 {
+    HelperRequest? request = null;
     HelperResponse response;
 
     try
     {
-        var request = JsonSerializer.Deserialize<HelperRequest>(line, jsonOptions)
+        request = JsonSerializer.Deserialize<HelperRequest>(line, jsonOptions)
             ?? throw new JsonException("Request body is empty.");
 
         response = request.Method switch
@@ -26,15 +28,32 @@ while ((line = Console.ReadLine()) is not null)
                 protocolVersion = ProtocolVersion,
                 mode = "read-only"
             }),
+            "scan-transfer-stash" => ScanTransferStash(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
     }
     catch (Exception exception) when (exception is JsonException or NotSupportedException)
     {
-        response = HelperResponse.Failure(null, "invalid_request", exception.Message);
+        response = HelperResponse.Failure(request?.Id, "invalid_request", exception.Message);
+    }
+    catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException)
+    {
+        response = HelperResponse.Failure(request?.Id, "scan_failed", exception.Message);
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine(exception);
+        response = HelperResponse.Failure(request?.Id, "internal_error", "The helper encountered an unexpected error.");
     }
 
     Console.WriteLine(JsonSerializer.Serialize(response, jsonOptions));
+}
+
+HelperResponse ScanTransferStash(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<ScanTransferStashRequest>(jsonOptions)
+        ?? throw new JsonException("scan-transfer-stash requires a path parameter.");
+    return HelperResponse.Success(request.Id, TransferStashScanner.Scan(parameters.Path));
 }
 
 internal sealed record HelperRequest(string Id, string Method, JsonElement? Params);

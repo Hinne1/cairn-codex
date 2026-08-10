@@ -30,6 +30,8 @@ while ((line = Console.ReadLine()) is not null)
             "build-item-catalog" => BuildItemCatalog(request),
             "scan-collection" => HelperResponse.Success(request.Id, CollectionSnapshotBuilder.Scan()),
             "scan-transfer-stash" => ScanTransferStash(request),
+            "inspect-write-safety" => HelperResponse.Success(request.Id, WriteSafetyGate.Inspect()),
+            "self-test-write-transaction" => HelperResponse.Success(request.Id, WriteTransactionSelfTest.Run()),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
     }
@@ -37,9 +39,17 @@ while ((line = Console.ReadLine()) is not null)
     {
         response = HelperResponse.Failure(request?.Id, "invalid_request", exception.Message);
     }
+    catch (SourceChangedException exception)
+    {
+        response = HelperResponse.Failure(request?.Id, "source_changed", exception.Message);
+    }
     catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException)
     {
         response = HelperResponse.Failure(request?.Id, "scan_failed", exception.Message);
+    }
+    catch (WriteSafetyException exception)
+    {
+        response = HelperResponse.Failure(request?.Id, "write_blocked", exception.Message);
     }
     catch (Exception exception)
     {

@@ -75,3 +75,16 @@ catalog parsing, and every validated transfer-stash scan. The result contains
 the complete catalog, per-rarity totals, currently available counts, content
 packs, source-stash hashes, and non-fatal source warnings. It does not yet
 persist lifetime discovery; that becomes the SQLite layer's responsibility.
+
+## Write-safety inspection and disposable self-test
+
+~~~json
+{"id":"6","method":"inspect-write-safety","params":{}}
+{"id":"7","method":"self-test-write-transaction","params":{}}
+~~~
+
+Inspection reports the current closed-processes safety gate and any Grim Dawn
+or IAGrim processes blocking permission. The self-test never touches Grim Dawn
+data; it verifies backup, validation, stale-source rejection, atomic
+replacement, rollback preservation, and final hashes in a uniquely named
+temporary directory.

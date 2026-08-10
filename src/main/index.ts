@@ -62,6 +62,10 @@ async function runSmokeTest(
 ): Promise<void> {
   try {
     await helper.request('health')
+    const writeTransaction = await helper.request<{ passed: boolean }>('self-test-write-transaction')
+    if (!writeTransaction.passed) {
+      throw new Error('Verified write transaction self-test failed.')
+    }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
     const snapshot = database.persistSnapshot(helperSnapshot)
     const discovery = snapshot.discovery
@@ -87,6 +91,7 @@ async function runSmokeTest(
     console.log(
       JSON.stringify({
         helper: 'available',
+        writeTransaction: 'verified',
         installations: discovery.installations.length,
         saveLocations: discovery.saveLocations.length,
         transferStashes: stashCount,

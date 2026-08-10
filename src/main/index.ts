@@ -78,6 +78,38 @@ async function runSmokeTest(
     if (roundTrips.some((result) => !result.semanticallyEquivalent || !result.idempotent)) {
       throw new Error('A transfer stash failed serializer round-trip validation.')
     }
+    const ingestPlans = await Promise.all(
+      helperSnapshot.scannedStashes
+        .filter((stash) => stash.itemCount > 0)
+        .map((stash) => {
+          const observed = helperSnapshot.observedItems.find(
+            (item) => item.sourcePath.toLowerCase() === stash.path.toLowerCase()
+          )
+          if (!observed) {
+            throw new Error('Non-empty stash has no observed item: ' + stash.path)
+          }
+          return helper.request<{
+            sourceItemCount: number
+            replacementItemCount: number
+            semanticallyValid: boolean
+            idempotent: boolean
+          }>('validate-ingest-plan', {
+            path: stash.path,
+            tabIndex: observed.tabIndex,
+            itemIndex: observed.itemIndex
+          })
+        })
+    )
+    if (
+      ingestPlans.some(
+        (plan) =>
+          !plan.semanticallyValid ||
+          !plan.idempotent ||
+          plan.replacementItemCount !== plan.sourceItemCount - 1
+      )
+    ) {
+      throw new Error('A transfer stash failed the in-memory ingest plan validation.')
+    }
     const snapshot = database.persistSnapshot(helperSnapshot)
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
@@ -104,6 +136,7 @@ async function runSmokeTest(
         helper: 'available',
         writeTransaction: 'verified',
         serializerRoundTrips: roundTrips.length,
+        ingestPlans: ingestPlans.length,
         installations: discovery.installations.length,
         saveLocations: discovery.saveLocations.length,
         transferStashes: stashCount,

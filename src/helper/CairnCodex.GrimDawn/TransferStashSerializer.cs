@@ -46,7 +46,7 @@ internal static class TransferStashSerializer
         return buffer.Data.AsSpan(0, buffer.Length).ToArray();
     }
 
-    private static Stash Parse(byte[] bytes)
+    internal static Stash Parse(byte[] bytes)
     {
         var stash = new Stash();
         if (!stash.Read(new GDCryptoDataBuffer(bytes)))
@@ -56,7 +56,7 @@ internal static class TransferStashSerializer
         return stash;
     }
 
-    private static bool AreEquivalent(Stash left, Stash right)
+    internal static bool AreEquivalent(Stash left, Stash right)
     {
         if (left.Unknown1 != right.Unknown1 ||
             left.Unknown2 != right.Unknown2 ||
@@ -91,7 +91,7 @@ internal static class TransferStashSerializer
         return true;
     }
 
-    private static bool AreEquivalent(Item left, Item right) =>
+    internal static bool AreEquivalent(Item left, Item right) =>
         left.BaseRecord == right.BaseRecord &&
         left.PrefixRecord == right.PrefixRecord &&
         left.SuffixRecord == right.SuffixRecord &&

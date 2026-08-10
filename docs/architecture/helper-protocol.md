@@ -99,3 +99,15 @@ This method parses a stash, serializes it in memory with a zero cipher key,
 reparses it, compares every known item/header/layout field, serializes it a
 second time, and requires deterministic bytes. It never writes the source or a
 replacement. Real-write IPC remains intentionally absent.
+
+## In-memory ingest planning
+
+~~~json
+{"id":"9","method":"validate-ingest-plan","params":{"path":"C:\\path\\to\\transfer.gsh","tabIndex":0,"itemIndex":0}}
+~~~
+
+The planner captures every known field of the selected item as an app-owned
+vault payload, removes it only from an in-memory stash, serializes and reparses
+the proposed replacement, verifies that exactly one item was removed, compares
+all remaining fields, and requires deterministic serialization. It returns
+hashes and validation evidence, not a write capability.

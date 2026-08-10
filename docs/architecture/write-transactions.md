@@ -31,3 +31,9 @@ passing in-memory semantic and deterministic round trips for all discovered v4,
 v5, and v11 files. Enabling ingest still requires an app-owned item payload,
 format validation inside the verified transaction, and an explicit journaled
 operation orchestrator.
+
+The in-memory ingest planner now proves the item-removal transformation
+separately from the file transaction. The smoke suite successfully plans one
+item from each of the five non-empty discovered stashes and verifies exact
+item-count reduction, remaining-item equivalence, a complete vault payload,
+and deterministic replacement bytes. The sixth discovered stash is empty.

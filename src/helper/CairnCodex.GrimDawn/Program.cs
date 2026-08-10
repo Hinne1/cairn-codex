@@ -33,6 +33,7 @@ while ((line = Console.ReadLine()) is not null)
             "inspect-write-safety" => HelperResponse.Success(request.Id, WriteSafetyGate.Inspect()),
             "self-test-write-transaction" => HelperResponse.Success(request.Id, WriteTransactionSelfTest.Run()),
             "validate-transfer-stash-roundtrip" => ValidateTransferStashRoundTrip(request),
+            "validate-ingest-plan" => ValidateIngestPlan(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
     }
@@ -82,6 +83,15 @@ HelperResponse ValidateTransferStashRoundTrip(HelperRequest request)
     return HelperResponse.Success(
         request.Id,
         TransferStashSerializer.ValidateRoundTrip(parameters.Path));
+}
+
+HelperResponse ValidateIngestPlan(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<ValidateIngestPlanRequest>(jsonOptions)
+        ?? throw new JsonException("validate-ingest-plan requires path, tabIndex, and itemIndex parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        IngestPlanner.Validate(parameters.Path, parameters.TabIndex, parameters.ItemIndex));
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);

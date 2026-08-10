@@ -6,7 +6,12 @@ import {
   IPC_CHANNELS,
   type AppStatus,
   type CollectionSnapshot,
-  type GrimDawnDiscovery
+  type GrimDawnDiscovery,
+  type IngestResult,
+  type RetrievalResult,
+  type StagingTabInspection,
+  type VaultListItem,
+  type WriteSafetyStatus
 } from '@shared/contracts'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
@@ -74,6 +79,21 @@ interface CommittedRetrieval {
   }
 }
 
+interface TransferStashScan {
+  path: string
+  sha256: string
+  itemCount: number
+  tabs: Array<{
+    index: number
+    items: Array<{
+      tabIndex: number
+      itemIndex: number
+      baseRecord: string
+      seed: number
+    }>
+  }>
+}
+
 function createHelperClient(): GrimDawnHelperClient {
   if (app.isPackaged) {
     return new GrimDawnHelperClient({
@@ -100,6 +120,17 @@ function createHelperClient(): GrimDawnHelperClient {
 }
 
 function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionDatabase): void {
+  let writeInProgress = false
+  const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (writeInProgress) throw new Error('Another vault write is already in progress.')
+    writeInProgress = true
+    try {
+      return await operation()
+    } finally {
+      writeInProgress = false
+    }
+  }
+
   ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
     try {
       await helper.request('health')
@@ -124,6 +155,26 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     (_event, input: { record: string; instanceKey: string | null }): void => {
       database.setPinnedBest(input.record, input.instanceKey)
     }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.inspectWriteSafety,
+    (): Promise<WriteSafetyStatus> => helper.request<WriteSafetyStatus>('inspect-write-safety')
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.inspectStagingTab,
+    (_event, input: { path: string }): Promise<StagingTabInspection> =>
+      inspectStagingTab(helper, database, input.path)
+  )
+  ipcMain.handle(IPC_CHANNELS.listVaultItems, (): VaultListItem[] => database.listVaultItems())
+  ipcMain.handle(
+    IPC_CHANNELS.ingestStagingTab,
+    (_event, input: { path: string }): Promise<IngestResult> =>
+      runExclusive(() => executeStagingTabIngest(helper, database, input.path))
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.retrieveVaultItems,
+    (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> =>
+      runExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds))
   )
 }
 
@@ -303,6 +354,14 @@ async function runSmokeTest(
     if (database.getVaultItems([journalVaultItemId])[0]?.state !== 'retrieved') {
       throw new Error('Vault item did not enter retrieved state.')
     }
+    const listedVaultItem = database.listVaultItems().find((item) => item.id === journalVaultItemId)
+    if (
+      !listedVaultItem ||
+      listedVaultItem.state !== 'retrieved' ||
+      listedVaultItem.seed !== (journalPayload.seed as number)
+    ) {
+      throw new Error('Vault listing did not project the stored payload and lifecycle state.')
+    }
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
       (count, location) => count + location.transferStashes.length,
@@ -331,6 +390,7 @@ async function runSmokeTest(
         ingestPlans: ingestPlans.length,
         retrievalRoundTrips: retrievalRoundTrips.length,
         retrievalJournal: 'verified',
+        vaultListing: 'verified',
         analyzedCopies: analyzedCopies.length,
         trustedRolls: trustedRolls.length,
         withheldRolls: analyzedCopies.length - trustedRolls.length,
@@ -359,18 +419,34 @@ async function runIngestCommand(
   database: CollectionDatabase,
   command: IngestCommand
 ): Promise<void> {
+  try {
+    const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    database.persistSnapshot(snapshot)
+    console.log(JSON.stringify(await executeIngestCommand(helper, database, command)))
+    helper.dispose()
+    database.close()
+    app.exit(0)
+  } catch (error) {
+    console.error(error)
+    helper.dispose()
+    database.close()
+    app.exit(1)
+  }
+}
+
+async function executeIngestCommand(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  command: IngestCommand
+): Promise<IngestResult> {
   const operationId = randomUUID()
   let prepared = false
   try {
-    const safety = await helper.request<{ permitted: boolean; reasons: string[] }>(
-      'inspect-write-safety'
-    )
+    const safety = await helper.request<WriteSafetyStatus>('inspect-write-safety')
     if (!safety.permitted) {
       throw new Error('Write safety gate refused permission: ' + safety.reasons.join(' '))
     }
 
-    const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-    database.persistSnapshot(snapshot)
     const selectors = command.items.map(({ tabIndex, itemIndex }) => ({ tabIndex, itemIndex }))
     const plan = await helper.request<IngestPlan>('plan-ingest-items', {
       path: command.path,
@@ -452,35 +528,27 @@ async function runIngestCommand(
       throw new Error('Post-commit stash verification did not match the committed ingest.')
     }
 
-    console.log(
-      JSON.stringify({
-        operationId,
-        status: 'committed',
-        ingested: plan.items.map((item, index) => ({
-          vaultItemId: vaultItemIds[index],
-          baseRecord: item.baseRecord,
-          seed: item.seed
-        })),
-        sourceItems: plan.sourceItemCount,
-        remainingItems: verified.itemCount,
-        lastTabItems: verified.tabs.at(-1)?.items.length ?? null,
-        sourceSha256: plan.sourceSha256,
-        committedSha256: committed.transaction.committedSha256,
-        backupPath: committed.transaction.backupPath,
-        rollbackPath: committed.transaction.rollbackPath
-      })
-    )
-    helper.dispose()
-    database.close()
-    app.exit(0)
+    return {
+      operationId,
+      status: 'committed',
+      ingested: plan.items.map((item, index) => ({
+        vaultItemId: vaultItemIds[index]!,
+        baseRecord: item.baseRecord,
+        seed: item.seed
+      })),
+      sourceItems: plan.sourceItemCount,
+      remainingItems: verified.itemCount,
+      lastTabItems: verified.tabs.at(-1)?.items.length ?? 0,
+      sourceSha256: plan.sourceSha256,
+      committedSha256: committed.transaction.committedSha256,
+      backupPath: committed.transaction.backupPath,
+      rollbackPath: committed.transaction.rollbackPath
+    }
   } catch (error) {
     if (prepared) {
       database.failIngestOperation(operationId, error)
     }
-    console.error(error)
-    helper.dispose()
-    database.close()
-    app.exit(1)
+    throw error
   }
 }
 
@@ -534,13 +602,29 @@ async function runRetrievalCommand(
   database: CollectionDatabase,
   command: RetrievalCommand
 ): Promise<void> {
+  try {
+    console.log(JSON.stringify(await executeRetrievalCommand(helper, database, command)))
+    helper.dispose()
+    database.close()
+    app.exit(0)
+  } catch (error) {
+    console.error(error)
+    helper.dispose()
+    database.close()
+    app.exit(1)
+  }
+}
+
+async function executeRetrievalCommand(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  command: RetrievalCommand
+): Promise<RetrievalResult> {
   const operationId = randomUUID()
   let prepared = false
   let commitAttempted = false
   try {
-    const safety = await helper.request<{ permitted: boolean; reasons: string[] }>(
-      'inspect-write-safety'
-    )
+    const safety = await helper.request<WriteSafetyStatus>('inspect-write-safety')
     if (!safety.permitted) {
       throw new Error('Write safety gate refused permission: ' + safety.reasons.join(' '))
     }
@@ -634,27 +718,22 @@ async function runRetrievalCommand(
       }
     })
 
-    console.log(
-      JSON.stringify({
-        operationId,
-        status: 'committed',
-        retrieved: plan.items.map((item, index) => ({
-          vaultItemId: command.vaultItemIds[index],
-          baseRecord: item.baseRecord,
-          seed: item.seed
-        })),
-        sourceItems: plan.sourceItemCount,
-        remainingItems: verified.itemCount,
-        targetTabItems: targetItems.length,
-        sourceSha256: plan.sourceSha256,
-        committedSha256: committed.transaction.committedSha256,
-        backupPath: committed.transaction.backupPath,
-        rollbackPath: committed.transaction.rollbackPath
-      })
-    )
-    helper.dispose()
-    database.close()
-    app.exit(0)
+    return {
+      operationId,
+      status: 'committed',
+      retrieved: plan.items.map((item, index) => ({
+        vaultItemId: command.vaultItemIds[index]!,
+        baseRecord: item.baseRecord,
+        seed: item.seed
+      })),
+      sourceItems: plan.sourceItemCount,
+      remainingItems: verified.itemCount,
+      targetTabItems: targetItems.length,
+      sourceSha256: plan.sourceSha256,
+      committedSha256: committed.transaction.committedSha256,
+      backupPath: committed.transaction.backupPath,
+      rollbackPath: committed.transaction.rollbackPath
+    }
   } catch (error) {
     if (prepared) {
       if (commitAttempted) {
@@ -663,11 +742,81 @@ async function runRetrievalCommand(
         database.failRetrievalOperation(operationId, command.vaultItemIds, error)
       }
     }
-    console.error(error)
-    helper.dispose()
-    database.close()
-    app.exit(1)
+    throw error
   }
+}
+
+async function inspectStagingTab(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  path: string
+): Promise<StagingTabInspection> {
+  const scan = await helper.request<TransferStashScan>('scan-transfer-stash', { path })
+  const lastTab = scan.tabs.at(-1)
+  if (!lastTab) throw new Error('The selected transfer stash has no tabs.')
+  const names = database.getCatalogNames(lastTab.items.map((item) => item.baseRecord))
+  return {
+    path: scan.path,
+    sha256: scan.sha256,
+    tabIndex: lastTab.index,
+    tabCount: scan.tabs.length,
+    itemCount: lastTab.items.length,
+    totalItemCount: scan.itemCount,
+    items: lastTab.items.map((item) => ({
+      tabIndex: item.tabIndex,
+      itemIndex: item.itemIndex,
+      baseRecord: item.baseRecord,
+      name: names.get(item.baseRecord.toLowerCase()) ?? item.baseRecord,
+      seed: item.seed,
+      supported: names.has(item.baseRecord.toLowerCase())
+    }))
+  }
+}
+
+async function executeStagingTabIngest(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  path: string
+): Promise<IngestResult> {
+  const staging = await inspectStagingTab(helper, database, path)
+  if (staging.items.length === 0) {
+    throw new Error('The final stash tab is empty; there is nothing staged for ingest.')
+  }
+  const unsupported = staging.items.filter((item) => !item.supported)
+  if (unsupported.length > 0) {
+    throw new Error(
+      'The staging tab contains items outside the Epic/Legendary collection: ' +
+        unsupported.map((item) => item.name).join(', ')
+    )
+  }
+  return executeIngestCommand(helper, database, {
+    path: staging.path,
+    expectedSourceSha256: staging.sha256,
+    items: staging.items.map((item) => ({
+      tabIndex: item.tabIndex,
+      itemIndex: item.itemIndex,
+      expectedSeed: item.seed
+    }))
+  })
+}
+
+async function executeLastTabRetrieval(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  path: string,
+  vaultItemIds: string[]
+): Promise<RetrievalResult> {
+  if (vaultItemIds.length === 0) throw new Error('Select at least one vault item to retrieve.')
+  const staging = await inspectStagingTab(helper, database, path)
+  if (staging.itemCount !== 0) {
+    throw new Error('The final stash tab must be empty before retrieving an item.')
+  }
+  return executeRetrievalCommand(helper, database, {
+    path: staging.path,
+    expectedSourceSha256: staging.sha256,
+    targetTabIndex: staging.tabIndex,
+    vaultItemIds
+  })
 }
 
 function createWindow(): void {

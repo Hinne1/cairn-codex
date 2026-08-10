@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
-import type { CollectionItem, CollectionSnapshot } from '@shared/contracts'
+import type { CollectionItem, CollectionSnapshot, VaultListItem } from '@shared/contracts'
 
 export class CollectionDatabase {
   private readonly database: DatabaseSync
@@ -177,6 +177,60 @@ export class CollectionDatabase {
         payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown
       }
     })
+  }
+
+  listVaultItems(): VaultListItem[] {
+    const rows = this.database
+      .prepare(`
+        SELECT
+          vault_item.id,
+          vault_item.base_record,
+          vault_item.state,
+          vault_item.serialized_item,
+          vault_item.ingested_at_utc,
+          vault_item.retrieved_at_utc,
+          catalog_item.name,
+          catalog_item.rarity
+        FROM vault_item
+        JOIN catalog_item ON catalog_item.record = vault_item.base_record
+        ORDER BY vault_item.ingested_at_utc DESC, vault_item.id
+      `)
+      .all() as Array<{
+      id: string
+      base_record: string
+      state: VaultItemState
+      serialized_item: Uint8Array
+      ingested_at_utc: string
+      retrieved_at_utc: string | null
+      name: string
+      rarity: 'epic' | 'legendary'
+    }>
+
+    return rows.map((row) => {
+      const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as {
+        seed?: number
+      }
+      return {
+        id: row.id,
+        baseRecord: row.base_record,
+        name: row.name,
+        rarity: row.rarity,
+        state: row.state,
+        seed: payload.seed ?? 0,
+        ingestedAtUtc: row.ingested_at_utc,
+        retrievedAtUtc: row.retrieved_at_utc
+      }
+    })
+  }
+
+  getCatalogNames(records: string[]): Map<string, string> {
+    const uniqueRecords = [...new Set(records)]
+    if (uniqueRecords.length === 0) return new Map()
+    const placeholders = uniqueRecords.map(() => '?').join(', ')
+    const rows = this.database
+      .prepare(`SELECT record, name FROM catalog_item WHERE record IN (${placeholders})`)
+      .all(...uniqueRecords) as Array<{ record: string; name: string }>
+    return new Map(rows.map((row) => [row.record.toLowerCase(), row.name]))
   }
 
   prepareRetrievalOperation(input: PreparedRetrievalOperation): void {

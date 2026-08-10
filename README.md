@@ -12,7 +12,7 @@ items.
 - Ingest and retrieve real items through Grim Dawn's transfer stash.
 - Exclude Monster Infrequents from the first release.
 
-## Proposed architecture
+## Architecture
 
 ```text
 Vue 3 + TypeScript renderer
@@ -65,6 +65,11 @@ transfer stash.
    - Roll breakdowns and aggregate auto-best scoring.
    - Pinned-best selection.
    - Advanced filters, comparisons, and collection presentation.
+
+These four milestones are implemented. The desktop Vault screen exposes the
+journaled ingest and retrieval flows: choose a transfer stash, stage supported
+items in its final tab, and explicitly confirm the operation. Retrieval remains
+deliberately conservative and requires that final tab to be empty.
 
 ## Safety invariants
 

@@ -6,7 +6,10 @@ import type {
   CollectionRaritySummary,
   CollectionSnapshot,
   GrimDawnDiscovery,
-  ObservedStashItem
+  ObservedStashItem,
+  StagingTabInspection,
+  VaultListItem,
+  WriteSafetyStatus
 } from '@shared/contracts'
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
@@ -34,6 +37,14 @@ const sortMode = ref<SortMode>('completion')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
 const pinning = ref(false)
+const vaultItems = ref<VaultListItem[]>([])
+const staging = ref<StagingTabInspection | null>(null)
+const writeSafety = ref<WriteSafetyStatus | null>(null)
+const selectedStashPath = ref('')
+const selectedVaultIds = ref<string[]>([])
+const vaultBusy = ref(false)
+const vaultError = ref<string | null>(null)
+const vaultMessage = ref<string | null>(null)
 const pageSize = 48
 
 const categories = [
@@ -49,8 +60,18 @@ const categories = [
   'Offhands',
   'Jewelry',
   'Relics',
-  'Sets'
+  'Sets',
+  'Vault'
 ]
+
+const availableVaultItems = computed(() =>
+  vaultItems.value.filter((item) => item.state === 'ingested')
+)
+const retrievedVaultItems = computed(() =>
+  vaultItems.value.filter((item) => item.state === 'retrieved')
+)
+const stashChoices = computed(() => snapshot.value?.scannedStashes ?? [])
+const stagingHasUnsupported = computed(() => staging.value?.items.some((item) => !item.supported) ?? false)
 
 const filteredItems = computed(() => {
   if (!snapshot.value || activeCategory.value === 'Sets') return []
@@ -130,7 +151,11 @@ const visibleSets = computed(() => {
 })
 
 const displayedResultCount = computed(() =>
-  activeCategory.value === 'Sets' ? visibleSets.value.length : filteredItems.value.length
+  activeCategory.value === 'Vault'
+    ? availableVaultItems.value.length
+    : activeCategory.value === 'Sets'
+      ? visibleSets.value.length
+      : filteredItems.value.length
 )
 
 const selectedItem = computed(() =>
@@ -160,9 +185,18 @@ watch(
   }
 )
 
+watch(selectedStashPath, async (path) => {
+  if (path) await refreshStaging()
+})
+
+watch(activeCategory, async (category) => {
+  if (category === 'Vault') await refreshVault()
+})
+
 onMounted(async () => {
   status.value = await window.cairnCodex.getAppStatus()
   await scanCollection()
+  await refreshVault()
 })
 
 async function scanCollection(): Promise<void> {
@@ -171,6 +205,9 @@ async function scanCollection(): Promise<void> {
   try {
     snapshot.value = await window.cairnCodex.scanCollection()
     discovery.value = snapshot.value.discovery
+    if (!selectedStashPath.value || !snapshot.value.scannedStashes.some((stash) => stash.path === selectedStashPath.value)) {
+      selectedStashPath.value = preferredStashPath(snapshot.value)
+    }
   } catch (error) {
     scanError.value = error instanceof Error ? error.message : 'Collection scan failed.'
   } finally {
@@ -189,12 +226,121 @@ function percentage(summary: CollectionRaritySummary | undefined): string {
 
 function categoryProgress(category: string): string {
   if (!snapshot.value) return '0 / 0'
+  if (category === 'Vault') return `${availableVaultItems.value.length} ready`
   if (category === 'Sets') {
     const collected = collectionSets.value.filter((set) => set.collected === set.items.length).length
     return `${collected} / ${collectionSets.value.length}`
   }
   const matches = snapshot.value.items.filter((item) => matchesCategory(item, category))
   return `${matches.filter((item) => item.discovered).length} / ${matches.length}`
+}
+
+function preferredStashPath(value: CollectionSnapshot): string {
+  const normalizedName = (path: string) => path.replaceAll('/', '\\').toLocaleLowerCase()
+  const documentsHardcore = value.scannedStashes.find((stash) => {
+    const path = normalizedName(stash.path)
+    return path.includes('\\documents\\') && path.endsWith('\\transfer.gsh')
+  })
+  return (
+    documentsHardcore?.path ??
+    value.scannedStashes.find((stash) => {
+      const path = normalizedName(stash.path)
+      return path.includes('\\documents\\') && path.endsWith('\\transfer.gst')
+    })?.path ??
+    value.scannedStashes.find((stash) => normalizedName(stash.path).endsWith('\\transfer.gsh'))?.path ??
+    value.scannedStashes.find((stash) => normalizedName(stash.path).endsWith('\\transfer.gst'))?.path ??
+    value.scannedStashes.find((stash) => stash.isHardcore)?.path ??
+    value.scannedStashes[0]?.path ??
+    ''
+  )
+}
+
+async function refreshVault(): Promise<void> {
+  if (!selectedStashPath.value) return
+  vaultError.value = null
+  try {
+    const [items, safety] = await Promise.all([
+      window.cairnCodex.listVaultItems(),
+      window.cairnCodex.inspectWriteSafety()
+    ])
+    vaultItems.value = items
+    writeSafety.value = safety
+    selectedVaultIds.value = selectedVaultIds.value.filter((id) =>
+      items.some((item) => item.id === id && item.state === 'ingested')
+    )
+    await refreshStaging()
+  } catch (error) {
+    vaultError.value = readableError(error)
+  }
+}
+
+async function refreshStaging(): Promise<void> {
+  if (!selectedStashPath.value) return
+  try {
+    staging.value = await window.cairnCodex.inspectStagingTab(selectedStashPath.value)
+  } catch (error) {
+    staging.value = null
+    vaultError.value = readableError(error)
+  }
+}
+
+async function ingestStagingTab(): Promise<void> {
+  if (!staging.value || staging.value.itemCount === 0 || vaultBusy.value) return
+  const confirmed = window.confirm(
+    `Ingest ${staging.value.itemCount} item${staging.value.itemCount === 1 ? '' : 's'} from the final shared stash tab? A verified backup will be created first.`
+  )
+  if (!confirmed) return
+  vaultBusy.value = true
+  vaultError.value = null
+  vaultMessage.value = null
+  try {
+    const result = await window.cairnCodex.ingestStagingTab(selectedStashPath.value)
+    vaultMessage.value = `Safely ingested ${result.ingested.length} item${result.ingested.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`
+    await scanCollection()
+    await refreshVault()
+  } catch (error) {
+    vaultError.value = readableError(error)
+    await refreshVault()
+  } finally {
+    vaultBusy.value = false
+  }
+}
+
+async function retrieveSelected(): Promise<void> {
+  if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
+  const confirmed = window.confirm(
+    `Retrieve ${selectedVaultIds.value.length} item${selectedVaultIds.value.length === 1 ? '' : 's'} into the empty final shared stash tab? A verified backup will be created first.`
+  )
+  if (!confirmed) return
+  vaultBusy.value = true
+  vaultError.value = null
+  vaultMessage.value = null
+  try {
+    const result = await window.cairnCodex.retrieveVaultItems(
+      selectedStashPath.value,
+      selectedVaultIds.value
+    )
+    selectedVaultIds.value = []
+    vaultMessage.value = `Safely retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`
+    await scanCollection()
+    await refreshVault()
+  } catch (error) {
+    vaultError.value = readableError(error)
+    await refreshVault()
+  } finally {
+    vaultBusy.value = false
+  }
+}
+
+function toggleVaultItem(id: string): void {
+  selectedVaultIds.value = selectedVaultIds.value.includes(id)
+    ? selectedVaultIds.value.filter((candidate) => candidate !== id)
+    : [...selectedVaultIds.value, id]
+}
+
+function readableError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }
 
 function compareItems(left: CollectionItem, right: CollectionItem): number {
@@ -387,7 +533,7 @@ function formatRollValue(value: number): string {
         </button>
       </nav>
 
-      <section class="filter-bar" aria-label="Collection filters">
+      <section v-if="activeCategory !== 'Vault'" class="filter-bar" aria-label="Collection filters">
         <label class="search-field">
           <span class="sr-only">Search collection</span>
           <input v-model="query" type="search" placeholder="Search items or sets…" />
@@ -417,7 +563,132 @@ function formatRollValue(value: number): string {
         <span class="result-count">{{ displayedResultCount.toLocaleString() }} results</span>
       </section>
 
-      <section v-if="!snapshot && scanning" class="empty-state">
+      <section v-if="activeCategory === 'Vault'" class="vault-workspace" aria-label="Item vault">
+        <header class="vault-heading">
+          <div>
+            <p class="section-label">Transfer vault</p>
+            <h2>One tab in. One tab out.</h2>
+            <p>
+              The final shared stash tab is the staging area. Every commit is process-gated,
+              backed up, written atomically, reparsed, and hash-verified.
+            </p>
+          </div>
+          <button type="button" :disabled="vaultBusy" @click="refreshVault">
+            {{ vaultBusy ? 'Working…' : 'Recheck' }}
+          </button>
+        </header>
+
+        <div class="vault-target">
+          <label>
+            <span>Shared stash</span>
+            <select v-model="selectedStashPath" :disabled="vaultBusy">
+              <option v-for="stash in stashChoices" :key="stash.path" :value="stash.path">
+                {{ stash.isHardcore ? 'Hardcore' : 'Softcore' }} · {{ stash.path }}
+              </option>
+            </select>
+          </label>
+          <div class="safety-state" :class="{ safe: writeSafety?.permitted }">
+            <span class="status-dot" :class="{ dim: !writeSafety?.permitted }" />
+            <div>
+              <strong>{{ writeSafety?.permitted ? 'Writes unlocked' : 'Writes locked' }}</strong>
+              <small v-if="writeSafety?.permitted">Grim Dawn and Item Assistant are closed.</small>
+              <small v-else>{{ writeSafety?.reasons.join(' ') || 'Checking running processes…' }}</small>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="vaultError" class="vault-notice error">{{ vaultError }}</p>
+        <p v-if="vaultMessage" class="vault-notice success">{{ vaultMessage }}</p>
+
+        <div class="vault-columns">
+          <article class="vault-panel staging-panel">
+            <header>
+              <div>
+                <p>Final stash tab</p>
+                <h3>Staged for ingest</h3>
+              </div>
+              <strong>{{ staging?.itemCount ?? '—' }}</strong>
+            </header>
+            <p class="panel-help">
+              Put only the Epics and Legendaries you want archived into tab
+              {{ staging ? staging.tabIndex + 1 : '—' }}.
+            </p>
+            <div v-if="staging?.items.length" class="vault-item-list">
+              <div
+                v-for="item in staging.items"
+                :key="`${item.itemIndex}:${item.seed}`"
+                class="vault-row"
+                :class="{ unsupported: !item.supported }"
+              >
+                <span class="item-rune">{{ item.supported ? '◆' : '!' }}</span>
+                <div>
+                  <strong>{{ item.name }}</strong>
+                  <small>Seed {{ item.seed }}{{ item.supported ? '' : ' · not an Epic/Legendary' }}</small>
+                </div>
+              </div>
+            </div>
+            <div v-else class="vault-empty">The staging tab is empty.</div>
+            <button
+              class="vault-action"
+              type="button"
+              :disabled="vaultBusy || !writeSafety?.permitted || !staging?.itemCount || stagingHasUnsupported"
+              @click="ingestStagingTab"
+            >
+              {{ vaultBusy ? 'Verifying…' : `Ingest ${staging?.itemCount ?? 0} staged` }}
+            </button>
+          </article>
+
+          <article class="vault-panel">
+            <header>
+              <div>
+                <p>Codex vault</p>
+                <h3>Ready to retrieve</h3>
+              </div>
+              <strong>{{ availableVaultItems.length }}</strong>
+            </header>
+            <p class="panel-help">
+              Retrieval requires the final stash tab to be empty. Select one or more archived copies.
+            </p>
+            <div v-if="availableVaultItems.length" class="vault-item-list selectable">
+              <label v-for="item in availableVaultItems" :key="item.id" class="vault-row">
+                <input
+                  type="checkbox"
+                  :checked="selectedVaultIds.includes(item.id)"
+                  :disabled="vaultBusy"
+                  @change="toggleVaultItem(item.id)"
+                />
+                <div>
+                  <strong>{{ item.name }}</strong>
+                  <small>{{ item.rarity }} · seed {{ item.seed }}</small>
+                </div>
+              </label>
+            </div>
+            <div v-else class="vault-empty">No archived items are waiting.</div>
+            <button
+              class="vault-action"
+              type="button"
+              :disabled="vaultBusy || !writeSafety?.permitted || staging?.itemCount !== 0 || selectedVaultIds.length === 0"
+              @click="retrieveSelected"
+            >
+              {{ vaultBusy ? 'Verifying…' : `Retrieve ${selectedVaultIds.length} selected` }}
+            </button>
+          </article>
+        </div>
+
+        <section v-if="retrievedVaultItems.length" class="vault-history">
+          <div>
+            <p class="section-label">History</p>
+            <h3>Previously retrieved</h3>
+          </div>
+          <div class="history-chips">
+            <span v-for="item in retrievedVaultItems" :key="item.id">
+              {{ item.name }} · seed {{ item.seed }}
+            </span>
+          </div>
+        </section>
+      </section>
+
+      <section v-else-if="!snapshot && scanning" class="empty-state">
         <div class="sigil loading" aria-hidden="true">C</div>
         <h3>Opening the Codex</h3>
         <p>Parsing the game database and your transfer stashes.</p>

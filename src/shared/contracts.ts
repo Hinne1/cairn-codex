@@ -2,7 +2,12 @@ export const IPC_CHANNELS = {
   getAppStatus: 'app:get-status',
   discoverGrimDawn: 'grim-dawn:discover',
   scanCollection: 'grim-dawn:scan-collection',
-  setPinnedBest: 'collection:set-pinned-best'
+  setPinnedBest: 'collection:set-pinned-best',
+  inspectWriteSafety: 'vault:inspect-write-safety',
+  inspectStagingTab: 'vault:inspect-staging-tab',
+  listVaultItems: 'vault:list-items',
+  ingestStagingTab: 'vault:ingest-staging-tab',
+  retrieveVaultItems: 'vault:retrieve-items'
 } as const
 
 export interface AppStatus {
@@ -16,6 +21,74 @@ export interface CairnCodexApi {
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   scanCollection: () => Promise<CollectionSnapshot>
   setPinnedBest: (record: string, instanceKey: string | null) => Promise<void>
+  inspectWriteSafety: () => Promise<WriteSafetyStatus>
+  inspectStagingTab: (path: string) => Promise<StagingTabInspection>
+  listVaultItems: () => Promise<VaultListItem[]>
+  ingestStagingTab: (path: string) => Promise<IngestResult>
+  retrieveVaultItems: (path: string, vaultItemIds: string[]) => Promise<RetrievalResult>
+}
+
+export interface WriteSafetyStatus {
+  permitted: boolean
+  reasons: string[]
+}
+
+export interface StagingTabInspection {
+  path: string
+  sha256: string
+  tabIndex: number
+  tabCount: number
+  itemCount: number
+  totalItemCount: number
+  items: StagedItem[]
+}
+
+export interface StagedItem {
+  tabIndex: number
+  itemIndex: number
+  baseRecord: string
+  name: string
+  seed: number
+  supported: boolean
+}
+
+export type VaultItemState = 'ingested' | 'retrieval_pending' | 'retrieved'
+
+export interface VaultListItem {
+  id: string
+  baseRecord: string
+  name: string
+  rarity: 'epic' | 'legendary'
+  state: VaultItemState
+  seed: number
+  ingestedAtUtc: string
+  retrievedAtUtc: string | null
+}
+
+export interface IngestResult {
+  operationId: string
+  status: 'committed'
+  ingested: Array<{ vaultItemId: string; baseRecord: string; seed: number }>
+  sourceItems: number
+  remainingItems: number
+  lastTabItems: number
+  sourceSha256: string
+  committedSha256: string
+  backupPath: string
+  rollbackPath: string
+}
+
+export interface RetrievalResult {
+  operationId: string
+  status: 'committed'
+  retrieved: Array<{ vaultItemId: string; baseRecord: string; seed: number }>
+  sourceItems: number
+  remainingItems: number
+  targetTabItems: number
+  sourceSha256: string
+  committedSha256: string
+  backupPath: string
+  rollbackPath: string
 }
 
 export interface GrimDawnDiscovery {

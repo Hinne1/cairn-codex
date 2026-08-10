@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import {
   IPC_CHANNELS,
@@ -620,6 +621,7 @@ async function runRetrievalCommand(
 }
 
 function createWindow(): void {
+  const screenshotPath = process.env.CAIRN_CODEX_SCREENSHOT_PATH
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -631,16 +633,73 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      backgroundThrottling: !screenshotPath
     }
   })
 
-  window.once('ready-to-show', () => window.show())
+  window.once('ready-to-show', () => {
+    if (!screenshotPath) window.show()
+  })
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     void window.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  if (screenshotPath) {
+    window.webContents.once('did-finish-load', () => {
+      void captureWindowWhenReady(window, screenshotPath)
+    })
+  }
+}
+
+async function captureWindowWhenReady(window: BrowserWindow, path: string): Promise<void> {
+  try {
+    window.setContentSize(1440, 1000)
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const ready = await window.webContents.executeJavaScript(
+        `Boolean(document.querySelector('.catalog-grid, .set-grid')) &&
+         !document.querySelector('.primary-action')?.disabled`
+      )
+      if (ready) {
+        const category = process.env.CAIRN_CODEX_SCREENSHOT_CATEGORY
+        if (category) {
+          await window.webContents.executeJavaScript(`
+            [...document.querySelectorAll('.category-tabs button')]
+              .find((button) => button.querySelector('span')?.textContent === ${JSON.stringify(category)})
+              ?.click()
+          `)
+        }
+        await window.webContents.executeJavaScript('window.scrollTo(0, 0)')
+        window.setOpacity(0)
+        window.showInactive()
+        window.webContents.invalidate()
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        const renderedState = await window.webContents.executeJavaScript(`({
+          heading: document.querySelector('.hero h2')?.textContent,
+          results: document.querySelector('.result-count')?.textContent,
+          cards: document.querySelectorAll('.item-card').length,
+          sets: document.querySelectorAll('.set-card').length,
+          scrollX: window.scrollX,
+          titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
+          mainX: document.querySelector('main')?.getBoundingClientRect().x
+        })`)
+        const image = await window.webContents.capturePage()
+        await writeFile(path, image.toPNG())
+        console.log(
+          JSON.stringify({ screenshotPath: path, width: 1440, height: 1000, renderedState })
+        )
+        app.quit()
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    throw new Error('Renderer did not finish its collection scan before screenshot timeout.')
+  } catch (error) {
+    console.error(error)
+    app.exit(1)
   }
 }
 

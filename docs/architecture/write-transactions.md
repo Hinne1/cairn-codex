@@ -52,3 +52,10 @@ finalization fails, the journal and item states remain marked
 making the items available twice. This conservative state is also used when a
 commit request was sent but its response was lost, because the file outcome is
 then unknown until hashes and stash contents are audited.
+
+The matching two-item v11 retrieval has now also been accepted by Grim Dawn.
+The game displayed both exact retrieved instances in the designated tab and
+left every other tab intact. The committed stash contained 210 items, including
+the two expected roll seeds; its pre-retrieval durable backup and atomic
+rollback copy were independently verified against the original source hash and
+retained.

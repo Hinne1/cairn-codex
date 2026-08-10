@@ -67,8 +67,9 @@ Consequences for Cairn Codex:
 - Their write methods are callable only after semantic/idempotent planning and
   through the app-owned journal, safety gate, backups, source hashes, temporary
   validation, and atomic replacement boundary.
-- The v11 serializer has completed an accepted two-item ingest against the game;
-  retrieval retains the same safeguards and requires its own game acceptance.
+- The v11 serializer has completed a game-accepted two-item ingest and matching
+  retrieval while preserving every other stash tab. Both directions retain the
+  same journal, backup, source-hash, validation, and atomic-replacement guards.
 - A later decision can select verified atomic file serialization or a narrowly
   maintained live-game hook without changing collection persistence or UI IPC.
 

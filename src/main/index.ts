@@ -119,6 +119,12 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       return database.persistSnapshot(snapshot)
     }
   )
+  ipcMain.handle(
+    IPC_CHANNELS.setPinnedBest,
+    (_event, input: { record: string; instanceKey: string | null }): void => {
+      database.setPinnedBest(input.record, input.instanceKey)
+    }
+  )
 }
 
 async function runSmokeTest(
@@ -231,6 +237,24 @@ async function runSmokeTest(
       throw new Error('A transfer stash failed the in-memory ingest/retrieval roundtrip.')
     }
     const snapshot = database.persistSnapshot(helperSnapshot)
+    const pinCandidate = snapshot.observedItems.find(
+      (item) => item.instanceKey && item.rollAnalysis?.trusted
+    )
+    if (!pinCandidate?.instanceKey) {
+      throw new Error('Smoke test needs one trusted copy to verify pinned-best persistence.')
+    }
+    database.setPinnedBest(pinCandidate.baseRecord, pinCandidate.instanceKey)
+    const pinnedSnapshot = database.persistSnapshot({
+      ...helperSnapshot,
+      scannedAtUtc: new Date(Date.parse(helperSnapshot.scannedAtUtc) + 0.5).toISOString()
+    })
+    const pinnedCatalogItem = pinnedSnapshot.items.find(
+      (item) => item.record.toLowerCase() === pinCandidate.baseRecord.toLowerCase()
+    )
+    if (pinnedCatalogItem?.pinnedInstanceKey !== pinCandidate.instanceKey) {
+      throw new Error('Pinned-best selection did not survive a subsequent collection snapshot.')
+    }
+    database.setPinnedBest(pinCandidate.baseRecord, null)
     const journalPayload = ingestPlans[0]?.items[0]
     if (!journalPayload) {
       throw new Error('Smoke test needs one item payload to verify retrieval journal transitions.')
@@ -310,6 +334,7 @@ async function runSmokeTest(
         analyzedCopies: analyzedCopies.length,
         trustedRolls: trustedRolls.length,
         withheldRolls: analyzedCopies.length - trustedRolls.length,
+        pinnedBest: 'verified',
         installations: discovery.installations.length,
         saveLocations: discovery.saveLocations.length,
         transferStashes: stashCount,
@@ -709,6 +734,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_OPEN_FIRST === '1') {
+          await new Promise((resolve) => setTimeout(resolve, 250))
+          await window.webContents.executeJavaScript(
+            "document.querySelector('.item-card[role=button]')?.click()"
+          )
+        }
         await window.webContents.executeJavaScript('window.scrollTo(0, 0)')
         window.setOpacity(0)
         window.showInactive()
@@ -719,6 +750,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           results: document.querySelector('.result-count')?.textContent,
           cards: document.querySelectorAll('.item-card').length,
           sets: document.querySelectorAll('.set-card').length,
+          copyCards: document.querySelectorAll('.copy-card').length,
           scrollX: window.scrollX,
           titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
           mainX: document.querySelector('main')?.getBoundingClientRect().x

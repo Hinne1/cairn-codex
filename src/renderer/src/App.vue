@@ -5,7 +5,8 @@ import type {
   CollectionItem,
   CollectionRaritySummary,
   CollectionSnapshot,
-  GrimDawnDiscovery
+  GrimDawnDiscovery,
+  ObservedStashItem
 } from '@shared/contracts'
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
@@ -31,6 +32,8 @@ const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('completion')
 const currentPage = ref(1)
+const selectedRecord = ref<string | null>(null)
+const pinning = ref(false)
 const pageSize = 48
 
 const categories = [
@@ -130,6 +133,26 @@ const displayedResultCount = computed(() =>
   activeCategory.value === 'Sets' ? visibleSets.value.length : filteredItems.value.length
 )
 
+const selectedItem = computed(() =>
+  snapshot.value?.items.find((item) => item.record === selectedRecord.value) ?? null
+)
+
+const selectedCopies = computed(() => {
+  if (!snapshot.value || !selectedRecord.value) return []
+  const pinned = selectedItem.value?.pinnedInstanceKey
+  return snapshot.value.observedItems
+    .filter((item) => item.baseRecord === selectedRecord.value && item.instanceKey)
+    .sort((left, right) => {
+      if ((left.instanceKey === pinned) !== (right.instanceKey === pinned)) {
+        return left.instanceKey === pinned ? -1 : 1
+      }
+      return (
+        (right.rollAnalysis?.overallEstimatedPercentile ?? -1) -
+        (left.rollAnalysis?.overallEstimatedPercentile ?? -1)
+      )
+    })
+})
+
 watch(
   [activeCategory, query, ownership, rarityFilter, sortMode],
   () => {
@@ -212,6 +235,88 @@ function matchesCategory(item: CollectionItem, category: string): boolean {
 function goToPage(page: number): void {
   currentPage.value = Math.min(Math.max(page, 1), pageCount.value)
   window.scrollTo({ top: 410, behavior: 'smooth' })
+}
+
+function openItem(item: CollectionItem): void {
+  selectedRecord.value = item.record
+}
+
+async function pinCopy(copy: ObservedStashItem): Promise<void> {
+  if (!selectedItem.value || !copy.instanceKey || pinning.value) return
+  pinning.value = true
+  try {
+    const next = selectedItem.value.pinnedInstanceKey === copy.instanceKey ? null : copy.instanceKey
+    await window.cairnCodex.setPinnedBest(selectedItem.value.record, next)
+    selectedItem.value.pinnedInstanceKey = next
+  } finally {
+    pinning.value = false
+  }
+}
+
+function isAutoBest(copy: ObservedStashItem): boolean {
+  const score = copy.rollAnalysis?.overallEstimatedPercentile
+  const best = selectedItem.value?.bestRollPercentile
+  return score !== null && score !== undefined && best !== null && best !== undefined && Math.abs(score - best) < 0.0000001
+}
+
+function rollableStats(copy: ObservedStashItem) {
+  const stats = (copy.rollAnalysis?.stats ?? [])
+    .filter((stat) => stat.estimatedPercentile !== null)
+  const byField = new Map(stats.map((stat) => [stat.field, stat]))
+  const consumed = new Set<string>()
+  return stats
+    .flatMap((stat) => {
+      if (consumed.has(stat.field)) return []
+      if (stat.field.endsWith('Min')) {
+        const root = stat.field.slice(0, -3)
+        const maximum = byField.get(root + 'Max')
+        if (maximum?.estimatedPercentile !== null && maximum?.estimatedPercentile !== undefined) {
+          consumed.add(maximum.field)
+          const valueLabel =
+            stat.value === maximum.value
+              ? formatRollValue(stat.value)
+              : `${formatRollValue(stat.value)}–${formatRollValue(maximum.value)}`
+          return [
+            {
+              key: root,
+              label: humanStatName(root),
+              valueLabel,
+              percentile: (stat.estimatedPercentile! + maximum.estimatedPercentile) / 2,
+              rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(maximum.observedMaximum ?? maximum.value)}`
+            }
+          ]
+        }
+      }
+      return [
+        {
+          key: stat.field,
+          label: humanStatName(stat.field),
+          valueLabel: formatRollValue(stat.value),
+          percentile: stat.estimatedPercentile!,
+          rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(stat.observedMaximum ?? stat.value)}`
+        }
+      ]
+    })
+    .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function humanStatName(field: string): string {
+  const names: Record<string, string> = {
+    characterAttackSpeedModifier: 'Attack speed',
+    characterSpellCastSpeedModifier: 'Cast speed',
+    characterIntelligence: 'Spirit',
+    characterDefensiveAbility: 'Defensive ability',
+    characterOffensiveAbility: 'Offensive ability',
+    conversionPercentage: 'Damage conversion',
+    offensiveFireModifier: 'Fire damage',
+    offensiveSlowFire: 'Burn damage',
+    offensiveSlowFireModifier: 'Burn damage bonus'
+  }
+  return names[field] ?? field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (value) => value.toUpperCase())
+}
+
+function formatRollValue(value: number): string {
+  return Number.isInteger(value) ? value.toString() : value.toFixed(1)
 }
 </script>
 
@@ -350,6 +455,10 @@ function goToPage(page: number): void {
             :key="item.record"
             class="item-card"
             :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary' }"
+            :role="item.availableCount > 0 ? 'button' : undefined"
+            :tabindex="item.availableCount > 0 ? 0 : undefined"
+            @click="item.availableCount > 0 && openItem(item)"
+            @keydown.enter="item.availableCount > 0 && openItem(item)"
           >
             <div class="item-mark" aria-hidden="true">{{ item.discovered ? '✓' : '?' }}</div>
             <div class="item-copy">
@@ -362,6 +471,7 @@ function goToPage(page: number): void {
               <span>Best roll</span>
               <strong>{{ item.bestRollPercentile.toFixed(1) }}%</strong>
             </div>
+            <span v-if="item.pinnedInstanceKey" class="pin-indicator">★ Pinned choice</span>
             <strong v-if="item.availableCount > 0">{{ item.availableCount }} available</strong>
             <strong v-else-if="item.discovered">Discovered · none available</strong>
             <strong v-else>Not found</strong>
@@ -376,5 +486,61 @@ function goToPage(page: number): void {
         </nav>
       </template>
     </main>
+
+    <div v-if="selectedItem" class="drawer-backdrop" @click.self="selectedRecord = null">
+      <aside class="item-drawer" :aria-label="selectedItem.name + ' roll comparison'">
+        <button class="drawer-close" type="button" aria-label="Close comparison" @click="selectedRecord = null">×</button>
+        <p class="section-label">Copy comparison</p>
+        <h2>{{ selectedItem.name }}</h2>
+        <p class="drawer-intro">
+          Auto-best averages the estimated percentile of each variable stat line. Pin whichever copy you actually prefer.
+        </p>
+        <p
+          v-if="selectedItem.pinnedInstanceKey && !selectedCopies.some((copy) => copy.instanceKey === selectedItem?.pinnedInstanceKey)"
+          class="pinned-away"
+        >
+          Your pinned copy is remembered, but it is not in a currently scanned stash.
+        </p>
+
+        <div class="copy-list">
+          <article
+            v-for="(copy, index) in selectedCopies"
+            :key="copy.instanceKey"
+            class="copy-card"
+            :class="{ pinned: copy.instanceKey === selectedItem.pinnedInstanceKey }"
+          >
+            <header>
+              <div>
+                <p>Copy {{ index + 1 }} · seed {{ copy.seed }}</p>
+                <strong v-if="copy.rollAnalysis?.overallEstimatedPercentile !== null">
+                  {{ copy.rollAnalysis?.overallEstimatedPercentile?.toFixed(1) }}%
+                </strong>
+                <strong v-else>Score withheld</strong>
+              </div>
+              <div class="copy-actions">
+                <span v-if="isAutoBest(copy)" class="auto-badge">Auto-best</span>
+                <button type="button" :disabled="pinning" @click="pinCopy(copy)">
+                  {{ copy.instanceKey === selectedItem.pinnedInstanceKey ? 'Unpin' : 'Pin this copy' }}
+                </button>
+              </div>
+            </header>
+
+            <p v-if="copy.rollAnalysis && !copy.rollAnalysis.trusted" class="withheld-note">
+              {{ copy.rollAnalysis.reason }}
+            </p>
+            <div v-else class="stat-list">
+              <div v-for="stat in rollableStats(copy)" :key="stat.key" class="stat-row">
+                <div class="stat-heading">
+                  <span>{{ stat.label }}</span>
+                  <strong>{{ stat.valueLabel }} · {{ stat.percentile.toFixed(0) }}%</strong>
+                </div>
+                <div class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
+                <small>{{ stat.rangeLabel }} sampled range</small>
+              </div>
+            </div>
+          </article>
+        </div>
+      </aside>
+    </div>
   </div>
 </template>

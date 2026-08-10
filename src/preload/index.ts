@@ -12,7 +12,9 @@ const api: CairnCodexApi = {
   discoverGrimDawn: () =>
     ipcRenderer.invoke(IPC_CHANNELS.discoverGrimDawn) as Promise<GrimDawnDiscovery>,
   scanCollection: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.scanCollection) as Promise<CollectionSnapshot>
+    ipcRenderer.invoke(IPC_CHANNELS.scanCollection) as Promise<CollectionSnapshot>,
+  setPinnedBest: (record, instanceKey) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setPinnedBest, { record, instanceKey }) as Promise<void>
 }
 
 contextBridge.exposeInMainWorld('cairnCodex', api)

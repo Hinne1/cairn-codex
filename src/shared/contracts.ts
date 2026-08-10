@@ -1,7 +1,8 @@
 export const IPC_CHANNELS = {
   getAppStatus: 'app:get-status',
   discoverGrimDawn: 'grim-dawn:discover',
-  scanCollection: 'grim-dawn:scan-collection'
+  scanCollection: 'grim-dawn:scan-collection',
+  setPinnedBest: 'collection:set-pinned-best'
 } as const
 
 export interface AppStatus {
@@ -14,6 +15,7 @@ export interface CairnCodexApi {
   getAppStatus: () => Promise<AppStatus>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   scanCollection: () => Promise<CollectionSnapshot>
+  setPinnedBest: (record: string, instanceKey: string | null) => Promise<void>
 }
 
 export interface GrimDawnDiscovery {
@@ -98,6 +100,7 @@ export interface CollectionItem {
   availableCount: number
   bestRollPercentile: number | null
   analyzedCopyCount: number
+  pinnedInstanceKey: string | null
   discovered?: boolean
   firstDiscoveredAt?: string | null
 }
@@ -124,6 +127,7 @@ export interface ObservedStashItem {
   rerolls: number
   affixRerolls: number
   rollAnalysis: ItemRollAnalysis | null
+  instanceKey?: string
 }
 
 export interface ItemRollAnalysis {

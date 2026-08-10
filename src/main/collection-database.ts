@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import { createHash } from 'node:crypto'
 import type { CollectionItem, CollectionSnapshot } from '@shared/contracts'
 
 export class CollectionDatabase {
@@ -15,6 +16,7 @@ export class CollectionDatabase {
   }
 
   persistSnapshot(snapshot: CollectionSnapshot): CollectionSnapshot {
+    snapshot = this.withInstanceKeys(snapshot)
     this.database.exec('BEGIN IMMEDIATE')
     try {
       const scanResult = this.database
@@ -289,6 +291,22 @@ export class CollectionDatabase {
       )
   }
 
+  setPinnedBest(record: string, instanceKey: string | null): void {
+    if (instanceKey === null) {
+      this.database.prepare('DELETE FROM pinned_best WHERE record = ?').run(record)
+      return
+    }
+    this.database
+      .prepare(`
+        INSERT INTO pinned_best (record, instance_key, pinned_at_utc)
+        VALUES (?, ?, ?)
+        ON CONFLICT(record) DO UPDATE SET
+          instance_key = excluded.instance_key,
+          pinned_at_utc = excluded.pinned_at_utc
+      `)
+      .run(record, instanceKey, new Date().toISOString())
+  }
+
   close(): void {
     this.database.close()
   }
@@ -296,7 +314,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 3) {
+    if (version > 4) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )
@@ -426,6 +444,22 @@ export class CollectionDatabase {
         PRAGMA user_version = 3;
         COMMIT;
       `)
+      version = 3
+    }
+
+    if (version === 3) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE observed_item ADD COLUMN instance_key TEXT;
+        CREATE INDEX observed_item_instance_key_idx ON observed_item(base_record, instance_key);
+        CREATE TABLE pinned_best (
+          record TEXT PRIMARY KEY REFERENCES catalog_item(record) ON DELETE CASCADE,
+          instance_key TEXT NOT NULL,
+          pinned_at_utc TEXT NOT NULL
+        ) STRICT;
+        PRAGMA user_version = 4;
+        COMMIT;
+      `)
     }
   }
 
@@ -478,8 +512,9 @@ export class CollectionDatabase {
         stash_snapshot_id, tab_index, item_index, base_record, prefix_record, suffix_record,
         modifier_record, transmute_record, seed, materia_record, relic_completion_bonus_record,
         relic_seed, enchantment_record, ascendant_record, ascendant_record_2h,
-        enchantment_seed, materia_combines, stack_count, rerolls, affix_rerolls, roll_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        enchantment_seed, materia_combines, stack_count, rerolls, affix_rerolls, roll_json,
+        instance_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     const snapshotIds = new Map<string, number>()
@@ -522,7 +557,8 @@ export class CollectionDatabase {
         item.stackCount,
         item.rerolls,
         item.affixRerolls,
-        item.rollAnalysis === null ? null : JSON.stringify(item.rollAnalysis)
+        item.rollAnalysis === null ? null : JSON.stringify(item.rollAnalysis),
+        item.instanceKey ?? null
       )
     }
   }
@@ -547,10 +583,17 @@ export class CollectionDatabase {
     const discovered = new Map(
       rows.map((row) => [row.record.toLowerCase(), row.first_discovered_at_utc])
     )
+    const pinned = new Map(
+      (this.database.prepare('SELECT record, instance_key FROM pinned_best').all() as Array<{
+        record: string
+        instance_key: string
+      }>).map((row) => [row.record.toLowerCase(), row.instance_key])
+    )
     const items = snapshot.items.map((item) => ({
       ...item,
       discovered: discovered.has(item.record.toLowerCase()),
-      firstDiscoveredAt: discovered.get(item.record.toLowerCase()) ?? null
+      firstDiscoveredAt: discovered.get(item.record.toLowerCase()) ?? null,
+      pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
     }))
     const rarities = (['epic', 'legendary'] as const).map((rarity) => {
       const matching = items.filter((item) => item.rarity === rarity)
@@ -563,6 +606,38 @@ export class CollectionDatabase {
     })
 
     return { ...snapshot, items, rarities }
+  }
+
+  private withInstanceKeys(snapshot: CollectionSnapshot): CollectionSnapshot {
+    return {
+      ...snapshot,
+      observedItems: snapshot.observedItems.map((item) => ({
+        ...item,
+        instanceKey: createHash('sha256')
+          .update(
+            JSON.stringify([
+              item.baseRecord,
+              item.prefixRecord,
+              item.suffixRecord,
+              item.modifierRecord,
+              item.transmuteRecord,
+              item.seed,
+              item.materiaRecord,
+              item.relicCompletionBonusRecord,
+              item.relicSeed,
+              item.enchantmentRecord,
+              item.ascendantRecord,
+              item.ascendantRecord2H,
+              item.enchantmentSeed,
+              item.materiaCombines,
+              item.stackCount,
+              item.rerolls,
+              item.affixRerolls
+            ])
+          )
+          .digest('hex')
+      }))
+    }
   }
 }
 

@@ -37,3 +37,10 @@ sample size, and any unmodeled fields—alongside the scan that produced it.
 Catalog tiles receive the best trusted score and analyzed-copy count from the
 current snapshot; lifetime discovery remains independent of current
 availability and roll scoring.
+
+Schema version 4 adds a location-independent SHA-256 fingerprint to observed
+copies and a `pinned_best` table keyed by canonical catalog record. The
+fingerprint covers serialized item identity and roll fields but excludes stash
+path, tab, item index, and coordinates, so a preference survives ordinary item
+movement. Auto-best remains computed data; pinned-best is explicit user state
+and may intentionally select a lower aggregate score.

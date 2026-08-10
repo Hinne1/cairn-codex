@@ -7,11 +7,16 @@ internal static class CollectionSnapshotBuilder
         var discovery = GrimDawnDiscovery.Discover();
         var installation = discovery.Installations.FirstOrDefault()
             ?? throw new DirectoryNotFoundException("No Grim Dawn installation was discovered.");
-        var catalog = ItemCatalogBuilder.Build(installation.Path);
+        var gameData = ItemCatalogBuilder.Load(installation.Path);
+        var catalog = ItemCatalogBuilder.Build(gameData);
         var availableByRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var scannedStashes = new List<ScannedStash>();
         var observedItems = new List<ObservedStashItem>();
         var warnings = new List<CollectionScanWarning>();
+        var eligibleRecords = catalog.Items
+            .Select(item => item.Record)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var rollDistributions = new Dictionary<RollTemplateKey, RollDistribution>();
 
         foreach (var candidate in discovery.SaveLocations.SelectMany(location => location.TransferStashes))
         {
@@ -35,6 +40,16 @@ internal static class CollectionSnapshotBuilder
                 {
                     availableByRecord[item.BaseRecord] =
                         availableByRecord.GetValueOrDefault(item.BaseRecord) + checked((int)item.StackCount);
+                    var rollAnalysis = eligibleRecords.Contains(item.BaseRecord)
+                        ? ItemRollAnalyzer.Analyze(
+                            gameData,
+                            new ItemRollInput(
+                                item.BaseRecord,
+                                item.PrefixRecord,
+                                item.SuffixRecord,
+                                item.Seed),
+                            rollDistributions)
+                        : null;
                     observedItems.Add(new ObservedStashItem(
                         stash.Path,
                         item.TabIndex,
@@ -55,7 +70,8 @@ internal static class CollectionSnapshotBuilder
                         item.MateriaCombines,
                         item.StackCount,
                         item.Rerolls,
-                        item.AffixRerolls));
+                        item.AffixRerolls,
+                        rollAnalysis));
                 }
             }
             catch (Exception exception) when (
@@ -65,10 +81,24 @@ internal static class CollectionSnapshotBuilder
             }
         }
 
+        var rollSummary = observedItems
+            .Where(item => item.RollAnalysis?.Trusted == true &&
+                           item.RollAnalysis.OverallEstimatedPercentile.HasValue)
+            .GroupBy(item => item.BaseRecord, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => new
+                {
+                    Best = group.Max(item => item.RollAnalysis!.OverallEstimatedPercentile!.Value),
+                    Count = group.Count()
+                },
+                StringComparer.OrdinalIgnoreCase);
         var items = catalog.Items
             .Select(item => new CollectionCatalogItem(
                 item,
-                availableByRecord.GetValueOrDefault(item.Record)))
+                availableByRecord.GetValueOrDefault(item.Record),
+                rollSummary.TryGetValue(item.Record, out var rolls) ? rolls.Best : null,
+                rollSummary.TryGetValue(item.Record, out rolls) ? rolls.Count : 0))
             .ToArray();
         var summaries = items
             .GroupBy(item => item.Rarity, StringComparer.OrdinalIgnoreCase)
@@ -132,7 +162,8 @@ internal sealed record ObservedStashItem(
     uint MateriaCombines,
     uint StackCount,
     uint Rerolls,
-    uint AffixRerolls);
+    uint AffixRerolls,
+    ItemRollAnalysis? RollAnalysis);
 
 internal sealed record CollectionRaritySummary(
     string Rarity,
@@ -152,9 +183,15 @@ internal sealed record CollectionCatalogItem(
     string? SetRecord,
     string? Bitmap,
     string ContentPack,
-    int AvailableCount)
+    int AvailableCount,
+    double? BestRollPercentile,
+    int AnalyzedCopyCount)
 {
-    public CollectionCatalogItem(CatalogItem item, int availableCount)
+    public CollectionCatalogItem(
+        CatalogItem item,
+        int availableCount,
+        double? bestRollPercentile,
+        int analyzedCopyCount)
         : this(
             item.Record,
             item.Name,
@@ -167,7 +204,9 @@ internal sealed record CollectionCatalogItem(
             item.SetRecord,
             item.Bitmap,
             item.ContentPack,
-            availableCount)
+            availableCount,
+            bestRollPercentile,
+            analyzedCopyCount)
     {
     }
 }

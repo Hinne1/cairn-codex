@@ -9,7 +9,8 @@ The first schema deliberately separates four concepts:
 - collection_entry is lifetime discovery state. It survives when no copy is
   currently visible in a stash.
 - scan_run, stash_snapshot, and observed_item are immutable evidence of what a
-  read-only scan saw, including source hashes and roll-relevant item fields.
+  read-only scan saw, including source hashes, serialized roll inputs, and the
+  trusted/withheld seed-stat analysis produced for each eligible copy.
 - vault_item is an app-owned serialized item. It is not a generic stash:
   its state is restricted to the ingest/retrieval lifecycle.
 
@@ -29,3 +30,10 @@ enabled. The desktop smoke test uses an isolated in-memory database and verifies
 that discoveries remain after a synthetic subsequent scan with zero available
 copies. It also exercises the complete ingest and retrieval journal state
 transition without touching a real stash.
+
+Schema version 3 adds `observed_item.roll_json`. This preserves the complete
+per-copy audit payload—seed, sampled extrema, per-stat estimated percentiles,
+sample size, and any unmodeled fields—alongside the scan that produced it.
+Catalog tiles receive the best trusted score and analyzed-copy count from the
+current snapshot; lifetime discovery remains independent of current
+availability and roll scoring.

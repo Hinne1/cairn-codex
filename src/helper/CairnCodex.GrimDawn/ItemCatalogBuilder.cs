@@ -10,7 +10,9 @@ internal static class ItemCatalogBuilder
         "ring", "amulet", "medal", "weapon", "offhand", "shield", "relic"
     ];
 
-    public static ItemCatalogResult Build(string installationPath)
+    public static ItemCatalogResult Build(string installationPath) => Build(Load(installationPath));
+
+    public static ItemCatalogData Load(string installationPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installationPath);
         var root = Path.GetFullPath(installationPath);
@@ -41,8 +43,13 @@ internal static class ItemCatalogBuilder
             }
         }
 
-        var items = records.Values
-            .Select(source => Project(source, tags, records))
+        return new ItemCatalogData(root, contentPacks, tags, records);
+    }
+
+    public static ItemCatalogResult Build(ItemCatalogData data)
+    {
+        var items = data.Records.Values
+            .Select(source => Project(source, data.Tags, data.Records))
             .Where(item => item is not null)
             .Cast<CatalogItem>()
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -50,10 +57,10 @@ internal static class ItemCatalogBuilder
             .ToArray();
 
         return new ItemCatalogResult(
-            root,
-            contentPacks.Select(pack => new CatalogContentPack(pack.Id, pack.DatabasePath, pack.TagsPath)).ToArray(),
-            records.Count,
-            tags.Count,
+            data.InstallationPath,
+            data.ContentPacks.Select(pack => new CatalogContentPack(pack.Id, pack.DatabasePath, pack.TagsPath)).ToArray(),
+            data.Records.Count,
+            data.Tags.Count,
             items);
     }
 
@@ -176,9 +183,16 @@ internal static class ItemCatalogBuilder
         }
     }
 
-    private sealed record ContentPack(string Id, string DatabasePath, string TagsPath);
-    private sealed record CatalogSourceRecord(ArzRecord Record, string ContentPack);
 }
+
+internal sealed record ItemCatalogData(
+    string InstallationPath,
+    IReadOnlyList<ContentPack> ContentPacks,
+    IReadOnlyDictionary<string, string> Tags,
+    IReadOnlyDictionary<string, CatalogSourceRecord> Records);
+
+internal sealed record ContentPack(string Id, string DatabasePath, string TagsPath);
+internal sealed record CatalogSourceRecord(ArzRecord Record, string ContentPack);
 
 internal sealed record ItemCatalogResult(
     string InstallationPath,

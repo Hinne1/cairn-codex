@@ -10,7 +10,7 @@ import type {
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary'
-type SortMode = 'name' | 'level' | 'completion'
+type SortMode = 'name' | 'level' | 'completion' | 'roll'
 
 interface CollectionSet {
   record: string
@@ -182,6 +182,12 @@ function compareItems(left: CollectionItem, right: CollectionItem): number {
     if (Boolean(left.discovered) !== Boolean(right.discovered)) return left.discovered ? -1 : 1
     if (left.availableCount !== right.availableCount) return right.availableCount - left.availableCount
   }
+  if (sortMode.value === 'roll') {
+    return (
+      (right.bestRollPercentile ?? -1) - (left.bestRollPercentile ?? -1) ||
+      left.name.localeCompare(right.name)
+    )
+  }
   return left.name.localeCompare(right.name)
 }
 
@@ -301,6 +307,7 @@ function goToPage(page: number): void {
           <option value="completion">Collected first</option>
           <option value="name">Name</option>
           <option value="level">Level</option>
+          <option value="roll">Best roll</option>
         </select>
         <span class="result-count">{{ displayedResultCount.toLocaleString() }} results</span>
       </section>
@@ -350,6 +357,10 @@ function goToPage(page: number): void {
               <h3>{{ item.name }}</h3>
               <small v-if="item.setName">{{ item.setName }}</small>
               <small v-else>{{ item.slot }}</small>
+            </div>
+            <div v-if="item.bestRollPercentile !== null" class="roll-summary">
+              <span>Best roll</span>
+              <strong>{{ item.bestRollPercentile.toFixed(1) }}%</strong>
             </div>
             <strong v-if="item.availableCount > 0">{{ item.availableCount }} available</strong>
             <strong v-else-if="item.discovered">Discovered · none available</strong>

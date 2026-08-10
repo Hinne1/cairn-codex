@@ -39,6 +39,7 @@ while ((line = Console.ReadLine()) is not null)
             "plan-retrieve-items" => PlanRetrieveItems(request),
             "commit-retrieve-items" => CommitRetrieveItems(request),
             "validate-ingest-retrieval-roundtrip" => ValidateIngestRetrievalRoundTrip(request),
+            "analyze-item-rolls" => AnalyzeItemRolls(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
     }
@@ -159,6 +160,15 @@ HelperResponse ValidateIngestRetrievalRoundTrip(HelperRequest request)
             parameters.Path,
             parameters.TabIndex,
             parameters.ItemIndex));
+}
+
+HelperResponse AnalyzeItemRolls(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<AnalyzeItemRollsRequest>(jsonOptions)
+        ?? throw new JsonException("analyze-item-rolls requires installationPath and items parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        ItemRollAnalyzer.Analyze(parameters.InstallationPath, parameters.Items));
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);

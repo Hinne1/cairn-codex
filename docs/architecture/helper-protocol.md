@@ -136,3 +136,23 @@ source hash and backup directory. It recomputes the plan and commits only
 through the verified file transaction. `validate-ingest-retrieval-roundtrip`
 removes and reconstructs a selected real item entirely in memory for smoke
 coverage across every discovered non-empty stash version.
+
+## Seed-applied roll analysis
+
+~~~json
+{"id":"11","method":"analyze-item-rolls","params":{"installationPath":"G:\\path\\to\\Grim Dawn","items":[{"baseRecord":"records/items/example.dbr","prefixRecord":"","suffixRecord":"","seed":123}]}}
+~~~
+
+The analyzer uses the pinned GDIA MINSTD stream and item-stat engine to replay
+Grim Dawn's shared random draw order over the overlaid base/prefix/suffix DBR
+records. It discards zero-valued template defaults exactly as GDIA's ARZ
+projection does. If a nonzero rollable field is not modeled, the result is
+marked untrusted and no score is produced.
+
+For a trusted template, each rollable stat receives a deterministic empirical
+percentile against 4,096 seeds distributed across the unsigned seed space. The
+response exposes the sample size and sampled extrema; fixed fields have no
+percentile. Min/max members of one displayed damage range are averaged as one
+stat line before the overall arithmetic mean is calculated. This is an
+auditable auto-best heuristic, not a claim that all stats have equal gameplay
+value; pinned-best remains a separate user choice.

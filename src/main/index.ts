@@ -132,6 +132,28 @@ async function runSmokeTest(
       throw new Error('Verified write transaction self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const analyzedCopies = helperSnapshot.observedItems.filter(
+      (item) => item.rollAnalysis !== null
+    )
+    const trustedRolls = analyzedCopies.filter(
+      (item) =>
+        item.rollAnalysis?.trusted === true &&
+        item.rollAnalysis.overallEstimatedPercentile !== null &&
+        item.rollAnalysis.percentileSampleSize === 4096
+    )
+    if (analyzedCopies.length === 0 || trustedRolls.length === 0) {
+      throw new Error('Collection scan did not produce any trusted roll analyses.')
+    }
+    for (const item of helperSnapshot.items.filter((candidate) => candidate.bestRollPercentile !== null)) {
+      const expected = Math.max(
+        ...trustedRolls
+          .filter((copy) => copy.baseRecord.toLowerCase() === item.record.toLowerCase())
+          .map((copy) => copy.rollAnalysis!.overallEstimatedPercentile!)
+      )
+      if (Math.abs(expected - item.bestRollPercentile!) > 0.0000001) {
+        throw new Error('Catalog best-roll selection does not match its trusted copies: ' + item.record)
+      }
+    }
     const roundTrips = await Promise.all(
       helperSnapshot.scannedStashes.map((stash) =>
         helper.request<{ semanticallyEquivalent: boolean; idempotent: boolean }>(
@@ -285,6 +307,9 @@ async function runSmokeTest(
         ingestPlans: ingestPlans.length,
         retrievalRoundTrips: retrievalRoundTrips.length,
         retrievalJournal: 'verified',
+        analyzedCopies: analyzedCopies.length,
+        trustedRolls: trustedRolls.length,
+        withheldRolls: analyzedCopies.length - trustedRolls.length,
         installations: discovery.installations.length,
         saveLocations: discovery.saveLocations.length,
         transferStashes: stashCount,
@@ -670,6 +695,18 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             [...document.querySelectorAll('.category-tabs button')]
               .find((button) => button.querySelector('span')?.textContent === ${JSON.stringify(category)})
               ?.click()
+          `)
+        }
+        const query = process.env.CAIRN_CODEX_SCREENSHOT_QUERY
+        if (query) {
+          await window.webContents.executeJavaScript(`
+            (() => {
+              const input = document.querySelector('.search-field input')
+              if (input) {
+                input.value = ${JSON.stringify(query)}
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+              }
+            })()
           `)
         }
         await window.webContents.executeJavaScript('window.scrollTo(0, 0)')

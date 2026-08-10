@@ -296,7 +296,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 2) {
+    if (version > 3) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )
@@ -416,6 +416,16 @@ export class CollectionDatabase {
         PRAGMA user_version = 2;
         COMMIT;
       `)
+      version = 2
+    }
+
+    if (version === 2) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE observed_item ADD COLUMN roll_json TEXT;
+        PRAGMA user_version = 3;
+        COMMIT;
+      `)
     }
   }
 
@@ -468,8 +478,8 @@ export class CollectionDatabase {
         stash_snapshot_id, tab_index, item_index, base_record, prefix_record, suffix_record,
         modifier_record, transmute_record, seed, materia_record, relic_completion_bonus_record,
         relic_seed, enchantment_record, ascendant_record, ascendant_record_2h,
-        enchantment_seed, materia_combines, stack_count, rerolls, affix_rerolls
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        enchantment_seed, materia_combines, stack_count, rerolls, affix_rerolls, roll_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     const snapshotIds = new Map<string, number>()
@@ -511,7 +521,8 @@ export class CollectionDatabase {
         item.materiaCombines,
         item.stackCount,
         item.rerolls,
-        item.affixRerolls
+        item.affixRerolls,
+        item.rollAnalysis === null ? null : JSON.stringify(item.rollAnalysis)
       )
     }
   }

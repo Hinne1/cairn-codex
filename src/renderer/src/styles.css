@@ -161,6 +161,9 @@ main { max-width: 1480px; margin: 0 auto; padding: 42px 48px 64px; }
 .item-copy small { color: #8d8575; }
 .item-card > strong { grid-column: 2; color: #b79a60; font-size: 11px; font-weight: 650; text-transform: uppercase; }
 .item-card.missing > strong { color: #777267; }
+.roll-summary { grid-column: 2; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-top: 7px; border-top: 1px solid rgba(143, 117, 69, 0.2); }
+.roll-summary span { color: #756d5f; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.roll-summary strong { color: #d4ad5d; font-size: 13px; }
 
 .set-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 .set-card { padding: 20px; border: 1px solid #454032; border-radius: 8px; background: linear-gradient(145deg, rgba(42, 39, 32, 0.94), rgba(24, 23, 20, 0.96)); }

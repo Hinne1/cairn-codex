@@ -96,6 +96,8 @@ export interface CollectionItem {
   bitmap: string | null
   contentPack: string
   availableCount: number
+  bestRollPercentile: number | null
+  analyzedCopyCount: number
   discovered?: boolean
   firstDiscoveredAt?: string | null
 }
@@ -121,4 +123,28 @@ export interface ObservedStashItem {
   stackCount: number
   rerolls: number
   affixRerolls: number
+  rollAnalysis: ItemRollAnalysis | null
+}
+
+export interface ItemRollAnalysis {
+  baseRecord: string
+  prefixRecord: string
+  suffixRecord: string
+  seed: number
+  supported: boolean
+  trusted: boolean
+  reason: string | null
+  percentileSampleSize: number
+  overallEstimatedPercentile: number | null
+  stats: RolledStat[]
+  unmodeledFields: string[]
+}
+
+export interface RolledStat {
+  field: string
+  value: number
+  rollable: boolean
+  observedMinimum: number | null
+  observedMaximum: number | null
+  estimatedPercentile: number | null
 }

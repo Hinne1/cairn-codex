@@ -9,7 +9,7 @@
 
 The full upstream license is reproduced in `THIRD_PARTY_NOTICES.md`.
 
-## Imported read-only boundary
+## Imported source boundary
 
 The following files were copied from `Parser/Stash` into
 `src/helper/CairnCodex.GrimDawn/Gdia/Stash`:
@@ -21,10 +21,22 @@ The following files were copied from `Parser/Stash` into
 - `StashTab.cs`
 - `Stash.cs`
 
-Local changes are intentionally narrow: provenance comments, removal of the
+The following self-contained files were copied from
+`IAGrim/Services/ItemStats/SeedStats` into
+`src/helper/CairnCodex.GrimDawn/Gdia/ItemStats`:
+
+- `MinstdRandom.cs`
+- `Jitter.cs`
+- `ItemStatEngine.cs`
+
+Stash-parser changes are intentionally narrow: provenance comments, removal of the
 `log4net` dependency, nullable/bounds corrections, and parse diagnostics. The
 original namespaces remain in place to make future upstream comparisons
 straightforward.
+
+The seed-stat files receive only provenance comments. Cairn Codex supplies its
+own ARZ projection and deterministic percentile wrapper; the GDIA engine remains
+isolated from SQLite, Electron, and filesystem writes.
 
 Grim Dawn transfer-stash version 11 adds an affix-reroll counter after the
 existing seed-reroll counter in each item. Cairn Codex adds this field for v11.

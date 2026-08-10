@@ -49,12 +49,14 @@ namespace IAGrim.StashFile {
 
         public void Write(DataBuffer pBuffer) {
             pBuffer.WriteUInt(0x55555555);
-            pBuffer.WriteUInt(2);
+            pBuffer.WriteUInt(this.Unknown1);
             this.Block.WriteStart(0x12, pBuffer);
-            pBuffer.WriteUInt(9);
-            pBuffer.WriteUInt(0);
+            pBuffer.WriteUInt(this.Version);
+            pBuffer.WriteUInt(this.Unknown2);
             pBuffer.WriteString(this.ModLabel);
-            pBuffer.WriteBoolean(this.IsExpansion1); 
+            if (this.Version >= 5) {
+                pBuffer.WriteBoolean(this.IsExpansion1);
+            }
             if ((this.Tabs == null) || (this.Tabs.Count < 1)) {
                 pBuffer.WriteUInt(0);
             }

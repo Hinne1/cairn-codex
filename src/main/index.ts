@@ -67,6 +67,17 @@ async function runSmokeTest(
       throw new Error('Verified write transaction self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const roundTrips = await Promise.all(
+      helperSnapshot.scannedStashes.map((stash) =>
+        helper.request<{ semanticallyEquivalent: boolean; idempotent: boolean }>(
+          'validate-transfer-stash-roundtrip',
+          { path: stash.path }
+        )
+      )
+    )
+    if (roundTrips.some((result) => !result.semanticallyEquivalent || !result.idempotent)) {
+      throw new Error('A transfer stash failed serializer round-trip validation.')
+    }
     const snapshot = database.persistSnapshot(helperSnapshot)
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
@@ -92,6 +103,7 @@ async function runSmokeTest(
       JSON.stringify({
         helper: 'available',
         writeTransaction: 'verified',
+        serializerRoundTrips: roundTrips.length,
         installations: discovery.installations.length,
         saveLocations: discovery.saveLocations.length,
         transferStashes: stashCount,

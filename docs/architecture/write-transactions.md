@@ -26,6 +26,8 @@ atomic rollback copy, and final bytes. It also proves that a stale source hash
 and a rejected replacement leave the target unchanged.
 
 The imported GDIA DataBuffer write methods are not accepted as a serializer.
-They remain quarantined until an encrypted v11 serializer can round-trip a
-disposable fixture byte-for-byte and the replacement validator can parse every
-emitted block.
+The narrow stash serializer remains quarantined from real-write IPC even after
+passing in-memory semantic and deterministic round trips for all discovered v4,
+v5, and v11 files. Enabling ingest still requires an app-owned item payload,
+format validation inside the verified transaction, and an explicit journaled
+operation orchestrator.

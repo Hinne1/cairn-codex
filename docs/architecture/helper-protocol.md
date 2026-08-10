@@ -88,3 +88,14 @@ or IAGrim processes blocking permission. The self-test never touches Grim Dawn
 data; it verifies backup, validation, stale-source rejection, atomic
 replacement, rollback preservation, and final hashes in a uniquely named
 temporary directory.
+
+## Read-only serializer validation
+
+~~~json
+{"id":"8","method":"validate-transfer-stash-roundtrip","params":{"path":"C:\\path\\to\\transfer.gsh"}}
+~~~
+
+This method parses a stash, serializes it in memory with a zero cipher key,
+reparses it, compares every known item/header/layout field, serializes it a
+second time, and requires deterministic bytes. It never writes the source or a
+replacement. Real-write IPC remains intentionally absent.

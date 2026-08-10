@@ -32,6 +32,7 @@ while ((line = Console.ReadLine()) is not null)
             "scan-transfer-stash" => ScanTransferStash(request),
             "inspect-write-safety" => HelperResponse.Success(request.Id, WriteSafetyGate.Inspect()),
             "self-test-write-transaction" => HelperResponse.Success(request.Id, WriteTransactionSelfTest.Run()),
+            "validate-transfer-stash-roundtrip" => ValidateTransferStashRoundTrip(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
     }
@@ -72,6 +73,15 @@ HelperResponse BuildItemCatalog(HelperRequest request)
     var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
         ?? throw new JsonException("build-item-catalog requires an installationPath parameter.");
     return HelperResponse.Success(request.Id, ItemCatalogBuilder.Build(parameters.InstallationPath));
+}
+
+HelperResponse ValidateTransferStashRoundTrip(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<ValidateTransferStashRoundTripRequest>(jsonOptions)
+        ?? throw new JsonException("validate-transfer-stash-roundtrip requires a path parameter.");
+    return HelperResponse.Success(
+        request.Id,
+        TransferStashSerializer.ValidateRoundTrip(parameters.Path));
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);

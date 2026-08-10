@@ -45,6 +45,14 @@ Epic/Legendary gear records. All six discovered transfer stashes parsed without
 warnings; the 211-item Documents stash matched 206 copies (174 unique records),
 with its five non-matches correctly outside the Epic/Legendary catalog.
 
+The dormant stash writer was corrected to preserve container version/header
+fields and to omit the expansion flag for v4. It emits the zero-key format
+already present in the user's valid v5 downgrade stash. In-memory round-trip
+validation succeeds for all six discovered v4, v5, and v11 stashes: every known
+field is preserved and a second serialization is byte-identical to the first.
+The existing zero-key v5 fixture is also byte-identical to its first
+serialization. This validation does not enable file writes.
+
 ## Important integration finding
 
 Current GDIA does not use these C# `Write` methods as its production live-item

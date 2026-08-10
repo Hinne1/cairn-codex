@@ -56,7 +56,9 @@ main { max-width: 1400px; margin: 0 auto; padding: 48px; }
 .hero { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 32px; }
 .hero h2 { max-width: 720px; margin: 4px 0 10px; color: #f0e8d6; font-size: clamp(28px, 4vw, 46px); font-weight: 500; }
 .hero-copy { margin: 0; color: #928b7a; }
-.hero button { padding: 12px 18px; border: 1px solid #55482f; border-radius: 4px; color: #827968; background: #28251f; }
+.hero button { padding: 12px 18px; border: 1px solid #765d32; border-radius: 4px; color: #f0d696; background: #332b1e; cursor: pointer; }
+.hero button:disabled { color: #827968; cursor: wait; }
+.scan-error { margin: 12px 0 0; color: #d98978; font-size: 13px; }
 
 .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; }
 .metrics article { padding: 22px; border: 1px solid #373329; border-radius: 7px; background: linear-gradient(145deg, rgba(39, 37, 31, 0.88), rgba(25, 24, 21, 0.88)); }

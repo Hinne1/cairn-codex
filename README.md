@@ -102,6 +102,7 @@ Install and verify the Electron application:
 npm.cmd install
 npm.cmd run typecheck
 npm.cmd run build
+npm.cmd run smoke:desktop
 ```
 
 Run the desktop application in development mode:

@@ -38,3 +38,15 @@ The result includes the source path, size, SHA-256 hash, modification time,
 stash version and mode, tabs, and every serialized item field currently known
 to the imported GDIA parser. A scan is rejected if the file metadata changes
 while it is being read.
+
+## Grim Dawn discovery
+
+```json
+{"id":"3","method":"discover-grim-dawn","params":{}}
+```
+
+Discovery checks registered Steam libraries and GOG installations for a valid
+`database/database.arz`, then checks the standard Documents and Steam Cloud save
+roots. Transfer-stash candidates are parsed before they are returned. A broken
+or unsupported candidate is reported with its own error instead of failing the
+entire discovery operation.

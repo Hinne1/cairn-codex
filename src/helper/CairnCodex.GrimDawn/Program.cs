@@ -28,6 +28,7 @@ while ((line = Console.ReadLine()) is not null)
                 protocolVersion = ProtocolVersion,
                 mode = "read-only"
             }),
+            "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
             "scan-transfer-stash" => ScanTransferStash(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };

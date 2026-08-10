@@ -35,8 +35,8 @@ const visibleItems = computed(() => {
   return snapshot.value.items
     .filter((item) => matchesCategory(item, activeCategory.value))
     .sort((left, right) => {
-      if ((left.availableCount > 0) !== (right.availableCount > 0)) {
-        return left.availableCount > 0 ? -1 : 1
+      if (Boolean(left.discovered) !== Boolean(right.discovered)) {
+        return left.discovered ? -1 : 1
       }
       return left.name.localeCompare(right.name)
     })
@@ -168,9 +168,9 @@ function matchesCategory(item: CollectionItem, category: string): boolean {
           v-for="item in visibleItems"
           :key="item.record"
           class="item-card"
-          :class="{ missing: item.availableCount === 0, legendary: item.rarity === 'legendary' }"
+          :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary' }"
         >
-          <div class="item-mark" aria-hidden="true">{{ item.availableCount > 0 ? '✓' : '?' }}</div>
+          <div class="item-mark" aria-hidden="true">{{ item.discovered ? '✓' : '?' }}</div>
           <div class="item-copy">
             <p>{{ item.rarity }} · level {{ item.levelRequirement }}</p>
             <h3>{{ item.name }}</h3>
@@ -178,6 +178,7 @@ function matchesCategory(item: CollectionItem, category: string): boolean {
             <small v-else>{{ item.slot }}</small>
           </div>
           <strong v-if="item.availableCount > 0">{{ item.availableCount }} available</strong>
+          <strong v-else-if="item.discovered">Discovered · none available</strong>
           <strong v-else>Not found</strong>
         </article>
       </section>

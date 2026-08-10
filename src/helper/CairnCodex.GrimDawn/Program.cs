@@ -1,12 +1,10 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using CairnCodex.GrimDawn;
 
 const int ProtocolVersion = 1;
 var jsonOptions = new JsonSerializerOptions
 {
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 };
 
 string? line;

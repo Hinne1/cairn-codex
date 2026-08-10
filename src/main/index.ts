@@ -7,6 +7,7 @@ import {
   type GrimDawnDiscovery
 } from '@shared/contracts'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
+import { CollectionDatabase } from './collection-database'
 
 function createHelperClient(): GrimDawnHelperClient {
   if (app.isPackaged) {
@@ -33,7 +34,7 @@ function createHelperClient(): GrimDawnHelperClient {
   })
 }
 
-function registerIpcHandlers(helper: GrimDawnHelperClient): void {
+function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionDatabase): void {
   ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
     try {
       await helper.request('health')
@@ -48,20 +49,41 @@ function registerIpcHandlers(helper: GrimDawnHelperClient): void {
   )
   ipcMain.handle(
     IPC_CHANNELS.scanCollection,
-    (): Promise<CollectionSnapshot> => helper.request<CollectionSnapshot>('scan-collection')
+    async (): Promise<CollectionSnapshot> => {
+      const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+      return database.persistSnapshot(snapshot)
+    }
   )
 }
 
-async function runSmokeTest(helper: GrimDawnHelperClient): Promise<void> {
+async function runSmokeTest(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase
+): Promise<void> {
   try {
     await helper.request('health')
-    const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const snapshot = database.persistSnapshot(helperSnapshot)
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
       (count, location) => count + location.transferStashes.length,
       0
     )
     const collected = snapshot.rarities.reduce((count, rarity) => count + rarity.collected, 0)
+    const unavailableSnapshot = database.persistSnapshot({
+      ...helperSnapshot,
+      scannedAtUtc: new Date(Date.parse(helperSnapshot.scannedAtUtc) + 1).toISOString(),
+      scannedStashes: [],
+      observedItems: [],
+      items: helperSnapshot.items.map((item) => ({ ...item, availableCount: 0 }))
+    })
+    const retainedDiscoveries = unavailableSnapshot.rarities.reduce(
+      (count, rarity) => count + rarity.collected,
+      0
+    )
+    if (retainedDiscoveries !== collected) {
+      throw new Error('Lifetime discoveries were lost when availability dropped to zero.')
+    }
     console.log(
       JSON.stringify({
         helper: 'available',
@@ -69,14 +91,17 @@ async function runSmokeTest(helper: GrimDawnHelperClient): Promise<void> {
         saveLocations: discovery.saveLocations.length,
         transferStashes: stashCount,
         catalogItems: snapshot.items.length,
-        collected
+        collected,
+        retainedDiscoveries
       })
     )
     helper.dispose()
+    database.close()
     app.exit(0)
   } catch (error) {
     console.error(error)
     helper.dispose()
+    database.close()
     app.exit(1)
   }
 }
@@ -108,16 +133,24 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   const helper = createHelperClient()
+  const database = new CollectionDatabase(
+    process.env.CAIRN_CODEX_SMOKE_TEST === '1'
+      ? ':memory:'
+      : join(app.getPath('userData'), 'cairn-codex.sqlite3')
+  )
 
   if (process.env.CAIRN_CODEX_SMOKE_TEST === '1') {
-    void runSmokeTest(helper)
+    void runSmokeTest(helper, database)
     return
   }
 
-  registerIpcHandlers(helper)
+  registerIpcHandlers(helper, database)
   createWindow()
 
-  app.once('before-quit', () => helper.dispose())
+  app.once('before-quit', () => {
+    helper.dispose()
+    database.close()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

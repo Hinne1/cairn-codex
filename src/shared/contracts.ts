@@ -50,6 +50,7 @@ export interface CollectionSnapshot {
   discovery: GrimDawnDiscovery
   contentPacks: CatalogContentPack[]
   scannedStashes: ScannedStash[]
+  observedItems: ObservedStashItem[]
   warnings: CollectionScanWarning[]
   rarities: CollectionRaritySummary[]
   items: CollectionItem[]
@@ -95,4 +96,29 @@ export interface CollectionItem {
   bitmap: string | null
   contentPack: string
   availableCount: number
+  discovered?: boolean
+  firstDiscoveredAt?: string | null
+}
+
+export interface ObservedStashItem {
+  sourcePath: string
+  tabIndex: number
+  itemIndex: number
+  baseRecord: string
+  prefixRecord: string
+  suffixRecord: string
+  modifierRecord: string
+  transmuteRecord: string
+  seed: number
+  materiaRecord: string
+  relicCompletionBonusRecord: string
+  relicSeed: number
+  enchantmentRecord: string
+  ascendantRecord: string
+  ascendantRecord2H: string
+  enchantmentSeed: number
+  materiaCombines: number
+  stackCount: number
+  rerolls: number
+  affixRerolls: number
 }

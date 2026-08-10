@@ -10,6 +10,7 @@ internal static class CollectionSnapshotBuilder
         var catalog = ItemCatalogBuilder.Build(installation.Path);
         var availableByRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var scannedStashes = new List<ScannedStash>();
+        var observedItems = new List<ObservedStashItem>();
         var warnings = new List<CollectionScanWarning>();
 
         foreach (var candidate in discovery.SaveLocations.SelectMany(location => location.TransferStashes))
@@ -34,6 +35,27 @@ internal static class CollectionSnapshotBuilder
                 {
                     availableByRecord[item.BaseRecord] =
                         availableByRecord.GetValueOrDefault(item.BaseRecord) + checked((int)item.StackCount);
+                    observedItems.Add(new ObservedStashItem(
+                        stash.Path,
+                        item.TabIndex,
+                        item.ItemIndex,
+                        item.BaseRecord,
+                        item.PrefixRecord,
+                        item.SuffixRecord,
+                        item.ModifierRecord,
+                        item.TransmuteRecord,
+                        item.Seed,
+                        item.MateriaRecord,
+                        item.RelicCompletionBonusRecord,
+                        item.RelicSeed,
+                        item.EnchantmentRecord,
+                        item.AscendantRecord,
+                        item.AscendantRecord2H,
+                        item.EnchantmentSeed,
+                        item.MateriaCombines,
+                        item.StackCount,
+                        item.Rerolls,
+                        item.AffixRerolls));
                 }
             }
             catch (Exception exception) when (
@@ -63,6 +85,7 @@ internal static class CollectionSnapshotBuilder
             discovery,
             catalog.ContentPacks,
             scannedStashes,
+            observedItems,
             warnings,
             summaries,
             items);
@@ -74,6 +97,7 @@ internal sealed record CollectionSnapshot(
     GrimDawnDiscoveryResult Discovery,
     IReadOnlyList<CatalogContentPack> ContentPacks,
     IReadOnlyList<ScannedStash> ScannedStashes,
+    IReadOnlyList<ObservedStashItem> ObservedItems,
     IReadOnlyList<CollectionScanWarning> Warnings,
     IReadOnlyList<CollectionRaritySummary> Rarities,
     IReadOnlyList<CollectionCatalogItem> Items);
@@ -87,6 +111,28 @@ internal sealed record ScannedStash(
     string Sha256);
 
 internal sealed record CollectionScanWarning(string Path, string Message);
+
+internal sealed record ObservedStashItem(
+    string SourcePath,
+    int TabIndex,
+    int ItemIndex,
+    string BaseRecord,
+    string PrefixRecord,
+    string SuffixRecord,
+    string ModifierRecord,
+    string TransmuteRecord,
+    uint Seed,
+    string MateriaRecord,
+    string RelicCompletionBonusRecord,
+    uint RelicSeed,
+    string EnchantmentRecord,
+    string AscendantRecord,
+    string AscendantRecord2H,
+    uint EnchantmentSeed,
+    uint MateriaCombines,
+    uint StackCount,
+    uint Rerolls,
+    uint AffixRerolls);
 
 internal sealed record CollectionRaritySummary(
     string Rarity,

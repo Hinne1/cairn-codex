@@ -120,3 +120,5 @@ dotnet build .\src\helper\CairnCodex.GrimDawn\CairnCodex.GrimDawn.csproj
 The renderer communicates only through the narrow API exposed by the preload
 script. The helper's versioned newline-JSON protocol is documented in
 [`docs/architecture/helper-protocol.md`](docs/architecture/helper-protocol.md).
+Collection persistence and its lifetime-discovery boundary are documented in
+[`docs/architecture/collection-schema.md`](docs/architecture/collection-schema.md).

@@ -264,6 +264,17 @@ async function runSmokeTest(
     ) {
       throw new Error('Catalog presentation did not preserve Flamebrand skill text and roll ranges.')
     }
+    const mythicalMaw = helperSnapshot.items.find(
+      (item) => item.name === 'Mythical Maw of the Damned'
+    )
+    const mawGrantedLines = mythicalMaw?.presentation?.grantedSkill?.lines ?? []
+    if (
+      mawGrantedLines.find((line) => line.label === 'Energy Cost')?.minimum !== 60 ||
+      mawGrantedLines.find((line) => line.label === 'Bleeding Damage over 3 Seconds')?.minimum !== 1320 ||
+      mythicalMaw?.presentation?.sections.filter((section) => section.kind === 'skill-modifier').length !== 3
+    ) {
+      throw new Error('Catalog presentation did not resolve Mythical Maw skill levels and modifiers.')
+    }
     const invertedRange = helperSnapshot.items
       .flatMap((item) => item.presentation?.sections ?? [])
       .flatMap((section) => section.lines)

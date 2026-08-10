@@ -52,7 +52,15 @@ internal static partial class ItemPresentationBuilder
             ["offensiveSlowLightningModifier"] = new("Electrocute Damage", "%"),
             ["offensiveSlowPoisonModifier"] = new("Poison Damage", "%"),
             ["offensiveSlowLifeModifier"] = new("Vitality Decay", "%"),
+            ["offensiveSlowPhysicalDurationModifier"] = new("Internal Trauma Duration", "%"),
+            ["offensiveSlowBleedingDurationModifier"] = new("Bleeding Duration", "%"),
+            ["offensiveSlowFireDurationModifier"] = new("Burn Duration", "%"),
+            ["offensiveSlowColdDurationModifier"] = new("Frostburn Duration", "%"),
+            ["offensiveSlowLightningDurationModifier"] = new("Electrocute Duration", "%"),
+            ["offensiveSlowPoisonDurationModifier"] = new("Poison Duration", "%"),
+            ["offensiveSlowLifeDurationModifier"] = new("Vitality Decay Duration", "%"),
             ["offensiveLifeLeechMin"] = new("of Attack Damage converted to Health", "%"),
+            ["damageAbsorptionPercent"] = new("Damage Absorption", "%"),
             ["defensivePhysical"] = new("Physical Resistance", "%"),
             ["defensivePierce"] = new("Pierce Resistance", "%"),
             ["defensiveFire"] = new("Fire Resistance", "%"),
@@ -92,11 +100,23 @@ internal static partial class ItemPresentationBuilder
         ("offensiveElemental", "Elemental Damage")
     ];
 
+    private static readonly (string Root, string Label)[] DurationDamage =
+    [
+        ("offensiveSlowPhysical", "Internal Trauma"),
+        ("offensiveSlowBleeding", "Bleeding"),
+        ("offensiveSlowFire", "Burn"),
+        ("offensiveSlowCold", "Frostburn"),
+        ("offensiveSlowLightning", "Electrocute"),
+        ("offensiveSlowPoison", "Poison"),
+        ("offensiveSlowLife", "Vitality Decay")
+    ];
+
     public static ItemPresentation Build(ArzRecord record, ItemPresentationSource data)
     {
         var baseLines = new List<ItemPresentationLine>();
         AddHeader(record, baseLines);
         AddFlatDamage(record, baseLines);
+        AddDurationDamage(record, baseLines);
         AddSimpleStats(record, baseLines, "standard");
         AddConversions(record, baseLines);
         AddSkillBonuses(record, data, baseLines);
@@ -104,11 +124,14 @@ internal static partial class ItemPresentationBuilder
         var sections = new List<ItemPresentationSection>();
         if (baseLines.Count > 0) sections.Add(new ItemPresentationSection("base", null, baseLines));
 
+        AddSkillModifiers(record, data, sections);
+
         var petRecord = record.Text("petBonusName");
         if (petRecord is not null && data.Records.TryGetValue(petRecord, out var pet))
         {
             var petLines = new List<ItemPresentationLine>();
             AddFlatDamage(pet.Record, petLines, "pet");
+            AddDurationDamage(pet.Record, petLines, "pet");
             AddSimpleStats(pet.Record, petLines, "pet");
             AddConversions(pet.Record, petLines, "pet");
             if (petLines.Count > 0)
@@ -119,6 +142,7 @@ internal static partial class ItemPresentationBuilder
         var grantedSkill = BuildGrantedSkill(record, data);
         var searchParts = new List<string>();
         if (flavorText is not null) searchParts.Add(flavorText);
+        searchParts.AddRange(sections.Select(section => section.Heading).OfType<string>());
         searchParts.AddRange(sections.SelectMany(section => section.Lines).Select(SearchLine));
         if (grantedSkill is not null)
         {
@@ -203,7 +227,9 @@ internal static partial class ItemPresentationBuilder
             var range = level.HasValue
                 ? new NumericRange(value, value)
                 : RollRange(record, pair.Key, value, scaled);
-            var prefix = pair.Key is "skillCooldownReduction" or "skillManaCostReduction" ? "−" : string.Empty;
+            var prefix = pair.Key is "skillCooldownReduction" or "skillManaCostReduction" || value < 0
+                ? "−"
+                : string.Empty;
             var absoluteMinimum = Math.Min(Math.Abs(range.Minimum), Math.Abs(range.Maximum));
             var absoluteMaximum = Math.Max(Math.Abs(range.Minimum), Math.Abs(range.Maximum));
             lines.Add(Line(
@@ -213,6 +239,45 @@ internal static partial class ItemPresentationBuilder
                 pair.Value.Unit,
                 tone,
                 prefix));
+        }
+    }
+
+    private static void AddDurationDamage(
+        ArzRecord record,
+        List<ItemPresentationLine> lines,
+        string tone = "standard",
+        int? level = null)
+    {
+        foreach (var (root, label) in DurationDamage)
+        {
+            var minimumValue = level.HasValue
+                ? NumberAt(record, root + "Min", level.Value)
+                : record.Number(root + "Min");
+            if (minimumValue is not { } minimum || Math.Abs(minimum) < 0.001) continue;
+            var maximum = level.HasValue
+                ? NumberAt(record, root + "Max", level.Value)
+                : record.Number(root + "Max");
+            var duration = level.HasValue
+                ? NumberAt(record, root + "DurationMin", level.Value)
+                : record.Number(root + "DurationMin");
+            if (!duration.HasValue || duration.Value <= 0) duration = 1;
+
+            var minimumRange = level.HasValue
+                ? new NumericRange(minimum, minimum)
+                : RollRange(record, root + "Min", minimum, scaled: true);
+            var maximumRange = maximum.HasValue && Math.Abs(maximum.Value) > 0.001
+                ? level.HasValue
+                    ? new NumericRange(maximum.Value, maximum.Value)
+                    : RollRange(record, root + "Max", maximum.Value, scaled: true)
+                : minimumRange;
+            var durationLabel = Math.Abs(duration.Value - 1) < 0.001
+                ? $"{label} Damage per Second"
+                : $"{label} Damage over {Format(duration.Value)} Seconds";
+            lines.Add(Line(
+                durationLabel,
+                minimumRange.Minimum * duration.Value,
+                maximumRange.Maximum * duration.Value,
+                tone: tone));
         }
     }
 
@@ -277,7 +342,8 @@ internal static partial class ItemPresentationBuilder
         var name = Resolve(skill.Text("skillDisplayName"), data.Tags) ?? "Granted Skill";
         var description = Resolve(skill.Text("skillBaseDescription"), data.Tags);
         var trigger = ResolveTrigger(item.Text("itemSkillAutoController"));
-        var level = Math.Max(1, checked((int)Math.Round(item.Number("itemSkillLevel") ?? 1)));
+        var level = Math.Max(1, RecordInteger(item, "itemSkillLevelEq") ??
+            RecordInteger(item, "itemSkillLevel") ?? 1);
         var lines = new List<ItemPresentationLine>();
         if (NumberAt(skill, "skillManaCost", level) is { } energy)
             lines.Add(Line("Energy Cost", energy, null));
@@ -288,14 +354,39 @@ internal static partial class ItemPresentationBuilder
         if (NumberAt(skill, "skillTargetRadius", level) is { } radius)
             lines.Add(Line("Target Area", radius, null, "m"));
         if (NumberAt(skill, "skillTargetAngle", level) is { } angle)
-            lines.Add(Line("Attack Arc", angle, null, suffix: "°"));
+            lines.Add(Line("Attack Arc", angle, null, "°"));
         if (NumberAt(skill, "skillTargetNumber", level) is { } targets)
             lines.Add(Line("Target Maximum", targets, null));
         if (NumberAt(skill, "weaponDamagePct", level) is { } weaponDamage)
             lines.Add(Line("Weapon Damage", weaponDamage, null, "%"));
-        AddFlatDamage(skill, lines, "skill", level);
-        AddSimpleStats(skill, lines, "skill", level);
+        AddFlatDamage(skill, lines, "standard", level);
+        AddDurationDamage(skill, lines, "standard", level);
+        AddSimpleStats(skill, lines, "standard", level);
         return new ItemGrantedSkillPresentation(name, description, trigger, lines);
+    }
+
+    private static void AddSkillModifiers(
+        ArzRecord item,
+        ItemPresentationSource data,
+        List<ItemPresentationSection> sections)
+    {
+        for (var index = 1; index <= 6; index++)
+        {
+            var modifiedSkill = item.Text("modifiedSkillName" + index);
+            var modifierSkill = item.Text("modifierSkillName" + index);
+            if (modifiedSkill is null || modifierSkill is null ||
+                !data.Records.TryGetValue(modifierSkill, out var modifier))
+                continue;
+            var lines = new List<ItemPresentationLine>();
+            AddFlatDamage(modifier.Record, lines, level: 1);
+            AddDurationDamage(modifier.Record, lines, level: 1);
+            AddSimpleStats(modifier.Record, lines, "standard", level: 1);
+            if (lines.Count > 0)
+                sections.Add(new ItemPresentationSection(
+                    "skill-modifier",
+                    ResolveSkillName(modifiedSkill, data),
+                    lines));
+        }
     }
 
     private static bool TryResolveDisplaySkill(
@@ -389,6 +480,15 @@ internal static partial class ItemPresentationBuilder
         var numbers = values.Where(value => value.Number.HasValue).Select(value => value.Number!.Value).ToArray();
         if (numbers.Length == 0) return null;
         return numbers[Math.Clamp(level - 1, 0, numbers.Length - 1)];
+    }
+
+    private static int? RecordInteger(ArzRecord record, string field)
+    {
+        if (record.Number(field) is { } number)
+            return checked((int)Math.Round(number));
+        return int.TryParse(record.Text(field), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
     }
 
     private static string? TrimQuotes(string? value) =>

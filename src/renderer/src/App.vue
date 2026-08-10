@@ -451,9 +451,13 @@ function skillSearchText(item: CollectionItem): string {
     .flatMap((section) => section.lines)
     .filter((line) => line.tone === 'skill' || line.tone === 'mastery')
     .map((line) => line.label)
+  const modifierSkills = item.presentation.sections
+    .filter((section) => section.kind === 'skill-modifier')
+    .map((section) => section.heading)
   const granted = item.presentation.grantedSkill
   return [
     ...skillLines,
+    ...modifierSkills,
     granted?.name,
     granted?.description,
     granted?.trigger,
@@ -955,6 +959,7 @@ function formatRollValue(value: number): string {
             v-for="section in tooltipItem.presentation.sections"
             :key="`${section.kind}:${section.heading ?? 'base'}`"
             class="tooltip-section"
+            :class="`section-${section.kind}`"
           >
             <h4 v-if="section.heading">{{ section.heading }}</h4>
             <p

@@ -197,7 +197,7 @@ export interface ItemPresentationLine {
   label: string
   minimum: number | null
   maximum: number | null
-  unit: '' | '%' | 's' | 'm'
+  unit: '' | '%' | 's' | 'm' | '°'
   tone: 'standard' | 'skill' | 'mastery' | 'pet'
   prefix: string
   suffix: string

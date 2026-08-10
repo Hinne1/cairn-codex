@@ -231,6 +231,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .tooltip-section { margin-top: 10px; }
 .tooltip-section + .tooltip-section { padding-top: 9px; border-top: 1px solid rgba(117, 94, 55, 0.32); }
 .tooltip-section h4 { margin: 0 0 5px; color: #efc35e; font-size: 15px; font-weight: 500; }
+.tooltip-section.section-skill-modifier h4 { color: #55a8ff; }
 .tooltip-section p { margin: 1px 0; }
 .tooltip-section .tone-skill, .tooltip-section .tone-mastery { color: #65acff; }
 .tooltip-section .tone-pet { padding-left: 10px; color: #c89a55; }

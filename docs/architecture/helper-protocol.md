@@ -111,3 +111,28 @@ vault payload, removes it only from an in-memory stash, serializes and reparses
 the proposed replacement, verifies that exactly one item was removed, compares
 all remaining fields, and requires deterministic serialization. It returns
 hashes and validation evidence, not a write capability.
+
+Multi-item ingest uses `plan-ingest-items` with an ordered `items` array. Once
+the desktop has durably persisted the payloads and a prepared journal entry,
+`commit-ingest-items` repeats the plan, enforces the process safety gate and
+source hash, creates durable backup and rollback files, and atomically commits
+the validated bytes.
+
+## Retrieval planning and commit
+
+~~~json
+{"id":"10","method":"plan-retrieve-items","params":{"path":"C:\\path\\to\\transfer.gsh","targetTabIndex":4,"items":[{"stashVersion":11,"baseRecord":"records/items/example.dbr","seed":123}]}}
+~~~
+
+The complete vault payloads are supplied by the Electron main process; the
+helper never opens SQLite. The first retrieval milestone requires an empty
+destination tab and an exact stash-version match. It reconstructs every known
+item field and original coordinate, serializes and reparses the candidate,
+compares each restored item, verifies the exact item-count increase, and
+requires deterministic bytes.
+
+`commit-retrieve-items` accepts the same plan plus an operation ID, expected
+source hash and backup directory. It recomputes the plan and commits only
+through the verified file transaction. `validate-ingest-retrieval-roundtrip`
+removes and reconstructs a selected real item entirely in memory for smoke
+coverage across every discovered non-empty stash version.

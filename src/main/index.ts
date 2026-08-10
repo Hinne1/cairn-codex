@@ -37,6 +37,42 @@ interface CommittedIngest {
   }
 }
 
+interface RetrievalCommand {
+  path: string
+  expectedSourceSha256: string
+  targetTabIndex: number
+  vaultItemIds: string[]
+}
+
+interface RetrievalPlanCommand {
+  path: string
+  targetTabIndex: number
+  vaultItemIds: string[]
+}
+
+interface RetrievalPlan {
+  path: string
+  sourceSha256: string
+  targetTabIndex: number
+  sourceItemCount: number
+  replacementItemCount: number
+  replacementSha256: string
+  restoredExactly: boolean
+  semanticallyValid: boolean
+  idempotent: boolean
+  items: Array<{ baseRecord: string; seed: number }>
+}
+
+interface CommittedRetrieval {
+  plan: RetrievalPlan
+  transaction: {
+    backupPath: string
+    rollbackPath: string
+    sourceSha256: string
+    committedSha256: string
+  }
+}
+
 function createHelperClient(): GrimDawnHelperClient {
   if (app.isPackaged) {
     return new GrimDawnHelperClient({
@@ -121,6 +157,7 @@ async function runSmokeTest(
             replacementItemCount: number
             semanticallyValid: boolean
             idempotent: boolean
+            items: Array<{ baseRecord: string; [key: string]: unknown }>
           }>('validate-ingest-plan', {
             path: stash.path,
             tabIndex: observed.tabIndex,
@@ -138,7 +175,87 @@ async function runSmokeTest(
     ) {
       throw new Error('A transfer stash failed the in-memory ingest plan validation.')
     }
+    const retrievalRoundTrips = await Promise.all(
+      helperSnapshot.scannedStashes
+        .filter((stash) => stash.itemCount > 0)
+        .map((stash) => {
+          const observed = helperSnapshot.observedItems.find(
+            (item) => item.sourcePath.toLowerCase() === stash.path.toLowerCase()
+          )
+          if (!observed) {
+            throw new Error('Non-empty stash has no observed item: ' + stash.path)
+          }
+          return helper.request<{
+            sourceItemCount: number
+            restoredItemCount: number
+            semanticallyEquivalent: boolean
+            idempotent: boolean
+          }>('validate-ingest-retrieval-roundtrip', {
+            path: stash.path,
+            tabIndex: observed.tabIndex,
+            itemIndex: observed.itemIndex
+          })
+        })
+    )
+    if (
+      retrievalRoundTrips.some(
+        (result) =>
+          !result.semanticallyEquivalent ||
+          !result.idempotent ||
+          result.restoredItemCount !== result.sourceItemCount
+      )
+    ) {
+      throw new Error('A transfer stash failed the in-memory ingest/retrieval roundtrip.')
+    }
     const snapshot = database.persistSnapshot(helperSnapshot)
+    const journalPayload = ingestPlans[0]?.items[0]
+    if (!journalPayload) {
+      throw new Error('Smoke test needs one item payload to verify retrieval journal transitions.')
+    }
+    const journalVaultItemId = randomUUID()
+    const ingestOperationId = randomUUID()
+    database.prepareIngestOperation({
+      operationId: ingestOperationId,
+      stashPath: 'smoke-test-transfer.gsh',
+      sourceSha256: 'smoke-source',
+      startedAtUtc: new Date().toISOString(),
+      items: [
+        {
+          vaultItemId: journalVaultItemId,
+          baseRecord: journalPayload.baseRecord,
+          payload: journalPayload
+        }
+      ],
+      detail: { phase: 'prepared', smokeTest: true }
+    })
+    database.completeIngestOperation({
+      operationId: ingestOperationId,
+      backupPath: 'smoke-ingest-backup',
+      completedAtUtc: new Date().toISOString(),
+      detail: { phase: 'committed', smokeTest: true }
+    })
+    const retrievalOperationId = randomUUID()
+    database.prepareRetrievalOperation({
+      operationId: retrievalOperationId,
+      stashPath: 'smoke-test-transfer.gsh',
+      sourceSha256: 'smoke-retrieval-source',
+      startedAtUtc: new Date().toISOString(),
+      vaultItemIds: [journalVaultItemId],
+      detail: { phase: 'prepared', smokeTest: true }
+    })
+    if (database.getVaultItems([journalVaultItemId])[0]?.state !== 'retrieval_pending') {
+      throw new Error('Vault item did not enter retrieval_pending state.')
+    }
+    database.completeRetrievalOperation({
+      operationId: retrievalOperationId,
+      backupPath: 'smoke-retrieval-backup',
+      completedAtUtc: new Date().toISOString(),
+      vaultItemIds: [journalVaultItemId],
+      detail: { phase: 'committed', smokeTest: true }
+    })
+    if (database.getVaultItems([journalVaultItemId])[0]?.state !== 'retrieved') {
+      throw new Error('Vault item did not enter retrieved state.')
+    }
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
       (count, location) => count + location.transferStashes.length,
@@ -165,6 +282,8 @@ async function runSmokeTest(
         writeTransaction: 'verified',
         serializerRoundTrips: roundTrips.length,
         ingestPlans: ingestPlans.length,
+        retrievalRoundTrips: retrievalRoundTrips.length,
+        retrievalJournal: 'verified',
         installations: discovery.installations.length,
         saveLocations: discovery.saveLocations.length,
         transferStashes: stashCount,
@@ -314,6 +433,192 @@ async function runIngestCommand(
   }
 }
 
+async function runRetrievalPlanCommand(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  command: RetrievalPlanCommand
+): Promise<void> {
+  try {
+    const vaultItems = database.getVaultItems(command.vaultItemIds)
+    const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
+    if (unavailable.length > 0) {
+      throw new Error(
+        'Vault items are not available for retrieval: ' + unavailable.map((item) => item.id).join(', ')
+      )
+    }
+    const plan = await helper.request<RetrievalPlan>('plan-retrieve-items', {
+      path: command.path,
+      targetTabIndex: command.targetTabIndex,
+      items: vaultItems.map((item) => item.payload)
+    })
+    if (
+      !plan.restoredExactly ||
+      !plan.semanticallyValid ||
+      !plan.idempotent ||
+      plan.replacementItemCount !== plan.sourceItemCount + vaultItems.length
+    ) {
+      throw new Error('Retrieval plan failed its item and serializer invariants.')
+    }
+
+    console.log(
+      JSON.stringify({
+        status: 'planned',
+        vaultItemIds: command.vaultItemIds,
+        ...plan
+      })
+    )
+    helper.dispose()
+    database.close()
+    app.exit(0)
+  } catch (error) {
+    console.error(error)
+    helper.dispose()
+    database.close()
+    app.exit(1)
+  }
+}
+
+async function runRetrievalCommand(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  command: RetrievalCommand
+): Promise<void> {
+  const operationId = randomUUID()
+  let prepared = false
+  let commitAttempted = false
+  try {
+    const safety = await helper.request<{ permitted: boolean; reasons: string[] }>(
+      'inspect-write-safety'
+    )
+    if (!safety.permitted) {
+      throw new Error('Write safety gate refused permission: ' + safety.reasons.join(' '))
+    }
+
+    const vaultItems = database.getVaultItems(command.vaultItemIds)
+    const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
+    if (unavailable.length > 0) {
+      throw new Error(
+        'Vault items are not available for retrieval: ' + unavailable.map((item) => item.id).join(', ')
+      )
+    }
+    const payloads = vaultItems.map((item) => item.payload)
+    const plan = await helper.request<RetrievalPlan>('plan-retrieve-items', {
+      path: command.path,
+      targetTabIndex: command.targetTabIndex,
+      items: payloads
+    })
+    if (
+      plan.sourceSha256.toLowerCase() !== command.expectedSourceSha256.toLowerCase() ||
+      !plan.restoredExactly ||
+      !plan.semanticallyValid ||
+      !plan.idempotent ||
+      plan.replacementItemCount !== plan.sourceItemCount + vaultItems.length
+    ) {
+      throw new Error('Retrieval plan no longer matches the approved source and transformation.')
+    }
+
+    database.prepareRetrievalOperation({
+      operationId,
+      stashPath: plan.path,
+      sourceSha256: plan.sourceSha256,
+      startedAtUtc: new Date().toISOString(),
+      vaultItemIds: command.vaultItemIds,
+      detail: {
+        phase: 'prepared',
+        targetTabIndex: command.targetTabIndex,
+        replacementSha256: plan.replacementSha256,
+        sourceItemCount: plan.sourceItemCount,
+        replacementItemCount: plan.replacementItemCount,
+        vaultItemIds: command.vaultItemIds
+      }
+    })
+    prepared = true
+
+    commitAttempted = true
+    const committed = await helper.request<CommittedRetrieval>('commit-retrieve-items', {
+      operationId,
+      path: plan.path,
+      expectedSourceSha256: plan.sourceSha256,
+      targetTabIndex: command.targetTabIndex,
+      items: payloads,
+      backupDirectory: join(app.getPath('userData'), 'backups')
+    })
+    if (
+      committed.transaction.sourceSha256.toLowerCase() !== plan.sourceSha256.toLowerCase() ||
+      committed.transaction.committedSha256.toLowerCase() !== plan.replacementSha256.toLowerCase()
+    ) {
+      throw new Error('Committed retrieval hashes do not match the persisted plan.')
+    }
+
+    const verified = await helper.request<{
+      sha256: string
+      itemCount: number
+      tabs: Array<{ items: Array<{ baseRecord: string; seed: number }> }>
+    }>('scan-transfer-stash', { path: plan.path })
+    const targetItems = verified.tabs[command.targetTabIndex]?.items ?? []
+    if (
+      verified.sha256.toLowerCase() !== committed.transaction.committedSha256.toLowerCase() ||
+      verified.itemCount !== plan.replacementItemCount ||
+      targetItems.length !== plan.items.length ||
+      !targetItems.every((item, index) => {
+        const planned = plan.items[index]
+        return planned !== undefined && item.baseRecord === planned.baseRecord && item.seed === planned.seed
+      })
+    ) {
+      throw new Error('Post-commit stash verification did not match the committed retrieval.')
+    }
+
+    const completedAtUtc = new Date().toISOString()
+    database.completeRetrievalOperation({
+      operationId,
+      backupPath: committed.transaction.backupPath,
+      completedAtUtc,
+      vaultItemIds: command.vaultItemIds,
+      detail: {
+        phase: 'committed',
+        targetTabIndex: command.targetTabIndex,
+        replacementSha256: committed.transaction.committedSha256,
+        rollbackPath: committed.transaction.rollbackPath,
+        vaultItemIds: command.vaultItemIds
+      }
+    })
+
+    console.log(
+      JSON.stringify({
+        operationId,
+        status: 'committed',
+        retrieved: plan.items.map((item, index) => ({
+          vaultItemId: command.vaultItemIds[index],
+          baseRecord: item.baseRecord,
+          seed: item.seed
+        })),
+        sourceItems: plan.sourceItemCount,
+        remainingItems: verified.itemCount,
+        targetTabItems: targetItems.length,
+        sourceSha256: plan.sourceSha256,
+        committedSha256: committed.transaction.committedSha256,
+        backupPath: committed.transaction.backupPath,
+        rollbackPath: committed.transaction.rollbackPath
+      })
+    )
+    helper.dispose()
+    database.close()
+    app.exit(0)
+  } catch (error) {
+    if (prepared) {
+      if (commitAttempted) {
+        database.markRetrievalNeedsRecovery(operationId, error)
+      } else {
+        database.failRetrievalOperation(operationId, command.vaultItemIds, error)
+      }
+    }
+    console.error(error)
+    helper.dispose()
+    database.close()
+    app.exit(1)
+  }
+}
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1280,
@@ -350,6 +655,26 @@ app.whenReady().then(() => {
   const ingestCommand = process.env.CAIRN_CODEX_INGEST_REQUEST
   if (ingestCommand) {
     void runIngestCommand(helper, database, JSON.parse(ingestCommand) as IngestCommand)
+    return
+  }
+
+  const retrievalPlanCommand = process.env.CAIRN_CODEX_RETRIEVAL_PLAN_REQUEST
+  if (retrievalPlanCommand) {
+    void runRetrievalPlanCommand(
+      helper,
+      database,
+      JSON.parse(retrievalPlanCommand) as RetrievalPlanCommand
+    )
+    return
+  }
+
+  const retrievalCommand = process.env.CAIRN_CODEX_RETRIEVE_REQUEST
+  if (retrievalCommand) {
+    void runRetrievalCommand(
+      helper,
+      database,
+      JSON.parse(retrievalCommand) as RetrievalCommand
+    )
     return
   }
 

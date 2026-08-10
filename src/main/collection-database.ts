@@ -141,6 +141,154 @@ export class CollectionDatabase {
       .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
   }
 
+  getVaultItems(vaultItemIds: string[]): VaultItem[] {
+    if (vaultItemIds.length === 0) {
+      throw new Error('At least one vault item ID is required.')
+    }
+    if (new Set(vaultItemIds).size !== vaultItemIds.length) {
+      throw new Error('Duplicate vault item IDs are not allowed.')
+    }
+
+    const placeholders = vaultItemIds.map(() => '?').join(', ')
+    const rows = this.database
+      .prepare(`
+        SELECT id, base_record, state, serialized_item
+        FROM vault_item
+        WHERE id IN (${placeholders})
+      `)
+      .all(...vaultItemIds) as Array<{
+      id: string
+      base_record: string
+      state: VaultItemState
+      serialized_item: Uint8Array
+    }>
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    return vaultItemIds.map((id) => {
+      const row = byId.get(id)
+      if (!row) {
+        throw new Error('Vault item does not exist: ' + id)
+      }
+      return {
+        id: row.id,
+        baseRecord: row.base_record,
+        state: row.state,
+        payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown
+      }
+    })
+  }
+
+  prepareRetrievalOperation(input: PreparedRetrievalOperation): void {
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      this.database
+        .prepare(`
+          INSERT INTO operation_journal (
+            id, operation, state, vault_item_id, stash_path, source_sha256,
+            backup_path, started_at_utc, completed_at_utc, detail_json
+          ) VALUES (?, 'retrieve', 'prepared', NULL, ?, ?, NULL, ?, NULL, ?)
+        `)
+        .run(
+          input.operationId,
+          input.stashPath,
+          input.sourceSha256,
+          input.startedAtUtc,
+          JSON.stringify(input.detail)
+        )
+      const update = this.database.prepare(`
+        UPDATE vault_item
+        SET state = 'retrieval_pending'
+        WHERE id = ? AND state = 'ingested'
+      `)
+      for (const vaultItemId of input.vaultItemIds) {
+        if (Number(update.run(vaultItemId).changes) !== 1) {
+          throw new Error('Vault item is not available for retrieval: ' + vaultItemId)
+        }
+      }
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  completeRetrievalOperation(input: CompletedRetrievalOperation): void {
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const update = this.database.prepare(`
+        UPDATE vault_item
+        SET state = 'retrieved', retrieved_at_utc = ?
+        WHERE id = ? AND state = 'retrieval_pending'
+      `)
+      for (const vaultItemId of input.vaultItemIds) {
+        if (Number(update.run(input.completedAtUtc, vaultItemId).changes) !== 1) {
+          throw new Error('Vault item is not pending retrieval: ' + vaultItemId)
+        }
+      }
+      const journal = this.database
+        .prepare(`
+          UPDATE operation_journal
+          SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
+          WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+        `)
+        .run(
+          input.backupPath,
+          input.completedAtUtc,
+          JSON.stringify(input.detail),
+          input.operationId
+        )
+      if (Number(journal.changes) !== 1) {
+        throw new Error('Prepared retrieval journal entry is missing.')
+      }
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  failRetrievalOperation(operationId: string, vaultItemIds: string[], error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error)
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const reset = this.database.prepare(`
+        UPDATE vault_item SET state = 'ingested'
+        WHERE id = ? AND state = 'retrieval_pending'
+      `)
+      for (const vaultItemId of vaultItemIds) {
+        reset.run(vaultItemId)
+      }
+      this.database
+        .prepare(`
+          UPDATE operation_journal
+          SET state = 'failed', completed_at_utc = ?, detail_json = ?
+          WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+        `)
+        .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
+      this.database.exec('COMMIT')
+    } catch (failure) {
+      this.database.exec('ROLLBACK')
+      throw failure
+    }
+  }
+
+  markRetrievalNeedsRecovery(operationId: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error)
+    const row = this.database
+      .prepare('SELECT detail_json FROM operation_journal WHERE id = ?')
+      .get(operationId) as { detail_json: string } | undefined
+    const previous = row ? (JSON.parse(row.detail_json) as Record<string, unknown>) : {}
+    this.database
+      .prepare(`
+        UPDATE operation_journal
+        SET state = 'needs_recovery', detail_json = ?
+        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+      `)
+      .run(
+        JSON.stringify({ ...previous, error: detail, phase: 'commit_outcome_unknown' }),
+        operationId
+      )
+  }
+
   close(): void {
     this.database.close()
   }
@@ -424,5 +572,31 @@ export interface CompletedIngestOperation {
   operationId: string
   backupPath: string
   completedAtUtc: string
+  detail: unknown
+}
+
+export type VaultItemState = 'ingested' | 'retrieval_pending' | 'retrieved'
+
+export interface VaultItem {
+  id: string
+  baseRecord: string
+  state: VaultItemState
+  payload: unknown
+}
+
+export interface PreparedRetrievalOperation {
+  operationId: string
+  stashPath: string
+  sourceSha256: string
+  startedAtUtc: string
+  vaultItemIds: string[]
+  detail: unknown
+}
+
+export interface CompletedRetrievalOperation {
+  operationId: string
+  backupPath: string
+  completedAtUtc: string
+  vaultItemIds: string[]
   detail: unknown
 }

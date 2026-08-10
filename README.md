@@ -78,7 +78,7 @@ transfer stash.
   it, then replace the target atomically.
 - Retain timestamped automatic backups independently of the atomic replacement
   fallback.
-- Keep an append-only operation journal for ingest and retrieval.
+- Keep a durable operation journal for ingest and retrieval.
 - Never delete the only persisted representation of an item as part of a failed
   or unverified operation.
 

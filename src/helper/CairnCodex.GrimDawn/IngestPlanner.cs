@@ -224,4 +224,37 @@ internal sealed record VaultItemPayload(
             item.AffixRerolls,
             item.XOffset,
             item.YOffset);
+
+    public Item ToItem(uint targetStashVersion)
+    {
+        if (StashVersion != targetStashVersion)
+        {
+            throw new InvalidDataException(
+                $"Vault item uses stash version {StashVersion}, but the target uses version {targetStashVersion}.");
+        }
+
+        return new Item(targetStashVersion)
+        {
+            BaseRecord = BaseRecord,
+            PrefixRecord = PrefixRecord,
+            SuffixRecord = SuffixRecord,
+            ModifierRecord = ModifierRecord,
+            TransmuteRecord = TransmuteRecord,
+            Seed = Seed,
+            MateriaRecord = MateriaRecord,
+            RelicCompletionBonusRecord = RelicCompletionBonusRecord,
+            RelicSeed = RelicSeed,
+            EnchantmentRecord = EnchantmentRecord,
+            AscendantRecord = AscendantRecord,
+            AscendantRecord2H = AscendantRecord2H,
+            UNKNOWN = Unknown,
+            EnchantmentSeed = EnchantmentSeed,
+            MateriaCombines = MateriaCombines,
+            StackCount = StackCount,
+            Rerolls = Rerolls,
+            AffixRerolls = AffixRerolls,
+            XOffset = XOffset,
+            YOffset = YOffset
+        };
+    }
 }

@@ -36,6 +36,9 @@ while ((line = Console.ReadLine()) is not null)
             "validate-ingest-plan" => ValidateIngestPlan(request),
             "plan-ingest-items" => PlanIngestItems(request),
             "commit-ingest-items" => CommitIngestItems(request),
+            "plan-retrieve-items" => PlanRetrieveItems(request),
+            "commit-retrieve-items" => CommitRetrieveItems(request),
+            "validate-ingest-retrieval-roundtrip" => ValidateIngestRetrievalRoundTrip(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
     }
@@ -118,6 +121,44 @@ HelperResponse CommitIngestItems(HelperRequest request)
             parameters.ExpectedSourceSha256,
             parameters.Items,
             parameters.BackupDirectory));
+}
+
+HelperResponse PlanRetrieveItems(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<PlanRetrieveItemsRequest>(jsonOptions)
+        ?? throw new JsonException("plan-retrieve-items requires path, targetTabIndex, and items parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        RetrievalPlanner.Plan(parameters.Path, parameters.TargetTabIndex, parameters.Items));
+}
+
+HelperResponse CommitRetrieveItems(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<CommitRetrieveItemsRequest>(jsonOptions)
+        ?? throw new JsonException(
+            "commit-retrieve-items requires operationId, path, expectedSourceSha256, targetTabIndex, items, and backupDirectory parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        RetrievalPlanner.Commit(
+            parameters.OperationId,
+            parameters.Path,
+            parameters.ExpectedSourceSha256,
+            parameters.TargetTabIndex,
+            parameters.Items,
+            parameters.BackupDirectory));
+}
+
+HelperResponse ValidateIngestRetrievalRoundTrip(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<ValidateIngestRetrievalRoundTripRequest>(jsonOptions)
+        ?? throw new JsonException(
+            "validate-ingest-retrieval-roundtrip requires path, tabIndex, and itemIndex parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        RetrievalPlanner.ValidateInMemoryRoundTrip(
+            parameters.Path,
+            parameters.TabIndex,
+            parameters.ItemIndex));
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);

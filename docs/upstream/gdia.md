@@ -63,10 +63,12 @@ here implements reading, not encrypted transfer-stash writing.
 
 Consequences for Cairn Codex:
 
-- These files are accepted only as the read-only transfer-stash parser.
-- Their write methods are untrusted for production stash mutation until proven
-  by round-trip fixtures and byte-level validation.
-- Milestones 2 and 3 remain behind the write-safety and transaction interfaces.
+- These files remain a narrow, quarantined transfer-stash access layer.
+- Their write methods are callable only after semantic/idempotent planning and
+  through the app-owned journal, safety gate, backups, source hashes, temporary
+  validation, and atomic replacement boundary.
+- The v11 serializer has completed an accepted two-item ingest against the game;
+  retrieval retains the same safeguards and requires its own game acceptance.
 - A later decision can select verified atomic file serialization or a narrowly
   maintained live-game hook without changing collection persistence or UI IPC.
 

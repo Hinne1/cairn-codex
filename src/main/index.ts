@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import {
   IPC_CHANNELS,
@@ -8,6 +9,33 @@ import {
 } from '@shared/contracts'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
+
+interface IngestCommand {
+  path: string
+  expectedSourceSha256: string
+  items: Array<{ tabIndex: number; itemIndex: number; expectedSeed: number }>
+}
+
+interface IngestPlan {
+  path: string
+  sourceSha256: string
+  sourceItemCount: number
+  replacementItemCount: number
+  replacementSha256: string
+  semanticallyValid: boolean
+  idempotent: boolean
+  items: Array<{ baseRecord: string; seed: number; [key: string]: unknown }>
+}
+
+interface CommittedIngest {
+  plan: IngestPlan
+  transaction: {
+    backupPath: string
+    rollbackPath: string
+    sourceSha256: string
+    committedSha256: string
+  }
+}
 
 function createHelperClient(): GrimDawnHelperClient {
   if (app.isPackaged) {
@@ -156,6 +184,136 @@ async function runSmokeTest(
   }
 }
 
+async function runIngestCommand(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  command: IngestCommand
+): Promise<void> {
+  const operationId = randomUUID()
+  let prepared = false
+  try {
+    const safety = await helper.request<{ permitted: boolean; reasons: string[] }>(
+      'inspect-write-safety'
+    )
+    if (!safety.permitted) {
+      throw new Error('Write safety gate refused permission: ' + safety.reasons.join(' '))
+    }
+
+    const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    database.persistSnapshot(snapshot)
+    const selectors = command.items.map(({ tabIndex, itemIndex }) => ({ tabIndex, itemIndex }))
+    const plan = await helper.request<IngestPlan>('plan-ingest-items', {
+      path: command.path,
+      items: selectors
+    })
+    if (
+      plan.sourceSha256.toLowerCase() !== command.expectedSourceSha256.toLowerCase() ||
+      !plan.semanticallyValid ||
+      !plan.idempotent ||
+      plan.replacementItemCount !== plan.sourceItemCount - command.items.length
+    ) {
+      throw new Error('Ingest plan no longer matches the approved source and transformation.')
+    }
+    const actualSeeds = plan.items.map((item) => item.seed)
+    const expectedSeeds = command.items.map((item) => item.expectedSeed)
+    if (
+      actualSeeds.length !== expectedSeeds.length ||
+      actualSeeds.some((seed, index) => seed !== expectedSeeds[index])
+    ) {
+      throw new Error('The selected stash items no longer match the approved roll seeds.')
+    }
+
+    const vaultItems = plan.items.map((item) => ({
+      vaultItemId: randomUUID(),
+      baseRecord: item.baseRecord,
+      payload: item
+    }))
+    database.prepareIngestOperation({
+      operationId,
+      stashPath: plan.path,
+      sourceSha256: plan.sourceSha256,
+      startedAtUtc: new Date().toISOString(),
+      items: vaultItems,
+      detail: {
+        phase: 'prepared',
+        replacementSha256: plan.replacementSha256,
+        sourceItemCount: plan.sourceItemCount,
+        replacementItemCount: plan.replacementItemCount,
+        vaultItemIds: vaultItems.map((item) => item.vaultItemId)
+      }
+    })
+    prepared = true
+
+    const committed = await helper.request<CommittedIngest>('commit-ingest-items', {
+      operationId,
+      path: plan.path,
+      expectedSourceSha256: plan.sourceSha256,
+      items: selectors,
+      backupDirectory: join(app.getPath('userData'), 'backups')
+    })
+    if (
+      committed.transaction.sourceSha256.toLowerCase() !== plan.sourceSha256.toLowerCase() ||
+      committed.transaction.committedSha256.toLowerCase() !== plan.replacementSha256.toLowerCase()
+    ) {
+      throw new Error('Committed ingest hashes do not match the persisted plan.')
+    }
+
+    const completedAtUtc = new Date().toISOString()
+    const vaultItemIds = database.completeIngestOperation({
+      operationId,
+      backupPath: committed.transaction.backupPath,
+      completedAtUtc,
+      detail: {
+        phase: 'committed',
+        replacementSha256: committed.transaction.committedSha256,
+        rollbackPath: committed.transaction.rollbackPath,
+        vaultItemIds: vaultItems.map((item) => item.vaultItemId)
+      }
+    })
+    const verified = await helper.request<{
+      sha256: string
+      itemCount: number
+      tabs: Array<{ items: unknown[] }>
+    }>('scan-transfer-stash', { path: plan.path })
+    if (
+      verified.sha256.toLowerCase() !== committed.transaction.committedSha256.toLowerCase() ||
+      verified.itemCount !== plan.replacementItemCount
+    ) {
+      throw new Error('Post-commit stash verification did not match the committed ingest.')
+    }
+
+    console.log(
+      JSON.stringify({
+        operationId,
+        status: 'committed',
+        ingested: plan.items.map((item, index) => ({
+          vaultItemId: vaultItemIds[index],
+          baseRecord: item.baseRecord,
+          seed: item.seed
+        })),
+        sourceItems: plan.sourceItemCount,
+        remainingItems: verified.itemCount,
+        lastTabItems: verified.tabs.at(-1)?.items.length ?? null,
+        sourceSha256: plan.sourceSha256,
+        committedSha256: committed.transaction.committedSha256,
+        backupPath: committed.transaction.backupPath,
+        rollbackPath: committed.transaction.rollbackPath
+      })
+    )
+    helper.dispose()
+    database.close()
+    app.exit(0)
+  } catch (error) {
+    if (prepared) {
+      database.failIngestOperation(operationId, error)
+    }
+    console.error(error)
+    helper.dispose()
+    database.close()
+    app.exit(1)
+  }
+}
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1280,
@@ -188,6 +346,12 @@ app.whenReady().then(() => {
       ? ':memory:'
       : join(app.getPath('userData'), 'cairn-codex.sqlite3')
   )
+
+  const ingestCommand = process.env.CAIRN_CODEX_INGEST_REQUEST
+  if (ingestCommand) {
+    void runIngestCommand(helper, database, JSON.parse(ingestCommand) as IngestCommand)
+    return
+  }
 
   if (process.env.CAIRN_CODEX_SMOKE_TEST === '1') {
     void runSmokeTest(helper, database)

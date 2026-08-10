@@ -34,6 +34,8 @@ while ((line = Console.ReadLine()) is not null)
             "self-test-write-transaction" => HelperResponse.Success(request.Id, WriteTransactionSelfTest.Run()),
             "validate-transfer-stash-roundtrip" => ValidateTransferStashRoundTrip(request),
             "validate-ingest-plan" => ValidateIngestPlan(request),
+            "plan-ingest-items" => PlanIngestItems(request),
+            "commit-ingest-items" => CommitIngestItems(request),
             _ => HelperResponse.Failure(request.Id, "method_not_found", $"Unknown method: {request.Method}")
         };
     }
@@ -92,6 +94,30 @@ HelperResponse ValidateIngestPlan(HelperRequest request)
     return HelperResponse.Success(
         request.Id,
         IngestPlanner.Validate(parameters.Path, parameters.TabIndex, parameters.ItemIndex));
+}
+
+HelperResponse PlanIngestItems(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<PlanIngestItemsRequest>(jsonOptions)
+        ?? throw new JsonException("plan-ingest-items requires path and items parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        IngestPlanner.Plan(parameters.Path, parameters.Items));
+}
+
+HelperResponse CommitIngestItems(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<CommitIngestItemsRequest>(jsonOptions)
+        ?? throw new JsonException(
+            "commit-ingest-items requires operationId, path, expectedSourceSha256, items, and backupDirectory parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        IngestPlanner.Commit(
+            parameters.OperationId,
+            parameters.Path,
+            parameters.ExpectedSourceSha256,
+            parameters.Items,
+            parameters.BackupDirectory));
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);

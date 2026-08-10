@@ -37,20 +37,124 @@ export class CollectionDatabase {
     return this.withLifetimeState(snapshot)
   }
 
+  prepareIngestOperation(input: PreparedIngestOperation): void {
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      this.database
+        .prepare(`
+          INSERT INTO operation_journal (
+            id, operation, state, vault_item_id, stash_path, source_sha256,
+            backup_path, started_at_utc, completed_at_utc, detail_json
+          ) VALUES (?, 'ingest', 'prepared', NULL, ?, ?, NULL, ?, NULL, ?)
+        `)
+        .run(
+          input.operationId,
+          input.stashPath,
+          input.sourceSha256,
+          input.startedAtUtc,
+          JSON.stringify(input.detail)
+        )
+      const statement = this.database.prepare(`
+        INSERT INTO pending_ingest_item (
+          operation_id, vault_item_id, ordinal, base_record, payload_json
+        ) VALUES (?, ?, ?, ?, ?)
+      `)
+      input.items.forEach((item, ordinal) => {
+        statement.run(
+          input.operationId,
+          item.vaultItemId,
+          ordinal,
+          item.baseRecord,
+          JSON.stringify(item.payload)
+        )
+      })
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  completeIngestOperation(input: CompletedIngestOperation): string[] {
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const pending = this.database
+        .prepare(`
+          SELECT vault_item_id, base_record, payload_json
+          FROM pending_ingest_item
+          WHERE operation_id = ?
+          ORDER BY ordinal
+        `)
+        .all(input.operationId) as Array<{
+        vault_item_id: string
+        base_record: string
+        payload_json: string
+      }>
+      if (pending.length === 0) {
+        throw new Error('Prepared ingest operation has no persisted item payloads.')
+      }
+
+      const insertVault = this.database.prepare(`
+        INSERT INTO vault_item (
+          id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc
+        ) VALUES (?, ?, 'ingested', ?, ?, NULL)
+      `)
+      for (const item of pending) {
+        insertVault.run(
+          item.vault_item_id,
+          item.base_record,
+          Buffer.from(item.payload_json, 'utf8'),
+          input.completedAtUtc
+        )
+      }
+      this.database
+        .prepare(`
+          UPDATE operation_journal
+          SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
+          WHERE id = ? AND state = 'prepared'
+        `)
+        .run(
+          input.backupPath,
+          input.completedAtUtc,
+          JSON.stringify(input.detail),
+          input.operationId
+        )
+      this.database
+        .prepare('DELETE FROM pending_ingest_item WHERE operation_id = ?')
+        .run(input.operationId)
+      this.database.exec('COMMIT')
+      return pending.map((item) => item.vault_item_id)
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  failIngestOperation(operationId: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error)
+    this.database
+      .prepare(`
+        UPDATE operation_journal
+        SET state = 'failed', completed_at_utc = ?, detail_json = ?
+        WHERE id = ? AND state = 'prepared'
+      `)
+      .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
+  }
+
   close(): void {
     this.database.close()
   }
 
   private migrate(): void {
-    const version = this.database.prepare('PRAGMA user_version').get() as { user_version: number }
-    if (version.user_version > 1) {
+    let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
+      .user_version
+    if (version > 2) {
       throw new Error(
-        'Collection database version ' + version.user_version + ' is newer than this app supports.'
+        'Collection database version ' + version + ' is newer than this app supports.'
       )
     }
-    if (version.user_version === 1) return
-
-    this.database.exec(`
+    if (version === 0) {
+      this.database.exec(`
       BEGIN IMMEDIATE;
 
       CREATE TABLE catalog_item (
@@ -146,7 +250,25 @@ export class CollectionDatabase {
 
       PRAGMA user_version = 1;
       COMMIT;
-    `)
+      `)
+      version = 1
+    }
+
+    if (version === 1) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE pending_ingest_item (
+          operation_id TEXT NOT NULL REFERENCES operation_journal(id) ON DELETE RESTRICT,
+          vault_item_id TEXT NOT NULL UNIQUE,
+          ordinal INTEGER NOT NULL,
+          base_record TEXT NOT NULL REFERENCES catalog_item(record) ON DELETE RESTRICT,
+          payload_json TEXT NOT NULL,
+          PRIMARY KEY (operation_id, ordinal)
+        ) STRICT;
+        PRAGMA user_version = 2;
+        COMMIT;
+      `)
+    }
   }
 
   private persistCatalog(items: CollectionItem[]): void {
@@ -283,4 +405,24 @@ export class CollectionDatabase {
 
     return { ...snapshot, items, rarities }
   }
+}
+
+export interface PreparedIngestOperation {
+  operationId: string
+  stashPath: string
+  sourceSha256: string
+  startedAtUtc: string
+  items: Array<{
+    vaultItemId: string
+    baseRecord: string
+    payload: unknown
+  }>
+  detail: unknown
+}
+
+export interface CompletedIngestOperation {
+  operationId: string
+  backupPath: string
+  completedAtUtc: string
+  detail: unknown
 }

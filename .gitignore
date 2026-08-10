@@ -5,11 +5,14 @@ out/
 .vite/
 coverage/
 *.log
+.env
+.env.*
 
 # .NET
 **/bin/
 **/obj/
 *.user
+local-cache/
 
 # Local application data
 *.db
@@ -22,4 +25,3 @@ backups/
 .vscode/
 .DS_Store
 Thumbs.db
-

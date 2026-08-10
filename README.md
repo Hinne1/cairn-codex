@@ -88,3 +88,34 @@ The transfer-stash and game-database access layer will be reduced from the
 MIT-licensed [Grim Dawn Item Assistant](https://github.com/marius00/iagd).
 Copied files must retain their original copyright and license notices. A source
 manifest will record the upstream commit and local modifications.
+
+## Development
+
+Prerequisites:
+
+- Node.js 22 or newer.
+- .NET SDK 10.
+
+Install and verify the Electron application:
+
+```powershell
+npm.cmd install
+npm.cmd run typecheck
+npm.cmd run build
+```
+
+Run the desktop application in development mode:
+
+```powershell
+npm.cmd run dev
+```
+
+Build the Grim Dawn helper:
+
+```powershell
+dotnet build .\src\helper\CairnCodex.GrimDawn\CairnCodex.GrimDawn.csproj
+```
+
+The renderer communicates only through the narrow API exposed by the preload
+script. The helper's versioned newline-JSON protocol is documented in
+[`docs/architecture/helper-protocol.md`](docs/architecture/helper-protocol.md).

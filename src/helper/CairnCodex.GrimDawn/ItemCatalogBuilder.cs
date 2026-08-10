@@ -122,7 +122,8 @@ internal static class ItemCatalogBuilder
             setName,
             setRecord,
             record.Text("bitmap") ?? record.Text("relicBitmap") ?? record.Text("shardBitmap"),
-            source.ContentPack);
+            source.ContentPack,
+            ItemPresentationBuilder.Build(record, data: new ItemPresentationSource(tags, records)));
     }
 
     private static string? Resolve(string? tag, IReadOnlyDictionary<string, string> tags)
@@ -214,4 +215,5 @@ internal sealed record CatalogItem(
     string? SetName,
     string? SetRecord,
     string? Bitmap,
-    string ContentPack);
+    string ContentPack,
+    ItemPresentation Presentation);

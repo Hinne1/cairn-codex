@@ -71,6 +71,17 @@ journaled ingest and retrieval flows: choose a transfer stash, stage supported
 items in its final tab, and explicitly confirm the operation. Retrieval remains
 deliberately conservative and requires that final tab to be empty.
 
+The collection browser also extracts item art from the installed game archives,
+uses Grim Dawn rarity colors, and builds game-style catalog tooltips from the
+local ARZ/tag data. Catalog tooltips show possible base-item ranges (for example,
+`40% – 60% Fire Damage`); the copy-comparison drawer remains the place for actual
+seed-applied values.
+
+Search is full-text across item names, sets, stats, skill bonuses, granted-skill
+names, and descriptions. Bare terms can be combined, and the following scoped
+forms are supported: `name:`, `set:`, `skill:`, `slot:`, `type:`, `rarity:`,
+`pack:`, and numeric level expressions such as `level:>=75`.
+
 ## Safety invariants
 
 - Read-only is the default mode.
@@ -86,6 +97,12 @@ deliberately conservative and requires that final tab to be empty.
 - Keep a durable operation journal for ingest and retrieval.
 - Never delete the only persisted representation of an item as part of a failed
   or unverified operation.
+
+GDIA's apparent live stash reads and writes do not come from ordinary concurrent
+file access: its injected native hook intercepts incoming items and recreates
+outgoing items inside the running game. Cairn Codex keeps that future adapter
+outside the collection database and transaction core, so adopting a narrowly
+maintained live hook later will not require a storage or renderer rewrite.
 
 ## Reused code
 

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   AppStatus,
   CollectionItem,
   CollectionRaritySummary,
   CollectionSnapshot,
   GrimDawnDiscovery,
+  ItemPresentationLine,
   ObservedStashItem,
   StagingTabInspection,
   VaultListItem,
@@ -45,6 +46,9 @@ const selectedVaultIds = ref<string[]>([])
 const vaultBusy = ref(false)
 const vaultError = ref<string | null>(null)
 const vaultMessage = ref<string | null>(null)
+const tooltipRecord = ref<string | null>(null)
+const tooltipPosition = ref({ left: 0, top: 0 })
+let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 const pageSize = 48
 
 const categories = [
@@ -86,9 +90,7 @@ const filteredItems = computed(() => {
     })
     .filter((item) => {
       if (!needle) return true
-      return [item.name, item.setName, item.slot, item.contentPack]
-        .filter(Boolean)
-        .some((value) => value?.toLocaleLowerCase().includes(needle))
+      return matchesSearch(item, needle)
     })
     .sort(compareItems)
 })
@@ -145,7 +147,7 @@ const visibleSets = computed(() => {
       if (!needle) return true
       return (
         set.name.toLocaleLowerCase().includes(needle) ||
-        set.items.some((item) => item.name.toLocaleLowerCase().includes(needle))
+        set.items.some((item) => matchesSearch(item, needle))
       )
     })
 })
@@ -160,6 +162,10 @@ const displayedResultCount = computed(() =>
 
 const selectedItem = computed(() =>
   snapshot.value?.items.find((item) => item.record === selectedRecord.value) ?? null
+)
+
+const tooltipItem = computed(() =>
+  snapshot.value?.items.find((item) => item.record === tooltipRecord.value) ?? null
 )
 
 const selectedCopies = computed(() => {
@@ -194,9 +200,15 @@ watch(activeCategory, async (category) => {
 })
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleEscape)
   status.value = await window.cairnCodex.getAppStatus()
   await scanCollection()
   await refreshVault()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleEscape)
+  cancelTooltip()
 })
 
 async function scanCollection(): Promise<void> {
@@ -217,6 +229,12 @@ async function scanCollection(): Promise<void> {
 
 function rarity(name: 'epic' | 'legendary'): CollectionRaritySummary | undefined {
   return snapshot.value?.rarities.find((summary) => summary.rarity === name)
+}
+
+function filterToRarity(value: 'epic' | 'legendary'): void {
+  activeCategory.value = 'All'
+  rarityFilter.value = value
+  window.scrollTo({ top: 500, behavior: 'smooth' })
 }
 
 function percentage(summary: CollectionRaritySummary | undefined): string {
@@ -384,7 +402,131 @@ function goToPage(page: number): void {
 }
 
 function openItem(item: CollectionItem): void {
+  hideTooltip()
   selectedRecord.value = item.record
+}
+
+function itemIconUrl(item: CollectionItem): string | null {
+  return item.iconKey ? `cairn-icon://asset/${item.iconKey}.png` : null
+}
+
+function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
+  const tokens = normalizedQuery.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []
+  const fields: Record<string, string> = {
+    name: item.name,
+    set: item.setName ?? '',
+    skill: skillSearchText(item),
+    slot: item.slot,
+    type: item.itemClass,
+    rarity: item.rarity,
+    pack: item.contentPack
+  }
+  const everything = [
+    item.name,
+    item.setName,
+    item.slot,
+    item.itemClass,
+    item.rarity,
+    item.contentPack,
+    item.presentation?.searchText
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLocaleLowerCase()
+
+  return tokens.every((rawToken) => {
+    const token = rawToken.replaceAll('"', '')
+    const separator = token.indexOf(':')
+    if (separator < 1) return everything.includes(token)
+    const field = token.slice(0, separator)
+    const value = token.slice(separator + 1)
+    if (field === 'level') return matchesLevel(item.levelRequirement, value)
+    return fields[field]?.toLocaleLowerCase().includes(value) ?? false
+  })
+}
+
+function skillSearchText(item: CollectionItem): string {
+  if (!item.presentation) return ''
+  const skillLines = item.presentation.sections
+    .flatMap((section) => section.lines)
+    .filter((line) => line.tone === 'skill' || line.tone === 'mastery')
+    .map((line) => line.label)
+  const granted = item.presentation.grantedSkill
+  return [
+    ...skillLines,
+    granted?.name,
+    granted?.description,
+    granted?.trigger,
+    ...((granted?.lines ?? []).map((line) => line.label))
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function matchesLevel(level: number, expression: string): boolean {
+  const match = /^(>=|<=|>|<|=)?(\d+)$/.exec(expression)
+  if (!match) return false
+  const target = Number(match[2])
+  if (match[1] === '>=') return level >= target
+  if (match[1] === '<=') return level <= target
+  if (match[1] === '>') return level > target
+  if (match[1] === '<') return level < target
+  return level === target
+}
+
+function queueTooltip(item: CollectionItem, event: MouseEvent | FocusEvent): void {
+  cancelTooltip()
+  positionTooltip(event)
+  tooltipTimer = setTimeout(() => {
+    tooltipRecord.value = item.record
+  }, 180)
+}
+
+function moveTooltip(event: MouseEvent): void {
+  if (tooltipRecord.value) positionTooltip(event)
+}
+
+function positionTooltip(event: MouseEvent | FocusEvent): void {
+  const width = 430
+  const margin = 14
+  let x: number
+  let y: number
+  if (event instanceof MouseEvent) {
+    x = event.clientX + 18
+    y = event.clientY + 14
+  } else {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    x = rect.right + 12
+    y = rect.top
+  }
+  const expectedHeight = Math.min(760, window.innerHeight - margin * 2)
+  tooltipPosition.value = {
+    left: Math.max(margin, Math.min(x, window.innerWidth - width - margin)),
+    top: Math.max(margin, Math.min(y, window.innerHeight - expectedHeight - margin))
+  }
+}
+
+function cancelTooltip(): void {
+  if (tooltipTimer) clearTimeout(tooltipTimer)
+  tooltipTimer = null
+}
+
+function hideTooltip(): void {
+  cancelTooltip()
+  tooltipRecord.value = null
+}
+
+function handleEscape(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  hideTooltip()
+  selectedRecord.value = null
+}
+
+function formatPresentationLine(line: ItemPresentationLine): string {
+  const minimum = line.minimum === null ? '' : formatRollValue(line.minimum)
+  const maximum = line.maximum === null ? '' : formatRollValue(line.maximum)
+  const range = maximum ? `${minimum}${line.unit} – ${maximum}${line.unit}` : `${minimum}${line.unit}`
+  return `${line.prefix}${range}${range ? ' ' : ''}${line.label}${line.suffix}`
 }
 
 async function pinCopy(copy: ObservedStashItem): Promise<void> {
@@ -502,22 +644,30 @@ function formatRollValue(value: number): string {
       </section>
 
       <section class="metrics" aria-label="Collection completion">
-        <article>
+        <button
+          type="button"
+          :aria-pressed="rarityFilter === 'legendary'"
+          @click="filterToRarity('legendary')"
+        >
           <div class="metric-heading">
             <span>Legendaries</span>
             <strong>{{ rarity('legendary')?.collected ?? 0 }} / {{ rarity('legendary')?.total ?? '—' }}</strong>
           </div>
           <div class="meter"><span :style="{ width: percentage(rarity('legendary')) }" /></div>
           <small>{{ percentage(rarity('legendary')) }} discovered · {{ rarity('legendary')?.availableCopies ?? 0 }} copies available</small>
-        </article>
-        <article>
+        </button>
+        <button
+          type="button"
+          :aria-pressed="rarityFilter === 'epic'"
+          @click="filterToRarity('epic')"
+        >
           <div class="metric-heading">
             <span>Epics</span>
             <strong>{{ rarity('epic')?.collected ?? 0 }} / {{ rarity('epic')?.total ?? '—' }}</strong>
           </div>
           <div class="meter epic"><span :style="{ width: percentage(rarity('epic')) }" /></div>
           <small>{{ percentage(rarity('epic')) }} discovered · {{ rarity('epic')?.availableCopies ?? 0 }} copies available</small>
-        </article>
+        </button>
       </section>
 
       <nav class="category-tabs" aria-label="Item categories">
@@ -536,7 +686,11 @@ function formatRollValue(value: number): string {
       <section v-if="activeCategory !== 'Vault'" class="filter-bar" aria-label="Collection filters">
         <label class="search-field">
           <span class="sr-only">Search collection</span>
-          <input v-model="query" type="search" placeholder="Search items or sets…" />
+          <input
+            v-model="query"
+            type="search"
+            placeholder="Search names, stats, skills…  (try skill:wendigo)"
+          />
         </label>
         <div class="segmented-control" aria-label="Ownership filter">
           <button
@@ -710,9 +864,20 @@ function formatRollValue(value: number): string {
           </div>
           <ul>
             <li v-for="item in set.items" :key="item.record" :class="{ missing: !item.discovered }">
-              <span aria-hidden="true">{{ item.discovered ? '✓' : '○' }}</span>
-              <div><strong>{{ item.name }}</strong><small>{{ item.slot }}</small></div>
-              <em v-if="item.availableCount > 0">×{{ item.availableCount }}</em>
+              <button
+                type="button"
+                aria-describedby="item-tooltip"
+                @mouseenter="queueTooltip(item, $event)"
+                @mousemove="moveTooltip"
+                @mouseleave="hideTooltip"
+                @focus="queueTooltip(item, $event)"
+                @blur="hideTooltip"
+                @click="openItem(item)"
+              >
+                <span aria-hidden="true">{{ item.discovered ? '✓' : '○' }}</span>
+                <div><strong>{{ item.name }}</strong><small>{{ item.slot }}</small></div>
+                <em v-if="item.availableCount > 0">×{{ item.availableCount }}</em>
+              </button>
             </li>
           </ul>
         </article>
@@ -725,13 +890,22 @@ function formatRollValue(value: number): string {
             v-for="item in visibleItems"
             :key="item.record"
             class="item-card"
-            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary' }"
-            :role="item.availableCount > 0 ? 'button' : undefined"
-            :tabindex="item.availableCount > 0 ? 0 : undefined"
-            @click="item.availableCount > 0 && openItem(item)"
-            @keydown.enter="item.availableCount > 0 && openItem(item)"
+            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic' }"
+            role="button"
+            tabindex="0"
+            aria-describedby="item-tooltip"
+            @mouseenter="queueTooltip(item, $event)"
+            @mousemove="moveTooltip"
+            @mouseleave="hideTooltip"
+            @focus="queueTooltip(item, $event)"
+            @blur="hideTooltip"
+            @click="openItem(item)"
+            @keydown.enter="openItem(item)"
           >
-            <div class="item-mark" aria-hidden="true">{{ item.discovered ? '✓' : '?' }}</div>
+            <div class="item-mark" aria-hidden="true">
+              <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
+              <span v-else>{{ item.discovered ? '✓' : '?' }}</span>
+            </div>
             <div class="item-copy">
               <p>{{ item.rarity }} · level {{ item.levelRequirement }}</p>
               <h3>{{ item.name }}</h3>
@@ -758,6 +932,69 @@ function formatRollValue(value: number): string {
       </template>
     </main>
 
+    <Teleport to="body">
+      <aside
+        v-if="tooltipItem"
+        id="item-tooltip"
+        class="game-tooltip"
+        :class="tooltipItem.rarity"
+        :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px` }"
+        role="tooltip"
+      >
+        <header class="tooltip-header">
+          <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" />
+          <div>
+            <h3>{{ tooltipItem.name }}</h3>
+            <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
+            <strong>{{ tooltipItem.rarity }} {{ tooltipItem.slot }}</strong>
+          </div>
+        </header>
+
+        <template v-if="tooltipItem.presentation">
+          <section
+            v-for="section in tooltipItem.presentation.sections"
+            :key="`${section.kind}:${section.heading ?? 'base'}`"
+            class="tooltip-section"
+          >
+            <h4 v-if="section.heading">{{ section.heading }}</h4>
+            <p
+              v-for="(line, index) in section.lines"
+              :key="`${line.label}:${index}`"
+              :class="`tone-${line.tone}`"
+            >
+              {{ formatPresentationLine(line) }}
+            </p>
+          </section>
+
+          <section v-if="tooltipItem.presentation.grantedSkill" class="tooltip-section granted-skill">
+            <h4>Granted Skills</h4>
+            <h5>
+              {{ tooltipItem.presentation.grantedSkill.name }}
+              <span v-if="tooltipItem.presentation.grantedSkill.trigger">
+                ({{ tooltipItem.presentation.grantedSkill.trigger }})
+              </span>
+            </h5>
+            <p v-if="tooltipItem.presentation.grantedSkill.description" class="skill-description">
+              {{ tooltipItem.presentation.grantedSkill.description }}
+            </p>
+            <p
+              v-for="(line, index) in tooltipItem.presentation.grantedSkill.lines"
+              :key="`${line.label}:${index}`"
+              :class="`tone-${line.tone}`"
+            >
+              {{ formatPresentationLine(line) }}
+            </p>
+          </section>
+        </template>
+
+        <footer>
+          <span v-if="tooltipItem.levelRequirement">Required Player Level: {{ tooltipItem.levelRequirement }}</span>
+          <span>Item Level: {{ tooltipItem.itemLevel }}</span>
+          <em v-if="tooltipItem.contentPack !== 'base'">{{ tooltipItem.contentPack.toUpperCase() }}</em>
+        </footer>
+      </aside>
+    </Teleport>
+
     <div v-if="selectedItem" class="drawer-backdrop" @click.self="selectedRecord = null">
       <aside class="item-drawer" :aria-label="selectedItem.name + ' roll comparison'">
         <button class="drawer-close" type="button" aria-label="Close comparison" @click="selectedRecord = null">×</button>
@@ -774,6 +1011,9 @@ function formatRollValue(value: number): string {
         </p>
 
         <div class="copy-list">
+          <p v-if="selectedCopies.length === 0" class="drawer-empty">
+            No currently scanned copy is available. The catalog tooltip will show this item's possible ranges.
+          </p>
           <article
             v-for="(copy, index) in selectedCopies"
             :key="copy.instanceKey"

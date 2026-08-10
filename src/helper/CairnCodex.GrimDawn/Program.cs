@@ -28,6 +28,8 @@ while ((line = Console.ReadLine()) is not null)
             }),
             "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
             "build-item-catalog" => BuildItemCatalog(request),
+            "inspect-game-record" => InspectGameRecord(request),
+            "extract-item-icons" => ExtractItemIcons(request),
             "scan-collection" => HelperResponse.Success(request.Id, CollectionSnapshotBuilder.Scan()),
             "scan-transfer-stash" => ScanTransferStash(request),
             "inspect-write-safety" => HelperResponse.Success(request.Id, WriteSafetyGate.Inspect()),
@@ -80,6 +82,31 @@ HelperResponse BuildItemCatalog(HelperRequest request)
     var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
         ?? throw new JsonException("build-item-catalog requires an installationPath parameter.");
     return HelperResponse.Success(request.Id, ItemCatalogBuilder.Build(parameters.InstallationPath));
+}
+
+HelperResponse InspectGameRecord(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<InspectGameRecordRequest>(jsonOptions)
+        ?? throw new JsonException("inspect-game-record requires installationPath and record parameters.");
+    var data = ItemCatalogBuilder.Load(parameters.InstallationPath);
+    if (!data.Records.TryGetValue(parameters.Record, out var source))
+    {
+        throw new ArgumentException($"Game record was not found: {parameters.Record}");
+    }
+    return HelperResponse.Success(request.Id, source.Record);
+}
+
+HelperResponse ExtractItemIcons(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<ExtractItemIconsRequest>(jsonOptions)
+        ?? throw new JsonException(
+            "extract-item-icons requires installationPath, outputDirectory, and bitmaps parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        ItemIconExtractor.Extract(
+            parameters.InstallationPath,
+            parameters.OutputDirectory,
+            parameters.Bitmaps));
 }
 
 HelperResponse ValidateTransferStashRoundTrip(HelperRequest request)
@@ -172,6 +199,7 @@ HelperResponse AnalyzeItemRolls(HelperRequest request)
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);
+internal sealed record InspectGameRecordRequest(string InstallationPath, string Record);
 
 internal sealed record HelperRequest(string Id, string Method, JsonElement? Params);
 

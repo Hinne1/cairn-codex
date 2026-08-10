@@ -98,6 +98,83 @@ internal static class ArcArchiveReader
         return tags;
     }
 
+    public static IReadOnlyDictionary<string, byte[]> ReadFiles(
+        string path,
+        IReadOnlySet<string> requestedPaths)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+
+        if (stream.Length < HeaderSize)
+        {
+            throw new InvalidDataException($"ARC file is too short: {path}");
+        }
+
+        _ = reader.ReadInt32();
+        var version = reader.ReadInt32();
+        var fileCount = reader.ReadInt32();
+        var partCount = reader.ReadInt32();
+        var partTableSize = reader.ReadInt32();
+        var stringTableSize = reader.ReadInt32();
+        var partTableOffset = reader.ReadInt32();
+        if (version != 3 || fileCount < 0 || partCount < 0 || stringTableSize < 0 ||
+            partTableSize != checked(partCount * PartSize))
+        {
+            throw new InvalidDataException($"Unsupported or invalid ARC header in {path}.");
+        }
+
+        stream.Position = partTableOffset;
+        var parts = new ArcPart[partCount];
+        for (var index = 0; index < parts.Length; index++)
+        {
+            parts[index] = new ArcPart(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
+        }
+
+        var stringsOffset = checked(partTableOffset + partTableSize);
+        ValidateRange(stream, stringsOffset, stringTableSize, "ARC string table");
+        stream.Position = stringsOffset;
+        var names = ReadNullTerminatedStrings(reader.ReadBytes(stringTableSize), fileCount);
+
+        var tocOffset = checked(stringsOffset + stringTableSize);
+        ValidateRange(stream, tocOffset, checked(fileCount * TocSize), "ARC table of contents");
+        stream.Position = tocOffset;
+        var entries = new ArcEntry[fileCount];
+        for (var index = 0; index < entries.Length; index++)
+        {
+            _ = reader.ReadInt32();
+            _ = reader.ReadInt32();
+            _ = reader.ReadInt32();
+            var decompressedLength = reader.ReadInt32();
+            _ = reader.ReadInt32();
+            _ = reader.ReadInt64();
+            var entryPartCount = reader.ReadInt32();
+            var firstPart = reader.ReadInt32();
+            _ = reader.ReadInt32();
+            _ = reader.ReadInt32();
+            entries[index] = new ArcEntry(decompressedLength, entryPartCount, firstPart);
+        }
+
+        var normalized = requestedPaths.Select(NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var byFileName = normalized
+            .GroupBy(FileName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < names.Count; index++)
+        {
+            var name = NormalizePath(names[index]);
+            string[] requested = normalized.Contains(name)
+                ? [name]
+                : byFileName.GetValueOrDefault(FileName(name)) ?? [];
+            if (requested.Length > 0 && entries[index].DecompressedLength > 0)
+            {
+                var bytes = Extract(stream, reader, parts, entries[index]);
+                foreach (var requestedPath in requested) result[requestedPath] = bytes;
+            }
+        }
+        return result;
+    }
+
     private static byte[] Extract(
         Stream stream,
         BinaryReader reader,
@@ -185,6 +262,9 @@ internal static class ArcArchiveReader
 
         return builder.ToString();
     }
+
+    private static string NormalizePath(string value) => value.Replace('\\', '/').TrimStart('/');
+    private static string FileName(string value) => value[(value.LastIndexOf('/') + 1)..];
 
     private static void ValidateRange(Stream stream, int offset, int length, string label)
     {

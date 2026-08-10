@@ -183,6 +183,7 @@ internal sealed record CollectionCatalogItem(
     string? SetRecord,
     string? Bitmap,
     string ContentPack,
+    ItemPresentation Presentation,
     int AvailableCount,
     double? BestRollPercentile,
     int AnalyzedCopyCount)
@@ -204,6 +205,7 @@ internal sealed record CollectionCatalogItem(
             item.SetRecord,
             item.Bitmap,
             item.ContentPack,
+            item.Presentation,
             availableCount,
             bestRollPercentile,
             analyzedCopyCount)

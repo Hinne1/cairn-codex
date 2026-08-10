@@ -169,13 +169,45 @@ export interface CollectionItem {
   setName: string | null
   setRecord: string | null
   bitmap: string | null
+  iconKey?: string | null
   contentPack: string
+  presentation?: ItemPresentation
   availableCount: number
   bestRollPercentile: number | null
   analyzedCopyCount: number
   pinnedInstanceKey: string | null
   discovered?: boolean
   firstDiscoveredAt?: string | null
+}
+
+export interface ItemPresentation {
+  flavorText: string | null
+  sections: ItemPresentationSection[]
+  grantedSkill: ItemGrantedSkillPresentation | null
+  searchText: string
+}
+
+export interface ItemPresentationSection {
+  kind: 'base' | 'pet' | 'skill-modifier'
+  heading: string | null
+  lines: ItemPresentationLine[]
+}
+
+export interface ItemPresentationLine {
+  label: string
+  minimum: number | null
+  maximum: number | null
+  unit: '' | '%' | 's' | 'm'
+  tone: 'standard' | 'skill' | 'mastery' | 'pet'
+  prefix: string
+  suffix: string
+}
+
+export interface ItemGrantedSkillPresentation {
+  name: string
+  description: string | null
+  trigger: string | null
+  lines: ItemPresentationLine[]
 }
 
 export interface ObservedStashItem {

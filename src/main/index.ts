@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { writeFile } from 'node:fs/promises'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { readFile, writeFile } from 'node:fs/promises'
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import {
   IPC_CHANNELS,
   type AppStatus,
@@ -94,6 +94,19 @@ interface TransferStashScan {
   }>
 }
 
+interface ItemIconExtractionResult {
+  icons: Array<{ bitmap: string; key: string }>
+  missing: string[]
+  failures: Array<{ bitmap: string; error: string }>
+}
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'cairn-icon',
+    privileges: { standard: true, secure: true, supportFetchAPI: true }
+  }
+])
+
 function createHelperClient(): GrimDawnHelperClient {
   if (app.isPackaged) {
     return new GrimDawnHelperClient({
@@ -147,7 +160,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     IPC_CHANNELS.scanCollection,
     async (): Promise<CollectionSnapshot> => {
       const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-      return database.persistSnapshot(snapshot)
+      return database.persistSnapshot(await attachItemIcons(helper, snapshot))
     }
   )
   ipcMain.handle(
@@ -178,6 +191,57 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
 }
 
+async function attachItemIcons(
+  helper: GrimDawnHelperClient,
+  snapshot: CollectionSnapshot
+): Promise<CollectionSnapshot> {
+  const installation = snapshot.discovery.installations[0]
+  if (!installation) return snapshot
+  const bitmaps = [
+    ...new Set(
+      snapshot.items
+        .map((item) => item.bitmap)
+        .filter((bitmap): bitmap is string => Boolean(bitmap))
+    )
+  ]
+  const extraction = await helper.request<ItemIconExtractionResult>('extract-item-icons', {
+    installationPath: installation.path,
+    outputDirectory: join(app.getPath('userData'), 'item-icons'),
+    bitmaps
+  })
+  if (extraction.failures.length > 0) {
+    console.warn('Some Grim Dawn item icons could not be decoded.', extraction.failures.slice(0, 10))
+  }
+  const keys = new Map(
+    extraction.icons.map((icon) => [icon.bitmap.toLocaleLowerCase(), icon.key])
+  )
+  return {
+    ...snapshot,
+    items: snapshot.items.map((item) => ({
+      ...item,
+      iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
+    }))
+  }
+}
+
+function registerItemIconProtocol(): void {
+  const iconDirectory = join(app.getPath('userData'), 'item-icons')
+  protocol.handle('cairn-icon', async (request) => {
+    const url = new URL(request.url)
+    const fileName = url.pathname.split('/').at(-1) ?? ''
+    if (!/^[a-f0-9]{64}\.png$/.test(fileName)) {
+      return new Response('Invalid item icon key.', { status: 400 })
+    }
+    try {
+      return new Response(await readFile(join(iconDirectory, fileName)), {
+        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=31536000, immutable' }
+      })
+    } catch {
+      return new Response('Item icon was not found.', { status: 404 })
+    }
+  })
+}
+
 async function runSmokeTest(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase
@@ -189,6 +253,27 @@ async function runSmokeTest(
       throw new Error('Verified write transaction self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const flamebrand = helperSnapshot.items.find((item) => item.name === 'Flamebrand')
+    const flamebrandFire = flamebrand?.presentation?.sections
+      .flatMap((section) => section.lines)
+      .find((line) => line.label === 'Fire Damage')
+    if (
+      !flamebrand?.presentation?.searchText.includes('Fire Strike') ||
+      flamebrandFire?.minimum !== 40 ||
+      flamebrandFire.maximum !== 60
+    ) {
+      throw new Error('Catalog presentation did not preserve Flamebrand skill text and roll ranges.')
+    }
+    const invertedRange = helperSnapshot.items
+      .flatMap((item) => item.presentation?.sections ?? [])
+      .flatMap((section) => section.lines)
+      .find(
+        (line) =>
+          line.minimum !== null && line.maximum !== null && line.minimum > line.maximum
+      )
+    if (invertedRange) {
+      throw new Error(`Catalog presentation produced an inverted range for ${invertedRange.label}.`)
+    }
     const analyzedCopies = helperSnapshot.observedItems.filter(
       (item) => item.rollAnalysis !== null
     )
@@ -886,8 +971,23 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         if (process.env.CAIRN_CODEX_SCREENSHOT_OPEN_FIRST === '1') {
           await new Promise((resolve) => setTimeout(resolve, 250))
           await window.webContents.executeJavaScript(
-            "document.querySelector('.item-card[role=button]')?.click()"
+            "document.querySelector('.item-card[role=button], .set-card li button')?.click()"
           )
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_HOVER_FIRST === '1') {
+          await new Promise((resolve) => setTimeout(resolve, 250))
+          await window.webContents.executeJavaScript(`
+            (() => {
+              const card = document.querySelector('.item-card[role=button], .set-card li button')
+              if (!card) return
+              const rect = card.getBoundingClientRect()
+              card.dispatchEvent(new MouseEvent('mouseenter', {
+                bubbles: false,
+                clientX: rect.right - 20,
+                clientY: rect.top + 30
+              }))
+            })()
+          `)
         }
         await window.webContents.executeJavaScript('window.scrollTo(0, 0)')
         window.setOpacity(0)
@@ -900,6 +1000,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           cards: document.querySelectorAll('.item-card').length,
           sets: document.querySelectorAll('.set-card').length,
           copyCards: document.querySelectorAll('.copy-card').length,
+          drawer: document.querySelector('.item-drawer h2')?.textContent?.trim(),
+          tooltip: document.querySelector('.game-tooltip')?.textContent?.trim(),
+          icons: [...document.querySelectorAll('.item-mark img')].map((image) => ({
+            src: image.getAttribute('src'),
+            complete: image.complete,
+            width: image.naturalWidth,
+            height: image.naturalHeight
+          })),
           scrollX: window.scrollX,
           titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
           mainX: document.querySelector('main')?.getBoundingClientRect().x
@@ -922,6 +1030,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
 }
 
 app.whenReady().then(() => {
+  registerItemIconProtocol()
   const helper = createHelperClient()
   const database = new CollectionDatabase(
     process.env.CAIRN_CODEX_SMOKE_TEST === '1'

@@ -19,8 +19,10 @@ type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
-type ActiveView = 'collection' | 'sets' | 'vault'
+type ActiveView = 'collection' | 'sets' | 'skills' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
+type SkillScope = 'archive' | 'all'
+type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
 
 interface CollectionSet {
   record: string
@@ -33,8 +35,17 @@ interface CollectionSet {
 const status = ref<AppStatus | null>(null)
 const discovery = ref<GrimDawnDiscovery | null>(null)
 const snapshot = ref<CollectionSnapshot | null>(null)
-const enabledStashPaths = ref<string[]>(readStoredSourcePaths())
+const indexStashPaths = ref<string[]>(readStoredSourcePaths('stashes'))
+const archiveStashPaths = ref<string[]>(readStoredSourcePaths('archive'))
 const collectionBasis = ref<CollectionBasis>(readStoredCollectionBasis())
+const enabledStashPaths = computed<string[]>({
+  get: () =>
+    collectionBasis.value === 'archive' ? archiveStashPaths.value : indexStashPaths.value,
+  set: (paths) => {
+    if (collectionBasis.value === 'archive') archiveStashPaths.value = paths
+    else indexStashPaths.value = paths
+  }
+})
 const scanning = ref(false)
 const scanError = ref<string | null>(null)
 const cacheIssue = ref<string | null>(null)
@@ -47,13 +58,19 @@ const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('recent')
 const sortDirection = ref<SortDirection>('desc')
 const setProgressFilter = ref<SetProgressFilter>('all')
+const selectedSkill = ref(localStorage.getItem('cairn-codex-skill') ?? 'Wendigo Totem')
+const skillScope = ref<SkillScope>(
+  localStorage.getItem('cairn-codex-skill-scope') === 'archive' ? 'archive' : 'all'
+)
+const skillSort = ref<SkillSort>('amount')
+const skillSortDirection = ref<SortDirection>('desc')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
 const pinning = ref(false)
 const vaultItems = ref<VaultListItem[]>([])
 const staging = ref<StagingTabInspection | null>(null)
 const writeSafety = ref<WriteSafetyStatus | null>(null)
-const selectedStashPath = ref('')
+const selectedStashPath = ref(localStorage.getItem('cairn-codex-retrieval-stash') ?? '')
 const selectedVaultIds = ref<string[]>([])
 const vaultBusy = ref(false)
 const vaultError = ref<string | null>(null)
@@ -69,6 +86,10 @@ let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 const pageSize = 48
+
+const archiveModeCount = computed(() =>
+  [false, true].filter((isHardcore) => archiveModeEnabled(isHardcore)).length
+)
 
 const categories = [
   'All',
@@ -212,7 +233,9 @@ const visibleSets = computed(() => {
 })
 
 const displayedResultCount = computed(() =>
-  activeView.value === 'vault'
+  activeView.value === 'settings'
+    ? 0
+    : activeView.value === 'vault'
     ? availableVaultItems.value.length
     : activeView.value === 'sets'
       ? visibleSets.value.length
@@ -262,6 +285,86 @@ const selectedStoredCopies = computed(() => {
     .sort((left, right) => (right.score ?? -1) - (left.score ?? -1))
 })
 
+const skillNames = computed(() => {
+  const names = new Set<string>()
+  for (const item of snapshot.value?.items ?? []) {
+    for (const section of item.presentation?.sections ?? []) {
+      if (section.kind === 'skill-modifier' && section.heading) names.add(section.heading)
+      for (const line of section.lines) {
+        if (line.tone === 'skill' && line.label.startsWith('to ')) names.add(line.label.slice(3))
+      }
+    }
+  }
+  return [...names].sort((left, right) => left.localeCompare(right))
+})
+
+const skillItemRows = computed(() => {
+  const skill = selectedSkill.value.trim().toLocaleLowerCase()
+  if (!skill) return []
+  const archiveModes = new Set(
+    stashChoices.value
+      .filter((stash) => archiveStashPaths.value.includes(stash.path))
+      .map((stash) => stash.isHardcore)
+  )
+  const archivedRecords = new Set(
+    vaultItems.value
+      .filter((item) => archiveModes.has(item.isHardcore))
+      .map((item) => item.baseRecord.toLocaleLowerCase())
+  )
+  const rows = (snapshot.value?.items ?? []).flatMap((item) => {
+    if (skillScope.value === 'archive' && !archivedRecords.has(item.record.toLocaleLowerCase())) return []
+    const sections = item.presentation?.sections ?? []
+    const amount = Math.max(
+      0,
+      ...sections
+        .flatMap((section) => section.lines)
+        .filter(
+          (line) =>
+            line.tone === 'skill' &&
+            line.label.startsWith('to ') &&
+            line.label.slice(3).toLocaleLowerCase() === skill
+        )
+        .map((line) => line.minimum ?? 0)
+    )
+    const modifiers = sections
+      .filter(
+        (section) =>
+          section.kind === 'skill-modifier' &&
+          section.heading?.toLocaleLowerCase() === skill
+      )
+      .flatMap((section) => section.lines)
+    if (amount === 0 && modifiers.length === 0) return []
+    const conversionLines = modifiers.filter((line) => /converted to/i.test(line.label))
+    const specialLines = modifiers.filter((line) => !/converted to/i.test(line.label))
+    return [{
+      item,
+      amount,
+      conversion: conversionLines.map(formatPresentationLine).join('; '),
+      special: specialLines.map(formatPresentationLine).join('; ')
+    }]
+  })
+  return rows.sort((left, right) => {
+    let comparison = 0
+    if (skillSort.value === 'amount') comparison = left.amount - right.amount
+    else if (skillSort.value === 'slot') comparison = left.item.slot.localeCompare(right.item.slot)
+    else if (skillSort.value === 'conversion') comparison = left.conversion.localeCompare(right.conversion)
+    else if (skillSort.value === 'special') comparison = left.special.localeCompare(right.special)
+    else if (skillSort.value === 'level') comparison = left.item.levelRequirement - right.item.levelRequirement
+    else comparison = left.item.name.localeCompare(right.item.name)
+    if (comparison === 0) comparison = left.item.name.localeCompare(right.item.name)
+    return skillSortDirection.value === 'asc' ? comparison : -comparison
+  })
+})
+
+function setSkillSort(next: SkillSort): void {
+  if (skillSort.value === next) {
+    skillSortDirection.value = skillSortDirection.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    skillSort.value = next
+    skillSortDirection.value = ['item', 'slot', 'conversion', 'special'].includes(next) ? 'asc' : 'desc'
+  }
+}
+
 watch(
   [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter],
   () => {
@@ -273,8 +376,14 @@ watch(sortMode, (mode) => {
   sortDirection.value = mode === 'name' ? 'asc' : 'desc'
 })
 
+watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
+watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
+
 watch(selectedStashPath, async (path) => {
-  if (path) await refreshStaging()
+  if (path) {
+    localStorage.setItem('cairn-codex-retrieval-stash', path)
+    await refreshStaging()
+  }
 })
 
 watch(activeView, async (view) => {
@@ -372,9 +481,11 @@ function applySnapshot(value: CollectionSnapshot): void {
   }
 }
 
-function readStoredSourcePaths(): string[] {
+function readStoredSourcePaths(basis: CollectionBasis): string[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem('cairn-codex-sources') ?? '[]') as unknown
+    const key = basis === 'archive' ? 'cairn-codex-archive-sources' : 'cairn-codex-index-sources'
+    const stored = localStorage.getItem(key) ?? localStorage.getItem('cairn-codex-sources') ?? '[]'
+    const parsed = JSON.parse(stored) as unknown
     return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string') ? parsed : []
   } catch {
     return []
@@ -382,7 +493,54 @@ function readStoredSourcePaths(): string[] {
 }
 
 function storeSourcePaths(): void {
-  localStorage.setItem('cairn-codex-sources', JSON.stringify(enabledStashPaths.value))
+  const key =
+    collectionBasis.value === 'archive'
+      ? 'cairn-codex-archive-sources'
+      : 'cairn-codex-index-sources'
+  localStorage.setItem(key, JSON.stringify(enabledStashPaths.value))
+}
+
+async function toggleSourceForBasis(basis: CollectionBasis, path: string): Promise<void> {
+  const target = basis === 'archive' ? archiveStashPaths : indexStashPaths
+  target.value = target.value.includes(path)
+    ? target.value.filter((candidate) => candidate !== path)
+    : [...target.value, path]
+  localStorage.setItem(
+    basis === 'archive' ? 'cairn-codex-archive-sources' : 'cairn-codex-index-sources',
+    JSON.stringify(target.value)
+  )
+  if (collectionBasis.value === basis) await loadSelectedSources()
+}
+
+async function selectSourceModeForBasis(basis: CollectionBasis, isHardcore: boolean): Promise<void> {
+  const paths = stashChoices.value
+    .filter((stash) => stash.isHardcore === isHardcore)
+    .map((stash) => stash.path)
+  const target = basis === 'archive' ? archiveStashPaths : indexStashPaths
+  target.value = paths
+  localStorage.setItem(
+    basis === 'archive' ? 'cairn-codex-archive-sources' : 'cairn-codex-index-sources',
+    JSON.stringify(paths)
+  )
+  if (collectionBasis.value === basis) await loadSelectedSources()
+}
+
+function archiveModeEnabled(isHardcore: boolean): boolean {
+  const modePaths = new Set(
+    stashChoices.value.filter((stash) => stash.isHardcore === isHardcore).map((stash) => stash.path)
+  )
+  return archiveStashPaths.value.some((path) => modePaths.has(path))
+}
+
+async function setArchiveModeEnabled(isHardcore: boolean, enabled: boolean): Promise<void> {
+  const modePaths = stashChoices.value
+    .filter((stash) => stash.isHardcore === isHardcore)
+    .map((stash) => stash.path)
+  const modePathSet = new Set(modePaths)
+  archiveStashPaths.value = archiveStashPaths.value.filter((path) => !modePathSet.has(path))
+  if (enabled) archiveStashPaths.value.push(...modePaths)
+  localStorage.setItem('cairn-codex-archive-sources', JSON.stringify(archiveStashPaths.value))
+  if (collectionBasis.value === 'archive') await loadSelectedSources()
 }
 
 function readStoredCollectionBasis(): CollectionBasis {
@@ -1189,8 +1347,14 @@ function formatRollValue(value: number): string {
         <button type="button" :class="{ active: activeView === 'sets' }" @click="activeView = 'sets'">
           <span>Sets</span><small>{{ collectionSets.length }} catalogued</small>
         </button>
+        <button type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
+          <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
+        </button>
         <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
           <span>Vault</span><small>{{ availableVaultItems.length }} stored</small>
+        </button>
+        <button type="button" :class="{ active: activeView === 'settings' }" @click="activeView = 'settings'">
+          <span>Settings</span><small>Sources · live · display</small>
         </button>
       </nav>
 
@@ -1207,7 +1371,7 @@ function formatRollValue(value: number): string {
         </button>
       </nav>
 
-      <section v-if="activeView !== 'vault'" class="filter-bar" aria-label="Collection filters">
+      <section v-if="activeView === 'collection' || activeView === 'sets'" class="filter-bar" aria-label="Collection filters">
         <label class="search-field">
           <span class="sr-only">Search collection</span>
           <input
@@ -1262,7 +1426,168 @@ function formatRollValue(value: number): string {
         <span class="result-count">{{ displayedResultCount.toLocaleString() }} results</span>
       </section>
 
-      <section v-if="activeView === 'vault'" class="vault-workspace" aria-label="Item vault">
+      <section v-if="activeView === 'skills'" class="skill-explorer" aria-label="Skill item explorer">
+        <header class="skill-explorer-heading">
+          <div>
+            <p class="section-label">Build research prototype</p>
+            <h2>Items for a skill</h2>
+            <p>Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, and level requirements.</p>
+          </div>
+          <div class="skill-scope segmented-control" aria-label="Skill item scope">
+            <button type="button" :class="{ active: skillScope === 'archive' }" @click="skillScope = 'archive'">My Archive</button>
+            <button type="button" :class="{ active: skillScope === 'all' }" @click="skillScope = 'all'">All catalog items</button>
+          </div>
+        </header>
+        <div class="skill-picker">
+          <label>
+            <span>Skill</span>
+            <input v-model="selectedSkill" list="skill-name-options" type="search" placeholder="Choose or type a skill…" />
+            <datalist id="skill-name-options">
+              <option v-for="skill in skillNames" :key="skill" :value="skill" />
+            </datalist>
+          </label>
+          <div>
+            <strong>{{ skillItemRows.length }}</strong>
+            <span>matching items</span>
+          </div>
+        </div>
+        <div class="skill-table-wrap">
+          <table class="skill-table">
+            <thead>
+              <tr>
+                <th><button type="button" @click="setSkillSort('item')">Item {{ skillSort === 'item' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
+                <th><button type="button" @click="setSkillSort('slot')">Slot <span v-if="skillSort === 'slot'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
+                <th><button type="button" @click="setSkillSort('amount')">Ranks {{ skillSort === 'amount' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
+                <th><button type="button" @click="setSkillSort('conversion')">Conversion {{ skillSort === 'conversion' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
+                <th><button type="button" @click="setSkillSort('special')">Special modifier <span v-if="skillSort === 'special'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
+                <th><button type="button" @click="setSkillSort('level')">Level {{ skillSort === 'level' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in skillItemRows" :key="row.item.record" @click="openItem(row.item)">
+                <td>
+                  <div class="skill-item-name">
+                    <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
+                    <span><strong>{{ row.item.name }}</strong><small>{{ row.item.rarity }}</small></span>
+                  </div>
+                </td>
+                <td>{{ row.item.slot }}</td>
+                <td class="skill-amount">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</td>
+                <td>{{ row.conversion || '—' }}</td>
+                <td>{{ row.special || '—' }}</td>
+                <td>{{ row.item.levelRequirement }}</td>
+              </tr>
+              <tr v-if="skillItemRows.length === 0"><td colspan="6" class="skill-empty">No matching items in this scope.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-else-if="activeView === 'settings'" class="settings-workspace" aria-label="Cairn Codex settings">
+        <header class="settings-heading">
+          <div>
+            <p class="section-label">Settings</p>
+            <h2>Collection and transfer behavior</h2>
+            <p>Long-lived choices live here. Search, filters, and sorting remain workspace controls.</p>
+          </div>
+        </header>
+
+        <div class="settings-grid">
+          <article class="settings-card">
+            <p class="section-label">Live game</p>
+            <h3>Connection lifecycle</h3>
+            <label class="settings-toggle">
+              <input
+                type="checkbox"
+                :checked="autoLiveConnect"
+                @change="setAutoLiveConnect(($event.target as HTMLInputElement).checked)"
+              />
+              <span><strong>Auto-connect</strong><small>Connect when Grim Dawn starts and disconnect when it exits.</small></span>
+            </label>
+            <div class="settings-status">
+              <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
+              <span>{{ liveStatus?.detail ?? 'Checking live adapter…' }}</span>
+            </div>
+          </article>
+
+          <article class="settings-card">
+            <p class="section-label">Display</p>
+            <h3>Interface scale</h3>
+            <div class="zoom-controls">
+              <button type="button" @click="setZoom(zoomFactor - 0.1)">−</button>
+              <strong>{{ Math.round(zoomFactor * 100) }}%</strong>
+              <button type="button" @click="setZoom(zoomFactor + 0.1)">+</button>
+              <button type="button" @click="setZoom(1)">Reset</button>
+            </div>
+            <small>Ctrl + mouse wheel works anywhere in Cairn.</small>
+          </article>
+
+          <article class="settings-card source-settings">
+            <header>
+              <div><p class="section-label">Stash Index</p><h3>Physical copy sources</h3></div>
+              <div class="source-presets">
+                <button type="button" @click="selectSourceModeForBasis('stashes', false)">SC</button>
+                <button type="button" @click="selectSourceModeForBasis('stashes', true)">HC</button>
+              </div>
+            </header>
+            <p>Controls physical copy counts. Collected status still includes anything preserved in the Archive.</p>
+            <div class="settings-source-list">
+              <label v-for="stash in stashChoices" :key="`index:${stash.path}`" class="source-option">
+                <input
+                  type="checkbox"
+                  :checked="indexStashPaths.includes(stash.path)"
+                  :disabled="indexStashPaths.length === 1 && indexStashPaths.includes(stash.path)"
+                  @change="toggleSourceForBasis('stashes', stash.path)"
+                />
+                <span :class="stash.isHardcore ? 'hardcore' : 'softcore'">{{ stash.isHardcore ? 'HC' : 'SC' }}</span>
+                <div><strong>{{ stash.modLabel || 'Base game' }}</strong><small>{{ stash.path }}</small></div>
+              </label>
+            </div>
+          </article>
+
+          <article class="settings-card source-settings">
+            <header>
+              <div><p class="section-label">Codex Archive</p><h3>Archive mode scope</h3></div>
+            </header>
+            <p>Archive copies retain their game mode, not an originating stash. Enable either mode or both.</p>
+            <div class="archive-mode-options">
+              <label class="archive-mode-option">
+                <input
+                  type="checkbox"
+                  :checked="archiveModeEnabled(false)"
+                  :disabled="archiveModeCount === 1 && archiveModeEnabled(false)"
+                  @change="setArchiveModeEnabled(false, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="mode-badge softcore">SC</span>
+                <span><strong>Softcore</strong><small>Show archived Softcore copies.</small></span>
+              </label>
+              <label class="archive-mode-option">
+                <input
+                  type="checkbox"
+                  :checked="archiveModeEnabled(true)"
+                  :disabled="archiveModeCount === 1 && archiveModeEnabled(true)"
+                  @change="setArchiveModeEnabled(true, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="mode-badge hardcore">HC</span>
+                <span><strong>Hardcore</strong><small>Show archived Hardcore copies.</small></span>
+              </label>
+            </div>
+          </article>
+
+          <article class="settings-card retrieval-settings">
+            <p class="section-label">Retrieval</p>
+            <h3>Closed-game transfer target</h3>
+            <select v-model="selectedStashPath" :disabled="vaultBusy">
+              <option v-for="stash in stashChoices" :key="stash.path" :value="stash.path">
+                {{ stash.isHardcore ? 'Hardcore' : 'Softcore' }} · {{ stash.path }}
+              </option>
+            </select>
+            <small>Live retrieval always targets {{ liveStatus?.depositTabDescription ?? 'the second-to-last shared stash tab' }}.</small>
+          </article>
+        </div>
+      </section>
+
+      <section v-else-if="activeView === 'vault'" class="vault-workspace" aria-label="Item vault">
         <header class="vault-heading">
           <div>
             <p class="section-label">Transfer vault</p>
@@ -1351,7 +1676,7 @@ function formatRollValue(value: number): string {
           </button>
         </section>
 
-        <section class="source-selector" aria-label="Collection stash sources">
+        <section v-if="false" class="source-selector" aria-label="Collection stash sources">
           <header>
             <div>
               <p class="section-label">Collection sources</p>

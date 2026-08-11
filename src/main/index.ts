@@ -1060,6 +1060,47 @@ async function runSmokeTest(
     ) {
       throw new Error('GDIA migration did not preserve copy multiplicity or idempotency.')
     }
+    let duplicateSelectionRejected = false
+    try {
+      database.getVaultItems([migration.importedIds[0]!, migration.importedIds[0]!], true)
+    } catch (error) {
+      duplicateSelectionRejected =
+        error instanceof Error && error.message.includes('Duplicate vault item IDs')
+    }
+    if (!duplicateSelectionRejected) {
+      throw new Error('Vault retrieval accepted the same copy ID more than once.')
+    }
+    const failedRetrievalId = randomUUID()
+    database.prepareRetrievalOperation({
+      operationId: failedRetrievalId,
+      stashPath: 'smoke-full-target.gsh',
+      sourceSha256: 'smoke-full-target',
+      startedAtUtc: new Date().toISOString(),
+      vaultItemIds: [migration.importedIds[0]!],
+      detail: { phase: 'prepared', smokeTest: true, scenario: 'full_target' }
+    })
+    database.failRetrievalOperation(
+      failedRetrievalId,
+      [migration.importedIds[0]!],
+      new Error('Target tab is full.')
+    )
+    if (database.getVaultItems([migration.importedIds[0]!], true)[0]?.state !== 'ingested') {
+      throw new Error('A rejected retrieval did not return its copy to ingested state.')
+    }
+    const rollCacheCandidate = database
+      .listAvailableArchiveItems(true)
+      .find((item) => item.id === migration.importedIds[0])
+    const sourceRoll = archivedSmokeCopy?.rollAnalysis
+    if (!rollCacheCandidate || !sourceRoll) {
+      throw new Error('Smoke test needs an archived analyzed copy to verify roll caching.')
+    }
+    database.setVaultRollAnalyses([{ id: rollCacheCandidate.id, rollAnalysis: sourceRoll }])
+    if (
+      database.listAvailableArchiveItems(true).find((item) => item.id === rollCacheCandidate.id)
+        ?.rollAnalysis?.overallEstimatedPercentile !== sourceRoll.overallEstimatedPercentile
+    ) {
+      throw new Error('Archive roll analysis did not survive a database round trip.')
+    }
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
       (count, location) => count + location.transferStashes.length,
@@ -1086,6 +1127,9 @@ async function runSmokeTest(
         writeTransaction: 'verified',
         liveQueue: 'verified',
         migrationDedupe: 'verified',
+        duplicateSelection: 'rejected',
+        rejectedRetrievalRollback: 'verified',
+        archiveRollCache: 'verified',
         serializerRoundTrips: roundTrips.length,
         ingestPlans: ingestPlans.length,
         retrievalRoundTrips: retrievalRoundTrips.length,
@@ -1583,6 +1627,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           await window.webContents.executeJavaScript(`
             [...document.querySelectorAll('.workspace-tabs button, .category-tabs button')]
               .find((button) => button.querySelector('span')?.textContent === ${JSON.stringify(category)})
+              ?.click()
+          `)
+        }
+        const skillScope = process.env.CAIRN_CODEX_SCREENSHOT_SKILL_SCOPE
+        if (skillScope) {
+          await window.webContents.executeJavaScript(`
+            [...document.querySelectorAll('.skill-scope button')]
+              .find((button) => button.textContent?.trim() === ${JSON.stringify(skillScope)})
               ?.click()
           `)
         }

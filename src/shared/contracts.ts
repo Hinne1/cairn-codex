@@ -9,7 +9,11 @@ export const IPC_CHANNELS = {
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
   ingestStagingTab: 'vault:ingest-staging-tab',
-  retrieveVaultItems: 'vault:retrieve-items'
+  retrieveVaultItems: 'vault:retrieve-items',
+  inspectLiveGame: 'live:inspect',
+  startLiveGame: 'live:start',
+  syncLiveGame: 'live:sync',
+  retrieveLiveVaultItems: 'live:retrieve-items'
 } as const
 
 export type CollectionBasis = 'stashes' | 'archive'
@@ -32,11 +36,49 @@ export interface CairnCodexApi {
   listVaultItems: () => Promise<VaultListItem[]>
   ingestStagingTab: (path: string) => Promise<IngestResult>
   retrieveVaultItems: (path: string, vaultItemIds: string[]) => Promise<RetrievalResult>
+  inspectLiveGame: () => Promise<LiveGameStatus>
+  startLiveGame: () => Promise<LiveGameStatus>
+  syncLiveGame: () => Promise<LiveGameSyncResult>
+  retrieveLiveVaultItems: (vaultItemIds: string[]) => Promise<LiveRetrievalResult>
 }
 
 export interface WriteSafetyStatus {
   permitted: boolean
   reasons: string[]
+}
+
+export type LiveGameState = 'unavailable' | 'available' | 'connecting' | 'ready' | 'blocked'
+
+export interface LiveGameStatus {
+  state: LiveGameState
+  detail: string
+  grimDawnProcessIds: number[]
+  itemAssistantProcessIds: number[]
+  hookAvailable: boolean
+  itemAssistantDirectory: string | null
+  hookVersion: string | null
+  connectedProcessId: number | null
+  isHardcore: boolean | null
+  ingestTabSetting: number
+  depositTabSetting: number
+  ingestTabDescription: string
+  depositTabDescription: string
+  hostWindowReady: boolean
+  injectorOutput: string | null
+  messages: Array<{ type: number; dataHex: string; receivedAtUtc: string }>
+}
+
+export interface LiveGameSyncResult {
+  status: LiveGameStatus
+  ingested: Array<{ vaultItemId: string; baseRecord: string; name: string; seed: number }>
+  issues: string[]
+}
+
+export interface LiveRetrievalResult {
+  operationId: string
+  status: 'committed'
+  retrieved: Array<{ vaultItemId: string; baseRecord: string; seed: number }>
+  receiptPaths: string[]
 }
 
 export interface StagingTabInspection {

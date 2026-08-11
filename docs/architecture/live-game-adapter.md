@@ -26,22 +26,39 @@ them into the configured target tab in game memory.
 That distinction matters: file watching can refresh a read-only collection,
 but cannot make live mutation safe.
 
-## Planned boundary
+## Implemented opt-in boundary
 
-The Electron process will talk to a small native host which owns injection,
-queue directories, hook health, and game-state messages. The renderer will see
-only a capability/status model and the same high-level Vault commands:
+The Electron process talks to the .NET helper, which owns a hidden
+`GDIAWindowClass` handshake window, injection, queue directories, hook health,
+and game-state messages. The renderer sees only a capability/status model and
+the same high-level Vault commands:
 
 - `unavailable`: no compatible game process or hook binary;
 - `connecting`: injector or handshake in progress;
 - `ready`: compatible game, matching HC/SC mode, and queue handshake active;
 - `blocked`: version mismatch, ambiguous mode, or hook failure.
 
-Live ingest must durably store and verify an item before acknowledging its
-removal. Live retrieval must not mark a Vault item retrieved until the hook has
-acknowledged the in-game deposit. Every queue message needs an operation ID so
-restarts and duplicate delivery remain idempotent.
+The adapter reuses the compatible hook and injector from the user's installed
+Item Assistant; those version-sensitive binaries are not copied into Cairn
+Codex. Item Assistant must be closed while Cairn owns the window and queue.
 
-The native hook is version-sensitive and must never be silently enabled. The
-first implementation should be opt-in, report the detected game build and hook
-version prominently, and retain the closed-game adapter as a fallback.
+Live ingest copies and SHA-256 verifies the hook's incoming CSV into Cairn's
+receipt directory, commits the complete item payload and journal row to SQLite,
+and only then acknowledges the incoming queue file. The operation and Vault IDs
+are deterministic over the queue path and hash, so a failed acknowledgement is
+safe to retry without creating another copy.
+
+Live retrieval marks the selected Vault rows `retrieval_pending` before writing
+operation-named outgoing CSV files. It waits for semantically matching files in
+the hook's soft-delete directory and only then marks those rows `retrieved`.
+Timeouts after queue delivery become `needs_recovery`, never an assumed failure.
+
+On shutdown the helper destroys its handshake window and signals the hook's
+named worker event. This forces the injected hook to observe the disconnect and
+disable interception immediately.
+
+The native hook is version-sensitive and is never silently enabled. The Vault
+reports the detected hook version and configured ingest/deposit tabs, requires
+an explicit confirmation for each game session, and retains the closed-game
+adapter as a fallback. Unsupported live items are left in the durable incoming
+queue and surfaced as a recovery issue rather than being discarded.

@@ -14,7 +14,7 @@ items.
 
 ## Architecture
 
-Live-game mutation is a separate, opt-in adapter; see
+Live-game mutation is a separate, opt-in GDIA-hook adapter; see
 [`docs/architecture/live-game-adapter.md`](docs/architecture/live-game-adapter.md).
 
 ```text
@@ -36,11 +36,11 @@ verified Grim Dawn file transactions. The Electron main process owns application
 lifecycle, file watching, SQLite persistence, and operation orchestration. The
 renderer has no direct filesystem or database access.
 
-Write eligibility is represented by a replaceable safety gate. The MVP gate
-requires Grim Dawn to be closed. A later live-game gate can use GDIA-derived
-game-state detection without changing the transaction, ingestion, retrieval, or
-IPC layers. GDIA itself must never be running while Cairn Codex is accessing the
-transfer stash.
+Write eligibility is represented by separate adapters. Atomic transfer-stash
+file writes require Grim Dawn to be closed. An explicit per-session live adapter
+uses the compatible hook from an installed Item Assistant and performs the item
+transfer inside game memory. Item Assistant itself must remain closed while
+Cairn Codex owns that hook and queue.
 
 ## Initial support scope
 
@@ -89,8 +89,9 @@ forms are supported: `name:`, `set:`, `skill:`, `slot:`, `type:`, `rarity:`,
 
 - Read-only is the default mode.
 - Every write requires an explicit permit from the configured safety gate.
-- The MVP never writes while Grim Dawn is running; live-game support requires a
-  safety gate that can prove the stash is not in use.
+- Closed-game mode never writes a transfer-stash file while Grim Dawn runs.
+- Live mode never rewrites the transfer-stash file; it uses an explicit,
+  version-reported in-memory hook handshake and durable queue receipts.
 - Never read or write the transfer stash while GDIA is running.
 - Before every write, make a restorable snapshot and validate the source hash.
 - Serialize to a temporary file beside the target, flush it, parse and verify
@@ -103,9 +104,9 @@ forms are supported: `name:`, `set:`, `skill:`, `slot:`, `type:`, `rarity:`,
 
 GDIA's apparent live stash reads and writes do not come from ordinary concurrent
 file access: its injected native hook intercepts incoming items and recreates
-outgoing items inside the running game. Cairn Codex keeps that future adapter
-outside the collection database and transaction core, so adopting a narrowly
-maintained live hook later will not require a storage or renderer rewrite.
+outgoing items inside the running game. Cairn Codex keeps that adapter outside
+the collection database and file-transaction core and only enables it after an
+explicit confirmation for the current game session.
 
 ## Reused code
 

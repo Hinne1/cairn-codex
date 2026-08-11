@@ -57,11 +57,20 @@ export class GrimDawnHelperClient {
   }
 
   dispose(): void {
+    const child = this.process
     this.lines?.close()
     this.lines = null
     this.rejectAll(new Error('Grim Dawn helper stopped.'))
-    this.process?.kill()
     this.process = null
+    if (!child) return
+    // Closing stdin lets the helper leave its request loop and run adapter disposal,
+    // including the live-hook deactivation handshake. Keep a bounded kill fallback.
+    child.stdin.end()
+    const fallback = setTimeout(() => {
+      if (!child.killed) child.kill()
+    }, 2_000)
+    fallback.unref()
+    child.once('exit', () => clearTimeout(fallback))
   }
 
   private ensureStarted(): ChildProcessWithoutNullStreams {

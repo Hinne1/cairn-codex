@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import {
@@ -9,6 +9,9 @@ import {
   type CollectionSnapshot,
   type GrimDawnDiscovery,
   type IngestResult,
+  type LiveGameStatus,
+  type LiveGameSyncResult,
+  type LiveRetrievalResult,
   type RetrievalResult,
   type StagingTabInspection,
   type VaultListItem,
@@ -99,6 +102,59 @@ interface ItemIconExtractionResult {
   icons: Array<{ bitmap: string; key: string }>
   missing: string[]
   failures: Array<{ bitmap: string; error: string }>
+}
+
+interface LiveVaultPayload {
+  stashVersion: number
+  sourceTabIndex: number
+  sourceItemIndex: number
+  baseRecord: string
+  prefixRecord: string
+  suffixRecord: string
+  modifierRecord: string
+  transmuteRecord: string
+  seed: number
+  materiaRecord: string
+  relicCompletionBonusRecord: string
+  relicSeed: number
+  enchantmentRecord: string
+  ascendantRecord: string
+  ascendantRecord2H: string
+  unknown: number
+  enchantmentSeed: number
+  materiaCombines: number
+  stackCount: number
+  rerolls: number
+  affixRerolls: number
+  xOffset: number
+  yOffset: number
+}
+
+interface LiveIncomingItem {
+  path: string
+  sha256: string
+  isHardcore: boolean
+  item: LiveVaultPayload
+  createdAtUtc: string
+}
+
+interface LiveQueueReceipt {
+  sha256: string
+  receiptPath: string
+}
+
+interface LiveRetrievalQueue {
+  operationId: string
+  outgoingPath: string
+  semanticSha256: string
+  isHardcore: boolean
+  baselineDeleted: string[]
+  baselineIncoming: string[]
+}
+
+interface LiveRetrievalStatus {
+  state: 'pending' | 'deposited' | 'rejected' | 'unknown'
+  receiptPath: string | null
 }
 
 function isHardcoreStashPath(path: string): boolean {
@@ -233,6 +289,205 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> =>
       runExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds))
   )
+  ipcMain.handle(
+    IPC_CHANNELS.inspectLiveGame,
+    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('inspect-live-game')
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.startLiveGame,
+    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('start-live-game')
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.syncLiveGame,
+    (): Promise<LiveGameSyncResult> => runExclusive(() => syncLiveIncoming(helper, database))
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.retrieveLiveVaultItems,
+    (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> =>
+      runExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds))
+  )
+}
+
+async function syncLiveIncoming(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase
+): Promise<LiveGameSyncResult> {
+  const status = await helper.request<LiveGameStatus>('inspect-live-game')
+  if (status.state !== 'ready') return { status, ingested: [], issues: [] }
+  const incoming = await helper.request<LiveIncomingItem[]>('poll-live-incoming')
+  const ingested: LiveGameSyncResult['ingested'] = []
+  const issues: string[] = []
+  for (const source of incoming) {
+    const name = database.getCatalogNames([source.item.baseRecord]).get(source.item.baseRecord.toLowerCase())
+    if (!name) {
+      issues.push(
+        `Live item ${source.item.baseRecord} is outside the Epic/Legendary catalog. ` +
+          `Its durable GDIA queue file was retained at ${source.path}.`
+      )
+      continue
+    }
+    const identity = createHash('sha256')
+      .update(source.path.toLowerCase())
+      .update('\0')
+      .update(source.sha256)
+      .digest('hex')
+    const operationId = `live-ingest-${identity}`
+    const vaultItemId = `live-${identity}`
+    if (database.hasCommittedOperation(operationId)) {
+      try {
+        await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+          path: source.path,
+          expectedSha256: source.sha256,
+          receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'ingested')
+        })
+      } catch (error) {
+        issues.push(`${name}: committed earlier, but queue acknowledgement still failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      continue
+    }
+    let prepared = false
+    let committed = false
+    try {
+      const receipt = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
+        path: source.path,
+        expectedSha256: source.sha256,
+        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'ingested')
+      })
+      database.prepareIngestOperation({
+        operationId,
+        stashPath: `live://gdia/${source.isHardcore ? 'hc' : 'sc'}/${source.path.split(/[\\/]/).at(-1)}`,
+        sourceSha256: source.sha256,
+        startedAtUtc: new Date().toISOString(),
+        items: [{ vaultItemId, baseRecord: source.item.baseRecord, payload: source.item }],
+        detail: { phase: 'receipt_verified', adapter: 'gdia-live-v1', receiptPath: receipt.receiptPath }
+      })
+      prepared = true
+      database.completeIngestOperation({
+        operationId,
+        backupPath: receipt.receiptPath,
+        completedAtUtc: new Date().toISOString(),
+        isHardcore: source.isHardcore,
+        detail: { phase: 'committed', adapter: 'gdia-live-v1', receiptPath: receipt.receiptPath }
+      })
+      committed = true
+      await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+        path: source.path,
+        expectedSha256: source.sha256,
+        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'ingested')
+      })
+      ingested.push({
+        vaultItemId,
+        baseRecord: source.item.baseRecord,
+        name,
+        seed: source.item.seed
+      })
+    } catch (error) {
+      if (prepared && !committed) database.failIngestOperation(operationId, error)
+      issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return {
+    status: await helper.request<LiveGameStatus>('inspect-live-game'),
+    ingested,
+    issues
+  }
+}
+
+async function executeLiveRetrieval(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  vaultItemIds: string[]
+): Promise<LiveRetrievalResult> {
+  if (vaultItemIds.length === 0) throw new Error('Select at least one vault item to retrieve.')
+  const listed = new Map(database.listVaultItems().map((item) => [item.id, item]))
+  const selected = vaultItemIds.map((id) => {
+    const item = listed.get(id)
+    if (!item) throw new Error(`Vault item does not exist: ${id}`)
+    return item
+  })
+  const modes = new Set(selected.map((item) => item.isHardcore))
+  if (modes.size !== 1) throw new Error('A live retrieval cannot mix Hardcore and Softcore items.')
+  const isHardcore = selected[0]!.isHardcore
+  const status = await helper.request<LiveGameStatus>('inspect-live-game')
+  if (status.state !== 'ready') throw new Error(status.detail)
+  if (status.isHardcore !== null && status.isHardcore !== isHardcore) {
+    throw new Error(
+      `The running character is ${status.isHardcore ? 'Hardcore' : 'Softcore'}, but the selection is ${isHardcore ? 'Hardcore' : 'Softcore'}.`
+    )
+  }
+  const vaultItems = database.getVaultItems(vaultItemIds, isHardcore)
+  const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
+  if (unavailable.length > 0) {
+    throw new Error('Vault items are not available: ' + unavailable.map((item) => item.id).join(', '))
+  }
+  const operationId = randomUUID()
+  const sourceIdentity = createHash('sha256')
+    .update(JSON.stringify(vaultItems.map((item) => item.payload)))
+    .digest('hex')
+  let prepared = false
+  let queued = false
+  try {
+    database.prepareRetrievalOperation({
+      operationId,
+      stashPath: `live://gdia/${isHardcore ? 'hc' : 'sc'}`,
+      sourceSha256: sourceIdentity,
+      startedAtUtc: new Date().toISOString(),
+      vaultItemIds,
+      detail: { phase: 'prepared', adapter: 'gdia-live-v1', vaultItemIds }
+    })
+    prepared = true
+    const queues: LiveRetrievalQueue[] = []
+    for (const [index, item] of vaultItems.entries()) {
+      queues.push(
+        await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
+          operationId: `${operationId}-${index}`,
+          isHardcore,
+          item: item.payload
+        })
+      )
+    }
+    queued = true
+    const deadline = Date.now() + 45_000
+    const receipts = new Map<number, string>()
+    while (Date.now() < deadline && receipts.size < queues.length) {
+      for (const [index, queue] of queues.entries()) {
+        if (receipts.has(index)) continue
+        const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
+        if (result.state === 'rejected') {
+          throw new Error(`The game rejected vault item ${vaultItemIds[index]}; receipt: ${result.receiptPath}`)
+        }
+        if (result.state === 'deposited' && result.receiptPath) receipts.set(index, result.receiptPath)
+      }
+      if (receipts.size < queues.length) await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    if (receipts.size !== queues.length) {
+      throw new Error('Timed out waiting for the live hook to acknowledge the in-game deposit.')
+    }
+    const receiptPaths = [...receipts.entries()].sort(([left], [right]) => left - right).map(([, path]) => path)
+    database.completeRetrievalOperation({
+      operationId,
+      vaultItemIds,
+      backupPath: receiptPaths[0]!,
+      completedAtUtc: new Date().toISOString(),
+      detail: { phase: 'committed', adapter: 'gdia-live-v1', receiptPaths, vaultItemIds }
+    })
+    return {
+      operationId,
+      status: 'committed',
+      retrieved: vaultItems.map((item, index) => ({
+        vaultItemId: item.id,
+        baseRecord: item.baseRecord,
+        seed: (item.payload as { seed?: number }).seed ?? selected[index]!.seed
+      })),
+      receiptPaths
+    }
+  } catch (error) {
+    if (prepared) {
+      if (queued) database.markRetrievalNeedsRecovery(operationId, error)
+      else database.failRetrievalOperation(operationId, vaultItemIds, error)
+    }
+    throw error
+  }
 }
 
 async function attachItemIcons(
@@ -404,6 +659,10 @@ async function runSmokeTest(
     const writeTransaction = await helper.request<{ passed: boolean }>('self-test-write-transaction')
     if (!writeTransaction.passed) {
       throw new Error('Verified write transaction self-test failed.')
+    }
+    const liveQueue = await helper.request<{ passed: boolean; fields: number }>('self-test-live-queue')
+    if (!liveQueue.passed || liveQueue.fields !== 17) {
+      throw new Error('Live queue serializer self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
     const flamebrand = helperSnapshot.items.find((item) => item.name === 'Flamebrand')
@@ -676,6 +935,7 @@ async function runSmokeTest(
       JSON.stringify({
         helper: 'available',
         writeTransaction: 'verified',
+        liveQueue: 'verified',
         serializerRoundTrips: roundTrips.length,
         ingestPlans: ingestPlans.length,
         retrievalRoundTrips: retrievalRoundTrips.length,

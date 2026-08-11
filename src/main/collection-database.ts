@@ -190,6 +190,13 @@ export class CollectionDatabase {
       .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
   }
 
+  hasCommittedOperation(operationId: string): boolean {
+    const row = this.database
+      .prepare(`SELECT 1 AS found FROM operation_journal WHERE id = ? AND state = 'committed'`)
+      .get(operationId) as { found: number } | undefined
+    return row?.found === 1
+  }
+
   getVaultItems(vaultItemIds: string[], isHardcore?: boolean): VaultItem[] {
     if (vaultItemIds.length === 0) {
       throw new Error('At least one vault item ID is required.')

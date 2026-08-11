@@ -8,6 +8,7 @@ import type {
   CollectionSnapshot,
   GrimDawnDiscovery,
   ItemPresentationLine,
+  LiveGameStatus,
   ObservedStashItem,
   StagingTabInspection,
   VaultListItem,
@@ -53,9 +54,13 @@ const selectedVaultIds = ref<string[]>([])
 const vaultBusy = ref(false)
 const vaultError = ref<string | null>(null)
 const vaultMessage = ref<string | null>(null)
+const liveStatus = ref<LiveGameStatus | null>(null)
+const liveIssues = ref<string[]>([])
+const liveSyncing = ref(false)
 const tooltipRecord = ref<string | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
+let liveTimer: ReturnType<typeof setInterval> | null = null
 const pageSize = 48
 
 const categories = [
@@ -254,12 +259,15 @@ onMounted(async () => {
     await scanCollection()
   }
   await refreshVault()
+  liveStatus.value = await window.cairnCodex.inspectLiveGame()
+  liveTimer = setInterval(() => void syncLiveMode(), 1000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
+  if (liveTimer) clearInterval(liveTimer)
 })
 
 async function scanCollection(): Promise<void> {
@@ -426,18 +434,86 @@ async function refreshVault(): Promise<void> {
   if (!selectedStashPath.value) return
   vaultError.value = null
   try {
-    const [items, safety] = await Promise.all([
+    const [items, safety, live] = await Promise.all([
       window.cairnCodex.listVaultItems(),
-      window.cairnCodex.inspectWriteSafety()
+      window.cairnCodex.inspectWriteSafety(),
+      window.cairnCodex.inspectLiveGame()
     ])
     vaultItems.value = items
     writeSafety.value = safety
+    liveStatus.value = live
     selectedVaultIds.value = selectedVaultIds.value.filter((id) =>
       items.some((item) => item.id === id && item.state === 'ingested')
     )
     await refreshStaging()
   } catch (error) {
     vaultError.value = readableError(error)
+  }
+}
+
+async function startLiveMode(): Promise<void> {
+  if (vaultBusy.value) return
+  const confirmed = window.confirm(
+    'Enable the installed GDIA live hook for this Grim Dawn session? Item Assistant must remain closed while Cairn Codex owns its queue.'
+  )
+  if (!confirmed) return
+  vaultBusy.value = true
+  vaultError.value = null
+  try {
+    liveStatus.value = await window.cairnCodex.startLiveGame()
+    if (liveStatus.value.state === 'ready') {
+      vaultMessage.value = 'Live mode connected. Put an Epic or Legendary into the final shared stash tab to archive it instantly.'
+    } else {
+      vaultError.value = liveStatus.value.detail
+    }
+  } catch (error) {
+    vaultError.value = readableError(error)
+    liveStatus.value = await window.cairnCodex.inspectLiveGame()
+  } finally {
+    vaultBusy.value = false
+  }
+}
+
+async function syncLiveMode(): Promise<void> {
+  if (liveStatus.value?.state !== 'ready' || liveSyncing.value || vaultBusy.value) return
+  liveSyncing.value = true
+  try {
+    const result = await window.cairnCodex.syncLiveGame()
+    liveStatus.value = result.status
+    liveIssues.value = result.issues
+    if (result.ingested.length > 0) {
+      vaultMessage.value = `Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`
+      await refreshVault()
+      if (collectionBasis.value === 'archive') await loadSelectedSources()
+    }
+  } catch (error) {
+    const message = readableError(error)
+    if (!message.includes('Another vault write is already in progress')) liveIssues.value = [message]
+  } finally {
+    liveSyncing.value = false
+  }
+}
+
+async function retrieveSelectedLive(): Promise<void> {
+  if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
+  const confirmed = window.confirm(
+    `Live-retrieve ${selectedVaultIds.value.length} item${selectedVaultIds.value.length === 1 ? '' : 's'}? Keep the shared stash open until the in-game deposit is acknowledged.`
+  )
+  if (!confirmed) return
+  vaultBusy.value = true
+  vaultError.value = null
+  vaultMessage.value = null
+  try {
+    const result = await window.cairnCodex.retrieveLiveVaultItems([...selectedVaultIds.value])
+    vaultMessage.value = `Live-retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn.`
+    selectedVaultIds.value = []
+    await refreshVault()
+    if (collectionBasis.value === 'archive') await loadSelectedSources()
+  } catch (error) {
+    vaultError.value = readableError(error)
+    await refreshVault()
+  } finally {
+    vaultBusy.value = false
   }
 }
 
@@ -962,6 +1038,32 @@ function formatRollValue(value: number): string {
           </button>
         </header>
 
+        <section class="live-mode-card" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
+          <div class="live-mode-status">
+            <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
+            <div>
+              <p class="section-label">Live game adapter</p>
+              <h3>{{ liveStatus?.state === 'ready' ? 'Connected to Grim Dawn' : 'Optional live transfers' }}</h3>
+              <small>{{ liveStatus?.detail || 'Checking the installed GDIA hook…' }}</small>
+              <small v-if="liveStatus?.hookVersion">Hook {{ liveStatus.hookVersion }}</small>
+            </div>
+          </div>
+          <button
+            v-if="liveStatus?.state !== 'ready'"
+            type="button"
+            :disabled="vaultBusy || liveStatus?.state === 'unavailable'"
+            @click="startLiveMode"
+          >
+            {{ liveStatus?.state === 'connecting' ? 'Retry connection' : 'Enable live mode' }}
+          </button>
+          <div v-else class="live-ready-instructions">
+            <strong>{{ liveSyncing ? 'Checking queue…' : `Watching the ${liveStatus.ingestTabDescription}` }}</strong>
+            <small>Retrieval target: {{ liveStatus.depositTabDescription }}.</small>
+            <small>Only place Epics or Legendaries in the watched tab.</small>
+          </div>
+        </section>
+        <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>
+
         <section class="source-selector" aria-label="Collection stash sources">
           <header>
             <div>
@@ -1088,6 +1190,15 @@ function formatRollValue(value: number): string {
               @click="retrieveSelected"
             >
               {{ vaultBusy ? 'Verifying…' : `Retrieve ${selectedVaultIds.length} selected` }}
+            </button>
+            <button
+              v-if="liveStatus?.state === 'ready'"
+              class="vault-action live-action"
+              type="button"
+              :disabled="vaultBusy || selectedVaultIds.length === 0"
+              @click="retrieveSelectedLive"
+            >
+              {{ vaultBusy ? 'Waiting for game…' : `Live-retrieve ${selectedVaultIds.length} selected` }}
             </button>
           </article>
         </div>

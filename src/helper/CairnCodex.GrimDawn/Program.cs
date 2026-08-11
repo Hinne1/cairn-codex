@@ -2,6 +2,7 @@ using System.Text.Json;
 using CairnCodex.GrimDawn;
 
 const int ProtocolVersion = 1;
+using var liveGame = new LiveGameAdapter();
 var jsonOptions = new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -33,7 +34,15 @@ while ((line = Console.ReadLine()) is not null)
             "scan-collection" => HelperResponse.Success(request.Id, CollectionSnapshotBuilder.Scan()),
             "scan-transfer-stash" => ScanTransferStash(request),
             "inspect-write-safety" => HelperResponse.Success(request.Id, WriteSafetyGate.Inspect()),
+            "inspect-live-game" => HelperResponse.Success(request.Id, liveGame.Inspect()),
+            "start-live-game" => HelperResponse.Success(request.Id, liveGame.Start()),
+            "poll-live-incoming" => HelperResponse.Success(request.Id, liveGame.PollIncoming()),
+            "copy-live-incoming" => CopyLiveIncoming(request),
+            "ack-live-incoming" => AcknowledgeLiveIncoming(request),
+            "enqueue-live-retrieval" => EnqueueLiveRetrieval(request),
+            "inspect-live-retrieval" => InspectLiveRetrieval(request),
             "self-test-write-transaction" => HelperResponse.Success(request.Id, WriteTransactionSelfTest.Run()),
+            "self-test-live-queue" => HelperResponse.Success(request.Id, LiveGameAdapter.SelfTest()),
             "validate-transfer-stash-roundtrip" => ValidateTransferStashRoundTrip(request),
             "validate-ingest-plan" => ValidateIngestPlan(request),
             "plan-ingest-items" => PlanIngestItems(request),
@@ -75,6 +84,46 @@ HelperResponse ScanTransferStash(HelperRequest request)
     var parameters = request.Params?.Deserialize<ScanTransferStashRequest>(jsonOptions)
         ?? throw new JsonException("scan-transfer-stash requires a path parameter.");
     return HelperResponse.Success(request.Id, TransferStashScanner.Scan(parameters.Path));
+}
+
+HelperResponse AcknowledgeLiveIncoming(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<AcknowledgeLiveIncomingRequest>(jsonOptions)
+        ?? throw new JsonException("ack-live-incoming requires path, expectedSha256, and receiptDirectory.");
+    return HelperResponse.Success(
+        request.Id,
+        liveGame.AcknowledgeIncoming(
+            parameters.Path,
+            parameters.ExpectedSha256,
+            parameters.ReceiptDirectory));
+}
+
+HelperResponse CopyLiveIncoming(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<AcknowledgeLiveIncomingRequest>(jsonOptions)
+        ?? throw new JsonException("copy-live-incoming requires path, expectedSha256, and receiptDirectory.");
+    return HelperResponse.Success(
+        request.Id,
+        liveGame.CopyIncomingReceipt(
+            parameters.Path,
+            parameters.ExpectedSha256,
+            parameters.ReceiptDirectory));
+}
+
+HelperResponse EnqueueLiveRetrieval(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<EnqueueLiveRetrievalRequest>(jsonOptions)
+        ?? throw new JsonException("enqueue-live-retrieval requires operationId, isHardcore, and item.");
+    return HelperResponse.Success(
+        request.Id,
+        liveGame.EnqueueRetrieval(parameters.OperationId, parameters.IsHardcore, parameters.Item));
+}
+
+HelperResponse InspectLiveRetrieval(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<InspectLiveRetrievalRequest>(jsonOptions)
+        ?? throw new JsonException("inspect-live-retrieval requires queue.");
+    return HelperResponse.Success(request.Id, liveGame.InspectRetrieval(parameters.Queue));
 }
 
 HelperResponse BuildItemCatalog(HelperRequest request)
@@ -200,6 +249,15 @@ HelperResponse AnalyzeItemRolls(HelperRequest request)
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);
 internal sealed record InspectGameRecordRequest(string InstallationPath, string Record);
+internal sealed record AcknowledgeLiveIncomingRequest(
+    string Path,
+    string ExpectedSha256,
+    string ReceiptDirectory);
+internal sealed record EnqueueLiveRetrievalRequest(
+    string OperationId,
+    bool IsHardcore,
+    VaultItemPayload Item);
+internal sealed record InspectLiveRetrievalRequest(LiveRetrievalQueue Queue);
 
 internal sealed record HelperRequest(string Id, string Method, JsonElement? Params);
 

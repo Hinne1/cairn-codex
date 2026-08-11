@@ -6,6 +6,9 @@ import {
   type CollectionSnapshot,
   type GrimDawnDiscovery,
   type IngestResult,
+  type LiveGameStatus,
+  type LiveGameSyncResult,
+  type LiveRetrievalResult,
   type RetrievalResult,
   type StagingTabInspection,
   type VaultListItem,
@@ -33,7 +36,15 @@ const api: CairnCodexApi = {
   ingestStagingTab: (path) =>
     ipcRenderer.invoke(IPC_CHANNELS.ingestStagingTab, { path }) as Promise<IngestResult>,
   retrieveVaultItems: (path, vaultItemIds) =>
-    ipcRenderer.invoke(IPC_CHANNELS.retrieveVaultItems, { path, vaultItemIds }) as Promise<RetrievalResult>
+    ipcRenderer.invoke(IPC_CHANNELS.retrieveVaultItems, { path, vaultItemIds }) as Promise<RetrievalResult>,
+  inspectLiveGame: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.inspectLiveGame) as Promise<LiveGameStatus>,
+  startLiveGame: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.startLiveGame) as Promise<LiveGameStatus>,
+  syncLiveGame: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.syncLiveGame) as Promise<LiveGameSyncResult>,
+  retrieveLiveVaultItems: (vaultItemIds) =>
+    ipcRenderer.invoke(IPC_CHANNELS.retrieveLiveVaultItems, { vaultItemIds }) as Promise<LiveRetrievalResult>
 }
 
 contextBridge.exposeInMainWorld('cairnCodex', api)

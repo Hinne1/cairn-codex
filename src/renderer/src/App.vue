@@ -111,7 +111,10 @@ const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', t
 const tooltipRecord = ref<string | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
 const tooltipMaxHeight = computed(() => Math.max(180, window.innerHeight - tooltipPosition.value.top - 14))
+const tooltipPinned = ref(false)
+const tooltipExpanded = ref(false)
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
+let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 const pageSize = 48
@@ -437,24 +440,31 @@ const atlasRegions = computed(() => {
   const regions = new Map<string, {
     key: string
     name: string
+    contentPack: string
+    minimumItemLevel: number
     items: CollectionItem[]
   }>()
   for (const item of plannerMiItems.value) {
     for (const location of item.acquisition?.locations ?? []) {
-      const key = location.name.toLocaleLowerCase()
+      const key = `${location.contentPack}:${location.name}`.toLocaleLowerCase()
       const existing = regions.get(key)
       if (existing) {
         if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
+        existing.minimumItemLevel = Math.min(existing.minimumItemLevel, item.levelRequirement)
       } else {
         regions.set(key, {
           key,
           name: location.name,
+          contentPack: location.contentPack,
+          minimumItemLevel: item.levelRequirement,
           items: [item]
         })
       }
     }
   }
   return [...regions.values()].sort((left, right) =>
+    contentPackRank(left.contentPack) - contentPackRank(right.contentPack) ||
+    left.minimumItemLevel - right.minimumItemLevel ||
     left.name.localeCompare(right.name)
   )
 })
@@ -751,6 +761,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
+  cancelTooltipHide()
   if (liveSyncTimer) clearInterval(liveSyncTimer)
   if (liveLifecycleTimer) clearInterval(liveLifecycleTimer)
 })
@@ -1499,12 +1510,33 @@ function rarityLabel(item: CollectionItem): string {
   return item.rarity.charAt(0).toLocaleUpperCase() + item.rarity.slice(1)
 }
 
+function contentPackRank(contentPack: string): number {
+  return ({ base: 0, gdx1: 1, gdx2: 2, gdx3: 3 } as Record<string, number>)[contentPack] ?? 9
+}
+
+function contentPackShortLabel(contentPack: string): string {
+  return ({ base: 'Base', gdx1: 'AoM', gdx2: 'FG', gdx3: 'FoA' } as Record<string, string>)[contentPack]
+    ?? contentPack.toLocaleUpperCase()
+}
+
+function locationDisplayName(location: Pick<MapRegionLocation, 'name' | 'contentPack'>): string {
+  return `${location.name} (${contentPackShortLabel(location.contentPack)})`
+}
+
 function tooltipSources(item: CollectionItem): string[] {
-  return (item.acquisition?.sources ?? []).slice(0, 5)
+  const sources = item.acquisition?.sources ?? []
+  return tooltipExpanded.value ? sources : sources.slice(0, 5)
 }
 
 function tooltipLocations(item: CollectionItem): MapRegionLocation[] {
-  return (item.acquisition?.locations ?? []).slice(0, 6)
+  const locations = item.acquisition?.locations ?? []
+  return tooltipExpanded.value ? locations : locations.slice(0, 6)
+}
+
+function tooltipHasMore(item: CollectionItem): boolean {
+  return (item.acquisition?.sources.length ?? 0) > 5 ||
+    (item.acquisition?.locations?.length ?? 0) > 6 ||
+    (item.acquisition?.additionalLocationCount ?? 0) > 0
 }
 
 function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
@@ -1592,15 +1624,18 @@ function matchesLevel(level: number, expression: string): boolean {
 }
 
 function queueTooltip(item: CollectionItem, event: MouseEvent | FocusEvent): void {
+  cancelTooltipHide()
+  if (tooltipPinned.value) return
   cancelTooltip()
   positionTooltip(event)
   tooltipTimer = setTimeout(() => {
+    tooltipExpanded.value = false
     tooltipRecord.value = item.record
   }, 180)
 }
 
 function moveTooltip(event: MouseEvent): void {
-  if (tooltipRecord.value) positionTooltip(event)
+  if (tooltipRecord.value && !tooltipPinned.value) positionTooltip(event)
 }
 
 function positionTooltip(event: MouseEvent | FocusEvent): void {
@@ -1628,9 +1663,35 @@ function cancelTooltip(): void {
   tooltipTimer = null
 }
 
+function cancelTooltipHide(): void {
+  if (tooltipHideTimer) clearTimeout(tooltipHideTimer)
+  tooltipHideTimer = null
+}
+
+function scheduleTooltipHide(): void {
+  cancelTooltip()
+  cancelTooltipHide()
+  if (tooltipPinned.value) return
+  tooltipHideTimer = setTimeout(hideTooltip, 220)
+}
+
+function toggleTooltipPinned(): void {
+  tooltipPinned.value = !tooltipPinned.value
+  cancelTooltipHide()
+}
+
+function toggleTooltipExpanded(): void {
+  tooltipExpanded.value = !tooltipExpanded.value
+  tooltipPinned.value = true
+  cancelTooltipHide()
+}
+
 function hideTooltip(): void {
   cancelTooltip()
+  cancelTooltipHide()
   tooltipRecord.value = null
+  tooltipPinned.value = false
+  tooltipExpanded.value = false
 }
 
 function handleEscape(event: KeyboardEvent): void {
@@ -2050,9 +2111,9 @@ function formatPercentile(value: number | null | undefined): string {
                 aria-describedby="item-tooltip"
                 @mouseenter="queueTooltip(row.item, $event)"
                 @mousemove="moveTooltip"
-                @mouseleave="hideTooltip"
+                @mouseleave="scheduleTooltipHide"
                 @focus="queueTooltip(row.item, $event)"
-                @blur="hideTooltip"
+                @blur="scheduleTooltipHide"
                 @click="openItem(row.item)"
                 @keydown.enter="openItem(row.item)"
               >
@@ -2152,9 +2213,9 @@ function formatPercentile(value: number | null | undefined): string {
                   tabindex="0"
                   @mouseenter="queueTooltip(row.item, $event)"
                   @mousemove="moveTooltip"
-                  @mouseleave="hideTooltip"
+                  @mouseleave="scheduleTooltipHide"
                   @focus="queueTooltip(row.item, $event)"
-                  @blur="hideTooltip"
+                  @blur="scheduleTooltipHide"
                   @click="openItem(row.item)"
                   @keydown.enter="openItem(row.item)"
                 >
@@ -2188,7 +2249,7 @@ function formatPercentile(value: number | null | undefined): string {
                       <b>{{ faction.faction }}</b> · {{ faction.reputation }}
                     </span>
                     <span v-if="!(row.item.acquisition?.factions?.length)">{{ row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
-                    <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map((location) => location.name).slice(0, 2).join(', ') }}</small>
+                    <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map(locationDisplayName).slice(0, 2).join(', ') }}</small>
                   </td>
                 </tr>
                 <tr v-if="plannerRows.length === 0"><td colspan="5" class="skill-empty">Select at least one skill, or raise the level cap, to build a shopping list.</td></tr>
@@ -2216,16 +2277,16 @@ function formatPercentile(value: number | null | undefined): string {
                 @click="selectedAtlasRegion = region.key"
               >
                 <span>
-                  <strong>{{ region.name }}</strong>
+                  <strong>{{ region.name }} ({{ contentPackShortLabel(region.contentPack) }})</strong>
                   <small>{{ [...new Set(region.items.flatMap((item) => item.acquisition?.sources ?? []))].slice(0, 2).join(' · ') }}</small>
                 </span>
-                <b>{{ region.items.length }} tiers</b>
+                <b>{{ region.items.length }} tiers · earliest item Lv{{ region.minimumItemLevel }}</b>
               </button>
             </aside>
             <section class="mi-source-detail">
               <header v-if="selectedAtlasRegion">
                 <p class="section-label">Area drops</p>
-                <h3>{{ atlasRegions.find((region) => region.key === selectedAtlasRegion)?.name }}</h3>
+                <h3>{{ atlasRegions.find((region) => region.key === selectedAtlasRegion)?.name }} ({{ contentPackShortLabel(atlasRegions.find((region) => region.key === selectedAtlasRegion)?.contentPack ?? '') }})</h3>
                 <p>Item tiers whose indexed monster source can appear in this area.</p>
               </header>
               <div v-if="selectedAtlasItems.length" class="atlas-item-list">
@@ -2235,7 +2296,7 @@ function formatPercentile(value: number | null | undefined): string {
                   type="button"
                   @mouseenter="queueTooltip(item, $event)"
                   @mousemove="moveTooltip"
-                  @mouseleave="hideTooltip"
+                  @mouseleave="scheduleTooltipHide"
                   @click="openItem(item)"
                 >
                   <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
@@ -2420,7 +2481,7 @@ function formatPercentile(value: number | null | undefined): string {
             <p class="section-label">Game data</p>
             <h3>Installed-data cache</h3>
             <p>Item records, drop-source graphs, map regions, and monster placements are cached locally. Game updates invalidate the cache automatically.</p>
-            <button type="button" :disabled="scanning" @click="rebuildGameDataIndex">
+            <button class="settings-action" type="button" :disabled="scanning" @click="rebuildGameDataIndex">
               {{ scanning && scanActivity === 'game-data' ? 'Rebuilding index…' : 'Rebuild game-data index' }}
             </button>
             <small>Use this after changing mods or if a location looks stale.</small>
@@ -2741,9 +2802,9 @@ function formatPercentile(value: number | null | undefined): string {
                 aria-describedby="item-tooltip"
                 @mouseenter="queueTooltip(item, $event)"
                 @mousemove="moveTooltip"
-                @mouseleave="hideTooltip"
+                @mouseleave="scheduleTooltipHide"
                 @focus="queueTooltip(item, $event)"
-                @blur="hideTooltip"
+                @blur="scheduleTooltipHide"
                 @click="openItem(item)"
               >
                 <span aria-hidden="true">{{ item.discovered ? '✓' : '○' }}</span>
@@ -2804,9 +2865,9 @@ function formatPercentile(value: number | null | undefined): string {
             aria-describedby="item-tooltip"
             @mouseenter="queueTooltip(item, $event)"
             @mousemove="moveTooltip"
-            @mouseleave="hideTooltip"
+            @mouseleave="scheduleTooltipHide"
             @focus="queueTooltip(item, $event)"
-            @blur="hideTooltip"
+            @blur="scheduleTooltipHide"
             @click="openItem(item)"
             @keydown.enter="openItem(item)"
           >
@@ -2858,9 +2919,11 @@ function formatPercentile(value: number | null | undefined): string {
         v-if="tooltipItem"
         id="item-tooltip"
         class="game-tooltip"
-        :class="tooltipItem.rarity"
+        :class="[tooltipItem.rarity, { pinned: tooltipPinned }]"
         :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px`, maxHeight: `${tooltipMaxHeight}px` }"
-        role="tooltip"
+        :role="tooltipPinned ? 'dialog' : 'tooltip'"
+        @mouseenter="cancelTooltipHide"
+        @mouseleave="scheduleTooltipHide"
       >
         <header class="tooltip-header">
           <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" />
@@ -2868,6 +2931,12 @@ function formatPercentile(value: number | null | undefined): string {
             <h3>{{ tooltipItem.name }}</h3>
             <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
             <strong>{{ rarityLabel(tooltipItem) }} · {{ itemTypeLabel(tooltipItem) }}</strong>
+          </div>
+          <div class="tooltip-actions">
+            <button type="button" :aria-pressed="tooltipPinned" @click.stop="toggleTooltipPinned">
+              {{ tooltipPinned ? 'Unpin' : 'Pin' }}
+            </button>
+            <button type="button" aria-label="Close tooltip" @click.stop="hideTooltip">×</button>
           </div>
         </header>
 
@@ -2975,12 +3044,20 @@ function formatPercentile(value: number | null | undefined): string {
           <template v-if="tooltipItem.acquisition.locations?.length">
             <h4>Drop location</h4>
             <p v-for="location in tooltipLocations(tooltipItem)" :key="`${location.name}:${location.levelFile}`">
-              {{ location.name }}
+              {{ locationDisplayName(location) }}
             </p>
             <p v-if="(tooltipItem.acquisition.locations.length - tooltipLocations(tooltipItem).length) + (tooltipItem.acquisition.additionalLocationCount ?? 0)" class="tooltip-location-overflow">
               +{{ (tooltipItem.acquisition.locations.length - tooltipLocations(tooltipItem).length) + (tooltipItem.acquisition.additionalLocationCount ?? 0) }} more indexed regions
             </p>
           </template>
+          <button
+            v-if="tooltipHasMore(tooltipItem)"
+            class="tooltip-expand"
+            type="button"
+            @click.stop="toggleTooltipExpanded"
+          >
+            {{ tooltipExpanded ? 'Show summary' : 'Show expanded sources and areas' }}
+          </button>
         </section>
 
         <footer>

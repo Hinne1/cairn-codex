@@ -384,7 +384,7 @@ internal static class ItemCatalogBuilder
         if (hints.Count == 0 && sawDropTable) hints.Add("Random drop");
         if (hints.Count == 0) hints.Add("Special source; exact location not yet indexed");
         return new ItemAcquisitionPresentation(
-            hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray(),
+            hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
             sourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
             factionRequirements
                 .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)

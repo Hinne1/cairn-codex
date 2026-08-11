@@ -74,7 +74,7 @@ internal static class MapLocationIndexer
             })
             .ToArray();
         return new MapLocationIndexResult(
-            5,
+            6,
             DateTimeOffset.UtcNow,
             fingerprints,
             scannedRegions,
@@ -243,13 +243,37 @@ internal static class MapLocationIndexer
                 ResolveRegionName(zoneRecord, levelFile, data),
                 zoneRecord,
                 levelFile,
-                contentPack,
+                ResolveRegionContentPack(zoneRecord, levelFile, contentPack),
                 originX,
                 originY,
                 levelOffset,
                 levelLength));
         }
         return result;
+    }
+
+    private static string ResolveRegionContentPack(string zoneRecord, string levelFile, string fallback)
+    {
+        // The installed expansion Levels.arc is cumulative, so the archive itself
+        // cannot tell us which campaign owns a region. Rift-gate zone records do:
+        // a-g are the base campaign, h-i AoM, j FG, and k-l FoA.
+        var zoneFile = Path.GetFileNameWithoutExtension(zoneRecord).ToLowerInvariant();
+        if (zoneFile.StartsWith("riftgatemap1", StringComparison.Ordinal) && zoneFile.Length > 12)
+        {
+            return zoneFile[12] switch
+            {
+                >= 'a' and <= 'g' => "base",
+                >= 'h' and <= 'i' => "gdx1",
+                'j' => "gdx2",
+                >= 'k' and <= 'l' => "gdx3",
+                _ => fallback
+            };
+        }
+
+        // Scripted/fallback regions do not always have a zone record. Preserve the
+        // owning item/archive pack rather than guessing from a display name.
+        _ = levelFile;
+        return fallback;
     }
 
     private static string ResolveRegionName(string zoneRecord, string levelFile, ItemCatalogData data)

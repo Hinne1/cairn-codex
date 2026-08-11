@@ -24,7 +24,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 12
+const CATALOG_PRESENTATION_VERSION = 13
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -682,7 +682,7 @@ async function readMapLocationIndex(path: string): Promise<MapLocationIndex | nu
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as MapLocationIndex
     if (
-      parsed.version !== 5 ||
+      parsed.version !== 6 ||
       !Array.isArray(parsed.archives) ||
       !parsed.sourceLocations ||
       typeof parsed.sourceLocations !== 'object'
@@ -750,7 +750,11 @@ function attachMapLocations(
       }
       const distinctLocations = [...unique.values()]
       const namedWorldLocations = distinctLocations.filter((location) => Boolean(location.zoneRecord))
-      const usefulLocations = namedWorldLocations.length > 0 ? namedWorldLocations : distinctLocations
+      const usefulLocations = (namedWorldLocations.length > 0 ? namedWorldLocations : distinctLocations)
+        .sort((left, right) =>
+          mapLocationRouteRank(left) - mapLocationRouteRank(right) ||
+          left.name.localeCompare(right.name)
+        )
       return item.acquisition
         ? {
             ...item,
@@ -759,13 +763,20 @@ function attachMapLocations(
               // Source records are an internal join key; once locations are attached,
               // retaining thousands of repeated paths only bloats the persisted catalog.
               sourceRecords: [],
-              locations: usefulLocations.slice(0, 8),
-              additionalLocationCount: Math.max(0, usefulLocations.length - 8)
+              locations: usefulLocations.slice(0, 64),
+              additionalLocationCount: Math.max(0, usefulLocations.length - 64)
             }
           }
         : item
     })
   }
+}
+
+function mapLocationRouteRank(location: MapRegionLocation): number {
+  const packRank = ({ base: 0, gdx1: 1, gdx2: 2, gdx3: 3 } as Record<string, number>)[location.contentPack] ?? 9
+  const chapter = /riftgatemap1([a-l])_/i.exec(location.zoneRecord)?.[1]?.toLocaleLowerCase()
+  const chapterRank = chapter ? chapter.charCodeAt(0) - 'a'.charCodeAt(0) : 99
+  return packRank * 100 + chapterRank
 }
 
 async function writeJsonCache(path: string, value: unknown): Promise<void> {

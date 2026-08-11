@@ -38,9 +38,9 @@ renderer has no direct filesystem or database access.
 
 Write eligibility is represented by separate adapters. Atomic transfer-stash
 file writes require Grim Dawn to be closed. An explicit per-session live adapter
-uses the compatible hook from an installed Item Assistant and performs the item
-transfer inside game memory. Item Assistant itself must remain closed while
-Cairn Codex owns that hook and queue.
+uses an app-owned, fingerprint-allowlisted GDIA hook and the installed Item
+Assistant injector to perform the transfer inside game memory. Item Assistant
+itself must remain closed while Cairn Codex owns that hook and queue.
 
 ## Initial support scope
 

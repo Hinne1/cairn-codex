@@ -1051,7 +1051,7 @@ function formatRollValue(value: number): string {
           <button
             v-if="liveStatus?.state !== 'ready'"
             type="button"
-            :disabled="vaultBusy || liveStatus?.state === 'unavailable'"
+            :disabled="vaultBusy || liveStatus?.state === 'unavailable' || liveStatus?.state === 'blocked'"
             @click="startLiveMode"
           >
             {{ liveStatus?.state === 'connecting' ? 'Retry connection' : 'Enable live mode' }}

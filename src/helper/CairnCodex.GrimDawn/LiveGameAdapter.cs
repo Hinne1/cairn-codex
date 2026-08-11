@@ -15,6 +15,12 @@ internal sealed class LiveGameAdapter : IDisposable
     private const int TypeHardcoreViaInit = 47;
     private const int TypeInjectionCancelled = 8100;
     private const string WindowClassName = "GDIAWindowClass";
+    private const string CrashingRetailHookSha256 =
+        "14e57644d5403819aebfb856053f28afbc40dcdc2d95d0d9a8c71eafdf707891";
+    private const string VerifiedRetailHookSha256 =
+        "5b2b6da0319dcbc8b41bbaef68d6ed09f494737edfcde41011917803c1ba1ac0";
+    private const string VerifiedRetailGameDllSha256 =
+        "d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7";
 
     private readonly object sync = new();
     private readonly HashSet<string> incomingBaseline = new(StringComparer.OrdinalIgnoreCase);
@@ -24,6 +30,7 @@ internal sealed class LiveGameAdapter : IDisposable
     private WndProc? windowProcedure;
     private IntPtr window;
     private string? itemAssistantDirectory;
+    private string? hookPath;
     private string? queueDirectory;
     private int? gameProcessId;
     private bool? isHardcore;
@@ -59,19 +66,35 @@ internal sealed class LiveGameAdapter : IDisposable
             try
             {
                 var install = ResolveItemAssistantDirectory();
-                var hook = install is null ? null : Path.Combine(install, "ItemAssistantHook_x64.dll");
+                var hook = ResolveLiveHookPath(install);
                 var injector = install is null ? null : Path.Combine(install, "DllInjector64.exe");
-                var compatible = hook is not null && injector is not null && File.Exists(hook) && File.Exists(injector);
+                var filesPresent = hook is not null && injector is not null && File.Exists(hook) && File.Exists(injector);
+                var compatibility = game.Count == 1 && filesPresent
+                    ? InspectCompatibility(game[0], hook!)
+                    : new LiveHookCompatibility(false, null);
+                var compatible = filesPresent && compatibility.Verified;
                 var queueSettings = ReadQueueSettings();
                 var currentState = state;
                 var currentDetail = detail;
+                if (window != IntPtr.Zero &&
+                    (gameProcessId is null || game.All(process => process.Id != gameProcessId)))
+                {
+                    state = "blocked";
+                    detail = "The connected Grim Dawn process exited. Live queue operations are locked.";
+                    gameProcessId = null;
+                    isHardcore = null;
+                    currentState = state;
+                    currentDetail = detail;
+                }
                 if (window == IntPtr.Zero)
                 {
                     currentState = game.Count == 0 || !compatible ? "unavailable" : "available";
                     currentDetail = game.Count == 0
                         ? "Start Grim Dawn and enter the world before enabling live mode."
-                        : !compatible
-                            ? "A compatible Grim Dawn Item Assistant hook installation was not found."
+                        : !filesPresent
+                            ? "A Grim Dawn Item Assistant hook installation was not found."
+                            : !compatible
+                                ? compatibility.Reason ?? "This game and hook combination has not been verified for live transfers."
                             : itemAssistant.Count > 0
                                 ? "Close Item Assistant before Cairn Codex owns the live queue."
                                 : "Compatible game process and GDIA hook found. Live mode is ready to connect.";
@@ -129,11 +152,19 @@ internal sealed class LiveGameAdapter : IDisposable
             }
             itemAssistantDirectory = ResolveItemAssistantDirectory()
                 ?? throw new FileNotFoundException("Grim Dawn Item Assistant is not installed.");
-            var hook = Path.Combine(itemAssistantDirectory, "ItemAssistantHook_x64.dll");
+            var hook = ResolveLiveHookPath(itemAssistantDirectory)
+                ?? throw new FileNotFoundException("The Cairn Codex live hook is missing.");
             var injector = Path.Combine(itemAssistantDirectory, "DllInjector64.exe");
             if (!File.Exists(hook) || !File.Exists(injector))
             {
                 throw new FileNotFoundException("The installed GDIA hook or injector is missing.");
+            }
+            var compatibility = InspectCompatibility(game[0], hook);
+            if (!compatibility.Verified)
+            {
+                foreach (var process in game) process.Dispose();
+                throw new WriteSafetyException(compatibility.Reason ??
+                    "This game and hook combination has not been verified for live transfers.");
             }
             queueDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -147,6 +178,7 @@ internal sealed class LiveGameAdapter : IDisposable
             }
             messages.Clear();
             isHardcore = null;
+            hookPath = hook;
             gameProcessId = game[0].Id;
             state = "connecting";
             detail = "Creating the live hook handshake window.";
@@ -362,6 +394,36 @@ internal sealed class LiveGameAdapter : IDisposable
         {
             throw new WriteSafetyException("The live-game adapter is not ready.");
         }
+        Process? connected = null;
+        try
+        {
+            if (gameProcessId is null)
+            {
+                throw new WriteSafetyException("The connected Grim Dawn process is no longer available.");
+            }
+            connected = Process.GetProcessById(gameProcessId.Value);
+            var hook = hookPath;
+            if (connected.HasExited || hook is null || !ProcessHasModule(connected, hook))
+            {
+                state = "blocked";
+                detail = "The connected Grim Dawn process or live hook exited. Live queue operations are locked.";
+                gameProcessId = null;
+                isHardcore = null;
+                throw new WriteSafetyException(detail);
+            }
+        }
+        catch (ArgumentException)
+        {
+            state = "blocked";
+            detail = "The connected Grim Dawn process exited. Live queue operations are locked.";
+            gameProcessId = null;
+            isHardcore = null;
+            throw new WriteSafetyException(detail);
+        }
+        finally
+        {
+            connected?.Dispose();
+        }
         var itemAssistant = FindProcesses(["IAGrim"]);
         try
         {
@@ -572,6 +634,49 @@ internal sealed class LiveGameAdapter : IDisposable
         catch { return false; }
     }
 
+    private static LiveHookCompatibility InspectCompatibility(Process game, string hookPath)
+    {
+        try
+        {
+            var hookVersion = FileVersionInfo.GetVersionInfo(hookPath).FileVersion ?? "unknown";
+            var hookSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(hookPath)));
+            var executable = game.MainModule?.FileName;
+            var gameDirectory = executable is null ? null : Path.GetDirectoryName(executable);
+            var gameDll = gameDirectory is null ? null : Path.Combine(gameDirectory, "Game.dll");
+            var executableInfo = executable is null ? null : FileVersionInfo.GetVersionInfo(executable);
+            var gameVersion = executableInfo?.ProductVersion ?? executableInfo?.FileVersion ?? "unknown";
+            var gameDllSha256 = gameDll is not null && File.Exists(gameDll)
+                ? Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(gameDll)))
+                : null;
+
+            if (hookSha256.Equals(CrashingRetailHookSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return new LiveHookCompatibility(false,
+                    $"Live mode is disabled for Grim Dawn {gameVersion} with GDIA hook {hookVersion}: " +
+                    "this exact hook crashed in the item-replica path during an item drop. Closed-game transfers remain available.");
+            }
+
+            if (hookSha256.Equals(VerifiedRetailHookSha256, StringComparison.OrdinalIgnoreCase) &&
+                gameDllSha256?.Equals(VerifiedRetailGameDllSha256, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return new LiveHookCompatibility(true,
+                    $"Verified Cairn Codex hook {hookVersion} for Grim Dawn {gameVersion}.");
+            }
+
+            // Injection mutates a running game process. Unknown binaries must be opted in
+            // here only after an item-drop and item-restore test has passed for the exact
+            // Game.dll and hook fingerprints.
+            return new LiveHookCompatibility(false,
+                $"Grim Dawn {gameVersion} with GDIA hook {hookVersion} has not been verified for live transfers. " +
+                "Closed-game transfers remain available.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return new LiveHookCompatibility(false,
+                $"Could not verify the live hook safely: {exception.Message}");
+        }
+    }
+
     private static string? ResolveItemAssistantDirectory()
     {
         var candidates = new[]
@@ -582,6 +687,15 @@ internal sealed class LiveGameAdapter : IDisposable
         return candidates.FirstOrDefault(path =>
             File.Exists(Path.Combine(path, "ItemAssistantHook_x64.dll")) &&
             File.Exists(Path.Combine(path, "DllInjector64.exe")));
+    }
+
+    private static string? ResolveLiveHookPath(string? itemAssistantDirectory)
+    {
+        var bundled = Path.Combine(AppContext.BaseDirectory, "native", "ItemAssistantHook_x64.dll");
+        if (File.Exists(bundled)) return bundled;
+        if (itemAssistantDirectory is null) return null;
+        var installed = Path.Combine(itemAssistantDirectory, "ItemAssistantHook_x64.dll");
+        return File.Exists(installed) ? installed : null;
     }
 
     private static LiveQueueSettings ReadQueueSettings()
@@ -715,6 +829,7 @@ internal sealed class LiveGameAdapter : IDisposable
 }
 
 internal sealed record LiveHookMessage(int Type, string DataHex, string ReceivedAtUtc);
+internal sealed record LiveHookCompatibility(bool Verified, string? Reason);
 internal sealed record LiveQueueSelfTestResult(bool Passed, int Fields, uint Seed, uint AffixRerolls);
 internal sealed record LiveQueueSettings(
     int LootFrom,

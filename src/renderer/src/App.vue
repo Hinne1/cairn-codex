@@ -364,25 +364,34 @@ const skillItemRows = computed(() => {
       .flatMap((section) => section.lines)
       .filter((line) => /converted to/i.test(line.label))
     const specialLines = modifiers.filter((line) => !/converted to/i.test(line.label))
+    const allConversionLines = [
+      ...conversionLines.map((line) => ({ scope: 'Skill', line })),
+      ...globalConversionLines.map((line) => ({ scope: 'Global', line }))
+    ]
+    const conversionTargets = [...new Set(
+      allConversionLines
+        .map(({ line }) => conversionTarget(line.label))
+        .filter((target): target is string => target !== null)
+    )]
     return [{
       item,
       amount,
-      conversion: [
-        ...conversionLines.map((line) => `Skill: ${formatPresentationLine(line)}`),
-        ...globalConversionLines.map((line) => `Global: ${formatPresentationLine(line)}`)
-      ].join('; '),
+      conversionTarget: conversionTargets.join(', '),
+      conversionDetails: allConversionLines
+        .map(({ scope, line }) => `${scope}: ${formatPresentationLine(line)}`)
+        .join('; '),
       special: specialLines.map(formatPresentationLine).join('; ')
     }]
   })
   return rows.sort((left, right) => {
     let comparison = 0
     if (skillSort.value === 'amount') {
-      const leftHasModifier = left.conversion.length > 0 || left.special.length > 0 ? 1 : 0
-      const rightHasModifier = right.conversion.length > 0 || right.special.length > 0 ? 1 : 0
+      const leftHasModifier = left.conversionDetails.length > 0 || left.special.length > 0 ? 1 : 0
+      const rightHasModifier = right.conversionDetails.length > 0 || right.special.length > 0 ? 1 : 0
       comparison = leftHasModifier - rightHasModifier || left.amount - right.amount
     }
     else if (skillSort.value === 'slot') comparison = left.item.slot.localeCompare(right.item.slot)
-    else if (skillSort.value === 'conversion') comparison = left.conversion.localeCompare(right.conversion)
+    else if (skillSort.value === 'conversion') comparison = left.conversionTarget.localeCompare(right.conversionTarget)
     else if (skillSort.value === 'special') comparison = left.special.localeCompare(right.special)
     else if (skillSort.value === 'level') comparison = left.item.levelRequirement - right.item.levelRequirement
     else comparison = left.item.name.localeCompare(right.item.name)
@@ -390,6 +399,12 @@ const skillItemRows = computed(() => {
     return skillSortDirection.value === 'asc' ? comparison : -comparison
   })
 })
+
+function conversionTarget(label: string): string | null {
+  const match = label.match(/converted to\s+(.+)$/i)
+  const target = match?.[1]?.replace(/\s+Damage$/i, '').trim()
+  return target || null
+}
 
 function setSkillSort(next: SkillSort): void {
   if (skillSort.value === next) {
@@ -1581,7 +1596,8 @@ function formatRollValue(value: number): string {
                 <th><button type="button" @click="setSkillSort('item')">Item {{ skillSort === 'item' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
                 <th><button type="button" @click="setSkillSort('slot')">Slot <span v-if="skillSort === 'slot'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
                 <th><button type="button" @click="setSkillSort('amount')">Ranks {{ skillSort === 'amount' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
-                <th><button type="button" @click="setSkillSort('conversion')">Conversion {{ skillSort === 'conversion' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
+                <th><button type="button" @click="setSkillSort('conversion')">Target {{ skillSort === 'conversion' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
+                <th>Conversion details</th>
                 <th><button type="button" @click="setSkillSort('special')">Special modifier <span v-if="skillSort === 'special'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
                 <th><button type="button" @click="setSkillSort('level')">Level {{ skillSort === 'level' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
               </tr>
@@ -1596,11 +1612,12 @@ function formatRollValue(value: number): string {
                 </td>
                 <td>{{ row.item.slot }}</td>
                 <td class="skill-amount">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</td>
-                <td>{{ row.conversion || '—' }}</td>
+                <td class="skill-conversion-target">{{ row.conversionTarget || '—' }}</td>
+                <td>{{ row.conversionDetails || '—' }}</td>
                 <td>{{ row.special || '—' }}</td>
                 <td>{{ row.item.levelRequirement }}</td>
               </tr>
-              <tr v-if="skillItemRows.length === 0"><td colspan="6" class="skill-empty">No matching items in this scope.</td></tr>
+              <tr v-if="skillItemRows.length === 0"><td colspan="7" class="skill-empty">No matching items in this scope.</td></tr>
             </tbody>
           </table>
         </div>

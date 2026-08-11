@@ -16,6 +16,7 @@ import type {
 type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary'
 type SortMode = 'name' | 'level' | 'completion' | 'roll'
+type ActiveView = 'collection' | 'sets' | 'vault'
 
 interface CollectionSet {
   record: string
@@ -28,9 +29,13 @@ interface CollectionSet {
 const status = ref<AppStatus | null>(null)
 const discovery = ref<GrimDawnDiscovery | null>(null)
 const snapshot = ref<CollectionSnapshot | null>(null)
+const enabledStashPaths = ref<string[]>(readStoredSourcePaths())
 const scanning = ref(false)
 const scanError = ref<string | null>(null)
+const cacheIssue = ref<string | null>(null)
+const zoomFactor = ref(readStoredZoomFactor())
 const activeCategory = ref('All')
+const activeView = ref<ActiveView>('collection')
 const query = ref('')
 const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
@@ -63,22 +68,33 @@ const categories = [
   'Weapons',
   'Offhands',
   'Jewelry',
-  'Relics',
-  'Sets',
-  'Vault'
+  'Relics'
 ]
 
+const targetStash = computed(() =>
+  stashChoices.value.find((stash) => stash.path === selectedStashPath.value) ?? null
+)
 const availableVaultItems = computed(() =>
-  vaultItems.value.filter((item) => item.state === 'ingested')
+  vaultItems.value.filter(
+    (item) => item.state === 'ingested' && item.isHardcore === targetStash.value?.isHardcore
+  )
 )
 const retrievedVaultItems = computed(() =>
   vaultItems.value.filter((item) => item.state === 'retrieved')
 )
-const stashChoices = computed(() => snapshot.value?.scannedStashes ?? [])
+const stashChoices = computed(() => snapshot.value?.availableStashes ?? snapshot.value?.scannedStashes ?? [])
+const activeSourceCount = computed(() => snapshot.value?.scannedStashes.length ?? 0)
+const sourceModeLabel = computed(() => {
+  const modes = new Set(snapshot.value?.scannedStashes.map((stash) => stash.isHardcore) ?? [])
+  if (modes.size > 1) return 'Mixed modes'
+  if (modes.has(true)) return 'Hardcore'
+  if (modes.has(false)) return 'Softcore'
+  return 'No sources'
+})
 const stagingHasUnsupported = computed(() => staging.value?.items.some((item) => !item.supported) ?? false)
 
 const filteredItems = computed(() => {
-  if (!snapshot.value || activeCategory.value === 'Sets') return []
+  if (!snapshot.value) return []
   const needle = query.value.trim().toLocaleLowerCase()
   return snapshot.value.items
     .filter((item) => matchesCategory(item, activeCategory.value))
@@ -147,15 +163,18 @@ const visibleSets = computed(() => {
       if (!needle) return true
       return (
         set.name.toLocaleLowerCase().includes(needle) ||
+        (set.items[0]?.setPresentation?.tiers ?? []).some((tier) =>
+          tier.lines.some((line) => formatPresentationLine(line).toLocaleLowerCase().includes(needle))
+        ) ||
         set.items.some((item) => matchesSearch(item, needle))
       )
     })
 })
 
 const displayedResultCount = computed(() =>
-  activeCategory.value === 'Vault'
+  activeView.value === 'vault'
     ? availableVaultItems.value.length
-    : activeCategory.value === 'Sets'
+    : activeView.value === 'sets'
       ? visibleSets.value.length
       : filteredItems.value.length
 )
@@ -185,7 +204,7 @@ const selectedCopies = computed(() => {
 })
 
 watch(
-  [activeCategory, query, ownership, rarityFilter, sortMode],
+  [activeView, activeCategory, query, ownership, rarityFilter, sortMode],
   () => {
     currentPage.value = 1
   }
@@ -195,30 +214,52 @@ watch(selectedStashPath, async (path) => {
   if (path) await refreshStaging()
 })
 
-watch(activeCategory, async (category) => {
-  if (category === 'Vault') await refreshVault()
+watch(activeView, async (view) => {
+  if (view === 'vault') await refreshVault()
 })
 
 onMounted(async () => {
   window.addEventListener('keydown', handleEscape)
+  window.addEventListener('wheel', handleZoomWheel, { passive: false })
+  zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
   status.value = await window.cairnCodex.getAppStatus()
-  await scanCollection()
+  let cached: CollectionSnapshot | null = null
+  try {
+    cached = await window.cairnCodex.getCachedCollection([...enabledStashPaths.value])
+  } catch (error) {
+    cacheIssue.value = readableError(error)
+    console.warn('Cached collection was unavailable; falling back to a full scan.', error)
+  }
+  if (cached) {
+    applySnapshot(cached)
+    void scanCollection()
+  } else {
+    await scanCollection()
+  }
   await refreshVault()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleEscape)
+  window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
 })
 
 async function scanCollection(): Promise<void> {
+  const requestedSources = [...enabledStashPaths.value]
+  const requestedKey = JSON.stringify(requestedSources.map((path) => path.toLocaleLowerCase()).sort())
   scanning.value = true
   scanError.value = null
   try {
-    snapshot.value = await window.cairnCodex.scanCollection()
-    discovery.value = snapshot.value.discovery
-    if (!selectedStashPath.value || !snapshot.value.scannedStashes.some((stash) => stash.path === selectedStashPath.value)) {
-      selectedStashPath.value = preferredStashPath(snapshot.value)
+    const result = await window.cairnCodex.scanCollection(requestedSources)
+    const currentKey = JSON.stringify(
+      enabledStashPaths.value.map((path) => path.toLocaleLowerCase()).sort()
+    )
+    if (requestedKey === currentKey) {
+      applySnapshot(result)
+    } else {
+      const current = await window.cairnCodex.getCachedCollection([...enabledStashPaths.value])
+      if (current) applySnapshot(current)
     }
   } catch (error) {
     scanError.value = error instanceof Error ? error.message : 'Collection scan failed.'
@@ -227,11 +268,83 @@ async function scanCollection(): Promise<void> {
   }
 }
 
+function applySnapshot(value: CollectionSnapshot): void {
+  snapshot.value = value
+  discovery.value = value.discovery
+  if (enabledStashPaths.value.length === 0 && value.scannedStashes.length > 0) {
+    enabledStashPaths.value = value.scannedStashes.map((stash) => stash.path)
+    storeSourcePaths()
+  }
+  if (
+    !selectedStashPath.value ||
+    !(value.availableStashes ?? value.scannedStashes).some(
+      (stash) => stash.path === selectedStashPath.value
+    )
+  ) {
+    selectedStashPath.value = preferredStashPath(value)
+  }
+}
+
+function readStoredSourcePaths(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('cairn-codex-sources') ?? '[]') as unknown
+    return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string') ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function storeSourcePaths(): void {
+  localStorage.setItem('cairn-codex-sources', JSON.stringify(enabledStashPaths.value))
+}
+
+function readStoredZoomFactor(): number {
+  const stored = Number(localStorage.getItem('cairn-codex-zoom'))
+  return Number.isFinite(stored) && stored >= 0.7 && stored <= 1.8 ? stored : 1
+}
+
+async function setZoom(factor: number): Promise<void> {
+  zoomFactor.value = await window.cairnCodex.setZoomFactor(factor)
+  localStorage.setItem('cairn-codex-zoom', String(zoomFactor.value))
+}
+
+function handleZoomWheel(event: WheelEvent): void {
+  if (!event.ctrlKey) return
+  event.preventDefault()
+  void setZoom(zoomFactor.value + (event.deltaY < 0 ? 0.1 : -0.1))
+}
+
+async function toggleCollectionSource(path: string): Promise<void> {
+  enabledStashPaths.value = enabledStashPaths.value.includes(path)
+    ? enabledStashPaths.value.filter((candidate) => candidate !== path)
+    : [...enabledStashPaths.value, path]
+  storeSourcePaths()
+  await loadSelectedSources()
+}
+
+async function selectSourceMode(isHardcore: boolean): Promise<void> {
+  enabledStashPaths.value = stashChoices.value
+    .filter((stash) => stash.isHardcore === isHardcore)
+    .map((stash) => stash.path)
+  storeSourcePaths()
+  await loadSelectedSources()
+}
+
+async function loadSelectedSources(): Promise<void> {
+  hideTooltip()
+  selectedRecord.value = null
+  const cached = await window.cairnCodex.getCachedCollection([...enabledStashPaths.value])
+  if (cached) applySnapshot(cached)
+  else await scanCollection()
+  await refreshVault()
+}
+
 function rarity(name: 'epic' | 'legendary'): CollectionRaritySummary | undefined {
   return snapshot.value?.rarities.find((summary) => summary.rarity === name)
 }
 
 function filterToRarity(value: 'epic' | 'legendary'): void {
+  activeView.value = 'collection'
   activeCategory.value = 'All'
   rarityFilter.value = value
   window.scrollTo({ top: 500, behavior: 'smooth' })
@@ -244,11 +357,6 @@ function percentage(summary: CollectionRaritySummary | undefined): string {
 
 function categoryProgress(category: string): string {
   if (!snapshot.value) return '0 / 0'
-  if (category === 'Vault') return `${availableVaultItems.value.length} ready`
-  if (category === 'Sets') {
-    const collected = collectionSets.value.filter((set) => set.collected === set.items.length).length
-    return `${collected} / ${collectionSets.value.length}`
-  }
   const matches = snapshot.value.items.filter((item) => matchesCategory(item, category))
   return `${matches.filter((item) => item.discovered).length} / ${matches.length}`
 }
@@ -428,7 +536,12 @@ function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
     item.itemClass,
     item.rarity,
     item.contentPack,
-    item.presentation?.searchText
+    item.presentation?.searchText,
+    item.setPresentation?.description,
+    ...(item.acquisition?.sources ?? []),
+    ...(item.setPresentation?.tiers.flatMap((tier) =>
+      tier.lines.map((line) => formatPresentationLine(line))
+    ) ?? [])
   ]
     .filter(Boolean)
     .join(' ')
@@ -521,15 +634,27 @@ function hideTooltip(): void {
 }
 
 function handleEscape(event: KeyboardEvent): void {
+  if (event.ctrlKey && event.key === '0') {
+    event.preventDefault()
+    void setZoom(1)
+    return
+  }
   if (event.key !== 'Escape') return
   hideTooltip()
   selectedRecord.value = null
 }
 
+function setMemberItems(item: CollectionItem): CollectionItem[] {
+  if (!snapshot.value || !item.setRecord) return []
+  return snapshot.value.items
+    .filter((candidate) => candidate.setRecord === item.setRecord)
+    .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
+}
+
 function formatPresentationLine(line: ItemPresentationLine): string {
   const minimum = line.minimum === null ? '' : formatRollValue(line.minimum)
   const maximum = line.maximum === null ? '' : formatRollValue(line.maximum)
-  const range = maximum ? `${minimum}${line.unit} – ${maximum}${line.unit}` : `${minimum}${line.unit}`
+  const range = maximum ? `${minimum}${line.unit} - ${maximum}${line.unit}` : `${minimum}${line.unit}`
   return `${line.prefix}${range}${range ? ' ' : ''}${line.label}${line.suffix}`
 }
 
@@ -538,7 +663,12 @@ async function pinCopy(copy: ObservedStashItem): Promise<void> {
   pinning.value = true
   try {
     const next = selectedItem.value.pinnedInstanceKey === copy.instanceKey ? null : copy.instanceKey
-    await window.cairnCodex.setPinnedBest(selectedItem.value.record, next)
+    const source = stashChoices.value.find((stash) => stash.path === copy.sourcePath)
+    await window.cairnCodex.setPinnedBest(
+      selectedItem.value.record,
+      next,
+      source?.isHardcore ?? snapshot.value?.isHardcore ?? false
+    )
     selectedItem.value.pinnedInstanceKey = next
   } finally {
     pinning.value = false
@@ -613,25 +743,36 @@ function formatRollValue(value: number): string {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :data-cache-issue="cacheIssue">
     <header class="topbar">
       <div>
         <p class="eyebrow">Grim Dawn collection atlas</p>
         <h1>Cairn Codex</h1>
       </div>
-      <div class="status-pill">
-        <span class="status-dot" :class="{ dim: status?.helper !== 'available' }" />
-        {{ status ? `v${status.appVersion} · ${status.helper}` : 'Connecting…' }}
+      <div class="topbar-actions">
+        <span class="source-pill">{{ sourceModeLabel }} · {{ activeSourceCount }} sources</span>
+        <div class="status-pill">
+          <span class="status-dot" :class="{ dim: status?.helper !== 'available' }" />
+          {{ status ? `v${status.appVersion} · ${status.helper}` : 'Connecting…' }}
+        </div>
       </div>
     </header>
 
     <main>
+      <section v-if="scanning && snapshot" class="background-scan" aria-live="polite">
+        <span class="scan-spinner" aria-hidden="true" />
+        <div>
+          <strong>Refreshing collection in the background</strong>
+          <small>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
+        </div>
+      </section>
       <section class="hero">
         <div>
           <p class="section-label">Collection</p>
           <h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>
           <p class="hero-copy">
             <template v-if="discovery?.installations[0]">
+              {{ sourceModeLabel }} ·
               {{ snapshot?.contentPacks.length ?? 0 }} content packs ·
               {{ snapshot?.scannedStashes.length ?? 0 }} transfer stashes ·
               {{ snapshot?.items.length.toLocaleString() ?? 0 }} catalog entries
@@ -674,7 +815,19 @@ function formatRollValue(value: number): string {
         </button>
       </section>
 
-      <nav class="category-tabs" aria-label="Item categories">
+      <nav class="workspace-tabs" aria-label="Cairn Codex workspace">
+        <button type="button" :class="{ active: activeView === 'collection' }" @click="activeView = 'collection'">
+          <span>Collection</span><small>Items and copies</small>
+        </button>
+        <button type="button" :class="{ active: activeView === 'sets' }" @click="activeView = 'sets'">
+          <span>Sets</span><small>{{ collectionSets.length }} catalogued</small>
+        </button>
+        <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
+          <span>Vault</span><small>{{ availableVaultItems.length }} ready</small>
+        </button>
+      </nav>
+
+      <nav v-if="activeView === 'collection'" class="category-tabs" aria-label="Item categories">
         <button
           v-for="category in categories"
           :key="category"
@@ -687,7 +840,7 @@ function formatRollValue(value: number): string {
         </button>
       </nav>
 
-      <section v-if="activeCategory !== 'Vault'" class="filter-bar" aria-label="Collection filters">
+      <section v-if="activeView !== 'vault'" class="filter-bar" aria-label="Collection filters">
         <label class="search-field">
           <span class="sr-only">Search collection</span>
           <input
@@ -712,7 +865,7 @@ function formatRollValue(value: number): string {
           <option value="legendary">Legendary</option>
           <option value="epic">Epic</option>
         </select>
-        <select v-if="activeCategory !== 'Sets'" v-model="sortMode" aria-label="Sort collection">
+        <select v-if="activeView === 'collection'" v-model="sortMode" aria-label="Sort collection">
           <option value="completion">Collected first</option>
           <option value="name">Name</option>
           <option value="level">Level</option>
@@ -721,7 +874,7 @@ function formatRollValue(value: number): string {
         <span class="result-count">{{ displayedResultCount.toLocaleString() }} results</span>
       </section>
 
-      <section v-if="activeCategory === 'Vault'" class="vault-workspace" aria-label="Item vault">
+      <section v-if="activeView === 'vault'" class="vault-workspace" aria-label="Item vault">
         <header class="vault-heading">
           <div>
             <p class="section-label">Transfer vault</p>
@@ -735,6 +888,37 @@ function formatRollValue(value: number): string {
             {{ vaultBusy ? 'Working…' : 'Recheck' }}
           </button>
         </header>
+
+        <section class="source-selector" aria-label="Collection stash sources">
+          <header>
+            <div>
+              <p class="section-label">Collection sources</p>
+              <h3>Choose which stashes count.</h3>
+              <small>Hardcore and Softcore remain separate unless you explicitly select both.</small>
+            </div>
+            <div class="source-presets">
+              <button type="button" @click="selectSourceMode(false)">Softcore only</button>
+              <button type="button" @click="selectSourceMode(true)">Hardcore only</button>
+            </div>
+          </header>
+          <div class="source-options">
+            <label v-for="stash in stashChoices" :key="stash.path" class="source-option">
+              <input
+                type="checkbox"
+                :checked="enabledStashPaths.includes(stash.path)"
+                :disabled="enabledStashPaths.length === 1 && enabledStashPaths.includes(stash.path)"
+                @change="toggleCollectionSource(stash.path)"
+              />
+              <span :class="stash.isHardcore ? 'hardcore' : 'softcore'">
+                {{ stash.isHardcore ? 'HC' : 'SC' }}
+              </span>
+              <div>
+                <strong>{{ stash.modLabel || 'Base game' }}</strong>
+                <small>{{ stash.itemCount }} items · {{ stash.path }}</small>
+              </div>
+            </label>
+          </div>
+        </section>
 
         <div class="vault-target">
           <label>
@@ -817,7 +1001,7 @@ function formatRollValue(value: number): string {
                 />
                 <div>
                   <strong>{{ item.name }}</strong>
-                  <small>{{ item.rarity }} · seed {{ item.seed }}</small>
+                  <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.rarity }} · seed {{ item.seed }}</small>
                 </div>
               </label>
             </div>
@@ -840,7 +1024,7 @@ function formatRollValue(value: number): string {
           </div>
           <div class="history-chips">
             <span v-for="item in retrievedVaultItems" :key="item.id">
-              {{ item.name }} · seed {{ item.seed }}
+              {{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.name }} · seed {{ item.seed }}
             </span>
           </div>
         </section>
@@ -852,7 +1036,7 @@ function formatRollValue(value: number): string {
         <p>Parsing the game database and your transfer stashes.</p>
       </section>
 
-      <section v-else-if="activeCategory === 'Sets'" class="set-grid" aria-label="Item sets">
+      <section v-else-if="activeView === 'sets'" class="set-grid" aria-label="Item sets">
         <article v-for="set in visibleSets" :key="set.record" class="set-card">
           <header>
             <div>
@@ -884,6 +1068,18 @@ function formatRollValue(value: number): string {
               </button>
             </li>
           </ul>
+          <div v-if="set.items[0]?.setPresentation?.tiers.length" class="set-bonus-tiers">
+            <section
+              v-for="tier in set.items[0]?.setPresentation?.tiers"
+              :key="tier.requiredPieces"
+              :class="{ unlocked: set.collected >= tier.requiredPieces }"
+            >
+              <h4>({{ tier.requiredPieces }}) Set</h4>
+              <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
+                {{ formatPresentationLine(line) }}
+              </p>
+            </section>
+          </div>
         </article>
         <div v-if="visibleSets.length === 0" class="no-results">No sets match these filters.</div>
       </section>
@@ -911,19 +1107,22 @@ function formatRollValue(value: number): string {
               <span v-else>{{ item.discovered ? '✓' : '?' }}</span>
             </div>
             <div class="item-copy">
-              <p>{{ item.rarity }} · level {{ item.levelRequirement }}</p>
               <h3>{{ item.name }}</h3>
+              <p>{{ item.rarity }} · {{ item.slot }} · Lv{{ item.levelRequirement }}</p>
               <small v-if="item.setName">{{ item.setName }}</small>
-              <small v-else>{{ item.slot }}</small>
             </div>
-            <div v-if="item.bestRollPercentile !== null" class="roll-summary">
-              <span>Best roll</span>
-              <strong>{{ item.bestRollPercentile.toFixed(1) }}%</strong>
+            <div class="card-result">
+              <strong v-if="item.bestRollPercentile !== null" class="roll-score">
+                ★ {{ item.bestRollPercentile.toFixed(1) }}%
+              </strong>
+              <span v-else class="roll-score dim">★ —</span>
+              <strong v-if="item.availableCount > 0">
+                {{ item.availableCount }} {{ item.availableCount === 1 ? 'copy' : 'copies' }}
+              </strong>
+              <strong v-else-if="item.discovered">Discovered · no copies</strong>
+              <strong v-else>Not found</strong>
             </div>
-            <span v-if="item.pinnedInstanceKey" class="pin-indicator">★ Pinned choice</span>
-            <strong v-if="item.availableCount > 0">{{ item.availableCount }} available</strong>
-            <strong v-else-if="item.discovered">Discovered · none available</strong>
-            <strong v-else>Not found</strong>
+            <span v-if="item.pinnedInstanceKey" class="pin-indicator">Pinned choice</span>
           </article>
           <div v-if="visibleItems.length === 0" class="no-results">No items match these filters.</div>
         </section>
@@ -971,6 +1170,31 @@ function formatRollValue(value: number): string {
             </p>
           </section>
 
+          <section v-if="tooltipItem.setPresentation" class="tooltip-section tooltip-set">
+            <h4>{{ tooltipItem.setPresentation.name }}</h4>
+            <p
+              v-for="member in setMemberItems(tooltipItem)"
+              :key="member.record"
+              class="set-member"
+              :class="{
+                current: member.record === tooltipItem.record,
+                missing: !member.discovered
+              }"
+            >
+              {{ member.name }}
+            </p>
+            <div
+              v-for="tier in tooltipItem.setPresentation.tiers"
+              :key="tier.requiredPieces"
+              class="tooltip-set-tier"
+            >
+              <h5>({{ tier.requiredPieces }}) Set</h5>
+              <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
+                {{ formatPresentationLine(line) }}
+              </p>
+            </div>
+          </section>
+
           <section v-if="tooltipItem.presentation.grantedSkill" class="tooltip-section granted-skill">
             <h4>Granted Skills</h4>
             <h5>
@@ -991,6 +1215,11 @@ function formatRollValue(value: number): string {
             </p>
           </section>
         </template>
+
+        <section v-if="tooltipItem.acquisition?.sources.length" class="tooltip-section tooltip-acquisition">
+          <h4>Acquisition</h4>
+          <p v-for="source in tooltipItem.acquisition.sources" :key="source">{{ source }}</p>
+        </section>
 
         <footer>
           <span v-if="tooltipItem.levelRequirement">Required Player Level: {{ tooltipItem.levelRequirement }}</span>

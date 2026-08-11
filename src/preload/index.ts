@@ -14,12 +14,16 @@ import {
 
 const api: CairnCodexApi = {
   getAppStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getAppStatus) as Promise<AppStatus>,
+  setZoomFactor: (factor) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setZoomFactor, { factor }) as Promise<number>,
+  getCachedCollection: (sourcePaths) =>
+    ipcRenderer.invoke(IPC_CHANNELS.getCachedCollection, { sourcePaths }) as Promise<CollectionSnapshot | null>,
   discoverGrimDawn: () =>
     ipcRenderer.invoke(IPC_CHANNELS.discoverGrimDawn) as Promise<GrimDawnDiscovery>,
-  scanCollection: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.scanCollection) as Promise<CollectionSnapshot>,
-  setPinnedBest: (record, instanceKey) =>
-    ipcRenderer.invoke(IPC_CHANNELS.setPinnedBest, { record, instanceKey }) as Promise<void>,
+  scanCollection: (sourcePaths) =>
+    ipcRenderer.invoke(IPC_CHANNELS.scanCollection, { sourcePaths }) as Promise<CollectionSnapshot>,
+  setPinnedBest: (record, instanceKey, isHardcore) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setPinnedBest, { record, instanceKey, isHardcore }) as Promise<void>,
   inspectWriteSafety: () =>
     ipcRenderer.invoke(IPC_CHANNELS.inspectWriteSafety) as Promise<WriteSafetyStatus>,
   inspectStagingTab: (path) =>

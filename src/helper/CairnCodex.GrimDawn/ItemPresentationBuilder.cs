@@ -158,6 +158,50 @@ internal static partial class ItemPresentationBuilder
             string.Join(' ', searchParts.Where(value => !string.IsNullOrWhiteSpace(value))));
     }
 
+    public static ItemSetPresentation? BuildSet(string? path, ItemPresentationSource data)
+    {
+        if (path is null || !data.Records.TryGetValue(path, out var source)) return null;
+        var record = source.Record;
+        var members = record.Values.GetValueOrDefault("setMembers")?
+            .Select(value => value.Text)
+            .OfType<string>()
+            .Where(value => value.Length > 0)
+            .ToArray() ?? [];
+        if (members.Length == 0) return null;
+
+        var tierLines = Enumerable.Range(0, members.Length)
+            .Select(_ => new List<ItemPresentationLine>())
+            .ToArray();
+        foreach (var pair in Labels)
+        {
+            if (!record.Values.TryGetValue(pair.Key, out var values)) continue;
+            var numbers = values.Where(value => value.Number.HasValue)
+                .Select(value => value.Number!.Value)
+                .ToArray();
+            for (var index = 0; index < Math.Min(numbers.Length, members.Length); index++)
+            {
+                var value = numbers[index];
+                var previous = index == 0 ? 0 : numbers[index - 1];
+                if (Math.Abs(value) < 0.001 || Math.Abs(value - previous) < 0.001) continue;
+                tierLines[index].Add(Line(
+                    pair.Value.Label,
+                    Math.Abs(value),
+                    null,
+                    pair.Value.Unit,
+                    prefix: value < 0 ? "−" : string.Empty));
+            }
+        }
+        var tiers = tierLines
+            .Select((lines, index) => new ItemSetBonusTier(index + 1, lines))
+            .Where(tier => tier.Lines.Count > 0)
+            .ToArray();
+        return new ItemSetPresentation(
+            Resolve(record.Text("setName"), data.Tags) ?? HumanizePath(path),
+            Resolve(record.Text("setDescription"), data.Tags),
+            members,
+            tiers);
+    }
+
     private static void AddHeader(ArzRecord record, List<ItemPresentationLine> lines)
     {
         var itemClass = record.Text("Class") ?? string.Empty;
@@ -561,4 +605,12 @@ internal sealed record ItemGrantedSkillPresentation(
     string Name,
     string? Description,
     string? Trigger,
+    IReadOnlyList<ItemPresentationLine> Lines);
+internal sealed record ItemSetPresentation(
+    string Name,
+    string? Description,
+    IReadOnlyList<string> Members,
+    IReadOnlyList<ItemSetBonusTier> Tiers);
+internal sealed record ItemSetBonusTier(
+    int RequiredPieces,
     IReadOnlyList<ItemPresentationLine> Lines);

@@ -39,6 +39,10 @@ export class CollectionDatabase {
     return this.withLifetimeState(snapshot)
   }
 
+  presentSnapshot(snapshot: CollectionSnapshot, isHardcore?: boolean): CollectionSnapshot {
+    return this.withLifetimeState(snapshot, isHardcore)
+  }
+
   prepareIngestOperation(input: PreparedIngestOperation): void {
     this.database.exec('BEGIN IMMEDIATE')
     try {
@@ -98,15 +102,16 @@ export class CollectionDatabase {
 
       const insertVault = this.database.prepare(`
         INSERT INTO vault_item (
-          id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc
-        ) VALUES (?, ?, 'ingested', ?, ?, NULL)
+          id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc, is_hardcore
+        ) VALUES (?, ?, 'ingested', ?, ?, NULL, ?)
       `)
       for (const item of pending) {
         insertVault.run(
           item.vault_item_id,
           item.base_record,
           Buffer.from(item.payload_json, 'utf8'),
-          input.completedAtUtc
+          input.completedAtUtc,
+          input.isHardcore ? 1 : 0
         )
       }
       this.database
@@ -143,7 +148,7 @@ export class CollectionDatabase {
       .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
   }
 
-  getVaultItems(vaultItemIds: string[]): VaultItem[] {
+  getVaultItems(vaultItemIds: string[], isHardcore?: boolean): VaultItem[] {
     if (vaultItemIds.length === 0) {
       throw new Error('At least one vault item ID is required.')
     }
@@ -157,8 +162,9 @@ export class CollectionDatabase {
         SELECT id, base_record, state, serialized_item
         FROM vault_item
         WHERE id IN (${placeholders})
+          ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
       `)
-      .all(...vaultItemIds) as Array<{
+      .all(...vaultItemIds, ...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
       id: string
       base_record: string
       state: VaultItemState
@@ -179,7 +185,7 @@ export class CollectionDatabase {
     })
   }
 
-  listVaultItems(): VaultListItem[] {
+  listVaultItems(isHardcore?: boolean): VaultListItem[] {
     const rows = this.database
       .prepare(`
         SELECT
@@ -189,13 +195,15 @@ export class CollectionDatabase {
           vault_item.serialized_item,
           vault_item.ingested_at_utc,
           vault_item.retrieved_at_utc,
+          vault_item.is_hardcore,
           catalog_item.name,
           catalog_item.rarity
         FROM vault_item
         JOIN catalog_item ON catalog_item.record = vault_item.base_record
+        ${isHardcore === undefined ? '' : 'WHERE vault_item.is_hardcore = ?'}
         ORDER BY vault_item.ingested_at_utc DESC, vault_item.id
       `)
-      .all() as Array<{
+      .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
       id: string
       base_record: string
       state: VaultItemState
@@ -204,6 +212,7 @@ export class CollectionDatabase {
       retrieved_at_utc: string | null
       name: string
       rarity: 'epic' | 'legendary'
+      is_hardcore: number
     }>
 
     return rows.map((row) => {
@@ -215,6 +224,7 @@ export class CollectionDatabase {
         baseRecord: row.base_record,
         name: row.name,
         rarity: row.rarity,
+        isHardcore: row.is_hardcore === 1,
         state: row.state,
         seed: payload.seed ?? 0,
         ingestedAtUtc: row.ingested_at_utc,
@@ -345,20 +355,40 @@ export class CollectionDatabase {
       )
   }
 
-  setPinnedBest(record: string, instanceKey: string | null): void {
-    if (instanceKey === null) {
-      this.database.prepare('DELETE FROM pinned_best WHERE record = ?').run(record)
+  setPinnedBest(record: string, instanceKey: string | null, isHardcore?: boolean): void {
+    if (isHardcore === undefined) {
+      if (instanceKey === null) {
+        this.database.prepare('DELETE FROM pinned_best WHERE record = ?').run(record)
+        return
+      }
+      this.database
+        .prepare(`
+          INSERT INTO pinned_best (record, instance_key, pinned_at_utc)
+          VALUES (?, ?, ?)
+          ON CONFLICT(record) DO UPDATE SET
+            instance_key = excluded.instance_key,
+            pinned_at_utc = excluded.pinned_at_utc
+        `)
+        .run(record, instanceKey, new Date().toISOString())
       return
     }
+    if (instanceKey === null) {
+      this.database.prepare('DELETE FROM pinned_best WHERE record = ?').run(record)
+      this.database
+        .prepare('DELETE FROM pinned_best_mode WHERE record = ? AND is_hardcore = ?')
+        .run(record, isHardcore ? 1 : 0)
+      return
+    }
+    this.database.prepare('DELETE FROM pinned_best WHERE record = ?').run(record)
     this.database
       .prepare(`
-        INSERT INTO pinned_best (record, instance_key, pinned_at_utc)
-        VALUES (?, ?, ?)
-        ON CONFLICT(record) DO UPDATE SET
+        INSERT INTO pinned_best_mode (record, is_hardcore, instance_key, pinned_at_utc)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(record, is_hardcore) DO UPDATE SET
           instance_key = excluded.instance_key,
           pinned_at_utc = excluded.pinned_at_utc
       `)
-      .run(record, instanceKey, new Date().toISOString())
+      .run(record, isHardcore ? 1 : 0, instanceKey, new Date().toISOString())
   }
 
   close(): void {
@@ -368,7 +398,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 4) {
+    if (version > 5) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )
@@ -514,6 +544,65 @@ export class CollectionDatabase {
         PRAGMA user_version = 4;
         COMMIT;
       `)
+      version = 4
+    }
+
+    if (version === 4) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE collection_entry_mode (
+          record TEXT NOT NULL REFERENCES catalog_item(record) ON DELETE RESTRICT,
+          is_hardcore INTEGER NOT NULL CHECK (is_hardcore IN (0, 1)),
+          first_discovered_at_utc TEXT NOT NULL,
+          last_discovered_at_utc TEXT NOT NULL,
+          PRIMARY KEY (record, is_hardcore)
+        ) STRICT;
+        INSERT OR IGNORE INTO collection_entry_mode (
+          record, is_hardcore, first_discovered_at_utc, last_discovered_at_utc
+        )
+        SELECT
+          observed_item.base_record,
+          stash_snapshot.is_hardcore,
+          MIN(scan_run.scanned_at_utc),
+          MAX(scan_run.scanned_at_utc)
+        FROM observed_item
+        JOIN stash_snapshot ON stash_snapshot.id = observed_item.stash_snapshot_id
+        JOIN scan_run ON scan_run.id = stash_snapshot.scan_run_id
+        JOIN catalog_item ON catalog_item.record = observed_item.base_record
+        GROUP BY observed_item.base_record, stash_snapshot.is_hardcore;
+
+        CREATE TABLE pinned_best_mode (
+          record TEXT NOT NULL REFERENCES catalog_item(record) ON DELETE CASCADE,
+          is_hardcore INTEGER NOT NULL CHECK (is_hardcore IN (0, 1)),
+          instance_key TEXT NOT NULL,
+          pinned_at_utc TEXT NOT NULL,
+          PRIMARY KEY (record, is_hardcore)
+        ) STRICT;
+        INSERT OR IGNORE INTO pinned_best_mode (record, is_hardcore, instance_key, pinned_at_utc)
+        SELECT
+          pinned_best.record,
+          stash_snapshot.is_hardcore,
+          pinned_best.instance_key,
+          pinned_best.pinned_at_utc
+        FROM pinned_best
+        JOIN observed_item ON observed_item.instance_key = pinned_best.instance_key
+        JOIN stash_snapshot ON stash_snapshot.id = observed_item.stash_snapshot_id
+        GROUP BY pinned_best.record, stash_snapshot.is_hardcore;
+
+        ALTER TABLE vault_item ADD COLUMN is_hardcore INTEGER NOT NULL DEFAULT 0
+          CHECK (is_hardcore IN (0, 1));
+        UPDATE vault_item
+        SET is_hardcore = 1
+        WHERE EXISTS (
+          SELECT 1
+          FROM operation_journal
+          WHERE operation_journal.operation = 'ingest'
+            AND operation_journal.completed_at_utc = vault_item.ingested_at_utc
+            AND LOWER(operation_journal.stash_path) LIKE '%.gsh'
+        );
+        PRAGMA user_version = 5;
+        COMMIT;
+      `)
     }
   }
 
@@ -619,30 +708,75 @@ export class CollectionDatabase {
 
   private persistDiscoveries(snapshot: CollectionSnapshot): void {
     const statement = this.database.prepare(`
-      INSERT INTO collection_entry (record, first_discovered_at_utc, last_discovered_at_utc)
-      VALUES (?, ?, ?)
-      ON CONFLICT(record) DO UPDATE SET last_discovered_at_utc = excluded.last_discovered_at_utc
+      INSERT INTO collection_entry_mode (
+        record, is_hardcore, first_discovered_at_utc, last_discovered_at_utc
+      ) VALUES (?, ?, ?, ?)
+      ON CONFLICT(record, is_hardcore) DO UPDATE SET
+        last_discovered_at_utc = excluded.last_discovered_at_utc
     `)
-    for (const item of snapshot.items) {
-      if (item.availableCount > 0) {
-        statement.run(item.record, snapshot.scannedAtUtc, snapshot.scannedAtUtc)
-      }
+    const catalogRecords = new Set(snapshot.items.map((item) => item.record.toLowerCase()))
+    const modesByPath = new Map(
+      snapshot.scannedStashes.map((stash) => [stash.path.toLowerCase(), stash.isHardcore])
+    )
+    const discoveries = new Set<string>()
+    for (const item of snapshot.observedItems) {
+      if (!catalogRecords.has(item.baseRecord.toLowerCase())) continue
+      const isHardcore = modesByPath.get(item.sourcePath.toLowerCase())
+      if (isHardcore === undefined) continue
+      const key = `${isHardcore ? 1 : 0}:${item.baseRecord.toLowerCase()}`
+      if (discoveries.has(key)) continue
+      discoveries.add(key)
+      statement.run(item.baseRecord, isHardcore ? 1 : 0, snapshot.scannedAtUtc, snapshot.scannedAtUtc)
     }
   }
 
-  private withLifetimeState(snapshot: CollectionSnapshot): CollectionSnapshot {
-    const rows = this.database
-      .prepare('SELECT record, first_discovered_at_utc FROM collection_entry')
-      .all() as Array<{ record: string; first_discovered_at_utc: string }>
+  private withLifetimeState(
+    snapshot: CollectionSnapshot,
+    isHardcore?: boolean
+  ): CollectionSnapshot {
+    const rows = (isHardcore === undefined
+      ? this.database
+          .prepare(`
+            SELECT record, MIN(first_discovered_at_utc) AS first_discovered_at_utc
+            FROM collection_entry_mode
+            GROUP BY record
+          `)
+          .all()
+      : this.database
+          .prepare(`
+            SELECT record, first_discovered_at_utc
+            FROM collection_entry_mode
+            WHERE is_hardcore = ?
+          `)
+          .all(isHardcore ? 1 : 0)) as Array<{
+      record: string
+      first_discovered_at_utc: string
+    }>
     const discovered = new Map(
       rows.map((row) => [row.record.toLowerCase(), row.first_discovered_at_utc])
     )
-    const pinned = new Map(
-      (this.database.prepare('SELECT record, instance_key FROM pinned_best').all() as Array<{
+    const pinnedRows = (isHardcore === undefined
+      ? this.database
+          .prepare(`
+            SELECT record, instance_key FROM pinned_best
+            UNION ALL
+            SELECT record, MIN(instance_key) AS instance_key
+            FROM pinned_best_mode AS mode_pin
+            WHERE NOT EXISTS (
+              SELECT 1 FROM pinned_best AS legacy_pin
+              WHERE legacy_pin.record = mode_pin.record
+            )
+            GROUP BY record
+            HAVING COUNT(DISTINCT instance_key) = 1
+          `)
+          .all()
+      : this.database
+          .prepare('SELECT record, instance_key FROM pinned_best_mode WHERE is_hardcore = ?')
+          .all(isHardcore ? 1 : 0)) as Array<{
         record: string
         instance_key: string
-      }>).map((row) => [row.record.toLowerCase(), row.instance_key])
-    )
+      }>
+    const pinned = new Map(pinnedRows.map((row) => [row.record.toLowerCase(), row.instance_key]))
     const items = snapshot.items.map((item) => ({
       ...item,
       discovered: discovered.has(item.record.toLowerCase()),
@@ -712,6 +846,7 @@ export interface CompletedIngestOperation {
   operationId: string
   backupPath: string
   completedAtUtc: string
+  isHardcore: boolean
   detail: unknown
 }
 

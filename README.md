@@ -14,6 +14,9 @@ items.
 
 ## Architecture
 
+Live-game mutation is a separate, opt-in adapter; see
+[`docs/architecture/live-game-adapter.md`](docs/architecture/live-game-adapter.md).
+
 ```text
 Vue 3 + TypeScript renderer
           |

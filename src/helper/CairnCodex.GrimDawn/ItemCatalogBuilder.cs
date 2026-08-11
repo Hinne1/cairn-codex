@@ -48,8 +48,10 @@ internal static class ItemCatalogBuilder
 
     public static ItemCatalogResult Build(ItemCatalogData data)
     {
+        var presentationSource = new ItemPresentationSource(data.Tags, data.Records);
+        var acquisitionReferences = BuildAcquisitionReferences(data.Records);
         var items = data.Records.Values
-            .Select(source => Project(source, data.Tags, data.Records))
+            .Select(source => Project(source, data.Tags, data.Records, presentationSource, acquisitionReferences))
             .Where(item => item is not null)
             .Cast<CatalogItem>()
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -67,7 +69,9 @@ internal static class ItemCatalogBuilder
     private static CatalogItem? Project(
         CatalogSourceRecord source,
         IReadOnlyDictionary<string, string> tags,
-        IReadOnlyDictionary<string, CatalogSourceRecord> records)
+        IReadOnlyDictionary<string, CatalogSourceRecord> records,
+        ItemPresentationSource presentationSource,
+        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences)
     {
         var record = source.Record;
         var classification = record.Text("itemClassification");
@@ -123,7 +127,55 @@ internal static class ItemCatalogBuilder
             setRecord,
             record.Text("bitmap") ?? record.Text("relicBitmap") ?? record.Text("shardBitmap"),
             source.ContentPack,
-            ItemPresentationBuilder.Build(record, data: new ItemPresentationSource(tags, records)));
+            ItemPresentationBuilder.BuildSet(setRecord, presentationSource),
+            BuildAcquisition(record.Name, acquisitionReferences),
+            ItemPresentationBuilder.Build(record, presentationSource));
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> BuildAcquisitionReferences(
+        IReadOnlyDictionary<string, CatalogSourceRecord> records)
+    {
+        var references = new Dictionary<string, List<AcquisitionReference>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in records.Values)
+        {
+            foreach (var field in source.Record.Values)
+            {
+                foreach (var value in field.Value.Select(value => value.Text).OfType<string>())
+                {
+                    if (!value.StartsWith("records/", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!references.TryGetValue(value, out var list))
+                    {
+                        list = [];
+                        references[value] = list;
+                    }
+                    list.Add(new AcquisitionReference(source.Record.Name, source.Record.Type, field.Key));
+                }
+            }
+        }
+        return references.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<AcquisitionReference>)pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static ItemAcquisitionPresentation BuildAcquisition(
+        string itemRecord,
+        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> references)
+    {
+        var sources = references.GetValueOrDefault(itemRecord) ?? [];
+        var hints = new List<string>();
+        if (sources.Any(source => source.Type == "ItemArtifactFormula" && source.Field == "artifactName"))
+            hints.Add("Craftable from a learned blueprint");
+        if (sources.Any(source =>
+                source.Record.Contains("/loottables/vendors/", StringComparison.OrdinalIgnoreCase) ||
+                source.Record.Contains("/merchants/", StringComparison.OrdinalIgnoreCase)))
+            hints.Add("Merchant or faction inventory");
+        if (sources.Any(source =>
+                source.Record.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) &&
+                !source.Record.Contains("/vendors/", StringComparison.OrdinalIgnoreCase)))
+            hints.Add("Random drop");
+        if (hints.Count == 0) hints.Add("Special source; exact location not yet indexed");
+        return new ItemAcquisitionPresentation(hints);
     }
 
     private static string? Resolve(string? tag, IReadOnlyDictionary<string, string> tags)
@@ -216,4 +268,9 @@ internal sealed record CatalogItem(
     string? SetRecord,
     string? Bitmap,
     string ContentPack,
+    ItemSetPresentation? SetPresentation,
+    ItemAcquisitionPresentation Acquisition,
     ItemPresentation Presentation);
+
+internal sealed record AcquisitionReference(string Record, string Type, string Field);
+internal sealed record ItemAcquisitionPresentation(IReadOnlyList<string> Sources);

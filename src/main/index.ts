@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import {
   IPC_CHANNELS,
@@ -100,6 +100,10 @@ interface ItemIconExtractionResult {
   failures: Array<{ bitmap: string; error: string }>
 }
 
+function isHardcoreStashPath(path: string): boolean {
+  return path.toLocaleLowerCase().endsWith('.gsh')
+}
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'cairn-icon',
@@ -134,6 +138,9 @@ function createHelperClient(): GrimDawnHelperClient {
 
 function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionDatabase): void {
   let writeInProgress = false
+  let latestCollection: CollectionSnapshot | null = null
+  let collectionScan: Promise<CollectionSnapshot> | null = null
+  const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
     if (writeInProgress) throw new Error('Another vault write is already in progress.')
     writeInProgress = true
@@ -153,20 +160,52 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     }
   })
   ipcMain.handle(
+    IPC_CHANNELS.setZoomFactor,
+    (event, input: { factor: number }): number => {
+      const factor = Math.min(1.8, Math.max(0.7, Math.round(input.factor * 10) / 10))
+      event.sender.setZoomFactor(factor)
+      return factor
+    }
+  )
+  ipcMain.handle(
     IPC_CHANNELS.discoverGrimDawn,
     (): Promise<GrimDawnDiscovery> => helper.request<GrimDawnDiscovery>('discover-grim-dawn')
   )
   ipcMain.handle(
+    IPC_CHANNELS.getCachedCollection,
+    async (_event, input: { sourcePaths: string[] }): Promise<CollectionSnapshot | null> => {
+      latestCollection ??= await readCollectionCache(collectionCachePath)
+      if (!latestCollection) {
+        return null
+      }
+      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+      return database.presentSnapshot(projected, lifetimeMode(projected))
+    }
+  )
+  ipcMain.handle(
     IPC_CHANNELS.scanCollection,
-    async (): Promise<CollectionSnapshot> => {
-      const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-      return database.persistSnapshot(await attachItemIcons(helper, snapshot))
+    async (_event, input: { sourcePaths: string[] }): Promise<CollectionSnapshot> => {
+      collectionScan ??= (async () => {
+        const startedAt = Date.now()
+        const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+        const withIcons = await attachItemIcons(helper, snapshot)
+        const persisted = database.persistSnapshot(withIcons)
+        latestCollection = persisted
+        await writeCollectionCache(collectionCachePath, persisted)
+        console.log(`[collection-scan] completed in ${Date.now() - startedAt}ms`)
+        return persisted
+      })().finally(() => {
+        collectionScan = null
+      })
+      const snapshot = await collectionScan
+      const projected = projectCollectionSources(snapshot, input.sourcePaths)
+      return database.presentSnapshot(projected, lifetimeMode(projected))
     }
   )
   ipcMain.handle(
     IPC_CHANNELS.setPinnedBest,
-    (_event, input: { record: string; instanceKey: string | null }): void => {
-      database.setPinnedBest(input.record, input.instanceKey)
+    (_event, input: { record: string; instanceKey: string | null; isHardcore: boolean }): void => {
+      database.setPinnedBest(input.record, input.instanceKey, input.isHardcore)
     }
   )
   ipcMain.handle(
@@ -178,7 +217,11 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     (_event, input: { path: string }): Promise<StagingTabInspection> =>
       inspectStagingTab(helper, database, input.path)
   )
-  ipcMain.handle(IPC_CHANNELS.listVaultItems, (): VaultListItem[] => database.listVaultItems())
+  ipcMain.handle(
+    IPC_CHANNELS.listVaultItems,
+    (_event, input?: { isHardcore?: boolean }): VaultListItem[] =>
+      database.listVaultItems(input?.isHardcore)
+  )
   ipcMain.handle(
     IPC_CHANNELS.ingestStagingTab,
     (_event, input: { path: string }): Promise<IngestResult> =>
@@ -222,6 +265,104 @@ async function attachItemIcons(
       iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
     }))
   }
+}
+
+async function readCollectionCache(path: string): Promise<CollectionSnapshot | null> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as CollectionSnapshot
+    if (
+      !Array.isArray(parsed.items) ||
+      !Array.isArray(parsed.observedItems) ||
+      !Array.isArray(parsed.scannedStashes)
+    ) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function writeCollectionCache(path: string, snapshot: CollectionSnapshot): Promise<void> {
+  const temporaryPath = path + '.tmp'
+  await writeFile(temporaryPath, JSON.stringify(snapshot), 'utf8')
+  await rename(temporaryPath, path)
+}
+
+function projectCollectionSources(
+  snapshot: CollectionSnapshot,
+  sourcePaths: string[]
+): CollectionSnapshot {
+  const availableStashes = snapshot.availableStashes ?? snapshot.scannedStashes
+  const requested = new Set(sourcePaths.map((path) => path.toLocaleLowerCase()))
+  const defaultMode = availableStashes.some((stash) => stash.isHardcore)
+  const scannedStashes = availableStashes.filter((stash) =>
+    requested.size > 0
+      ? requested.has(stash.path.toLocaleLowerCase())
+      : stash.isHardcore === defaultMode
+  )
+  const paths = new Set(scannedStashes.map((stash) => stash.path.toLocaleLowerCase()))
+  const observedItems = snapshot.observedItems.filter((item) =>
+    paths.has(item.sourcePath.toLocaleLowerCase())
+  )
+  const copiesByRecord = new Map<string, typeof observedItems>()
+  for (const item of observedItems) {
+    const key = item.baseRecord.toLocaleLowerCase()
+    const copies = copiesByRecord.get(key)
+    if (copies) copies.push(item)
+    else copiesByRecord.set(key, [item])
+  }
+  const items = snapshot.items.map((item) => {
+    const copies = copiesByRecord.get(item.record.toLocaleLowerCase()) ?? []
+    const trusted = copies.filter(
+      (copy) =>
+        copy.rollAnalysis?.trusted === true &&
+        copy.rollAnalysis.overallEstimatedPercentile !== null
+    )
+    return {
+      ...item,
+      availableCount: copies.length,
+      analyzedCopyCount: trusted.length,
+      bestRollPercentile:
+        trusted.length > 0
+          ? Math.max(...trusted.map((copy) => copy.rollAnalysis!.overallEstimatedPercentile!))
+          : null
+    }
+  })
+  const warnings = snapshot.warnings.filter((warning) => {
+    if (paths.has(warning.path.toLocaleLowerCase())) return true
+    return scannedStashes.some(
+      (stash) => stash.isHardcore === isHardcoreStashPath(warning.path)
+    )
+  })
+  const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+    const matching = items.filter((item) => item.rarity === rarity)
+    return {
+      rarity,
+      total: matching.length,
+      collected: matching.filter((item) => item.availableCount > 0).length,
+      availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
+    }
+  })
+  return {
+    ...snapshot,
+    isHardcore:
+      scannedStashes.length > 0 &&
+      scannedStashes.every((stash) => stash.isHardcore === scannedStashes[0]!.isHardcore)
+        ? scannedStashes[0]!.isHardcore
+        : undefined,
+    availableStashes,
+    scannedStashes,
+    observedItems,
+    warnings,
+    rarities,
+    items
+  }
+}
+
+function lifetimeMode(snapshot: CollectionSnapshot): boolean | undefined {
+  const modes = new Set(snapshot.scannedStashes.map((stash) => stash.isHardcore))
+  return modes.size === 1 ? [...modes][0] : undefined
 }
 
 function registerItemIconProtocol(): void {
@@ -426,6 +567,7 @@ async function runSmokeTest(
       operationId: ingestOperationId,
       backupPath: 'smoke-ingest-backup',
       completedAtUtc: new Date().toISOString(),
+      isHardcore: true,
       detail: { phase: 'committed', smokeTest: true }
     })
     const retrievalOperationId = randomUUID()
@@ -605,6 +747,7 @@ async function executeIngestCommand(
       operationId,
       backupPath: committed.transaction.backupPath,
       completedAtUtc,
+      isHardcore: isHardcoreStashPath(plan.path),
       detail: {
         phase: 'committed',
         replacementSha256: committed.transaction.committedSha256,
@@ -654,7 +797,10 @@ async function runRetrievalPlanCommand(
   command: RetrievalPlanCommand
 ): Promise<void> {
   try {
-    const vaultItems = database.getVaultItems(command.vaultItemIds)
+    const vaultItems = database.getVaultItems(
+      command.vaultItemIds,
+      isHardcoreStashPath(command.path)
+    )
     const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
     if (unavailable.length > 0) {
       throw new Error(
@@ -725,7 +871,10 @@ async function executeRetrievalCommand(
       throw new Error('Write safety gate refused permission: ' + safety.reasons.join(' '))
     }
 
-    const vaultItems = database.getVaultItems(command.vaultItemIds)
+    const vaultItems = database.getVaultItems(
+      command.vaultItemIds,
+      isHardcoreStashPath(command.path)
+    )
     const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
     if (unavailable.length > 0) {
       throw new Error(
@@ -953,16 +1102,24 @@ function createWindow(): void {
 async function captureWindowWhenReady(window: BrowserWindow, path: string): Promise<void> {
   try {
     window.setContentSize(1440, 1000)
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      const scanError = await window.webContents.executeJavaScript(
+        "document.querySelector('.scan-error')?.textContent"
+      )
+      if (scanError) throw new Error('Renderer collection scan failed: ' + scanError)
       const ready = await window.webContents.executeJavaScript(
         `Boolean(document.querySelector('.catalog-grid, .set-grid')) &&
-         !document.querySelector('.primary-action')?.disabled`
+         (!document.querySelector('.primary-action')?.disabled ||
+          Boolean(document.querySelector('.background-scan'))) &&
+         (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN === '1')}
+           ? !document.querySelector('.background-scan')
+           : true)`
       )
       if (ready) {
         const category = process.env.CAIRN_CODEX_SCREENSHOT_CATEGORY
         if (category) {
           await window.webContents.executeJavaScript(`
-            [...document.querySelectorAll('.category-tabs button')]
+            [...document.querySelectorAll('.workspace-tabs button, .category-tabs button')]
               .find((button) => button.querySelector('span')?.textContent === ${JSON.stringify(category)})
               ?.click()
           `)
@@ -1013,6 +1170,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           copyCards: document.querySelectorAll('.copy-card').length,
           drawer: document.querySelector('.item-drawer h2')?.textContent?.trim(),
           tooltip: document.querySelector('.game-tooltip')?.textContent?.trim(),
+          cacheIssue: document.querySelector('.app-shell')?.getAttribute('data-cache-issue'),
+          cacheApi: typeof window.cairnCodex?.getCachedCollection,
           icons: [...document.querySelectorAll('.item-mark img')].map((image) => ({
             src: image.getAttribute('src'),
             complete: image.complete,
@@ -1033,7 +1192,20 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       }
       await new Promise((resolve) => setTimeout(resolve, 500))
     }
-    throw new Error('Renderer did not finish its collection scan before screenshot timeout.')
+    const diagnostic = await window.webContents.executeJavaScript(`({
+      heading: document.querySelector('.hero h2')?.textContent,
+      scanError: document.querySelector('.scan-error')?.textContent,
+      scanDisabled: document.querySelector('.primary-action')?.disabled,
+          backgroundScan: document.querySelector('.background-scan')?.textContent,
+          cacheIssue: document.querySelector('.app-shell')?.getAttribute('data-cache-issue'),
+          cacheApi: typeof window.cairnCodex?.getCachedCollection,
+      cards: document.querySelectorAll('.item-card').length,
+      text: document.body.innerText.slice(0, 500)
+    })`)
+    throw new Error(
+      'Renderer did not finish its collection scan before screenshot timeout: ' +
+        JSON.stringify(diagnostic)
+    )
   } catch (error) {
     console.error(error)
     app.exit(1)

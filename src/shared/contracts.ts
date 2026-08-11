@@ -1,5 +1,7 @@
 export const IPC_CHANNELS = {
   getAppStatus: 'app:get-status',
+  setZoomFactor: 'app:set-zoom-factor',
+  getCachedCollection: 'collection:get-cached',
   discoverGrimDawn: 'grim-dawn:discover',
   scanCollection: 'grim-dawn:scan-collection',
   setPinnedBest: 'collection:set-pinned-best',
@@ -18,9 +20,11 @@ export interface AppStatus {
 
 export interface CairnCodexApi {
   getAppStatus: () => Promise<AppStatus>
+  setZoomFactor: (factor: number) => Promise<number>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
-  scanCollection: () => Promise<CollectionSnapshot>
-  setPinnedBest: (record: string, instanceKey: string | null) => Promise<void>
+  getCachedCollection: (sourcePaths: string[]) => Promise<CollectionSnapshot | null>
+  scanCollection: (sourcePaths: string[]) => Promise<CollectionSnapshot>
+  setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>
@@ -59,6 +63,7 @@ export interface VaultListItem {
   baseRecord: string
   name: string
   rarity: 'epic' | 'legendary'
+  isHardcore: boolean
   state: VaultItemState
   seed: number
   ingestedAtUtc: string
@@ -121,6 +126,8 @@ export interface TransferStashCandidate {
 }
 
 export interface CollectionSnapshot {
+  isHardcore?: boolean
+  availableStashes?: ScannedStash[]
   scannedAtUtc: string
   discovery: GrimDawnDiscovery
   contentPacks: CatalogContentPack[]
@@ -171,6 +178,8 @@ export interface CollectionItem {
   bitmap: string | null
   iconKey?: string | null
   contentPack: string
+  setPresentation?: ItemSetPresentation | null
+  acquisition?: ItemAcquisitionPresentation
   presentation?: ItemPresentation
   availableCount: number
   bestRollPercentile: number | null
@@ -208,6 +217,22 @@ export interface ItemGrantedSkillPresentation {
   description: string | null
   trigger: string | null
   lines: ItemPresentationLine[]
+}
+
+export interface ItemSetPresentation {
+  name: string
+  description: string | null
+  members: string[]
+  tiers: ItemSetBonusTier[]
+}
+
+export interface ItemSetBonusTier {
+  requiredPieces: number
+  lines: ItemPresentationLine[]
+}
+
+export interface ItemAcquisitionPresentation {
+  sources: string[]
 }
 
 export interface ObservedStashItem {

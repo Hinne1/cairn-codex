@@ -50,8 +50,22 @@ internal static class ItemCatalogBuilder
     {
         var presentationSource = new ItemPresentationSource(data.Tags, data.Records);
         var acquisitionReferences = BuildAcquisitionReferences(data.Records);
+        var setPresentations = data.Records.Values
+            .Select(source => source.Record.Text("itemSetName"))
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                path => path,
+                path => ItemPresentationBuilder.BuildSet(path, presentationSource),
+                StringComparer.OrdinalIgnoreCase);
         var items = data.Records.Values
-            .Select(source => Project(source, data.Tags, data.Records, presentationSource, acquisitionReferences))
+            .Select(source => Project(
+                source,
+                data.Tags,
+                data.Records,
+                presentationSource,
+                acquisitionReferences,
+                setPresentations))
             .Where(item => item is not null)
             .Cast<CatalogItem>()
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -71,7 +85,8 @@ internal static class ItemCatalogBuilder
         IReadOnlyDictionary<string, string> tags,
         IReadOnlyDictionary<string, CatalogSourceRecord> records,
         ItemPresentationSource presentationSource,
-        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences)
+        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences,
+        IReadOnlyDictionary<string, ItemSetPresentation?> setPresentations)
     {
         var record = source.Record;
         var classification = record.Text("itemClassification");
@@ -127,7 +142,7 @@ internal static class ItemCatalogBuilder
             setRecord,
             record.Text("bitmap") ?? record.Text("relicBitmap") ?? record.Text("shardBitmap"),
             source.ContentPack,
-            ItemPresentationBuilder.BuildSet(setRecord, presentationSource),
+            setRecord is null ? null : setPresentations.GetValueOrDefault(setRecord),
             BuildAcquisition(record.Name, acquisitionReferences),
             ItemPresentationBuilder.Build(record, presentationSource));
     }

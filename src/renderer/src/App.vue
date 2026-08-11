@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   AppStatus,
+  CollectionBasis,
   CollectionItem,
   CollectionRaritySummary,
   CollectionSnapshot,
@@ -30,6 +31,7 @@ const status = ref<AppStatus | null>(null)
 const discovery = ref<GrimDawnDiscovery | null>(null)
 const snapshot = ref<CollectionSnapshot | null>(null)
 const enabledStashPaths = ref<string[]>(readStoredSourcePaths())
+const collectionBasis = ref<CollectionBasis>(readStoredCollectionBasis())
 const scanning = ref(false)
 const scanError = ref<string | null>(null)
 const cacheIssue = ref<string | null>(null)
@@ -91,7 +93,19 @@ const sourceModeLabel = computed(() => {
   if (modes.has(false)) return 'Softcore'
   return 'No sources'
 })
+const collectionBasisLabel = computed(() =>
+  collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Index'
+)
 const stagingHasUnsupported = computed(() => staging.value?.items.some((item) => !item.supported) ?? false)
+const ingestBlockedReason = computed(() => {
+  if (vaultBusy.value) return 'A Vault operation is already running.'
+  if (!writeSafety.value) return 'Checking whether stash writes are safe…'
+  if (!writeSafety.value.permitted) return writeSafety.value.reasons.join(' ') || 'Stash writes are locked.'
+  if (!staging.value) return 'Inspecting the final stash tab…'
+  if (staging.value.itemCount === 0) return 'Put at least one Epic or Legendary in the final stash tab.'
+  if (stagingHasUnsupported.value) return 'Remove unsupported items from the final stash tab first.'
+  return null
+})
 
 const filteredItems = computed(() => {
   if (!snapshot.value) return []
@@ -225,7 +239,10 @@ onMounted(async () => {
   status.value = await window.cairnCodex.getAppStatus()
   let cached: CollectionSnapshot | null = null
   try {
-    cached = await window.cairnCodex.getCachedCollection([...enabledStashPaths.value])
+    cached = await window.cairnCodex.getCachedCollection(
+      [...enabledStashPaths.value],
+      collectionBasis.value
+    )
   } catch (error) {
     cacheIssue.value = readableError(error)
     console.warn('Cached collection was unavailable; falling back to a full scan.', error)
@@ -247,18 +264,26 @@ onBeforeUnmount(() => {
 
 async function scanCollection(): Promise<void> {
   const requestedSources = [...enabledStashPaths.value]
-  const requestedKey = JSON.stringify(requestedSources.map((path) => path.toLocaleLowerCase()).sort())
+  const requestedBasis = collectionBasis.value
+  const requestedKey = JSON.stringify({
+    basis: requestedBasis,
+    paths: requestedSources.map((path) => path.toLocaleLowerCase()).sort()
+  })
   scanning.value = true
   scanError.value = null
   try {
-    const result = await window.cairnCodex.scanCollection(requestedSources)
-    const currentKey = JSON.stringify(
-      enabledStashPaths.value.map((path) => path.toLocaleLowerCase()).sort()
-    )
+    const result = await window.cairnCodex.scanCollection(requestedSources, requestedBasis)
+    const currentKey = JSON.stringify({
+      basis: collectionBasis.value,
+      paths: enabledStashPaths.value.map((path) => path.toLocaleLowerCase()).sort()
+    })
     if (requestedKey === currentKey) {
       applySnapshot(result)
     } else {
-      const current = await window.cairnCodex.getCachedCollection([...enabledStashPaths.value])
+      const current = await window.cairnCodex.getCachedCollection(
+        [...enabledStashPaths.value],
+        collectionBasis.value
+      )
       if (current) applySnapshot(current)
     }
   } catch (error) {
@@ -298,6 +323,19 @@ function storeSourcePaths(): void {
   localStorage.setItem('cairn-codex-sources', JSON.stringify(enabledStashPaths.value))
 }
 
+function readStoredCollectionBasis(): CollectionBasis {
+  return localStorage.getItem('cairn-codex-collection-basis') === 'archive'
+    ? 'archive'
+    : 'stashes'
+}
+
+async function setCollectionBasis(basis: CollectionBasis): Promise<void> {
+  if (collectionBasis.value === basis) return
+  collectionBasis.value = basis
+  localStorage.setItem('cairn-codex-collection-basis', basis)
+  await loadSelectedSources()
+}
+
 function readStoredZoomFactor(): number {
   const stored = Number(localStorage.getItem('cairn-codex-zoom'))
   return Number.isFinite(stored) && stored >= 0.7 && stored <= 1.8 ? stored : 1
@@ -333,7 +371,10 @@ async function selectSourceMode(isHardcore: boolean): Promise<void> {
 async function loadSelectedSources(): Promise<void> {
   hideTooltip()
   selectedRecord.value = null
-  const cached = await window.cairnCodex.getCachedCollection([...enabledStashPaths.value])
+  const cached = await window.cairnCodex.getCachedCollection(
+    [...enabledStashPaths.value],
+    collectionBasis.value
+  )
   if (cached) applySnapshot(cached)
   else await scanCollection()
   await refreshVault()
@@ -540,7 +581,18 @@ function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
     item.setPresentation?.description,
     ...(item.acquisition?.sources ?? []),
     ...(item.setPresentation?.tiers.flatMap((tier) =>
-      tier.lines.map((line) => formatPresentationLine(line))
+      [
+        ...tier.lines.map((line) => formatPresentationLine(line)),
+        ...(tier.petLines ?? []).map((line) => formatPresentationLine(line)),
+        ...(tier.skillModifiers ?? []).flatMap((section) => [
+          section.heading,
+          ...section.lines.map((line) => formatPresentationLine(line))
+        ]),
+        tier.grantedSkill?.name,
+        tier.grantedSkill?.description,
+        tier.grantedSkill?.trigger,
+        ...(tier.grantedSkill?.lines.map((line) => formatPresentationLine(line)) ?? [])
+      ]
     ) ?? [])
   ]
     .filter(Boolean)
@@ -768,7 +820,7 @@ function formatRollValue(value: number): string {
       </section>
       <section class="hero">
         <div>
-          <p class="section-label">Collection</p>
+          <p class="section-label">{{ collectionBasisLabel }}</p>
           <h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>
           <p class="hero-copy">
             <template v-if="discovery?.installations[0]">
@@ -812,6 +864,27 @@ function formatRollValue(value: number): string {
           </div>
           <div class="meter epic"><span :style="{ width: percentage(rarity('epic')) }" /></div>
           <small>{{ percentage(rarity('epic')) }} discovered · {{ rarity('epic')?.availableCopies ?? 0 }} copies available</small>
+        </button>
+      </section>
+
+      <section class="collection-basis" aria-label="Collection persistence">
+        <button
+          type="button"
+          :class="{ active: collectionBasis === 'stashes' }"
+          :aria-pressed="collectionBasis === 'stashes'"
+          @click="setCollectionBasis('stashes')"
+        >
+          <strong>Stash Index</strong>
+          <small>Ownership mirrors the selected transfer stashes.</small>
+        </button>
+        <button
+          type="button"
+          :class="{ active: collectionBasis === 'archive' }"
+          :aria-pressed="collectionBasis === 'archive'"
+          @click="setCollectionBasis('archive')"
+        >
+          <strong>Codex Archive</strong>
+          <small>Ownership persists here after items are ingested from the game.</small>
         </button>
       </section>
 
@@ -973,11 +1046,13 @@ function formatRollValue(value: number): string {
             <button
               class="vault-action"
               type="button"
-              :disabled="vaultBusy || !writeSafety?.permitted || !staging?.itemCount || stagingHasUnsupported"
+              :disabled="Boolean(ingestBlockedReason)"
+              :title="ingestBlockedReason ?? 'Archive the staged items in Cairn Codex.'"
               @click="ingestStagingTab"
             >
               {{ vaultBusy ? 'Verifying…' : `Ingest ${staging?.itemCount ?? 0} staged` }}
             </button>
+            <p v-if="ingestBlockedReason" class="action-blocked-reason">{{ ingestBlockedReason }}</p>
           </article>
 
           <article class="vault-panel">
@@ -1078,6 +1153,30 @@ function formatRollValue(value: number): string {
               <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
                 {{ formatPresentationLine(line) }}
               </p>
+              <div v-if="tier.petLines?.length" class="set-tier-group">
+                <h5>Bonus to All Pets</h5>
+                <p v-for="(line, index) in tier.petLines" :key="`pet:${line.label}:${index}`">
+                  {{ formatPresentationLine(line) }}
+                </p>
+              </div>
+              <div
+                v-for="modifier in tier.skillModifiers ?? []"
+                :key="`modifier:${modifier.heading}`"
+                class="set-tier-group skill-bonus"
+              >
+                <h5>{{ modifier.heading }}</h5>
+                <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
+                  {{ formatPresentationLine(line) }}
+                </p>
+              </div>
+              <div v-if="tier.grantedSkill" class="set-tier-group skill-bonus">
+                <h5>{{ tier.grantedSkill.name }}</h5>
+                <p v-if="tier.grantedSkill.trigger">{{ tier.grantedSkill.trigger }}</p>
+                <p v-if="tier.grantedSkill.description">{{ tier.grantedSkill.description }}</p>
+                <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
+                  {{ formatPresentationLine(line) }}
+                </p>
+              </div>
             </section>
           </div>
         </article>
@@ -1192,6 +1291,38 @@ function formatRollValue(value: number): string {
               <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
                 {{ formatPresentationLine(line) }}
               </p>
+              <div v-if="tier.petLines?.length" class="tooltip-set-subsection">
+                <h6>Bonus to All Pets</h6>
+                <p
+                  v-for="(line, index) in tier.petLines"
+                  :key="`pet:${line.label}:${index}`"
+                  :class="`tone-${line.tone}`"
+                >
+                  {{ formatPresentationLine(line) }}
+                </p>
+              </div>
+              <div
+                v-for="modifier in tier.skillModifiers ?? []"
+                :key="`modifier:${modifier.heading}`"
+                class="tooltip-set-subsection skill-bonus"
+              >
+                <h6>{{ modifier.heading }}</h6>
+                <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
+                  {{ formatPresentationLine(line) }}
+                </p>
+              </div>
+              <div v-if="tier.grantedSkill" class="tooltip-set-subsection granted-skill">
+                <h6>
+                  {{ tier.grantedSkill.name }}
+                  <span v-if="tier.grantedSkill.trigger">({{ tier.grantedSkill.trigger }})</span>
+                </h6>
+                <p v-if="tier.grantedSkill.description" class="skill-description">
+                  {{ tier.grantedSkill.description }}
+                </p>
+                <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
+                  {{ formatPresentationLine(line) }}
+                </p>
+              </div>
             </div>
           </section>
 

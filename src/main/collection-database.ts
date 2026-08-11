@@ -43,6 +43,48 @@ export class CollectionDatabase {
     return this.withLifetimeState(snapshot, isHardcore)
   }
 
+  presentArchiveSnapshot(snapshot: CollectionSnapshot, isHardcore?: boolean): CollectionSnapshot {
+    const rows = this.database
+      .prepare(`
+        SELECT
+          base_record,
+          MIN(ingested_at_utc) AS first_ingested_at_utc,
+          SUM(CASE WHEN state = 'ingested' THEN 1 ELSE 0 END) AS available_count
+        FROM vault_item
+        ${isHardcore === undefined ? '' : 'WHERE is_hardcore = ?'}
+        GROUP BY base_record
+      `)
+      .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
+      base_record: string
+      first_ingested_at_utc: string
+      available_count: number
+    }>
+    const archived = new Map(rows.map((row) => [row.base_record.toLowerCase(), row]))
+    const pinned = this.loadPinned(isHardcore)
+    const items = snapshot.items.map((item) => {
+      const row = archived.get(item.record.toLowerCase())
+      return {
+        ...item,
+        availableCount: row?.available_count ?? 0,
+        bestRollPercentile: null,
+        analyzedCopyCount: 0,
+        discovered: Boolean(row),
+        firstDiscoveredAt: row?.first_ingested_at_utc ?? null,
+        pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
+      }
+    })
+    const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+      const matching = items.filter((item) => item.rarity === rarity)
+      return {
+        rarity,
+        total: matching.length,
+        collected: matching.filter((item) => item.discovered).length,
+        availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
+      }
+    })
+    return { ...snapshot, basis: 'archive', observedItems: [], items, rarities }
+  }
+
   prepareIngestOperation(input: PreparedIngestOperation): void {
     this.database.exec('BEGIN IMMEDIATE')
     try {
@@ -755,6 +797,27 @@ export class CollectionDatabase {
     const discovered = new Map(
       rows.map((row) => [row.record.toLowerCase(), row.first_discovered_at_utc])
     )
+    const pinned = this.loadPinned(isHardcore)
+    const items = snapshot.items.map((item) => ({
+      ...item,
+      discovered: discovered.has(item.record.toLowerCase()),
+      firstDiscoveredAt: discovered.get(item.record.toLowerCase()) ?? null,
+      pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
+    }))
+    const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+      const matching = items.filter((item) => item.rarity === rarity)
+      return {
+        rarity,
+        total: matching.length,
+        collected: matching.filter((item) => item.discovered).length,
+        availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
+      }
+    })
+
+    return { ...snapshot, basis: 'stashes', items, rarities }
+  }
+
+  private loadPinned(isHardcore?: boolean): Map<string, string> {
     const pinnedRows = (isHardcore === undefined
       ? this.database
           .prepare(`
@@ -776,24 +839,7 @@ export class CollectionDatabase {
         record: string
         instance_key: string
       }>
-    const pinned = new Map(pinnedRows.map((row) => [row.record.toLowerCase(), row.instance_key]))
-    const items = snapshot.items.map((item) => ({
-      ...item,
-      discovered: discovered.has(item.record.toLowerCase()),
-      firstDiscoveredAt: discovered.get(item.record.toLowerCase()) ?? null,
-      pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
-    }))
-    const rarities = (['epic', 'legendary'] as const).map((rarity) => {
-      const matching = items.filter((item) => item.rarity === rarity)
-      return {
-        rarity,
-        total: matching.length,
-        collected: matching.filter((item) => item.discovered).length,
-        availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
-      }
-    })
-
-    return { ...snapshot, items, rarities }
+    return new Map(pinnedRows.map((row) => [row.record.toLowerCase(), row.instance_key]))
   }
 
   private withInstanceKeys(snapshot: CollectionSnapshot): CollectionSnapshot {

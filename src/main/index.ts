@@ -5,6 +5,7 @@ import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import {
   IPC_CHANNELS,
   type AppStatus,
+  type CollectionBasis,
   type CollectionSnapshot,
   type GrimDawnDiscovery,
   type IngestResult,
@@ -173,18 +174,18 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
   ipcMain.handle(
     IPC_CHANNELS.getCachedCollection,
-    async (_event, input: { sourcePaths: string[] }): Promise<CollectionSnapshot | null> => {
+    async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot | null> => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
       if (!latestCollection) {
         return null
       }
       const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return database.presentSnapshot(projected, lifetimeMode(projected))
+      return presentCollection(database, projected, input.basis)
     }
   )
   ipcMain.handle(
     IPC_CHANNELS.scanCollection,
-    async (_event, input: { sourcePaths: string[] }): Promise<CollectionSnapshot> => {
+    async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
       collectionScan ??= (async () => {
         const startedAt = Date.now()
         const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
@@ -199,7 +200,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       })
       const snapshot = await collectionScan
       const projected = projectCollectionSources(snapshot, input.sourcePaths)
-      return database.presentSnapshot(projected, lifetimeMode(projected))
+      return presentCollection(database, projected, input.basis)
     }
   )
   ipcMain.handle(
@@ -365,6 +366,17 @@ function lifetimeMode(snapshot: CollectionSnapshot): boolean | undefined {
   return modes.size === 1 ? [...modes][0] : undefined
 }
 
+function presentCollection(
+  database: CollectionDatabase,
+  snapshot: CollectionSnapshot,
+  basis: CollectionBasis
+): CollectionSnapshot {
+  const mode = lifetimeMode(snapshot)
+  return basis === 'archive'
+    ? database.presentArchiveSnapshot(snapshot, mode)
+    : database.presentSnapshot({ ...snapshot, basis: 'stashes' }, mode)
+}
+
 function registerItemIconProtocol(): void {
   const iconDirectory = join(app.getPath('userData'), 'item-icons')
   protocol.handle('cairn-icon', async (request) => {
@@ -415,6 +427,31 @@ async function runSmokeTest(
       mythicalMaw?.presentation?.sections.filter((section) => section.kind === 'skill-modifier').length !== 3
     ) {
       throw new Error('Catalog presentation did not resolve Mythical Maw skill levels and modifiers.')
+    }
+    const oathbreaker = helperSnapshot.items.find((item) => item.setName === 'Oathbreaker')
+      ?.setPresentation
+    const marauder = helperSnapshot.items.find((item) => item.setName === "Marauder's Justice")
+      ?.setPresentation
+    const brimstone = helperSnapshot.items.find((item) => item.setName === 'Brimstone')
+      ?.setPresentation
+    if (
+      !oathbreaker?.tiers.some(
+        (tier) => tier.lines.some((line) => line.tone === 'skill' && line.minimum === 3) &&
+          tier.grantedSkill
+      ) ||
+      !marauder?.tiers.some(
+        (tier) =>
+          tier.requiredPieces === 3 &&
+          tier.lines.some((line) => line.label === 'Fire Damage' && line.minimum === 7) &&
+          tier.lines.some((line) => line.label === 'Cold Damage' && line.minimum === 7)
+      ) ||
+      !brimstone?.tiers.some(
+        (tier) =>
+          tier.requiredPieces === 2 &&
+          tier.lines.some((line) => line.label === 'Fire Damage' && line.minimum === 18)
+      )
+    ) {
+      throw new Error('Set presentation omitted flat damage, skill bonuses, or granted skills.')
     }
     const invertedRange = helperSnapshot.items
       .flatMap((item) => item.presentation?.sections ?? [])
@@ -570,6 +607,15 @@ async function runSmokeTest(
       isHardcore: true,
       detail: { phase: 'committed', smokeTest: true }
     })
+    const archivedBeforeRetrieval = database
+      .presentArchiveSnapshot(snapshot, true)
+      .items.find((item) => item.record.toLowerCase() === journalPayload.baseRecord.toLowerCase())
+    if (
+      !archivedBeforeRetrieval?.discovered ||
+      archivedBeforeRetrieval.availableCount !== 1
+    ) {
+      throw new Error('Codex Archive did not own the newly ingested item.')
+    }
     const retrievalOperationId = randomUUID()
     database.prepareRetrievalOperation({
       operationId: retrievalOperationId,
@@ -589,6 +635,12 @@ async function runSmokeTest(
       vaultItemIds: [journalVaultItemId],
       detail: { phase: 'committed', smokeTest: true }
     })
+    const archivedAfterRetrieval = database
+      .presentArchiveSnapshot(snapshot, true)
+      .items.find((item) => item.record.toLowerCase() === journalPayload.baseRecord.toLowerCase())
+    if (!archivedAfterRetrieval?.discovered || archivedAfterRetrieval.availableCount !== 0) {
+      throw new Error('Codex Archive did not retain collection history after retrieval.')
+    }
     if (database.getVaultItems([journalVaultItemId])[0]?.state !== 'retrieved') {
       throw new Error('Vault item did not enter retrieved state.')
     }

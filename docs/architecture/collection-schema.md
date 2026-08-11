@@ -44,3 +44,15 @@ fingerprint covers serialized item identity and roll fields but excludes stash
 path, tab, item index, and coordinates, so a preference survives ordinary item
 movement. Auto-best remains computed data; pinned-best is explicit user state
 and may intentionally select a lower aggregate score.
+
+Schema version 5 separates lifetime discovery, pinned choices, and Vault items
+by Hardcore/Softcore mode. A retrieval cannot cross that boundary.
+
+The UI exposes two projections over the same canonical catalog:
+
+- **Stash Index** uses selected stash snapshots for availability and
+  mode-specific lifetime discoveries for completion.
+- **Codex Archive** uses `vault_item` as the ownership authority. Ingested
+  rows are available copies; retrieved rows remain historical discoveries but
+  are no longer available. Consequently an item can leave every Grim Dawn
+  stash while remaining both serialized and browsable in Cairn Codex.

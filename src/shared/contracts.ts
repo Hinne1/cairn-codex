@@ -12,6 +12,8 @@ export const IPC_CHANNELS = {
   retrieveVaultItems: 'vault:retrieve-items'
 } as const
 
+export type CollectionBasis = 'stashes' | 'archive'
+
 export interface AppStatus {
   appVersion: string
   helper: 'not-configured' | 'available' | 'unavailable'
@@ -22,8 +24,8 @@ export interface CairnCodexApi {
   getAppStatus: () => Promise<AppStatus>
   setZoomFactor: (factor: number) => Promise<number>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
-  getCachedCollection: (sourcePaths: string[]) => Promise<CollectionSnapshot | null>
-  scanCollection: (sourcePaths: string[]) => Promise<CollectionSnapshot>
+  getCachedCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot | null>
+  scanCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
@@ -126,6 +128,7 @@ export interface TransferStashCandidate {
 }
 
 export interface CollectionSnapshot {
+  basis?: CollectionBasis
   isHardcore?: boolean
   availableStashes?: ScannedStash[]
   scannedAtUtc: string
@@ -229,6 +232,9 @@ export interface ItemSetPresentation {
 export interface ItemSetBonusTier {
   requiredPieces: number
   lines: ItemPresentationLine[]
+  petLines: ItemPresentationLine[]
+  skillModifiers: ItemPresentationSection[]
+  grantedSkill: ItemGrantedSkillPresentation | null
 }
 
 export interface ItemAcquisitionPresentation {

@@ -21,6 +21,10 @@ internal static partial class ItemPresentationBuilder
             ["characterIntelligenceModifier"] = new("Spirit", "%"),
             ["characterLifeModifier"] = new("Health", "%"),
             ["characterManaModifier"] = new("Energy", "%"),
+            ["characterLifeRegen"] = new("Health Regenerated per Second"),
+            ["characterLifeRegenModifier"] = new("Health Regeneration", "%"),
+            ["characterManaRegen"] = new("Energy Regenerated per Second"),
+            ["characterManaRegenModifier"] = new("Energy Regeneration", "%"),
             ["characterOffensiveAbility"] = new("Offensive Ability"),
             ["characterDefensiveAbility"] = new("Defensive Ability"),
             ["characterOffensiveAbilityModifier"] = new("Offensive Ability", "%"),
@@ -30,6 +34,9 @@ internal static partial class ItemPresentationBuilder
             ["characterRunSpeedModifier"] = new("Movement Speed", "%"),
             ["characterTotalSpeedModifier"] = new("Total Speed", "%"),
             ["characterConstitutionModifier"] = new("Constitution", "%"),
+            ["characterHealIncreasePercent"] = new("Healing Effects", "%"),
+            ["characterRunSpeedMaxModifier"] = new("Maximum Movement Speed", "%"),
+            ["characterSpellCastSpeedMaxModifier"] = new("Maximum Casting Speed", "%"),
             ["characterDodgePercent"] = new("Chance to Avoid Melee Attacks", "%"),
             ["characterDeflectProjectile"] = new("Chance to Avoid Projectiles", "%"),
             ["characterEnergyAbsorptionPercent"] = new("Energy Absorption from Enemy Spells", "%"),
@@ -79,9 +86,18 @@ internal static partial class ItemPresentationBuilder
             ["defensiveTotalSpeedResistance"] = new("Slow Resistance", "%"),
             ["defensiveReflect"] = new("Damage Reflected", "%"),
             ["defensiveProtectionModifier"] = new("Increased Armor", "%"),
+            ["defensiveBonusProtection"] = new("Armor"),
+            ["defensiveBlockModifier"] = new("Shield Block Chance", "%"),
+            ["defensiveBlockAmountModifier"] = new("Shield Damage Blocked", "%"),
+            ["defensivePercentReflectionResistance"] = new("Reflected Damage Reduction", "%"),
+            ["defensivePercentCurrentLife"] = new("Maximum Health Resistance", "%"),
+            ["defensiveSlowLifeLeach"] = new("Life Leech Resistance", "%"),
+            ["defensiveBleedingDuration"] = new("Reduced Bleeding Duration", "%"),
+            ["defensiveFireDuration"] = new("Reduced Burn Duration", "%"),
             ["defensiveAbsorptionModifier"] = new("Increased Armor Absorption", "%"),
             ["skillCooldownReduction"] = new("Skill Cooldown Reduction", "%"),
             ["skillManaCostReduction"] = new("Skill Energy Cost", "%"),
+            ["skillComboChargeSpendReduction"] = new("Weapon Pool Charge Cost", "%"),
             ["retaliationTotalDamageModifier"] = new("Total Retaliation Damage", "%")
         };
 
@@ -109,6 +125,19 @@ internal static partial class ItemPresentationBuilder
         ("offensiveSlowLightning", "Electrocute"),
         ("offensiveSlowPoison", "Poison"),
         ("offensiveSlowLife", "Vitality Decay")
+    ];
+
+    private static readonly (string Root, string Label)[] RetaliationDamage =
+    [
+        ("retaliationPhysical", "Physical Retaliation"),
+        ("retaliationPierce", "Pierce Retaliation"),
+        ("retaliationFire", "Fire Retaliation"),
+        ("retaliationCold", "Cold Retaliation"),
+        ("retaliationLightning", "Lightning Retaliation"),
+        ("retaliationPoison", "Acid Retaliation"),
+        ("retaliationLife", "Vitality Retaliation"),
+        ("retaliationAether", "Aether Retaliation"),
+        ("retaliationChaos", "Chaos Retaliation")
     ];
 
     public static ItemPresentation Build(ArzRecord record, ItemPresentationSource data)
@@ -169,38 +198,68 @@ internal static partial class ItemPresentationBuilder
             .ToArray() ?? [];
         if (members.Length == 0) return null;
 
-        var tierLines = Enumerable.Range(0, members.Length)
-            .Select(_ => new List<ItemPresentationLine>())
-            .ToArray();
-        foreach (var pair in Labels)
+        var tiers = new List<ItemSetBonusTier>();
+        var previousLines = new List<ItemPresentationLine>();
+        for (var level = 1; level <= members.Length; level++)
         {
-            if (!record.Values.TryGetValue(pair.Key, out var values)) continue;
-            var numbers = values.Where(value => value.Number.HasValue)
-                .Select(value => value.Number!.Value)
-                .ToArray();
-            for (var index = 0; index < Math.Min(numbers.Length, members.Length); index++)
-            {
-                var value = numbers[index];
-                var previous = index == 0 ? 0 : numbers[index - 1];
-                if (Math.Abs(value) < 0.001 || Math.Abs(value - previous) < 0.001) continue;
-                tierLines[index].Add(Line(
-                    pair.Value.Label,
-                    Math.Abs(value),
-                    null,
-                    pair.Value.Unit,
-                    prefix: value < 0 ? "−" : string.Empty));
-            }
+            var currentLines = BuildSetTierLines(record, data, level);
+            var newLines = currentLines.Except(previousLines).ToArray();
+            var petBecameActive = IsTierValueActive(record, "petBonusLevel", level) &&
+                !IsTierValueActive(record, "petBonusLevel", level - 1);
+            var petLines = petBecameActive ? BuildSetPetLines(record, data) : [];
+            var skillBecameActive = IsTierValueActive(record, "itemSkillLevel", level) &&
+                !IsTierValueActive(record, "itemSkillLevel", level - 1);
+            var skillModifiers = new List<ItemPresentationSection>();
+            if (skillBecameActive) AddSkillModifiers(record, data, skillModifiers);
+            var grantedSkill = skillBecameActive ? BuildGrantedSkill(record, data) : null;
+            if (newLines.Length > 0 || petLines.Count > 0 || skillModifiers.Count > 0 || grantedSkill is not null)
+                tiers.Add(new ItemSetBonusTier(
+                    level,
+                    newLines,
+                    petLines,
+                    skillModifiers,
+                    grantedSkill));
+            previousLines = currentLines;
         }
-        var tiers = tierLines
-            .Select((lines, index) => new ItemSetBonusTier(index + 1, lines))
-            .Where(tier => tier.Lines.Count > 0)
-            .ToArray();
         return new ItemSetPresentation(
             Resolve(record.Text("setName"), data.Tags) ?? HumanizePath(path),
             Resolve(record.Text("setDescription"), data.Tags),
             members,
             tiers);
     }
+
+    private static List<ItemPresentationLine> BuildSetTierLines(
+        ArzRecord record,
+        ItemPresentationSource data,
+        int level)
+    {
+        var lines = new List<ItemPresentationLine>();
+        AddFlatDamage(record, lines, level: level);
+        AddDurationDamage(record, lines, level: level);
+        AddSimpleStats(record, lines, "standard", level);
+        AddRetaliation(record, lines, level);
+        AddConversions(record, lines, level: level);
+        AddSetSkillBonuses(record, data, lines, level);
+        return lines;
+    }
+
+    private static IReadOnlyList<ItemPresentationLine> BuildSetPetLines(
+        ArzRecord record,
+        ItemPresentationSource data)
+    {
+        var path = record.Text("petBonusName");
+        if (path is null || !data.Records.TryGetValue(path, out var source)) return [];
+        var lines = new List<ItemPresentationLine>();
+        AddFlatDamage(source.Record, lines, "pet");
+        AddDurationDamage(source.Record, lines, "pet");
+        AddSimpleStats(source.Record, lines, "pet");
+        AddRetaliation(source.Record, lines);
+        AddConversions(source.Record, lines, "pet");
+        return lines;
+    }
+
+    private static bool IsTierValueActive(ArzRecord record, string field, int level) =>
+        level > 0 && NumberAt(record, field, level) is { } value && Math.Abs(value) > 0.001;
 
     private static void AddHeader(ArzRecord record, List<ItemPresentationLine> lines)
     {
@@ -328,12 +387,17 @@ internal static partial class ItemPresentationBuilder
     private static void AddConversions(
         ArzRecord record,
         List<ItemPresentationLine> lines,
-        string tone = "standard")
+        string tone = "standard",
+        int? level = null)
     {
         for (var index = 1; index <= 2; index++)
         {
             var suffix = index == 1 ? string.Empty : index.ToString(CultureInfo.InvariantCulture);
-            if (record.Number("conversionPercentage" + suffix) is not { } value) continue;
+            var percentageField = "conversionPercentage" + suffix;
+            var percentage = level.HasValue
+                ? NumberAt(record, percentageField, level.Value)
+                : record.Number(percentageField);
+            if (percentage is not { } value || Math.Abs(value) < 0.001) continue;
             var input = record.Text("conversionInType" + suffix);
             var output = record.Text("conversionOutType" + suffix);
             if (input is null || output is null) continue;
@@ -347,6 +411,70 @@ internal static partial class ItemPresentationBuilder
                 "%",
                 tone));
         }
+    }
+
+    private static void AddRetaliation(
+        ArzRecord record,
+        List<ItemPresentationLine> lines,
+        int? level = null)
+    {
+        foreach (var (root, label) in RetaliationDamage)
+        {
+            var minimum = level.HasValue
+                ? NumberAt(record, root + "Min", level.Value)
+                : record.Number(root + "Min");
+            if (minimum is { } minimumValue && Math.Abs(minimumValue) > 0.001)
+            {
+                var maximum = level.HasValue
+                    ? NumberAt(record, root + "Max", level.Value)
+                    : record.Number(root + "Max");
+                lines.Add(Line(
+                    label,
+                    minimumValue,
+                    maximum is { } maximumValue && Math.Abs(maximumValue) > 0.001
+                        ? maximumValue
+                        : null));
+            }
+            var modifier = level.HasValue
+                ? NumberAt(record, root + "Modifier", level.Value)
+                : record.Number(root + "Modifier");
+            if (modifier is { } modifierValue && Math.Abs(modifierValue) > 0.001)
+                lines.Add(Line(label, Math.Abs(modifierValue), null, "%", prefix: modifierValue < 0 ? "−" : string.Empty));
+        }
+        var freeze = level.HasValue
+            ? NumberAt(record, "retaliationFreezeMin", level.Value)
+            : record.Number("retaliationFreezeMin");
+        if (freeze is { } freezeValue && Math.Abs(freezeValue) > 0.001)
+            lines.Add(Line("Freeze Retaliation", freezeValue, null, "s"));
+    }
+
+    private static void AddSetSkillBonuses(
+        ArzRecord record,
+        ItemPresentationSource data,
+        List<ItemPresentationLine> lines,
+        int level)
+    {
+        for (var index = 1; index <= 4; index++)
+        {
+            var path = record.Text("augmentSkillName" + index);
+            var value = NumberAt(record, "augmentSkillLevel" + index, level);
+            if (path is null || value is not { } amount || Math.Abs(amount) < 0.001) continue;
+            lines.Add(Line("to " + ResolveSkillName(path, data), amount, null, tone: "skill", prefix: "+"));
+        }
+        for (var index = 1; index <= 3; index++)
+        {
+            var path = record.Text("augmentMasteryName" + index);
+            var value = NumberAt(record, "augmentMasteryLevel" + index, level);
+            if (path is null || value is not { } amount || Math.Abs(amount) < 0.001) continue;
+            lines.Add(Line(
+                "to all skills in " + ResolveMasteryName(path, data),
+                amount,
+                null,
+                tone: "mastery",
+                prefix: "+"));
+        }
+        if (NumberAt(record, "augmentAllLevel", level) is { } allSkills && Math.Abs(allSkills) > 0.001)
+            lines.Add(Line("to All Skills", allSkills, null, tone: "mastery", prefix: "+"));
     }
 
     private static void AddSkillBonuses(
@@ -613,4 +741,7 @@ internal sealed record ItemSetPresentation(
     IReadOnlyList<ItemSetBonusTier> Tiers);
 internal sealed record ItemSetBonusTier(
     int RequiredPieces,
-    IReadOnlyList<ItemPresentationLine> Lines);
+    IReadOnlyList<ItemPresentationLine> Lines,
+    IReadOnlyList<ItemPresentationLine> PetLines,
+    IReadOnlyList<ItemPresentationSection> SkillModifiers,
+    ItemGrantedSkillPresentation? GrantedSkill);

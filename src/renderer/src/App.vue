@@ -148,7 +148,7 @@ const gameConnectionLabel = computed(() => {
   return 'Grim Dawn offline'
 })
 const collectionBasisLabel = computed(() =>
-  collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Index'
+  collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Scanner'
 )
 const stagingHasUnsupported = computed(() => staging.value?.items.some((item) => !item.supported) ?? false)
 const ingestBlockedReason = computed(() => {
@@ -717,9 +717,15 @@ async function setArchiveModeEnabled(isHardcore: boolean, enabled: boolean): Pro
 }
 
 function readStoredCollectionBasis(): CollectionBasis {
-  return localStorage.getItem('cairn-codex-collection-basis') === 'archive'
-    ? 'archive'
-    : 'stashes'
+  const defaultVersionKey = 'cairn-codex-collection-basis-default-version'
+  if (localStorage.getItem(defaultVersionKey) !== '2') {
+    localStorage.setItem(defaultVersionKey, '2')
+    localStorage.setItem('cairn-codex-collection-basis', 'archive')
+    return 'archive'
+  }
+  return localStorage.getItem('cairn-codex-collection-basis') === 'stashes'
+    ? 'stashes'
+    : 'archive'
 }
 
 async function setCollectionBasis(basis: CollectionBasis): Promise<void> {
@@ -1597,21 +1603,21 @@ function formatPercentile(value: number | null | undefined): string {
       <section class="collection-basis" aria-label="Collection persistence">
         <button
           type="button"
-          :class="{ active: collectionBasis === 'stashes' }"
-          :aria-pressed="collectionBasis === 'stashes'"
-          @click="setCollectionBasis('stashes')"
-        >
-          <strong>Stash Index</strong>
-          <small>Physical copy counts from selected stashes; discoveries also include the Archive.</small>
-        </button>
-        <button
-          type="button"
           :class="{ active: collectionBasis === 'archive' }"
           :aria-pressed="collectionBasis === 'archive'"
           @click="setCollectionBasis('archive')"
         >
           <strong>Codex Archive</strong>
-          <small>Ownership persists here after items are ingested from the game.</small>
+          <small>Your durable Cairn collection. Counts copies stored by Cairn, even after they leave Grim Dawn.</small>
+        </button>
+        <button
+          type="button"
+          :class="{ active: collectionBasis === 'stashes' }"
+          :aria-pressed="collectionBasis === 'stashes'"
+          @click="setCollectionBasis('stashes')"
+        >
+          <strong>Stash Scanner</strong>
+          <small>A live inventory of physical copies currently present in the selected Grim Dawn stash files.</small>
         </button>
       </section>
       </template>
@@ -1902,13 +1908,13 @@ function formatPercentile(value: number | null | undefined): string {
 
           <article class="settings-card source-settings">
             <header>
-              <div><p class="section-label">Stash Index</p><h3>Physical copy sources</h3></div>
+              <div><p class="section-label">Stash Scanner</p><h3>Physical copy sources</h3></div>
               <div class="source-presets">
                 <button type="button" @click="selectSourceModeForBasis('stashes', false)">SC</button>
                 <button type="button" @click="selectSourceModeForBasis('stashes', true)">HC</button>
               </div>
             </header>
-            <p>Controls physical copy counts. Collected status still includes anything preserved in the Archive.</p>
+            <p>Controls which Grim Dawn stash files the diagnostic scanner reads. These counts are separate from copies stored in the Codex Archive.</p>
             <div class="settings-source-list">
               <label v-for="stash in stashChoices" :key="`index:${stash.path}`" class="source-option">
                 <input

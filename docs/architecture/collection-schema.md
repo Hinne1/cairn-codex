@@ -50,7 +50,7 @@ by Hardcore/Softcore mode. A retrieval cannot cross that boundary.
 
 The UI exposes two projections over the same canonical catalog:
 
-- **Stash Index** uses selected stash snapshots for availability and
+- **Stash Scanner** uses selected stash snapshots for physical availability and
   mode-specific lifetime discoveries for completion.
 - **Codex Archive** uses `vault_item` as the ownership authority. Ingested
   rows are available copies; retrieved rows remain historical discoveries but

@@ -1785,7 +1785,20 @@ function formatPercentile(value: number | null | undefined): string {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in skillItemRows" :key="row.item.record" @click="openItem(row.item)">
+              <tr
+                v-for="row in skillItemRows"
+                :key="row.item.record"
+                role="button"
+                tabindex="0"
+                aria-describedby="item-tooltip"
+                @mouseenter="queueTooltip(row.item, $event)"
+                @mousemove="moveTooltip"
+                @mouseleave="hideTooltip"
+                @focus="queueTooltip(row.item, $event)"
+                @blur="hideTooltip"
+                @click="openItem(row.item)"
+                @keydown.enter="openItem(row.item)"
+              >
                 <td>
                   <div class="skill-item-name">
                     <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />

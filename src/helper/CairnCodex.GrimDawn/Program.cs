@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CairnCodex.GrimDawn;
+using CairnCodex.GrimDawn.Gdia.GameData;
 
 const int ProtocolVersion = 1;
 using var liveGame = new LiveGameAdapter();
@@ -31,6 +32,7 @@ while ((line = Console.ReadLine()) is not null)
             "build-item-catalog" => BuildItemCatalog(request),
             "inspect-game-record" => InspectGameRecord(request),
             "inspect-game-records" => InspectGameRecords(request),
+            "inspect-archive-text" => InspectArchiveText(request),
             "extract-item-icons" => ExtractItemIcons(request),
             "scan-collection" => HelperResponse.Success(request.Id, CollectionSnapshotBuilder.Scan()),
             "scan-transfer-stash" => ScanTransferStash(request),
@@ -203,6 +205,20 @@ HelperResponse InspectGameRecords(HelperRequest request)
     return HelperResponse.Success(request.Id, new { count = matches.Length, records = matches });
 }
 
+HelperResponse InspectArchiveText(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<InspectArchiveTextRequest>(jsonOptions)
+        ?? throw new JsonException("inspect-archive-text requires archivePath, entryPath, and text parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        ArcArchiveReader.SearchText(
+            parameters.ArchivePath,
+            parameters.EntryPath,
+            parameters.Text,
+            parameters.ContextBytes,
+            parameters.Limit));
+}
+
 HelperResponse ExtractItemIcons(HelperRequest request)
 {
     var parameters = request.Params?.Deserialize<ExtractItemIconsRequest>(jsonOptions)
@@ -307,6 +323,12 @@ HelperResponse AnalyzeItemRolls(HelperRequest request)
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);
 internal sealed record InspectGameRecordRequest(string InstallationPath, string Record);
+internal sealed record InspectArchiveTextRequest(
+    string ArchivePath,
+    string EntryPath,
+    string Text,
+    int ContextBytes = 32768,
+    int Limit = 20);
 internal sealed record InspectGameRecordsRequest(
     string InstallationPath,
     string? RecordContains,

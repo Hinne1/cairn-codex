@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
 import {
   IPC_CHANNELS,
@@ -13,6 +13,7 @@ import {
   type LiveGameStatus,
   type LiveGameSyncResult,
   type LiveRetrievalResult,
+  type MapRegionLocation,
   type RetrievalResult,
   type ObservedStashItem,
   type StagingTabInspection,
@@ -23,7 +24,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 4
+const CATALOG_PRESENTATION_VERSION = 8
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -38,6 +39,18 @@ interface PersistedWindowState {
   width: number
   height: number
   maximized: boolean
+}
+
+interface MapLocationIndex {
+  version: number
+  builtAt: string
+  archives: Array<{ path: string; length: number; lastWriteUtc: string }>
+  regionCount: number
+  placedRecordCount: number
+  sourceLocations: Record<string, MapRegionLocation[]>
+  miTierCount: number
+  locatedMiTierCount: number
+  unlocatedMiBases: string[]
 }
 
 interface IngestPlan {
@@ -212,6 +225,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   let latestCollection: CollectionSnapshot | null = null
   let collectionScan: Promise<CollectionSnapshot> | null = null
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
+  const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
   const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
     if (writeInProgress) throw new Error('Another vault write is already in progress.')
     writeInProgress = true
@@ -249,8 +263,14 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       if (!latestCollection) {
         return null
       }
+      const mapIndex = await readMapLocationIndex(mapLocationCachePath)
+      if (!mapIndex || !(await mapLocationIndexIsFresh(mapIndex))) return null
+      const cacheNeedsRefresh = !(await collectionStashesAreFresh(latestCollection))
       const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return presentCollection(helper, database, projected, input.basis, false)
+      return {
+        ...(await presentCollection(helper, database, projected, input.basis, false)),
+        cacheNeedsRefresh
+      }
     }
   )
   ipcMain.handle(
@@ -260,8 +280,22 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
         const startedAt = Date.now()
         const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
         const withIcons = await attachItemIcons(helper, snapshot)
+        const installationPath = withIcons.discovery.installations[0]?.path
+        let withLocations = withIcons
+        if (installationPath) {
+          try {
+            const locationIndex = await loadMapLocationIndex(
+              helper,
+              mapLocationCachePath,
+              installationPath
+            )
+            withLocations = attachMapLocations(withIcons, locationIndex)
+          } catch (error) {
+            console.warn('Grim Dawn map locations could not be indexed.', error)
+          }
+        }
         const persisted = {
-          ...database.persistSnapshot(withIcons),
+          ...database.persistSnapshot(withLocations),
           catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
         }
         latestCollection = persisted
@@ -274,6 +308,28 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       const snapshot = await collectionScan
       const projected = projectCollectionSources(snapshot, input.sourcePaths)
       return presentCollection(helper, database, projected, input.basis)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.rebuildGameDataIndex,
+    async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
+      const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+      const withIcons = await attachItemIcons(helper, snapshot)
+      const installationPath = withIcons.discovery.installations[0]?.path
+      if (!installationPath) throw new Error('No Grim Dawn installation is available.')
+      const locationIndex = await loadMapLocationIndex(
+        helper,
+        mapLocationCachePath,
+        installationPath,
+        true
+      )
+      latestCollection = {
+        ...database.persistSnapshot(attachMapLocations(withIcons, locationIndex)),
+        catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
+      }
+      await writeCollectionCache(collectionCachePath, latestCollection)
+      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+      return presentCollection(helper, database, projected, input.basis, false)
     }
   )
   ipcMain.handle(
@@ -581,10 +637,123 @@ async function readCollectionCache(path: string): Promise<CollectionSnapshot | n
   }
 }
 
-async function writeCollectionCache(path: string, snapshot: CollectionSnapshot): Promise<void> {
+async function loadMapLocationIndex(
+  helper: GrimDawnHelperClient,
+  cachePath: string,
+  installationPath: string,
+  force = false
+): Promise<MapLocationIndex> {
+  if (!force) {
+    const cached = await readMapLocationIndex(cachePath)
+    if (cached && (await mapLocationIndexIsFresh(cached))) return cached
+  }
+  const rebuilt = await helper.request<MapLocationIndex>('build-map-location-index', {
+    installationPath
+  })
+  await writeJsonCache(cachePath, rebuilt)
+  console.log(
+    `[map-index] ${rebuilt.regionCount} regions, ${rebuilt.placedRecordCount} placed game records`
+  )
+  return rebuilt
+}
+
+async function readMapLocationIndex(path: string): Promise<MapLocationIndex | null> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as MapLocationIndex
+    if (
+      parsed.version !== 4 ||
+      !Array.isArray(parsed.archives) ||
+      !parsed.sourceLocations ||
+      typeof parsed.sourceLocations !== 'object'
+    ) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function mapLocationIndexIsFresh(index: MapLocationIndex): Promise<boolean> {
+  try {
+    for (const archive of index.archives) {
+      const current = await stat(archive.path)
+      if (
+        current.size !== archive.length ||
+        Math.abs(current.mtimeMs - Date.parse(archive.lastWriteUtc)) > 1_000
+      ) {
+        return false
+      }
+    }
+    return index.archives.length > 0
+  } catch {
+    return false
+  }
+}
+
+async function collectionStashesAreFresh(snapshot: CollectionSnapshot): Promise<boolean> {
+  const stashes = snapshot.availableStashes ?? snapshot.scannedStashes
+  try {
+    for (const stash of stashes) {
+      const current = await stat(stash.path)
+      if (Math.abs(current.mtimeMs - Date.parse(stash.lastWriteUtc)) > 1_000) return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function attachMapLocations(
+  snapshot: CollectionSnapshot,
+  index: MapLocationIndex
+): CollectionSnapshot {
+  const locationsBySource = new Map(
+    Object.entries(index.sourceLocations).map(([record, locations]) => [
+      record.toLocaleLowerCase(),
+      locations
+    ])
+  )
+  return {
+    ...snapshot,
+    items: snapshot.items.map((item) => {
+      if (item.rarity !== 'mi') return item
+      const sourceRecords = item.acquisition?.sourceRecords ?? []
+      const locations = sourceRecords.flatMap(
+        (record) => locationsBySource.get(record.toLocaleLowerCase()) ?? []
+      )
+      const unique = new Map<string, MapRegionLocation>()
+      for (const location of locations) {
+        const key = location.name.toLocaleLowerCase()
+        if (!unique.has(key)) unique.set(key, location)
+      }
+      return item.acquisition
+        ? {
+            ...item,
+            acquisition: {
+              ...item.acquisition,
+              // Source records are an internal join key; once locations are attached,
+              // retaining thousands of repeated paths only bloats the persisted catalog.
+              sourceRecords: [],
+              locations: [...unique.values()]
+                .sort((left, right) => left.name.localeCompare(right.name))
+                .slice(0, 8),
+              additionalLocationCount: Math.max(0, unique.size - 8)
+            }
+          }
+        : item
+    })
+  }
+}
+
+async function writeJsonCache(path: string, value: unknown): Promise<void> {
   const temporaryPath = path + '.tmp'
-  await writeFile(temporaryPath, JSON.stringify(snapshot), 'utf8')
+  await writeFile(temporaryPath, JSON.stringify(value), 'utf8')
   await rename(temporaryPath, path)
+}
+
+async function writeCollectionCache(path: string, snapshot: CollectionSnapshot): Promise<void> {
+  await writeJsonCache(path, snapshot)
 }
 
 function projectCollectionSources(
@@ -839,6 +1008,33 @@ async function runSmokeTest(
       throw new Error('Live queue serializer self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const monsterInfrequents = helperSnapshot.items.filter((item) => item.rarity === 'mi')
+    const frostsnarlTiers = monsterInfrequents.filter((item) => item.name === "Frostsnarl's Horns")
+    if (
+      monsterInfrequents.length < 1_600 ||
+      monsterInfrequents.some(
+        (item) => !item.acquisition?.sources.some((source) => source.startsWith('Dropped by '))
+      ) ||
+      frostsnarlTiers.length !== 6 ||
+      frostsnarlTiers.some(
+        (item) => item.acquisition?.sources[0] !== 'Dropped by Frostsnarl the Chosen'
+      )
+    ) {
+      throw new Error('Monster Infrequent source traversal did not resolve every live MI tier.')
+    }
+    const mapIndex = await helper.request<MapLocationIndex>('build-map-location-index', {
+      installationPath: helperSnapshot.discovery.installations[0]?.path
+    })
+    const frostsnarlLocations =
+      mapIndex.sourceLocations[
+        'records/creatures/enemies/boss&quest/dranghoul_frostsnarl_01.dbr'
+      ] ?? []
+    if (!frostsnarlLocations.some((location) => location.name.includes("Kruu'Sul Crags"))) {
+      throw new Error('Map location index did not place Frostsnarl in Kruu\'Sul Crags.')
+    }
+    if (mapIndex.locatedMiTierCount !== mapIndex.miTierCount) {
+      throw new Error('Map location index did not resolve every live MI tier.')
+    }
     const flamebrand = helperSnapshot.items.find((item) => item.name === 'Flamebrand')
     const flamebrandFire = flamebrand?.presentation?.sections
       .flatMap((section) => section.lines)
@@ -1891,7 +2087,21 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
   }
 }
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window) return
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  })
+}
+
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return
   Menu.setApplicationMenu(null)
   registerItemIconProtocol()
   const helper = createHelperClient()

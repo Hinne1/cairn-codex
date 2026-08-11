@@ -1,7 +1,7 @@
 # Cairn Codex
 
-A local-first Pokedex-style collection manager for Grim Dawn Epic and Legendary
-items.
+A local-first Pokedex-style collection manager for Grim Dawn Epic, Legendary,
+and Monster Infrequent items.
 
 ## Product direction
 
@@ -10,7 +10,7 @@ items.
 - Keep every owned item instance while presenting one canonical entry per base item.
 - Track an automatically selected best roll and an optional user-pinned favorite.
 - Ingest and retrieve real items through Grim Dawn's transfer stash.
-- Exclude Monster Infrequents from the first release.
+- Track Monster Infrequent bases by level tier plus discovered prefix/suffix affixes.
 
 ## Architecture
 
@@ -48,7 +48,8 @@ must remain closed while Cairn Codex owns that hook and queue.
 - English item data.
 - Vanilla Grim Dawn plus locally installed official expansions.
 - Local save data; broader save-location support can be added when needed.
-- Epic and Legendary items only; Monster Infrequents are deferred.
+- Epic, Legendary, and Monster Infrequent bases; MI affix combinations are managed
+  separately in the Workshop.
 
 ## Milestones
 
@@ -84,6 +85,13 @@ Search is full-text across item names, sets, stats, skill bonuses, granted-skill
 names, and descriptions. Bare terms can be combined, and the following scoped
 forms are supported: `name:`, `set:`, `skill:`, `slot:`, `type:`, `rarity:`,
 `pack:`, and numeric level expressions such as `level:>=75`.
+
+MI acquisition sources are resolved from the installed ARZ by following the full
+item -> loot-table -> monster graph. Cairn also indexes placed game records from
+the highest installed `Levels.arc`, associates them with named map regions, and
+shows the result in item tooltips. The catalog and map index are cached locally;
+database/map timestamps invalidate them after a game update, stash timestamps
+trigger an inventory refresh, and Settings offers a manual rebuild command.
 
 ## Safety invariants
 

@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   getCachedCollection: 'collection:get-cached',
   discoverGrimDawn: 'grim-dawn:discover',
   scanCollection: 'grim-dawn:scan-collection',
+  rebuildGameDataIndex: 'grim-dawn:rebuild-game-data-index',
   setPinnedBest: 'collection:set-pinned-best',
   inspectWriteSafety: 'vault:inspect-write-safety',
   inspectStagingTab: 'vault:inspect-staging-tab',
@@ -31,6 +32,7 @@ export interface CairnCodexApi {
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   getCachedCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot | null>
   scanCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
+  rebuildGameDataIndex: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
@@ -181,6 +183,7 @@ export interface TransferStashCandidate {
 
 export interface CollectionSnapshot {
   catalogPresentationVersion?: number
+  cacheNeedsRefresh?: boolean
   basis?: CollectionBasis
   isHardcore?: boolean
   availableStashes?: ScannedStash[]
@@ -311,6 +314,18 @@ export interface ItemSetBonusTier {
 
 export interface ItemAcquisitionPresentation {
   sources: string[]
+  sourceRecords?: string[]
+  locations?: MapRegionLocation[]
+  additionalLocationCount?: number
+}
+
+export interface MapRegionLocation {
+  name: string
+  zoneRecord: string
+  levelFile: string
+  contentPack: string
+  originX: number
+  originY: number
 }
 
 export interface ObservedStashItem {

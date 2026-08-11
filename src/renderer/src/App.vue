@@ -46,6 +46,7 @@ const enabledStashPaths = computed<string[]>({
   }
 })
 const scanning = ref(false)
+const scanActivity = ref<'collection' | 'game-data'>('collection')
 const scanError = ref<string | null>(null)
 const cacheIssue = ref<string | null>(null)
 const zoomFactor = ref(readStoredZoomFactor())
@@ -591,7 +592,7 @@ onMounted(async () => {
     // While live mode owns the hook, keep the helper responsive to durable queue work.
     // The cached catalog is complete enough to browse; heavy scan/roll refreshes remain
     // manual and run automatically once the game session ends.
-    if (liveStatus.value?.state !== 'ready') void scanCollection()
+    if (cached.cacheNeedsRefresh && liveStatus.value?.state !== 'ready') void scanCollection()
   } else {
     await scanCollection()
   }
@@ -613,6 +614,7 @@ async function scanCollection(): Promise<void> {
     basis: requestedBasis,
     paths: requestedSources.map((path) => path.toLocaleLowerCase()).sort()
   })
+  scanActivity.value = 'collection'
   scanning.value = true
   scanError.value = null
   try {
@@ -632,6 +634,25 @@ async function scanCollection(): Promise<void> {
     }
   } catch (error) {
     scanError.value = error instanceof Error ? error.message : 'Collection scan failed.'
+  } finally {
+    scanning.value = false
+  }
+}
+
+async function rebuildGameDataIndex(): Promise<void> {
+  scanActivity.value = 'game-data'
+  scanning.value = true
+  vaultError.value = null
+  vaultMessage.value = null
+  try {
+    const result = await window.cairnCodex.rebuildGameDataIndex(
+      [...enabledStashPaths.value],
+      collectionBasis.value
+    )
+    applySnapshot(result)
+    vaultMessage.value = 'Game-data and map location indexes rebuilt from the installed Grim Dawn files.'
+  } catch (error) {
+    vaultError.value = readableError(error)
   } finally {
     scanning.value = false
   }
@@ -1520,8 +1541,9 @@ function formatPercentile(value: number | null | undefined): string {
       <section v-if="scanning && snapshot" class="background-scan" aria-live="polite">
         <span class="scan-spinner" aria-hidden="true" />
         <div>
-          <strong>Refreshing collection in the background</strong>
-          <small>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
+          <strong>{{ scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>
+          <small v-if="scanActivity === 'game-data'">Your cached Codex remains usable while map regions, drop sources, and game records are reindexed.</small>
+          <small v-else>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
         </div>
       </section>
       <p v-if="activeView !== 'vault' && vaultError" class="operation-banner error">{{ vaultError }}</p>
@@ -1980,6 +2002,16 @@ function formatPercentile(value: number | null | undefined): string {
               </option>
             </select>
             <small>Live retrieval always targets {{ liveStatus?.depositTabDescription ?? 'the second-to-last shared stash tab' }}.</small>
+          </article>
+
+          <article class="settings-card">
+            <p class="section-label">Game data</p>
+            <h3>Installed-data cache</h3>
+            <p>Item records, drop-source graphs, map regions, and monster placements are cached locally. Game updates invalidate the cache automatically.</p>
+            <button type="button" :disabled="scanning" @click="rebuildGameDataIndex">
+              {{ scanning && scanActivity === 'game-data' ? 'Rebuilding index…' : 'Rebuild game-data index' }}
+            </button>
+            <small>Use this after changing mods or if a location looks stale.</small>
           </article>
         </div>
       </section>
@@ -2525,6 +2557,15 @@ function formatPercentile(value: number | null | undefined): string {
         <section v-if="tooltipItem.acquisition?.sources.length" class="tooltip-section tooltip-acquisition">
           <h4>Acquisition</h4>
           <p v-for="source in tooltipItem.acquisition.sources" :key="source">{{ source }}</p>
+          <template v-if="tooltipItem.acquisition.locations?.length">
+            <h4>Drop location</h4>
+            <p v-for="location in tooltipItem.acquisition.locations" :key="`${location.name}:${location.levelFile}`">
+              {{ location.name }}
+            </p>
+            <p v-if="tooltipItem.acquisition.additionalLocationCount" class="tooltip-location-overflow">
+              +{{ tooltipItem.acquisition.additionalLocationCount }} more indexed regions (broad monster family)
+            </p>
+          </template>
         </section>
 
         <footer>

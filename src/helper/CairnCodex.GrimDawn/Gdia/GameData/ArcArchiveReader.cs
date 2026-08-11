@@ -285,6 +285,77 @@ internal static class ArcArchiveReader
         return matches;
     }
 
+    public static Stream OpenEntry(string path, string requestedPath)
+    {
+        var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        try
+        {
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+            if (stream.Length < HeaderSize)
+            {
+                throw new InvalidDataException($"ARC file is too short: {path}");
+            }
+
+            _ = reader.ReadInt32();
+            var version = reader.ReadInt32();
+            var fileCount = reader.ReadInt32();
+            var partCount = reader.ReadInt32();
+            var partTableSize = reader.ReadInt32();
+            var stringTableSize = reader.ReadInt32();
+            var partTableOffset = reader.ReadInt32();
+            if (version != 3 || fileCount < 0 || partCount < 0 || stringTableSize < 0 ||
+                partTableSize != checked(partCount * PartSize))
+            {
+                throw new InvalidDataException($"Unsupported or invalid ARC header in {path}.");
+            }
+
+            stream.Position = partTableOffset;
+            var parts = new ArcPart[partCount];
+            for (var index = 0; index < parts.Length; index++)
+            {
+                parts[index] = new ArcPart(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
+            }
+
+            var stringsOffset = checked(partTableOffset + partTableSize);
+            ValidateRange(stream, stringsOffset, stringTableSize, "ARC string table");
+            stream.Position = stringsOffset;
+            var names = ReadNullTerminatedStrings(reader.ReadBytes(stringTableSize), fileCount);
+            var tocOffset = checked(stringsOffset + stringTableSize);
+            ValidateRange(stream, tocOffset, checked(fileCount * TocSize), "ARC table of contents");
+            stream.Position = tocOffset;
+            var requested = NormalizePath(requestedPath);
+            for (var index = 0; index < fileCount; index++)
+            {
+                _ = reader.ReadInt32();
+                _ = reader.ReadInt32();
+                _ = reader.ReadInt32();
+                var decompressedLength = reader.ReadUInt32();
+                _ = reader.ReadInt32();
+                _ = reader.ReadInt64();
+                var entryPartCount = reader.ReadInt32();
+                var firstPart = reader.ReadInt32();
+                _ = reader.ReadInt32();
+                _ = reader.ReadInt32();
+                if (!string.Equals(NormalizePath(names[index]), requested, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (firstPart < 0 || entryPartCount < 0 || firstPart > parts.Length - entryPartCount)
+                    throw new InvalidDataException("ARC entry references invalid file parts.");
+                return new ArcEntryReadStream(
+                    stream,
+                    parts.Skip(firstPart).Take(entryPartCount).ToArray(),
+                    decompressedLength);
+            }
+
+            throw new ArgumentException($"ARC entry was not found: {requestedPath}");
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
     private static IReadOnlyList<string> ExtractPrintableStrings(ReadOnlySpan<byte> bytes)
     {
         var strings = new List<string>();
@@ -431,6 +502,101 @@ internal static class ArcArchiveReader
 
     private sealed record ArcPart(int Offset, int CompressedLength, int DecompressedLength);
     private sealed record ArcEntry(int DecompressedLength, int PartCount, int FirstPart);
+
+    private sealed class ArcEntryReadStream : Stream
+    {
+        private readonly FileStream source;
+        private readonly ArcPart[] parts;
+        private readonly long[] partOffsets;
+        private readonly long length;
+        private long position;
+        private int cachedPartIndex = -1;
+        private byte[] cachedPart = [];
+
+        public ArcEntryReadStream(FileStream source, ArcPart[] parts, uint length)
+        {
+            this.source = source;
+            this.parts = parts;
+            this.length = length;
+            partOffsets = new long[parts.Length + 1];
+            for (var index = 0; index < parts.Length; index++)
+            {
+                partOffsets[index + 1] = checked(partOffsets[index] + parts[index].DecompressedLength);
+            }
+            if (partOffsets[^1] != this.length)
+                throw new InvalidDataException("ARC entry parts do not match its declared length.");
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => length;
+        public override long Position
+        {
+            get => position;
+            set => Seek(value, SeekOrigin.Begin);
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (position >= length || buffer.Length == 0) return 0;
+            var requested = (int)Math.Min(buffer.Length, length - position);
+            var written = 0;
+            while (written < requested)
+            {
+                var partIndex = FindPart(position);
+                EnsurePart(partIndex);
+                var withinPart = checked((int)(position - partOffsets[partIndex]));
+                var available = Math.Min(cachedPart.Length - withinPart, requested - written);
+                cachedPart.AsSpan(withinPart, available).CopyTo(buffer[written..]);
+                written += available;
+                position += available;
+            }
+            return written;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            var next = origin switch
+            {
+                SeekOrigin.Begin => offset,
+                SeekOrigin.Current => checked(position + offset),
+                SeekOrigin.End => checked(length + offset),
+                _ => throw new ArgumentOutOfRangeException(nameof(origin))
+            };
+            if (next < 0 || next > length) throw new IOException("ARC entry seek is outside the file.");
+            position = next;
+            return position;
+        }
+
+        private int FindPart(long offset)
+        {
+            var index = Array.BinarySearch(partOffsets, offset);
+            if (index >= 0) return Math.Min(index, parts.Length - 1);
+            return ~index - 1;
+        }
+
+        private void EnsurePart(int index)
+        {
+            if (cachedPartIndex == index) return;
+            using var reader = new BinaryReader(source, Encoding.UTF8, leaveOpen: true);
+            cachedPart = ExtractPart(source, reader, parts[index]);
+            cachedPartIndex = index;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) source.Dispose();
+            base.Dispose(disposing);
+        }
+
+        public override void Flush() { }
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 }
 
 internal sealed record ArcTextMatch(

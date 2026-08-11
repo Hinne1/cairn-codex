@@ -25,6 +25,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.discoverGrimDawn) as Promise<GrimDawnDiscovery>,
   scanCollection: (sourcePaths, basis) =>
     ipcRenderer.invoke(IPC_CHANNELS.scanCollection, { sourcePaths, basis }) as Promise<CollectionSnapshot>,
+  rebuildGameDataIndex: (sourcePaths, basis) =>
+    ipcRenderer.invoke(IPC_CHANNELS.rebuildGameDataIndex, { sourcePaths, basis }) as Promise<CollectionSnapshot>,
   setPinnedBest: (record, instanceKey, isHardcore) =>
     ipcRenderer.invoke(IPC_CHANNELS.setPinnedBest, { record, instanceKey, isHardcore }) as Promise<void>,
   inspectWriteSafety: () =>

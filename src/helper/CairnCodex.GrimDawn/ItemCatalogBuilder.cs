@@ -156,6 +156,26 @@ internal static class ItemCatalogBuilder
             setName = Resolve(setSource.Record.Text("setName"), tags);
         }
 
+        var acquisition = BuildAcquisition(record.Name, acquisitionReferences, records, tags);
+        if (isMonsterInfrequent &&
+            acquisition.SourceRecords.Count == 0 &&
+            acquisition.Sources.Count == 1 &&
+            acquisition.Sources[0].StartsWith("Special source", StringComparison.OrdinalIgnoreCase))
+        {
+            // A handful of obsolete MI tiers remain in the ARZ after their loot-table
+            // references were removed. They are not obtainable and should not become
+            // phantom collection entries (currently this catches the retired level-18
+            // Putrid Necklace between its live level-8 and level-32 tiers).
+            return null;
+        }
+        if (!isMonsterInfrequent)
+        {
+            // Reverse-record IDs are only serialized for MI map-location joins. Keeping
+            // up to 64 monster records on every global-drop Epic/Legendary made the
+            // otherwise compact catalog cache balloon by tens of megabytes.
+            acquisition = acquisition with { SourceRecords = [] };
+        }
+
         return new CatalogItem(
             record.Name,
             name,
@@ -169,7 +189,7 @@ internal static class ItemCatalogBuilder
             record.Text("bitmap") ?? record.Text("relicBitmap") ?? record.Text("shardBitmap"),
             source.ContentPack,
             setRecord is null ? null : setPresentations.GetValueOrDefault(setRecord),
-            BuildAcquisition(record.Name, acquisitionReferences),
+            acquisition,
             ItemPresentationBuilder.Build(record, presentationSource));
     }
 
@@ -253,23 +273,118 @@ internal static class ItemCatalogBuilder
 
     private static ItemAcquisitionPresentation BuildAcquisition(
         string itemRecord,
-        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> references)
+        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> references,
+        IReadOnlyDictionary<string, CatalogSourceRecord> records,
+        IReadOnlyDictionary<string, string> tags)
     {
-        var sources = references.GetValueOrDefault(itemRecord) ?? [];
         var hints = new List<string>();
-        if (sources.Any(source => source.Type == "ItemArtifactFormula" && source.Field == "artifactName"))
-            hints.Add("Craftable from a learned blueprint");
-        if (sources.Any(source =>
-                source.Record.Contains("/loottables/vendors/", StringComparison.OrdinalIgnoreCase) ||
-                source.Record.Contains("/merchants/", StringComparison.OrdinalIgnoreCase)))
-            hints.Add("Merchant or faction inventory");
-        if (sources.Any(source =>
-                source.Record.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) &&
-                !source.Record.Contains("/vendors/", StringComparison.OrdinalIgnoreCase)))
-            hints.Add("Random drop");
+        var sourceRecords = new List<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { itemRecord };
+        var queue = new Queue<(string Record, int Depth)>();
+        queue.Enqueue((itemRecord, 0));
+        var sawDropTable = false;
+        var sawVendor = false;
+        var sawBlueprint = false;
+
+        // An MI normally reaches its source through two or more reverse references:
+        // item -> dynamic loot table -> monster, sometimes with one or more pool tables
+        // in between. Walking only the first edge made every MI look like a random drop.
+        while (queue.Count > 0 && visited.Count <= 2_000)
+        {
+            var (target, depth) = queue.Dequeue();
+            if (depth >= 8) continue;
+
+            foreach (var reference in references.GetValueOrDefault(target) ?? [])
+            {
+                if (!records.TryGetValue(reference.Record, out var source)) continue;
+                var path = source.Record.Name.Replace('\\', '/');
+                var isVendor = path.Contains("/vendors/", StringComparison.OrdinalIgnoreCase) ||
+                               path.Contains("/merchants/", StringComparison.OrdinalIgnoreCase);
+                var isMonster = source.Record.Type == "Monster" ||
+                                path.Contains("/creatures/", StringComparison.OrdinalIgnoreCase);
+                var isContainer = path.Contains("/interactiveobjects/loot", StringComparison.OrdinalIgnoreCase) ||
+                                  path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase);
+
+                if (source.Record.Type == "ItemArtifactFormula" && reference.Field == "artifactName")
+                    sawBlueprint = true;
+                if (path.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) && !isVendor)
+                    sawDropTable = true;
+                if (isVendor)
+                    sawVendor = true;
+
+                if (isMonster)
+                {
+                    AddNamedSource("Dropped by", source, tags, hints, sourceRecords);
+                    // Proxies point at monsters, but they are not needed to discover the
+                    // drop graph. Map placement is indexed independently from sourceRecords.
+                    continue;
+                }
+
+                if (isContainer)
+                {
+                    AddNamedSource("Found in", source, tags, hints, sourceRecords);
+                }
+
+                if (visited.Add(reference.Record) && IsAcquisitionBridge(path, source.Record.Type))
+                    queue.Enqueue((reference.Record, depth + 1));
+            }
+        }
+
+        if (sawBlueprint) hints.Add("Craftable from a learned blueprint");
+        if (sawVendor) hints.Add("Merchant or faction inventory");
+        if (hints.Count == 0 && sawDropTable) hints.Add("Random drop");
         if (hints.Count == 0) hints.Add("Special source; exact location not yet indexed");
-        return new ItemAcquisitionPresentation(hints);
+        return new ItemAcquisitionPresentation(
+            hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray(),
+            sourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray());
     }
+
+    private static bool IsAcquisitionBridge(string path, string type) =>
+        path.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/enemygear/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/npcgear/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/creatures/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/proxies/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/interactiveobjects/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/vendors/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/merchants/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/quests/", StringComparison.OrdinalIgnoreCase) ||
+        type.Contains("Loot", StringComparison.OrdinalIgnoreCase) ||
+        type.Contains("Merchant", StringComparison.OrdinalIgnoreCase);
+
+    private static void AddNamedSource(
+        string verb,
+        CatalogSourceRecord source,
+        IReadOnlyDictionary<string, string> tags,
+        ICollection<string> hints,
+        ICollection<string> sourceRecords)
+    {
+        var record = source.Record;
+        var name = new[]
+            {
+                record.Text("description"),
+                record.Text("displayName"),
+                record.Text("monsterName"),
+                record.Text("itemNameTag")
+            }
+            .Select(value => Resolve(value, tags)?.Trim())
+            .FirstOrDefault(value => IsUsefulSourceName(value));
+
+        if (name is null)
+        {
+            var fallback = record.Text("FileDescription")?.Trim();
+            if (IsUsefulSourceName(fallback)) name = fallback;
+        }
+
+        sourceRecords.Add(record.Name);
+        if (name is not null) hints.Add($"{verb} {name}");
+    }
+
+    private static bool IsUsefulSourceName(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        !value.StartsWith("tag", StringComparison.OrdinalIgnoreCase) &&
+        !value.StartsWith("records/", StringComparison.OrdinalIgnoreCase);
 
     private static string? Resolve(string? tag, IReadOnlyDictionary<string, string> tags)
     {
@@ -376,4 +491,6 @@ internal sealed record CatalogAffix(
 internal sealed record CatalogAffixRecord(string Record, string Name, string Kind, string Rarity);
 
 internal sealed record AcquisitionReference(string Record, string Type, string Field);
-internal sealed record ItemAcquisitionPresentation(IReadOnlyList<string> Sources);
+internal sealed record ItemAcquisitionPresentation(
+    IReadOnlyList<string> Sources,
+    IReadOnlyList<string> SourceRecords);

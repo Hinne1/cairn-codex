@@ -33,6 +33,7 @@ while ((line = Console.ReadLine()) is not null)
             "inspect-game-record" => InspectGameRecord(request),
             "inspect-game-records" => InspectGameRecords(request),
             "inspect-archive-text" => InspectArchiveText(request),
+            "build-map-location-index" => BuildMapLocationIndex(request),
             "extract-item-icons" => ExtractItemIcons(request),
             "scan-collection" => HelperResponse.Success(request.Id, CollectionSnapshotBuilder.Scan()),
             "scan-transfer-stash" => ScanTransferStash(request),
@@ -217,6 +218,13 @@ HelperResponse InspectArchiveText(HelperRequest request)
             parameters.Text,
             parameters.ContextBytes,
             parameters.Limit));
+}
+
+HelperResponse BuildMapLocationIndex(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
+        ?? throw new JsonException("build-map-location-index requires an installationPath parameter.");
+    return HelperResponse.Success(request.Id, MapLocationIndexer.Build(parameters.InstallationPath));
 }
 
 HelperResponse ExtractItemIcons(HelperRequest request)

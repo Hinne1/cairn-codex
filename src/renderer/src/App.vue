@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
-  AppStatus,
   CollectionBasis,
   CollectionItem,
   CollectionRaritySummary,
@@ -23,6 +22,7 @@ type ActiveView = 'collection' | 'sets' | 'skills' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
+type TransferMode = 'live' | 'offline'
 
 interface CollectionSet {
   record: string
@@ -32,7 +32,6 @@ interface CollectionSet {
   availableCopies: number
 }
 
-const status = ref<AppStatus | null>(null)
 const discovery = ref<GrimDawnDiscovery | null>(null)
 const snapshot = ref<CollectionSnapshot | null>(null)
 const indexStashPaths = ref<string[]>(readStoredSourcePaths('stashes'))
@@ -64,6 +63,9 @@ const skillScope = ref<SkillScope>(
 )
 const skillSort = ref<SkillSort>('amount')
 const skillSortDirection = ref<SortDirection>('desc')
+const skillPickerOpen = ref(false)
+const skillPickerIndex = ref(0)
+const transferMode = ref<TransferMode>('live')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
 const pinning = ref(false)
@@ -136,6 +138,13 @@ const sourceModeLabel = computed(() => {
   if (modes.has(true)) return 'Hardcore'
   if (modes.has(false)) return 'Softcore'
   return 'No sources'
+})
+const gameConnectionLabel = computed(() => {
+  if (liveStatus.value?.state === 'ready') return 'Grim Dawn connected'
+  if (liveStatus.value?.state === 'connecting') return 'Connecting to Grim Dawn'
+  if (liveStatus.value?.state === 'available') return 'Grim Dawn detected'
+  if (liveStatus.value?.state === 'blocked') return 'Live adapter blocked'
+  return 'Grim Dawn offline'
 })
 const collectionBasisLabel = computed(() =>
   collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Index'
@@ -298,6 +307,21 @@ const skillNames = computed(() => {
   return [...names].sort((left, right) => left.localeCompare(right))
 })
 
+const skillSuggestions = computed(() => {
+  const query = selectedSkill.value.trim().toLocaleLowerCase()
+  const matches = skillNames.value.filter((skill) =>
+    query.length === 0 || skill.toLocaleLowerCase().includes(query)
+  )
+  return matches
+    .sort((left, right) => {
+      const leftStarts = left.toLocaleLowerCase().startsWith(query)
+      const rightStarts = right.toLocaleLowerCase().startsWith(query)
+      if (leftStarts !== rightStarts) return leftStarts ? -1 : 1
+      return left.localeCompare(right)
+    })
+    .slice(0, 40)
+})
+
 const skillItemRows = computed(() => {
   const skill = selectedSkill.value.trim().toLocaleLowerCase()
   if (!skill) return []
@@ -345,7 +369,11 @@ const skillItemRows = computed(() => {
   })
   return rows.sort((left, right) => {
     let comparison = 0
-    if (skillSort.value === 'amount') comparison = left.amount - right.amount
+    if (skillSort.value === 'amount') {
+      const leftHasModifier = left.conversion.length > 0 || left.special.length > 0 ? 1 : 0
+      const rightHasModifier = right.conversion.length > 0 || right.special.length > 0 ? 1 : 0
+      comparison = leftHasModifier - rightHasModifier || left.amount - right.amount
+    }
     else if (skillSort.value === 'slot') comparison = left.item.slot.localeCompare(right.item.slot)
     else if (skillSort.value === 'conversion') comparison = left.conversion.localeCompare(right.conversion)
     else if (skillSort.value === 'special') comparison = left.special.localeCompare(right.special)
@@ -365,6 +393,47 @@ function setSkillSort(next: SkillSort): void {
   }
 }
 
+function openSkillPicker(): void {
+  skillPickerOpen.value = true
+  const exact = skillSuggestions.value.findIndex(
+    (skill) => skill.toLocaleLowerCase() === selectedSkill.value.trim().toLocaleLowerCase()
+  )
+  skillPickerIndex.value = exact >= 0 ? exact : 0
+}
+
+function selectSkill(skill: string): void {
+  selectedSkill.value = skill
+  skillPickerOpen.value = false
+}
+
+function handleSkillPickerKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    skillPickerOpen.value = false
+    return
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    if (!skillPickerOpen.value) openSkillPicker()
+    const direction = event.key === 'ArrowDown' ? 1 : -1
+    const count = skillSuggestions.value.length
+    if (count > 0) skillPickerIndex.value = (skillPickerIndex.value + direction + count) % count
+    return
+  }
+  if (event.key === 'Enter' && skillPickerOpen.value) {
+    const suggestion = skillSuggestions.value[skillPickerIndex.value]
+    if (suggestion) {
+      event.preventDefault()
+      selectSkill(suggestion)
+    }
+  }
+}
+
+function handleSkillPickerFocusOut(event: FocusEvent): void {
+  const container = event.currentTarget as HTMLElement
+  if (event.relatedTarget instanceof Node && container.contains(event.relatedTarget)) return
+  skillPickerOpen.value = false
+}
+
 watch(
   [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter],
   () => {
@@ -378,6 +447,11 @@ watch(sortMode, (mode) => {
 
 watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
 watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
+watch(transferMode, () => {
+  selectedVaultIds.value = []
+  vaultError.value = null
+  vaultMessage.value = null
+})
 
 watch(selectedStashPath, async (path) => {
   if (path) {
@@ -397,7 +471,6 @@ onMounted(async () => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
-  status.value = await window.cairnCodex.getAppStatus()
   // Establish live ownership before catalog projection/scanning queues any heavyweight
   // helper work. This keeps reconnect independent from collection startup time.
   await pollLiveLifecycle()
@@ -1252,10 +1325,17 @@ function formatRollValue(value: number): string {
         <h1>Cairn Codex</h1>
       </div>
       <div class="topbar-actions">
-        <span class="source-pill">{{ sourceModeLabel }} · {{ activeSourceCount }} sources</span>
-        <div class="status-pill">
-          <span class="status-dot" :class="{ dim: status?.helper !== 'available' }" />
-          {{ status ? `v${status.appVersion} · ${status.helper}` : 'Connecting…' }}
+        <nav class="system-nav" aria-label="Cairn Codex system views">
+          <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
+            Transfers
+          </button>
+          <button type="button" :class="{ active: activeView === 'settings' }" @click="activeView = 'settings'">
+            Settings
+          </button>
+        </nav>
+        <div class="game-status-pill" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
+          <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
+          <span><strong>{{ gameConnectionLabel }}</strong><small>{{ sourceModeLabel }} · {{ activeSourceCount }} sources</small></span>
         </div>
       </div>
     </header>
@@ -1270,6 +1350,7 @@ function formatRollValue(value: number): string {
       </section>
       <p v-if="activeView !== 'vault' && vaultError" class="operation-banner error">{{ vaultError }}</p>
       <p v-if="activeView !== 'vault' && vaultMessage" class="operation-banner success">{{ vaultMessage }}</p>
+      <template v-if="activeView !== 'vault' && activeView !== 'settings'">
       <section class="hero">
         <div>
           <p class="section-label">{{ collectionBasisLabel }}</p>
@@ -1339,6 +1420,7 @@ function formatRollValue(value: number): string {
           <small>Ownership persists here after items are ingested from the game.</small>
         </button>
       </section>
+      </template>
 
       <nav class="workspace-tabs" aria-label="Cairn Codex workspace">
         <button type="button" :class="{ active: activeView === 'collection' }" @click="activeView = 'collection'">
@@ -1349,12 +1431,6 @@ function formatRollValue(value: number): string {
         </button>
         <button type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
           <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
-        </button>
-        <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
-          <span>Vault</span><small>{{ availableVaultItems.length }} stored</small>
-        </button>
-        <button type="button" :class="{ active: activeView === 'settings' }" @click="activeView = 'settings'">
-          <span>Settings</span><small>Sources · live · display</small>
         </button>
       </nav>
 
@@ -1439,14 +1515,54 @@ function formatRollValue(value: number): string {
           </div>
         </header>
         <div class="skill-picker">
-          <label>
-            <span>Skill</span>
-            <input v-model="selectedSkill" list="skill-name-options" type="search" placeholder="Choose or type a skill…" />
-            <datalist id="skill-name-options">
-              <option v-for="skill in skillNames" :key="skill" :value="skill" />
-            </datalist>
-          </label>
-          <div>
+          <div class="skill-combobox" @focusout="handleSkillPickerFocusOut">
+            <label for="skill-picker-input">Skill</label>
+            <span class="skill-input-wrap">
+              <input
+                id="skill-picker-input"
+                v-model="selectedSkill"
+                type="text"
+                role="combobox"
+                autocomplete="off"
+                aria-autocomplete="list"
+                :aria-expanded="skillPickerOpen"
+                aria-controls="skill-name-options"
+                placeholder="Choose or type a skill…"
+                @focus="openSkillPicker"
+                @input="skillPickerOpen = true; skillPickerIndex = 0"
+                @keydown="handleSkillPickerKey"
+              />
+              <button
+                v-if="selectedSkill"
+                type="button"
+                aria-label="Clear selected skill"
+                @click="selectedSkill = ''; openSkillPicker()"
+              >
+                ×
+              </button>
+            </span>
+            <span
+              v-if="skillPickerOpen"
+              id="skill-name-options"
+              class="skill-suggestions"
+              role="listbox"
+            >
+              <button
+                v-for="(skill, index) in skillSuggestions"
+                :key="skill"
+                type="button"
+                role="option"
+                :aria-selected="index === skillPickerIndex"
+                :class="{ active: index === skillPickerIndex }"
+                @mouseenter="skillPickerIndex = index"
+                @click="selectSkill(skill)"
+              >
+                {{ skill }}
+              </button>
+              <small v-if="skillSuggestions.length === 0">No indexed skill matches that text.</small>
+            </span>
+          </div>
+          <div class="skill-match-count">
             <strong>{{ skillItemRows.length }}</strong>
             <span>matching items</span>
           </div>
@@ -1590,11 +1706,11 @@ function formatRollValue(value: number): string {
       <section v-else-if="activeView === 'vault'" class="vault-workspace" aria-label="Item vault">
         <header class="vault-heading">
           <div>
-            <p class="section-label">Transfer vault</p>
-            <h2>One tab in. One tab out.</h2>
+            <p class="section-label">Transfers</p>
+            <h2>Move items without losing them.</h2>
             <p>
-              The final shared stash tab is the staging area. Every commit is process-gated,
-              backed up, written atomically, reparsed, and hash-verified.
+              Live transfers operate while Grim Dawn is running. Offline staging provides the
+              same verified archive and retrieval workflow directly against the shared stash file.
             </p>
           </div>
           <button type="button" :disabled="vaultBusy" @click="refreshVault">
@@ -1602,6 +1718,21 @@ function formatRollValue(value: number): string {
           </button>
         </header>
 
+        <nav class="transfer-mode-tabs" aria-label="Transfer method">
+          <button type="button" :class="{ active: transferMode === 'live' }" @click="transferMode = 'live'">
+            <span><strong>Live game</strong><small>Watched tabs while Grim Dawn is running</small></span>
+            <em :class="`state-${liveStatus?.state ?? 'unavailable'}`">{{ gameConnectionLabel }}</em>
+          </button>
+          <button type="button" :class="{ active: transferMode === 'offline' }" @click="transferMode = 'offline'">
+            <span><strong>Offline staging</strong><small>Atomic shared-stash file operations</small></span>
+            <em :class="{ ready: writeSafety?.permitted }">{{ writeSafety?.permitted ? 'Ready' : 'Locked' }}</em>
+          </button>
+        </nav>
+
+        <p v-if="vaultError" class="vault-notice error">{{ vaultError }}</p>
+        <p v-if="vaultMessage" class="vault-notice success">{{ vaultMessage }}</p>
+
+        <template v-if="transferMode === 'live'">
         <section class="live-mode-card" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
           <div class="live-mode-status">
             <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
@@ -1676,6 +1807,45 @@ function formatRollValue(value: number): string {
           </button>
         </section>
 
+        <article class="vault-panel live-stored-panel">
+          <header>
+            <div>
+              <p>Codex Archive</p>
+              <h3>Return a stored copy to the game</h3>
+            </div>
+            <strong>{{ availableVaultItems.length }}</strong>
+          </header>
+          <p class="panel-help">
+            Select exactly one copy. Cairn sends it to {{ liveStatus?.depositTabDescription ?? 'the live deposit tab' }}
+            and keeps the archived copy reserved until the game acknowledges receipt.
+          </p>
+          <div v-if="availableVaultItems.length" class="vault-item-list selectable">
+            <label v-for="item in availableVaultItems" :key="item.id" class="vault-row">
+              <input
+                type="radio"
+                name="live-vault-item"
+                :checked="selectedVaultIds.includes(item.id)"
+                :disabled="vaultBusy"
+                @change="selectedVaultIds = [item.id]"
+              />
+              <div>
+                <strong>{{ item.name }}</strong>
+                <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.rarity }} · seed {{ item.seed }}</small>
+              </div>
+            </label>
+          </div>
+          <div v-else class="vault-empty">No archived items are waiting.</div>
+          <button
+            class="vault-action live-action"
+            type="button"
+            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length !== 1"
+            @click="retrieveSelectedLive"
+          >
+            {{ vaultBusy ? 'Waiting for game…' : selectedVaultIds.length === 1 ? 'Return selected copy live' : 'Select one stored copy' }}
+          </button>
+        </article>
+        </template>
+
         <section v-if="false" class="source-selector" aria-label="Collection stash sources">
           <header>
             <div>
@@ -1707,6 +1877,7 @@ function formatRollValue(value: number): string {
           </div>
         </section>
 
+        <template v-if="transferMode === 'offline'">
         <div class="vault-target">
           <label>
             <span>Shared stash</span>
@@ -1725,9 +1896,6 @@ function formatRollValue(value: number): string {
             </div>
           </div>
         </div>
-
-        <p v-if="vaultError" class="vault-notice error">{{ vaultError }}</p>
-        <p v-if="vaultMessage" class="vault-notice success">{{ vaultMessage }}</p>
 
         <div class="vault-columns">
           <article class="vault-panel staging-panel">
@@ -1803,17 +1971,9 @@ function formatRollValue(value: number): string {
             >
               {{ vaultBusy ? 'Verifying…' : `Retrieve ${selectedVaultIds.length} selected` }}
             </button>
-            <button
-              v-if="liveStatus?.state === 'ready'"
-              class="vault-action live-action"
-              type="button"
-              :disabled="vaultBusy || selectedVaultIds.length !== 1"
-              @click="retrieveSelectedLive"
-            >
-              {{ vaultBusy ? 'Waiting for game…' : selectedVaultIds.length === 1 ? 'Live-retrieve selected copy' : 'Select exactly one for live retrieval' }}
-            </button>
           </article>
         </div>
+        </template>
 
         <section v-if="retrievedVaultItems.length" class="vault-history">
           <div>

@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile, rename, writeFile } from 'node:fs/promises'
-import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
 import {
   IPC_CHANNELS,
   type AppStatus,
@@ -23,10 +23,20 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
+const CATALOG_PRESENTATION_VERSION = 2
+
 interface IngestCommand {
   path: string
   expectedSourceSha256: string
   items: Array<{ tabIndex: number; itemIndex: number; expectedSeed: number }>
+}
+
+interface PersistedWindowState {
+  x: number
+  y: number
+  width: number
+  height: number
+  maximized: boolean
 }
 
 interface IngestPlan {
@@ -249,7 +259,10 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
         const startedAt = Date.now()
         const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
         const withIcons = await attachItemIcons(helper, snapshot)
-        const persisted = database.persistSnapshot(withIcons)
+        const persisted = {
+          ...database.persistSnapshot(withIcons),
+          catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
+        }
         latestCollection = persisted
         await writeCollectionCache(collectionCachePath, persisted)
         console.log(`[collection-scan] completed in ${Date.now() - startedAt}ms`)
@@ -552,6 +565,7 @@ async function readCollectionCache(path: string): Promise<CollectionSnapshot | n
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as CollectionSnapshot
     if (
+      parsed.catalogPresentationVersion !== CATALOG_PRESENTATION_VERSION ||
       !Array.isArray(parsed.items) ||
       !Array.isArray(parsed.observedItems) ||
       !Array.isArray(parsed.scannedStashes)
@@ -807,6 +821,23 @@ async function runSmokeTest(
       mythicalMaw?.presentation?.sections.filter((section) => section.kind === 'skill-modifier').length !== 3
     ) {
       throw new Error('Catalog presentation did not resolve Mythical Maw skill levels and modifiers.')
+    }
+    const forbiddenMark = helperSnapshot.items.find(
+      (item) => item.name === 'Mythical Mark of the Forbidden'
+    )
+    const wendigoModifier = forbiddenMark?.presentation?.sections.find(
+      (section) => section.kind === 'skill-modifier' && section.heading === 'Wendigo Totem'
+    )
+    const anySkillConversion = helperSnapshot.items
+      .flatMap((item) => item.presentation?.sections ?? [])
+      .filter((section) => section.kind === 'skill-modifier')
+      .flatMap((section) => section.lines)
+      .some((line) => line.label.includes('Damage converted to'))
+    if (
+      wendigoModifier?.lines.find((line) => line.label === 'Vitality Damage')?.minimum !== 100 ||
+      !anySkillConversion
+    ) {
+      throw new Error('Pet skill modifiers did not preserve special damage or conversion payloads.')
     }
     const oathbreaker = helperSnapshot.items.find((item) => item.setName === 'Oathbreaker')
       ?.setPresentation
@@ -1570,11 +1601,66 @@ async function executeLastTabRetrieval(
   })
 }
 
-function createWindow(): void {
+async function readWindowState(): Promise<PersistedWindowState | null> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(join(app.getPath('userData'), 'window-state.json'), 'utf8')
+    ) as Partial<PersistedWindowState>
+    if (
+      !Number.isFinite(parsed.x) ||
+      !Number.isFinite(parsed.y) ||
+      !Number.isFinite(parsed.width) ||
+      !Number.isFinite(parsed.height)
+    ) return null
+    return {
+      x: parsed.x!,
+      y: parsed.y!,
+      width: Math.max(960, parsed.width!),
+      height: Math.max(640, parsed.height!),
+      maximized: parsed.maximized === true
+    }
+  } catch {
+    return null
+  }
+}
+
+function visibleWindowBounds(state: PersistedWindowState | null): Electron.Rectangle | null {
+  if (!state) return null
+  const requested = { x: state.x, y: state.y, width: state.width, height: state.height }
+  const display = screen.getAllDisplays().find(({ workArea }) =>
+    requested.x < workArea.x + workArea.width &&
+    requested.x + requested.width > workArea.x &&
+    requested.y < workArea.y + workArea.height &&
+    requested.y + requested.height > workArea.y
+  )
+  if (!display) return null
+  const width = Math.min(requested.width, display.workArea.width)
+  const height = Math.min(requested.height, display.workArea.height)
+  return {
+    x: Math.min(Math.max(requested.x, display.workArea.x), display.workArea.x + display.workArea.width - width),
+    y: Math.min(Math.max(requested.y, display.workArea.y), display.workArea.y + display.workArea.height - height),
+    width,
+    height
+  }
+}
+
+function rememberWindowState(window: BrowserWindow): void {
+  if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) return
+  const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds()
+  void writeFile(
+    join(app.getPath('userData'), 'window-state.json'),
+    JSON.stringify({ ...bounds, maximized: window.isMaximized() } satisfies PersistedWindowState)
+  ).catch((error) => console.warn('Could not persist window placement.', error))
+}
+
+async function createWindow(): Promise<void> {
   const screenshotPath = process.env.CAIRN_CODEX_SCREENSHOT_PATH
+  const savedState = screenshotPath ? null : await readWindowState()
+  const savedBounds = visibleWindowBounds(savedState)
   const window = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: savedBounds?.width ?? 1280,
+    height: savedBounds?.height ?? 800,
+    ...(savedBounds ? { x: savedBounds.x, y: savedBounds.y } : {}),
     minWidth: 960,
     minHeight: 640,
     show: false,
@@ -1587,6 +1673,20 @@ function createWindow(): void {
       backgroundThrottling: !screenshotPath
     }
   })
+  window.setMenuBarVisibility(false)
+  window.setAutoHideMenuBar(true)
+  if (savedState?.maximized) window.maximize()
+
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleWindowStateSave = (): void => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => rememberWindowState(window), 250)
+  }
+  window.on('resize', scheduleWindowStateSave)
+  window.on('move', scheduleWindowStateSave)
+  window.on('maximize', scheduleWindowStateSave)
+  window.on('unmaximize', scheduleWindowStateSave)
+  window.on('close', () => rememberWindowState(window))
 
   window.once('ready-to-show', () => {
     if (!screenshotPath) window.show()
@@ -1625,8 +1725,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         const category = process.env.CAIRN_CODEX_SCREENSHOT_CATEGORY
         if (category) {
           await window.webContents.executeJavaScript(`
-            [...document.querySelectorAll('.workspace-tabs button, .category-tabs button')]
-              .find((button) => button.querySelector('span')?.textContent === ${JSON.stringify(category)})
+            [...document.querySelectorAll('.workspace-tabs button, .category-tabs button, .system-nav button')]
+              .find((button) =>
+                (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
               ?.click()
           `)
         }
@@ -1636,6 +1737,22 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             [...document.querySelectorAll('.skill-scope button')]
               .find((button) => button.textContent?.trim() === ${JSON.stringify(skillScope)})
               ?.click()
+          `)
+        }
+        const skillQuery = process.env.CAIRN_CODEX_SCREENSHOT_SKILL_QUERY
+        if (skillQuery) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          await window.webContents.executeJavaScript(`
+            (() => {
+              const input = document.querySelector('.skill-combobox input')
+              if (!input) return
+              input.value = ${JSON.stringify(skillQuery)}
+              input.dispatchEvent(new Event('input', { bubbles: true }))
+              input.focus()
+              if (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_SKILL_SELECT_FIRST === '1')}) {
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+              }
+            })()
           `)
         }
         const query = process.env.CAIRN_CODEX_SCREENSHOT_QUERY
@@ -1727,6 +1844,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
   registerItemIconProtocol()
   const helper = createHelperClient()
   const databaseOverride = process.env.CAIRN_CODEX_DATABASE_PATH
@@ -1794,7 +1912,7 @@ app.whenReady().then(() => {
   }
 
   registerIpcHandlers(helper, database)
-  createWindow()
+  void createWindow()
 
   app.once('before-quit', () => {
     helper.dispose()
@@ -1802,7 +1920,7 @@ app.whenReady().then(() => {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow()
   })
 })
 

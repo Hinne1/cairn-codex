@@ -549,16 +549,54 @@ internal static partial class ItemPresentationBuilder
             if (modifiedSkill is null || modifierSkill is null ||
                 !data.Records.TryGetValue(modifierSkill, out var modifier))
                 continue;
+            var modifierRecord = ResolveSkillModifierRecord(modifier.Record, data);
             var lines = new List<ItemPresentationLine>();
-            AddFlatDamage(modifier.Record, lines, level: 1);
-            AddDurationDamage(modifier.Record, lines, level: 1);
-            AddSimpleStats(modifier.Record, lines, "standard", level: 1);
+            AddFlatDamage(modifierRecord, lines, level: 1);
+            AddDurationDamage(modifierRecord, lines, level: 1);
+            AddSimpleStats(modifierRecord, lines, "standard", level: 1);
+            AddConversions(modifierRecord, lines, level: 1);
+            AddSkillModifierSpecialStats(modifierRecord, lines);
             if (lines.Count > 0)
                 sections.Add(new ItemPresentationSection(
                     "skill-modifier",
                     ResolveSkillName(modifiedSkill, data),
                     lines));
         }
+    }
+
+    private static ArzRecord ResolveSkillModifierRecord(
+        ArzRecord record,
+        ItemPresentationSource data)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (true)
+        {
+            var next = record.Text("petSkillName") ?? record.Text("buffSkillName");
+            if (next is null || !seen.Add(next) || !data.Records.TryGetValue(next, out var source))
+                return record;
+            record = source.Record;
+        }
+    }
+
+    private static void AddSkillModifierSpecialStats(
+        ArzRecord record,
+        List<ItemPresentationLine> lines)
+    {
+        if (record.Number("offensiveTotalDamageReductionPercentMin") is { } damageReduction &&
+            Math.Abs(damageReduction) > 0.001)
+        {
+            var duration = record.Number("offensiveTotalDamageReductionPercentDurationMin");
+            var label = duration is { } seconds && seconds > 0
+                ? $"Reduced Target's Damage for {Format(seconds)} Seconds"
+                : "Reduced Target's Damage";
+            lines.Add(Line(label, Math.Abs(damageReduction), null, "%"));
+        }
+        if (record.Number("skillCooldownTime") is { } cooldown && Math.Abs(cooldown) > 0.001)
+            lines.Add(Line("Skill Recharge", Math.Abs(cooldown), null, "s", prefix: cooldown < 0 ? "−" : "+"));
+        if (record.Number("skillActiveDuration") is { } activeDuration && Math.Abs(activeDuration) > 0.001)
+            lines.Add(Line("Duration", Math.Abs(activeDuration), null, "s", prefix: activeDuration < 0 ? "−" : "+"));
+        if (record.Number("petLimit") is { } summonLimit && Math.Abs(summonLimit) > 0.001)
+            lines.Add(Line("Summon Limit", Math.Abs(summonLimit), null, prefix: summonLimit < 0 ? "−" : "+"));
     }
 
     private static bool TryResolveDisplaySkill(

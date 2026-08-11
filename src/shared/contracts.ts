@@ -173,6 +173,7 @@ export interface TransferStashCandidate {
 }
 
 export interface CollectionSnapshot {
+  catalogPresentationVersion?: number
   basis?: CollectionBasis
   isHardcore?: boolean
   availableStashes?: ScannedStash[]

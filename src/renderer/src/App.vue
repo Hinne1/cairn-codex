@@ -358,12 +358,12 @@ const skillItemRows = computed(() => {
       )
       .flatMap((section) => section.lines)
     if (amount === 0 && modifiers.length === 0) return []
-    const conversionLines = modifiers.filter((line) => /converted to/i.test(line.label))
+    const conversionLines = modifiers.filter((line) => isDamageTypeConversion(line.label))
     const globalConversionLines = sections
       .filter((section) => section.kind === 'base')
       .flatMap((section) => section.lines)
-      .filter((line) => /converted to/i.test(line.label))
-    const specialLines = modifiers.filter((line) => !/converted to/i.test(line.label))
+      .filter((line) => isDamageTypeConversion(line.label))
+    const specialLines = modifiers.filter((line) => !isDamageTypeConversion(line.label))
     const allConversionLines = [
       ...conversionLines.map((line) => ({ scope: 'Skill', line })),
       ...globalConversionLines.map((line) => ({ scope: 'Global', line }))
@@ -404,6 +404,10 @@ function conversionTarget(label: string): string | null {
   const match = label.match(/converted to\s+(.+)$/i)
   const target = match?.[1]?.replace(/\s+Damage$/i, '').trim()
   return target || null
+}
+
+function isDamageTypeConversion(label: string): boolean {
+  return /\bDamage converted to .+ Damage\b/i.test(label)
 }
 
 function setSkillSort(next: SkillSort): void {

@@ -15,10 +15,10 @@ import type {
 } from '@shared/contracts'
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
-type RarityFilter = 'all' | 'epic' | 'legendary'
+type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
-type ActiveView = 'collection' | 'sets' | 'skills' | 'vault' | 'settings'
+type ActiveView = 'collection' | 'sets' | 'skills' | 'mi-workshop' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
@@ -81,6 +81,7 @@ const liveStatus = ref<LiveGameStatus | null>(null)
 const liveIssues = ref<string[]>([])
 const liveSyncing = ref(false)
 const liveLifecyclePolling = ref(false)
+const showMiReserves = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
 const tooltipRecord = ref<string | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
@@ -155,7 +156,7 @@ const ingestBlockedReason = computed(() => {
   if (!writeSafety.value) return 'Checking whether stash writes are safe…'
   if (!writeSafety.value.permitted) return writeSafety.value.reasons.join(' ') || 'Stash writes are locked.'
   if (!staging.value) return 'Inspecting the final stash tab…'
-  if (staging.value.itemCount === 0) return 'Put at least one Epic or Legendary in the final stash tab.'
+  if (staging.value.itemCount === 0) return 'Put at least one Epic, Legendary, or Monster Infrequent in the final stash tab.'
   if (stagingHasUnsupported.value) return 'Remove unsupported items from the final stash tab first.'
   return null
 })
@@ -398,6 +399,79 @@ const skillItemRows = computed(() => {
     if (comparison === 0) comparison = left.item.name.localeCompare(right.item.name)
     return skillSortDirection.value === 'asc' ? comparison : -comparison
   })
+})
+
+const affixByRecord = computed(() => {
+  const byRecord = new Map<string, { name: string; kind: 'prefix' | 'suffix'; rarity: 'magical' | 'rare' }>()
+  for (const affix of snapshot.value?.affixes ?? []) {
+    for (const record of affix.records) {
+      byRecord.set(record.toLocaleLowerCase(), {
+        name: affix.name,
+        kind: affix.kind,
+        rarity: affix.rarity
+      })
+    }
+  }
+  return byRecord
+})
+
+const miWorkshopRows = computed(() => {
+  if (!snapshot.value) return []
+  const bases = new Map(
+    snapshot.value.items
+      .filter((item) => item.rarity === 'mi')
+      .map((item) => [item.record.toLocaleLowerCase(), item])
+  )
+  const grouped = new Map<string, {
+    base: CollectionItem
+    prefix: string
+    prefixRarity: 'magical' | 'rare' | null
+    suffix: string
+    suffixRarity: 'magical' | 'rare' | null
+    copies: ObservedStashItem[]
+  }>()
+  for (const copy of snapshot.value.observedItems) {
+    const base = bases.get(copy.baseRecord.toLocaleLowerCase())
+    if (!base) continue
+    const prefix = affixByRecord.value.get(copy.prefixRecord.toLocaleLowerCase())
+    const suffix = affixByRecord.value.get(copy.suffixRecord.toLocaleLowerCase())
+    const key = [copy.baseRecord, copy.prefixRecord, copy.suffixRecord]
+      .map((value) => value.toLocaleLowerCase())
+      .join('|')
+    const existing = grouped.get(key)
+    if (existing) existing.copies.push(copy)
+    else {
+      grouped.set(key, {
+        base,
+        prefix: prefix?.name ?? (copy.prefixRecord ? copy.prefixRecord.split('/').at(-1) ?? copy.prefixRecord : 'No prefix'),
+        prefixRarity: prefix?.rarity ?? null,
+        suffix: suffix?.name ?? (copy.suffixRecord ? copy.suffixRecord.split('/').at(-1) ?? copy.suffixRecord : 'No suffix'),
+        suffixRarity: suffix?.rarity ?? null,
+        copies: [copy]
+      })
+    }
+  }
+  return [...grouped.values()]
+    .map((group) => {
+      const copies = group.copies.sort(
+        (left, right) =>
+          (right.rollAnalysis?.overallEstimatedPercentile ?? -1) -
+          (left.rollAnalysis?.overallEstimatedPercentile ?? -1)
+      )
+      return {
+        ...group,
+        copies,
+        leader: copies[0]!,
+        bestScore: copies[0]?.rollAnalysis?.overallEstimatedPercentile ?? -1
+      }
+    })
+    .sort(
+      (left, right) =>
+        left.base.name.localeCompare(right.base.name) ||
+        left.base.levelRequirement - right.base.levelRequirement ||
+        left.prefix.localeCompare(right.prefix) ||
+        left.suffix.localeCompare(right.suffix)
+    )
 })
 
 function conversionTarget(label: string): string | null {
@@ -710,11 +784,11 @@ async function loadSelectedSources(): Promise<void> {
   await refreshVault()
 }
 
-function rarity(name: 'epic' | 'legendary'): CollectionRaritySummary | undefined {
+function rarity(name: 'epic' | 'legendary' | 'mi'): CollectionRaritySummary | undefined {
   return snapshot.value?.rarities.find((summary) => summary.rarity === name)
 }
 
-function filterToRarity(value: 'epic' | 'legendary'): void {
+function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
   activeView.value = 'collection'
   activeCategory.value = 'All'
   rarityFilter.value = value
@@ -722,6 +796,12 @@ function filterToRarity(value: 'epic' | 'legendary'): void {
 }
 
 function percentage(summary: CollectionRaritySummary | undefined): string {
+  if (!summary || summary.total === 0) return '0%'
+  return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
+}
+
+function affixPercentage(): string {
+  const summary = snapshot.value?.affixSummary
   if (!summary || summary.total === 0) return '0%'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
 }
@@ -784,7 +864,7 @@ async function startLiveMode(): Promise<void> {
   try {
     liveStatus.value = await window.cairnCodex.startLiveGame()
     if (liveStatus.value.state === 'ready') {
-      vaultMessage.value = 'Live mode connected. Put an Epic or Legendary into the final shared stash tab to archive it instantly.'
+      vaultMessage.value = 'Live mode connected. Put an Epic, Legendary, or Monster Infrequent into the final shared stash tab to archive it instantly.'
     } else {
       vaultError.value = liveStatus.value.detail
     }
@@ -891,7 +971,14 @@ async function retrieveArchivedCopyLive(vaultItemId: string): Promise<void> {
 }
 
 function applyLiveIngests(
-  ingested: Array<{ vaultItemId: string; baseRecord: string; name: string; seed: number }>
+  ingested: Array<{
+    vaultItemId: string
+    baseRecord: string
+    prefixRecord: string
+    suffixRecord: string
+    name: string
+    seed: number
+  }>
 ): void {
   if (!snapshot.value) return
   const counts = new Map<string, number>()
@@ -911,7 +998,36 @@ function applyLiveIngests(
         collectionBasis.value === 'archive' ? item.availableCount + added : item.availableCount
     }
   })
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, items })
+  const observedItems = collectionBasis.value === 'archive'
+    ? [
+        ...snapshot.value.observedItems,
+        ...ingested.map((item, index): ObservedStashItem => ({
+          sourcePath: `vault://${item.vaultItemId}`,
+          tabIndex: -1,
+          itemIndex: snapshot.value!.observedItems.length + index,
+          baseRecord: item.baseRecord,
+          prefixRecord: item.prefixRecord,
+          suffixRecord: item.suffixRecord,
+          modifierRecord: '',
+          transmuteRecord: '',
+          seed: item.seed,
+          materiaRecord: '',
+          relicCompletionBonusRecord: '',
+          relicSeed: 0,
+          enchantmentRecord: '',
+          ascendantRecord: '',
+          ascendantRecord2H: '',
+          enchantmentSeed: 0,
+          materiaCombines: 0,
+          stackCount: 1,
+          rerolls: 0,
+          affixRerolls: 0,
+          rollAnalysis: null,
+          instanceKey: `vault-live-${item.vaultItemId}`
+        }))
+      ]
+    : snapshot.value.observedItems
+  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items })
 }
 
 function applyLiveRetrievals(
@@ -952,7 +1068,7 @@ function applyLiveRetrievals(
 }
 
 function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
-  const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+  const rarities = (['epic', 'legendary', 'mi'] as const).map((rarity) => {
     const items = value.items.filter((item) => item.rarity === rarity)
     return {
       rarity,
@@ -961,7 +1077,31 @@ function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
       availableCopies: items.reduce((sum, item) => sum + item.availableCount, 0)
     }
   })
-  return { ...value, rarities }
+  const affixCounts = new Map<string, number>()
+  for (const item of value.observedItems) {
+    for (const record of [item.prefixRecord, item.suffixRecord]) {
+      if (!record) continue
+      const key = record.toLocaleLowerCase()
+      affixCounts.set(key, (affixCounts.get(key) ?? 0) + 1)
+    }
+  }
+  const affixes = value.affixes.map((affix) => ({
+    ...affix,
+    availableCount: affix.records.reduce(
+      (count, record) => count + (affixCounts.get(record.toLocaleLowerCase()) ?? 0),
+      0
+    )
+  }))
+  return {
+    ...value,
+    rarities,
+    affixes,
+    affixSummary: {
+      total: affixes.length,
+      collected: affixes.filter((affix) => affix.availableCount > 0).length,
+      availableCopies: affixes.reduce((count, affix) => count + affix.availableCount, 0)
+    }
+  }
 }
 
 async function refreshStaging(): Promise<void> {
@@ -1341,6 +1481,10 @@ function humanStatName(field: string): string {
 function formatRollValue(value: number): string {
   return Number.isInteger(value) ? value.toString() : value.toFixed(1)
 }
+
+function formatPercentile(value: number | null | undefined): string {
+  return value == null ? '—' : `${value.toFixed(1)}%`
+}
 </script>
 
 <template>
@@ -1424,6 +1568,30 @@ function formatRollValue(value: number): string {
           <div class="meter epic"><span :style="{ width: percentage(rarity('epic')) }" /></div>
           <small>{{ percentage(rarity('epic')) }} discovered · {{ rarity('epic')?.availableCopies ?? 0 }} copies available</small>
         </button>
+        <button
+          type="button"
+          :aria-pressed="rarityFilter === 'mi'"
+          @click="filterToRarity('mi')"
+        >
+          <div class="metric-heading">
+            <span>MI Bases</span>
+            <strong>{{ rarity('mi')?.collected ?? 0 }} / {{ rarity('mi')?.total ?? '—' }}</strong>
+          </div>
+          <div class="meter mi"><span :style="{ width: percentage(rarity('mi')) }" /></div>
+          <small>{{ percentage(rarity('mi')) }} discovered · level tiers tracked separately</small>
+        </button>
+        <button
+          type="button"
+          :aria-pressed="activeView === 'mi-workshop'"
+          @click="activeView = 'mi-workshop'"
+        >
+          <div class="metric-heading">
+            <span>Affixes</span>
+            <strong>{{ snapshot?.affixSummary.collected ?? 0 }} / {{ snapshot?.affixSummary.total ?? '—' }}</strong>
+          </div>
+          <div class="meter affix"><span :style="{ width: affixPercentage() }" /></div>
+          <small>{{ affixPercentage() }} discovered · prefixes and suffixes</small>
+        </button>
       </section>
 
       <section class="collection-basis" aria-label="Collection persistence">
@@ -1457,6 +1625,9 @@ function formatRollValue(value: number): string {
         </button>
         <button type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
           <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
+        </button>
+        <button type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
+          <span>MI Workshop</span><small>{{ miWorkshopRows.length }} affix combinations</small>
         </button>
       </nav>
 
@@ -1508,6 +1679,7 @@ function formatRollValue(value: number): string {
           <option value="all">All rarities</option>
           <option value="legendary">Legendary</option>
           <option value="epic">Epic</option>
+          <option value="mi">Monster Infrequent</option>
         </select>
         <select v-if="activeView === 'collection'" v-model="sortMode" aria-label="Sort collection">
           <option value="recent">Recently collected</option>
@@ -1622,6 +1794,68 @@ function formatRollValue(value: number): string {
                 <td>{{ row.item.levelRequirement }}</td>
               </tr>
               <tr v-if="skillItemRows.length === 0"><td colspan="7" class="skill-empty">No matching items in this scope.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-else-if="activeView === 'mi-workshop'" class="mi-workshop" aria-label="Monster Infrequent workshop">
+        <header class="mi-workshop-heading">
+          <div>
+            <p class="section-label">Monster Infrequent research</p>
+            <h2>MI Workshop</h2>
+            <p>Each MI level tier is its own base entry. Affix combinations are grouped below, with the strongest rolled copy leading each group.</p>
+          </div>
+          <label class="reserve-toggle">
+            <input v-model="showMiReserves" type="checkbox" />
+            Show archived copies
+          </label>
+        </header>
+        <div class="mi-workshop-summary">
+          <span><strong>{{ rarity('mi')?.collected ?? 0 }}</strong> MI tiers collected</span>
+          <span><strong>{{ snapshot?.affixSummary.collected ?? 0 }}</strong> affixes discovered</span>
+          <span><strong>{{ miWorkshopRows.length }}</strong> combinations retained</span>
+        </div>
+        <div class="mi-table-wrap">
+          <table class="mi-table">
+            <thead>
+              <tr>
+                <th>MI base</th>
+                <th>Level</th>
+                <th>Prefix</th>
+                <th>Suffix</th>
+                <th>Leader roll quality</th>
+                <th>Stored</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in miWorkshopRows" :key="`${row.base.record}|${row.prefix}|${row.suffix}`" @click="openItem(row.base)">
+                <td>
+                  <span class="mi-base-cell">
+                    <img v-if="itemIconUrl(row.base)" :src="itemIconUrl(row.base)!" alt="" />
+                    <strong>{{ row.base.name }}</strong>
+                  </span>
+                </td>
+                <td>{{ row.base.levelRequirement }}</td>
+                <td :class="['affix-name', row.prefixRarity]">{{ row.prefix }}</td>
+                <td :class="['affix-name', row.suffixRarity]">{{ row.suffix }}</td>
+                <td class="mi-score-breakdown">
+                  <span><small>Overall</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.overallEstimatedPercentile) }}</strong></span>
+                  <span><small>Base</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.baseEstimatedPercentile) }}</strong></span>
+                  <span><small>Prefix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.prefixEstimatedPercentile) }}</strong></span>
+                  <span><small>Suffix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.suffixEstimatedPercentile) }}</strong></span>
+                </td>
+                <td>
+                  <strong>{{ row.copies.length }}</strong>
+                  <small v-if="row.copies.length > 1">1 leader · {{ row.copies.length - 1 }} archived</small>
+                  <span v-if="showMiReserves && row.copies.length > 1" class="reserve-scores">
+                    {{ row.copies.slice(1).map((copy) => copy.rollAnalysis?.overallEstimatedPercentile == null ? 'unscored' : `${copy.rollAnalysis.overallEstimatedPercentile.toFixed(1)}%`).join(' · ') }}
+                  </span>
+                </td>
+              </tr>
+              <tr v-if="miWorkshopRows.length === 0">
+                <td colspan="6" class="skill-empty">Archive a Monster Infrequent to start building the Workshop.</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -1808,7 +2042,7 @@ function formatRollValue(value: number): string {
             </div>
           </header>
           <p>
-            Cairn intercepted these items but they are outside the Epic/Legendary collection.
+            Cairn intercepted these items but they are outside the Epic/Legendary/MI collection.
             Select them and use live return; their verified receipt remains on disk until the return is acknowledged.
           </p>
           <div class="vault-item-list selectable">
@@ -1948,7 +2182,7 @@ function formatRollValue(value: number): string {
                 <span class="item-rune">{{ item.supported ? '◆' : '!' }}</span>
                 <div>
                   <strong>{{ item.name }}</strong>
-                  <small>Seed {{ item.seed }}{{ item.supported ? '' : ' · not an Epic/Legendary' }}</small>
+                  <small>Seed {{ item.seed }}{{ item.supported ? '' : ' · not an Epic/Legendary/MI' }}</small>
                 </div>
               </div>
             </div>
@@ -2101,7 +2335,7 @@ function formatRollValue(value: number): string {
             v-for="item in visibleItems"
             :key="item.record"
             class="item-card"
-            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic' }"
+            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi' }"
             role="button"
             tabindex="0"
             aria-describedby="item-tooltip"

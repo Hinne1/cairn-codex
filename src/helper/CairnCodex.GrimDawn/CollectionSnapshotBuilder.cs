@@ -10,6 +10,7 @@ internal static class CollectionSnapshotBuilder
         var gameData = ItemCatalogBuilder.Load(installation.Path);
         var catalog = ItemCatalogBuilder.Build(gameData);
         var availableByRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var availableByAffixRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var scannedStashes = new List<ScannedStash>();
         var observedItems = new List<ObservedStashItem>();
         var warnings = new List<CollectionScanWarning>();
@@ -40,6 +41,16 @@ internal static class CollectionSnapshotBuilder
                 {
                     availableByRecord[item.BaseRecord] =
                         availableByRecord.GetValueOrDefault(item.BaseRecord) + checked((int)item.StackCount);
+                    if (!string.IsNullOrWhiteSpace(item.PrefixRecord))
+                    {
+                        availableByAffixRecord[item.PrefixRecord] =
+                            availableByAffixRecord.GetValueOrDefault(item.PrefixRecord) + 1;
+                    }
+                    if (!string.IsNullOrWhiteSpace(item.SuffixRecord))
+                    {
+                        availableByAffixRecord[item.SuffixRecord] =
+                            availableByAffixRecord.GetValueOrDefault(item.SuffixRecord) + 1;
+                    }
                     var rollAnalysis = eligibleRecords.Contains(item.BaseRecord)
                         ? ItemRollAnalyzer.Analyze(
                             gameData,
@@ -109,6 +120,19 @@ internal static class CollectionSnapshotBuilder
                 group.Count(item => item.AvailableCount > 0),
                 group.Sum(item => item.AvailableCount)))
             .ToArray();
+        var affixes = catalog.Affixes
+            .Select(affix => new CollectionAffix(
+                affix.Key,
+                affix.Name,
+                affix.Kind,
+                affix.Rarity,
+                affix.Records,
+                affix.Records.Sum(record => availableByAffixRecord.GetValueOrDefault(record))))
+            .ToArray();
+        var affixSummary = new CollectionAffixSummary(
+            affixes.Length,
+            affixes.Count(affix => affix.AvailableCount > 0),
+            affixes.Sum(affix => affix.AvailableCount));
 
         return new CollectionSnapshot(
             DateTime.UtcNow,
@@ -118,7 +142,9 @@ internal static class CollectionSnapshotBuilder
             observedItems,
             warnings,
             summaries,
-            items);
+            items,
+            affixSummary,
+            affixes);
     }
 }
 
@@ -130,7 +156,9 @@ internal sealed record CollectionSnapshot(
     IReadOnlyList<ObservedStashItem> ObservedItems,
     IReadOnlyList<CollectionScanWarning> Warnings,
     IReadOnlyList<CollectionRaritySummary> Rarities,
-    IReadOnlyList<CollectionCatalogItem> Items);
+    IReadOnlyList<CollectionCatalogItem> Items,
+    CollectionAffixSummary AffixSummary,
+    IReadOnlyList<CollectionAffix> Affixes);
 
 internal sealed record ScannedStash(
     string Path,
@@ -170,6 +198,16 @@ internal sealed record CollectionRaritySummary(
     int Total,
     int Collected,
     int AvailableCopies);
+
+internal sealed record CollectionAffixSummary(int Total, int Collected, int AvailableCopies);
+
+internal sealed record CollectionAffix(
+    string Key,
+    string Name,
+    string Kind,
+    string Rarity,
+    IReadOnlyList<string> Records,
+    int AvailableCount);
 
 internal sealed record CollectionCatalogItem(
     string Record,

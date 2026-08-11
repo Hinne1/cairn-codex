@@ -72,7 +72,14 @@ export interface LiveGameStatus {
 
 export interface LiveGameSyncResult {
   status: LiveGameStatus
-  ingested: Array<{ vaultItemId: string; baseRecord: string; name: string; seed: number }>
+  ingested: Array<{
+    vaultItemId: string
+    baseRecord: string
+    prefixRecord: string
+    suffixRecord: string
+    name: string
+    seed: number
+  }>
   issues: string[]
 }
 
@@ -108,7 +115,7 @@ export interface VaultListItem {
   id: string
   baseRecord: string
   name: string
-  rarity: 'epic' | 'legendary'
+  rarity: CollectionItemRarity
   catalogued: boolean
   isHardcore: boolean
   state: VaultItemState
@@ -185,6 +192,8 @@ export interface CollectionSnapshot {
   warnings: CollectionScanWarning[]
   rarities: CollectionRaritySummary[]
   items: CollectionItem[]
+  affixSummary: CollectionAffixSummary
+  affixes: CollectionAffix[]
 }
 
 export interface CatalogContentPack {
@@ -208,16 +217,33 @@ export interface CollectionScanWarning {
 }
 
 export interface CollectionRaritySummary {
-  rarity: 'epic' | 'legendary'
+  rarity: CollectionItemRarity
   total: number
   collected: number
   availableCopies: number
 }
 
+export type CollectionItemRarity = 'epic' | 'legendary' | 'mi'
+
+export interface CollectionAffixSummary {
+  total: number
+  collected: number
+  availableCopies: number
+}
+
+export interface CollectionAffix {
+  key: string
+  name: string
+  kind: 'prefix' | 'suffix'
+  rarity: 'magical' | 'rare'
+  records: string[]
+  availableCount: number
+}
+
 export interface CollectionItem {
   record: string
   name: string
-  rarity: 'epic' | 'legendary'
+  rarity: CollectionItemRarity
   itemClass: string
   slot: string
   levelRequirement: number
@@ -322,6 +348,9 @@ export interface ItemRollAnalysis {
   reason: string | null
   percentileSampleSize: number
   overallEstimatedPercentile: number | null
+  baseEstimatedPercentile: number | null
+  prefixEstimatedPercentile: number | null
+  suffixEstimatedPercentile: number | null
   stats: RolledStat[]
   unmodeledFields: string[]
 }

@@ -30,6 +30,7 @@ while ((line = Console.ReadLine()) is not null)
             "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
             "build-item-catalog" => BuildItemCatalog(request),
             "inspect-game-record" => InspectGameRecord(request),
+            "inspect-game-records" => InspectGameRecords(request),
             "extract-item-icons" => ExtractItemIcons(request),
             "scan-collection" => HelperResponse.Success(request.Id, CollectionSnapshotBuilder.Scan()),
             "scan-transfer-stash" => ScanTransferStash(request),
@@ -146,6 +147,62 @@ HelperResponse InspectGameRecord(HelperRequest request)
     return HelperResponse.Success(request.Id, source.Record);
 }
 
+HelperResponse InspectGameRecords(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<InspectGameRecordsRequest>(jsonOptions)
+        ?? throw new JsonException("inspect-game-records requires an installationPath parameter.");
+    var data = ItemCatalogBuilder.Load(parameters.InstallationPath);
+    var limit = Math.Clamp(parameters.Limit, 1, 5000);
+    var fields = parameters.Fields ?? [];
+    var matches = data.Records.Values
+        .Where(source => string.IsNullOrWhiteSpace(parameters.RecordContains) ||
+            source.Record.Name.Contains(parameters.RecordContains, StringComparison.OrdinalIgnoreCase))
+        .Where(source => string.IsNullOrWhiteSpace(parameters.Type) ||
+            string.Equals(source.Record.Type, parameters.Type, StringComparison.OrdinalIgnoreCase))
+        .Where(source => string.IsNullOrWhiteSpace(parameters.ValueContains) ||
+            source.Record.Values.Values.SelectMany(values => values).Any(value =>
+                value.Text?.Contains(parameters.ValueContains, StringComparison.OrdinalIgnoreCase) == true))
+        .Where(source => string.IsNullOrWhiteSpace(parameters.Field) ||
+            source.Record.Values.TryGetValue(parameters.Field, out var values) &&
+            (string.IsNullOrWhiteSpace(parameters.ValueEquals) || values.Any(value =>
+                string.Equals(value.Text, parameters.ValueEquals, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value.Number?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    parameters.ValueEquals, StringComparison.OrdinalIgnoreCase))))
+        .OrderBy(source => source.Record.Name, StringComparer.OrdinalIgnoreCase)
+        .Take(limit)
+        .Select(source => new
+        {
+            record = source.Record.Name,
+            source.Record.Type,
+            source.ContentPack,
+            matchingText = string.IsNullOrWhiteSpace(parameters.ValueContains)
+                ? []
+                : source.Record.Values.Values
+                    .SelectMany(values => values)
+                    .Select(value => value.Text)
+                    .Where(value => value?.Contains(
+                        parameters.ValueContains,
+                        StringComparison.OrdinalIgnoreCase) == true)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+            fields = fields.ToDictionary(
+                field => field,
+                field => source.Record.Values.GetValueOrDefault(field) ?? [],
+                StringComparer.OrdinalIgnoreCase),
+            resolvedText = fields.ToDictionary(
+                field => field,
+                field => source.Record.Values.GetValueOrDefault(field)?
+                    .Select(value => value.Text is { } text && data.Tags.TryGetValue(text, out var resolved)
+                        ? resolved
+                        : value.Text)
+                    .Where(value => value is not null)
+                    .ToArray() ?? [],
+                StringComparer.OrdinalIgnoreCase)
+        })
+        .ToArray();
+    return HelperResponse.Success(request.Id, new { count = matches.Length, records = matches });
+}
+
 HelperResponse ExtractItemIcons(HelperRequest request)
 {
     var parameters = request.Params?.Deserialize<ExtractItemIconsRequest>(jsonOptions)
@@ -250,6 +307,15 @@ HelperResponse AnalyzeItemRolls(HelperRequest request)
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);
 internal sealed record InspectGameRecordRequest(string InstallationPath, string Record);
+internal sealed record InspectGameRecordsRequest(
+    string InstallationPath,
+    string? RecordContains,
+    string? Type,
+    string? ValueContains,
+    string? Field,
+    string? ValueEquals,
+    string[]? Fields,
+    int Limit = 100);
 internal sealed record AcknowledgeLiveIncomingRequest(
     string Path,
     string ExpectedSha256,

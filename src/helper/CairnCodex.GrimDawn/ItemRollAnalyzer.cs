@@ -74,6 +74,9 @@ internal static class ItemRollAnalyzer
             .GroupBy(stat => GetScoreGroup(stat.Field, scored), StringComparer.Ordinal)
             .Select(group => group.Average(stat => stat.EstimatedPercentile!.Value))
             .ToArray();
+        var basePercentile = SourcePercentile(stats, baseStats);
+        var prefixPercentile = SourcePercentile(stats, prefixStats);
+        var suffixPercentile = SourcePercentile(stats, suffixStats);
         return new ItemRollAnalysis(
             item.BaseRecord,
             item.PrefixRecord,
@@ -84,6 +87,9 @@ internal static class ItemRollAnalyzer
             trusted ? null : "One or more rollable fields are not modeled; scoring is withheld.",
             trusted ? PercentileSampleSize : 0,
             groupedPercentiles.Length == 0 ? null : groupedPercentiles.Average(),
+            basePercentile,
+            prefixPercentile,
+            suffixPercentile,
             stats,
             result.UnmodeledFields,
             result.ProcLines?.Select(line => new RolledProcLine(
@@ -92,6 +98,22 @@ internal static class ItemRollAnalyzer
                 line.Max,
                 line.DurationMin,
                 line.Chance)).ToArray() ?? []);
+    }
+
+    private static double? SourcePercentile(
+        IReadOnlyList<RolledStat> stats,
+        ItemStatEngine.InputStat[]? source)
+    {
+        if (source is null) return null;
+        var fields = source.Select(stat => stat.Stat).ToHashSet(StringComparer.Ordinal);
+        var scored = stats
+            .Where(stat => stat.EstimatedPercentile.HasValue && fields.Contains(stat.Field))
+            .ToArray();
+        var grouped = scored
+            .GroupBy(stat => GetScoreGroup(stat.Field, scored), StringComparer.Ordinal)
+            .Select(group => group.Average(stat => stat.EstimatedPercentile!.Value))
+            .ToArray();
+        return grouped.Length == 0 ? null : grouped.Average();
     }
 
     private static RollDistribution BuildDistribution(
@@ -250,6 +272,9 @@ internal sealed record ItemRollAnalysis(
     string? Reason,
     int PercentileSampleSize,
     double? OverallEstimatedPercentile,
+    double? BaseEstimatedPercentile,
+    double? PrefixEstimatedPercentile,
+    double? SuffixEstimatedPercentile,
     IReadOnlyList<RolledStat> Stats,
     IReadOnlyList<string> UnmodeledFields,
     IReadOnlyList<RolledProcLine> ProcLines)
@@ -264,6 +289,9 @@ internal sealed record ItemRollAnalysis(
             false,
             reason,
             0,
+            null,
+            null,
+            null,
             null,
             [],
             [],

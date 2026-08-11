@@ -71,13 +71,37 @@ internal static class ItemCatalogBuilder
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var affixes = data.Records.Values
+            .Select(source => ProjectAffix(source, data.Tags))
+            .Where(affix => affix is not null)
+            .Cast<CatalogAffixRecord>()
+            .GroupBy(
+                affix => $"{affix.Kind}\0{affix.Rarity}\0{affix.Name}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var first = group.First();
+                return new CatalogAffix(
+                    $"{first.Kind}:{first.Rarity}:{first.Name.ToLowerInvariant()}",
+                    first.Name,
+                    first.Kind,
+                    first.Rarity,
+                    group.Select(affix => affix.Record)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(record => record, StringComparer.OrdinalIgnoreCase)
+                        .ToArray());
+            })
+            .OrderBy(affix => affix.Kind, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(affix => affix.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         return new ItemCatalogResult(
             data.InstallationPath,
             data.ContentPacks.Select(pack => new CatalogContentPack(pack.Id, pack.DatabasePath, pack.TagsPath)).ToArray(),
             data.Records.Count,
             data.Tags.Count,
-            items);
+            items,
+            affixes);
     }
 
     private static CatalogItem? Project(
@@ -90,7 +114,8 @@ internal static class ItemCatalogBuilder
     {
         var record = source.Record;
         var classification = record.Text("itemClassification");
-        if (classification is not ("Epic" or "Legendary") ||
+        var isMonsterInfrequent = classification == "Rare" && IsMonsterInfrequent(record);
+        if (classification is not ("Epic" or "Legendary") && !isMonsterInfrequent ||
             record.Name.Contains("/enemygear/", StringComparison.OrdinalIgnoreCase) ||
             record.Name.Contains("/npcgear/", StringComparison.OrdinalIgnoreCase) ||
             record.Name.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
@@ -134,7 +159,7 @@ internal static class ItemCatalogBuilder
         return new CatalogItem(
             record.Name,
             name,
-            classification.ToLowerInvariant(),
+            isMonsterInfrequent ? "mi" : classification!.ToLowerInvariant(),
             itemClass,
             slot,
             checked((int)Math.Round(record.Number("levelRequirement") ?? 0)),
@@ -146,6 +171,43 @@ internal static class ItemCatalogBuilder
             setRecord is null ? null : setPresentations.GetValueOrDefault(setRecord),
             BuildAcquisition(record.Name, acquisitionReferences),
             ItemPresentationBuilder.Build(record, presentationSource));
+    }
+
+    private static bool IsMonsterInfrequent(ArzRecord record) =>
+        record.Values.Values
+            .SelectMany(values => values)
+            .Select(value => value.Text)
+            .Any(value =>
+                value?.Contains("/skillmodifiers/monsterinfrequents/", StringComparison.OrdinalIgnoreCase) == true ||
+                value?.Contains("/skillmodifiers/mi/", StringComparison.OrdinalIgnoreCase) == true);
+
+    private static CatalogAffixRecord? ProjectAffix(
+        CatalogSourceRecord source,
+        IReadOnlyDictionary<string, string> tags)
+    {
+        var path = source.Record.Name.Replace('\\', '/');
+        var kind = path.Contains("/lootaffixes/prefix/", StringComparison.OrdinalIgnoreCase)
+            ? "prefix"
+            : path.Contains("/lootaffixes/suffix/", StringComparison.OrdinalIgnoreCase)
+                ? "suffix"
+                : null;
+        if (kind is null ||
+            source.Record.Type != "LootRandomizer" ||
+            path.Contains("_base_blank", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var name = Resolve(source.Record.Text("lootRandomizerName"), tags)?.Trim();
+        var rarity = source.Record.Text("itemClassification")?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(name) ||
+            name.StartsWith("tag", StringComparison.OrdinalIgnoreCase) ||
+            rarity is not ("magical" or "rare"))
+        {
+            return null;
+        }
+
+        return new CatalogAffixRecord(source.Record.Name, name, kind, rarity);
     }
 
     private static bool IsCategoryTemplate(string recordName)
@@ -283,7 +345,8 @@ internal sealed record ItemCatalogResult(
     IReadOnlyList<CatalogContentPack> ContentPacks,
     int SourceRecordCount,
     int TagCount,
-    IReadOnlyList<CatalogItem> Items);
+    IReadOnlyList<CatalogItem> Items,
+    IReadOnlyList<CatalogAffix> Affixes);
 
 internal sealed record CatalogContentPack(string Id, string DatabasePath, string TagsPath);
 
@@ -302,6 +365,15 @@ internal sealed record CatalogItem(
     ItemSetPresentation? SetPresentation,
     ItemAcquisitionPresentation Acquisition,
     ItemPresentation Presentation);
+
+internal sealed record CatalogAffix(
+    string Key,
+    string Name,
+    string Kind,
+    string Rarity,
+    IReadOnlyList<string> Records);
+
+internal sealed record CatalogAffixRecord(string Record, string Name, string Kind, string Rarity);
 
 internal sealed record AcquisitionReference(string Record, string Type, string Field);
 internal sealed record ItemAcquisitionPresentation(IReadOnlyList<string> Sources);

@@ -8,6 +8,38 @@ import type {
   VaultListItem
 } from '@shared/contracts'
 
+const collectionRarities = ['epic', 'legendary', 'mi'] as const
+
+function withAffixAvailability(
+  snapshot: CollectionSnapshot,
+  observedItems: ObservedStashItem[]
+): CollectionSnapshot {
+  const counts = new Map<string, number>()
+  for (const item of observedItems) {
+    for (const record of [item.prefixRecord, item.suffixRecord]) {
+      if (!record) continue
+      const key = record.toLocaleLowerCase()
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  const affixes = snapshot.affixes.map((affix) => ({
+    ...affix,
+    availableCount: affix.records.reduce(
+      (count, record) => count + (counts.get(record.toLocaleLowerCase()) ?? 0),
+      0
+    )
+  }))
+  return {
+    ...snapshot,
+    affixes,
+    affixSummary: {
+      total: affixes.length,
+      collected: affixes.filter((affix) => affix.availableCount > 0).length,
+      availableCopies: affixes.reduce((count, affix) => count + affix.availableCount, 0)
+    }
+  }
+}
+
 function vaultPayloadFingerprint(payload: unknown): string {
   const item = payload as Record<string, unknown>
   return createHash('sha256')
@@ -73,7 +105,8 @@ export class CollectionDatabase {
   }
 
   presentSnapshot(snapshot: CollectionSnapshot, isHardcore?: boolean): CollectionSnapshot {
-    return this.withLifetimeState(snapshot, isHardcore)
+    const presented = this.withLifetimeState(snapshot, isHardcore)
+    return withAffixAvailability(presented, presented.observedItems)
   }
 
   presentArchiveSnapshot(
@@ -126,7 +159,7 @@ export class CollectionDatabase {
         pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
       }
     })
-    const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+    const rarities = collectionRarities.map((rarity) => {
       const matching = items.filter((item) => item.rarity === rarity)
       return {
         rarity,
@@ -135,7 +168,10 @@ export class CollectionDatabase {
         availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
       }
     })
-    return { ...snapshot, basis: 'archive', observedItems, items, rarities }
+    return withAffixAvailability(
+      { ...snapshot, basis: 'archive', observedItems, items, rarities },
+      observedItems
+    )
   }
 
   listAvailableArchiveItems(isHardcore?: boolean): ArchiveVaultItem[] {
@@ -436,7 +472,7 @@ export class CollectionDatabase {
       ingested_at_utc: string
       retrieved_at_utc: string | null
       name: string
-      rarity: 'epic' | 'legendary'
+      rarity: 'epic' | 'legendary' | 'mi'
       content_pack: string
       is_hardcore: number
     }>
@@ -641,7 +677,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 6) {
+    if (version > 7) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )
@@ -858,6 +894,37 @@ export class CollectionDatabase {
       `)
       version = 6
     }
+    if (version === 6) {
+      this.database.exec('PRAGMA foreign_keys = OFF')
+      try {
+        this.database.exec(`
+          BEGIN IMMEDIATE;
+          CREATE TABLE catalog_item_next (
+            record TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            rarity TEXT NOT NULL CHECK (rarity IN ('epic', 'legendary', 'mi')),
+            item_class TEXT NOT NULL,
+            slot TEXT NOT NULL,
+            level_requirement INTEGER NOT NULL,
+            item_level INTEGER NOT NULL,
+            set_name TEXT,
+            set_record TEXT,
+            bitmap TEXT,
+            content_pack TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+          ) STRICT;
+          INSERT INTO catalog_item_next SELECT * FROM catalog_item;
+          DROP TABLE catalog_item;
+          ALTER TABLE catalog_item_next RENAME TO catalog_item;
+          CREATE INDEX catalog_item_browse_idx ON catalog_item(rarity, slot, name);
+          PRAGMA user_version = 7;
+          COMMIT;
+        `)
+        version = 7
+      } finally {
+        this.database.exec('PRAGMA foreign_keys = ON')
+      }
+    }
   }
 
   private persistCatalog(items: CollectionItem[]): void {
@@ -1027,7 +1094,7 @@ export class CollectionDatabase {
       firstDiscoveredAt: discovered.get(item.record.toLowerCase()) ?? null,
       pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
     }))
-    const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+    const rarities = collectionRarities.map((rarity) => {
       const matching = items.filter((item) => item.rarity === rarity)
       return {
         rarity,

@@ -23,7 +23,8 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 2
+const CATALOG_PRESENTATION_VERSION = 4
+const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
   path: string
@@ -394,12 +395,14 @@ async function syncLiveIncoming(
       ingested.push({
         vaultItemId,
         baseRecord: source.item.baseRecord,
+        prefixRecord: source.item.prefixRecord,
+        suffixRecord: source.item.suffixRecord,
         name,
         seed: source.item.seed
       })
       if (!catalogName) {
         issues.push(
-          `${name} was safely stored outside the Epic/Legendary collection. ` +
+          `${name} was safely stored outside the Epic/Legendary/MI collection. ` +
             'It is available in Vault quarantine for an immediate live return.'
         )
       }
@@ -630,7 +633,7 @@ function projectCollectionSources(
       (stash) => stash.isHardcore === isHardcoreStashPath(warning.path)
     )
   })
-  const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+  const rarities = collectionRarities.map((rarity) => {
     const matching = items.filter((item) => item.rarity === rarity)
     return {
       rarity,
@@ -639,7 +642,7 @@ function projectCollectionSources(
       availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
     }
   })
-  return {
+  return withProjectedAffixes({
     ...snapshot,
     isHardcore:
       scannedStashes.length > 0 &&
@@ -652,6 +655,36 @@ function projectCollectionSources(
     warnings,
     rarities,
     items
+  }, observedItems)
+}
+
+function withProjectedAffixes(
+  snapshot: CollectionSnapshot,
+  observedItems: ObservedStashItem[]
+): CollectionSnapshot {
+  const counts = new Map<string, number>()
+  for (const item of observedItems) {
+    for (const record of [item.prefixRecord, item.suffixRecord]) {
+      if (!record) continue
+      const key = record.toLocaleLowerCase()
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  const affixes = snapshot.affixes.map((affix) => ({
+    ...affix,
+    availableCount: affix.records.reduce(
+      (count, record) => count + (counts.get(record.toLocaleLowerCase()) ?? 0),
+      0
+    )
+  }))
+  return {
+    ...snapshot,
+    affixes,
+    affixSummary: {
+      total: affixes.length,
+      collected: affixes.filter((affix) => affix.availableCount > 0).length,
+      availableCopies: affixes.reduce((count, affix) => count + affix.availableCount, 0)
+    }
   }
 }
 
@@ -680,7 +713,13 @@ async function presentCollection(
   const payloads = archived.map((item) => item.payload as LiveVaultPayload)
   const missingAnalysis = archived
     .map((item, index) => ({ item, payload: payloads[index]! }))
-    .filter(({ item }) => item.rollAnalysis === null)
+    .filter(
+      ({ item }) =>
+        item.rollAnalysis === null ||
+        item.rollAnalysis.baseEstimatedPercentile === undefined ||
+        item.rollAnalysis.prefixEstimatedPercentile === undefined ||
+        item.rollAnalysis.suffixEstimatedPercentile === undefined
+    )
   if (analyzeMissing && missingAnalysis.length > 0) {
     const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
       installationPath: installation.path,
@@ -1567,7 +1606,7 @@ async function executeStagingTabIngest(
   const unsupported = staging.items.filter((item) => !item.supported)
   if (unsupported.length > 0) {
     throw new Error(
-      'The staging tab contains items outside the Epic/Legendary collection: ' +
+      'The staging tab contains items outside the Epic/Legendary/MI collection: ' +
         unsupported.map((item) => item.name).join(', ')
     )
   }

@@ -38,10 +38,13 @@ the same high-level Vault commands:
 - `ready`: compatible game, matching HC/SC mode, and queue handshake active;
 - `blocked`: version mismatch, ambiguous mode, or hook failure.
 
-The adapter uses an app-owned hook built from the compatible MIT GDIA source and
-reuses only the injector from the user's installed Item Assistant. Both the hook
-and the running `Game.dll` must match an exact SHA-256 allowlist entry before
-injection. Item Assistant must be closed while Cairn owns the window and queue.
+The adapter bundles an app-owned hook and injector built/copied from the
+compatible MIT GDIA source. It has no runtime dependency on an Item Assistant
+installation. The hook stores its settings, queue, and log below
+`%APPDATA%\cairn-codex\live-adapter`, so it cannot consume or mutate GDIA's
+queue. Both the hook and the running `Game.dll` must match an exact SHA-256
+allowlist entry before injection. If Item Assistant is installed, it must be
+closed while Cairn owns the window and queue.
 Build provenance and the original crash fingerprint are documented in
 [`docs/live-hook-compatibility.md`](../live-hook-compatibility.md).
 

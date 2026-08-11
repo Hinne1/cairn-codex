@@ -1,6 +1,38 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
-import type { CollectionItem, CollectionSnapshot, VaultListItem } from '@shared/contracts'
+import type {
+  CollectionItem,
+  CollectionSnapshot,
+  ObservedStashItem,
+  VaultListItem
+} from '@shared/contracts'
+
+function vaultPayloadFingerprint(payload: unknown): string {
+  const item = payload as Record<string, unknown>
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        item.baseRecord ?? '',
+        item.prefixRecord ?? '',
+        item.suffixRecord ?? '',
+        item.modifierRecord ?? '',
+        item.transmuteRecord ?? '',
+        Number(item.seed ?? 0) >>> 0,
+        item.materiaRecord ?? '',
+        item.relicCompletionBonusRecord ?? '',
+        Number(item.relicSeed ?? 0) >>> 0,
+        item.enchantmentRecord ?? '',
+        item.ascendantRecord ?? '',
+        item.ascendantRecord2H ?? '',
+        Number(item.enchantmentSeed ?? 0) >>> 0,
+        Number(item.materiaCombines ?? 0) >>> 0,
+        Number(item.stackCount ?? 1) >>> 0,
+        Number(item.rerolls ?? 0) >>> 0,
+        Number(item.affixRerolls ?? 0) >>> 0
+      ])
+    )
+    .digest('hex')
+}
 
 export class CollectionDatabase {
   private readonly database: DatabaseSync
@@ -43,13 +75,16 @@ export class CollectionDatabase {
     return this.withLifetimeState(snapshot, isHardcore)
   }
 
-  presentArchiveSnapshot(snapshot: CollectionSnapshot, isHardcore?: boolean): CollectionSnapshot {
+  presentArchiveSnapshot(
+    snapshot: CollectionSnapshot,
+    observedItems: ObservedStashItem[],
+    isHardcore?: boolean
+  ): CollectionSnapshot {
     const rows = this.database
       .prepare(`
         SELECT
           base_record,
-          MIN(ingested_at_utc) AS first_ingested_at_utc,
-          SUM(CASE WHEN state = 'ingested' THEN 1 ELSE 0 END) AS available_count
+          MIN(ingested_at_utc) AS first_ingested_at_utc
         FROM vault_item
         ${isHardcore === undefined ? '' : 'WHERE is_hardcore = ?'}
         GROUP BY base_record
@@ -57,17 +92,34 @@ export class CollectionDatabase {
       .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
       base_record: string
       first_ingested_at_utc: string
-      available_count: number
     }>
     const archived = new Map(rows.map((row) => [row.base_record.toLowerCase(), row]))
+    const copiesByRecord = new Map<string, ObservedStashItem[]>()
+    for (const copy of observedItems) {
+      const key = copy.baseRecord.toLowerCase()
+      const copies = copiesByRecord.get(key)
+      if (copies) copies.push(copy)
+      else copiesByRecord.set(key, [copy])
+    }
     const pinned = this.loadPinned(isHardcore)
     const items = snapshot.items.map((item) => {
       const row = archived.get(item.record.toLowerCase())
+      const copies = copiesByRecord.get(item.record.toLowerCase()) ?? []
+      const analyzed = copies.filter(
+        (copy) =>
+          copy.rollAnalysis?.trusted === true &&
+          copy.rollAnalysis.overallEstimatedPercentile !== null
+      )
       return {
         ...item,
-        availableCount: row?.available_count ?? 0,
-        bestRollPercentile: null,
-        analyzedCopyCount: 0,
+        availableCount: copies.length,
+        bestRollPercentile:
+          analyzed.length === 0
+            ? null
+            : Math.max(
+                ...analyzed.map((copy) => copy.rollAnalysis!.overallEstimatedPercentile!)
+              ),
+        analyzedCopyCount: analyzed.length,
         discovered: Boolean(row),
         firstDiscoveredAt: row?.first_ingested_at_utc ?? null,
         pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
@@ -82,7 +134,112 @@ export class CollectionDatabase {
         availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
       }
     })
-    return { ...snapshot, basis: 'archive', observedItems: [], items, rarities }
+    return { ...snapshot, basis: 'archive', observedItems, items, rarities }
+  }
+
+  listAvailableArchiveItems(isHardcore?: boolean): ArchiveVaultItem[] {
+    const rows = this.database
+      .prepare(`
+        SELECT id, base_record, serialized_item
+        FROM vault_item
+        WHERE state = 'ingested'
+          ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
+        ORDER BY ingested_at_utc, id
+      `)
+      .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
+      id: string
+      base_record: string
+      serialized_item: Uint8Array
+    }>
+    return rows.map((row) => ({
+      id: row.id,
+      baseRecord: row.base_record,
+      payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown
+    }))
+  }
+
+  importVaultItems(input: VaultImport): VaultImportResult {
+    const existingRows = this.database
+      .prepare("SELECT serialized_item, is_hardcore FROM vault_item WHERE state = 'ingested'")
+      .all() as Array<{ serialized_item: Uint8Array; is_hardcore: number }>
+    const existingCounts = new Map<string, number>()
+    for (const row of existingRows) {
+      const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown
+      const key = `${row.is_hardcore}:${vaultPayloadFingerprint(payload)}`
+      existingCounts.set(key, (existingCounts.get(key) ?? 0) + 1)
+    }
+    const seenSourceCounts = new Map<string, number>()
+    const importedIds: string[] = []
+    const duplicateIds: string[] = []
+    const unsupportedIds: string[] = []
+    const catalogItem = this.database.prepare('SELECT 1 AS found FROM catalog_item WHERE record = ?')
+    const insertVault = this.database.prepare(`
+      INSERT OR IGNORE INTO vault_item (
+        id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc, is_hardcore
+      ) VALUES (?, ?, 'ingested', ?, ?, NULL, ?)
+    `)
+    const insertJournal = this.database.prepare(`
+      INSERT OR IGNORE INTO operation_journal (
+        id, operation, state, vault_item_id, stash_path, source_sha256,
+        backup_path, started_at_utc, completed_at_utc, detail_json
+      ) VALUES (?, 'ingest', 'committed', ?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      for (const item of input.items) {
+        if (!(catalogItem.get(item.baseRecord) as { found: number } | undefined)) {
+          unsupportedIds.push(item.externalId)
+          continue
+        }
+        const fingerprint = vaultPayloadFingerprint(item.payload)
+        const key = `${item.isHardcore ? 1 : 0}:${fingerprint}`
+        const seen = (seenSourceCounts.get(key) ?? 0) + 1
+        seenSourceCounts.set(key, seen)
+        if (seen <= (existingCounts.get(key) ?? 0)) {
+          duplicateIds.push(item.externalId)
+          continue
+        }
+        const vaultItemId = `gdia-${item.externalId}-${fingerprint.slice(0, 16)}`
+        const operationId = `gdia-import-${item.externalId}-${fingerprint.slice(0, 16)}`
+        const inserted = insertVault.run(
+          vaultItemId,
+          item.baseRecord,
+          Buffer.from(JSON.stringify(item.payload), 'utf8'),
+          item.createdAtUtc,
+          item.isHardcore ? 1 : 0
+        )
+        if (Number(inserted.changes) !== 1) {
+          duplicateIds.push(item.externalId)
+          continue
+        }
+        insertJournal.run(
+          operationId,
+          vaultItemId,
+          item.sourcePath ?? input.sourcePath,
+          item.sourceSha256 ?? input.sourceSha256,
+          item.backupPath ?? input.backupPath,
+          input.importedAtUtc,
+          input.importedAtUtc,
+          JSON.stringify({
+            adapter: 'gdia-sqlite-migration-v1',
+            externalId: item.externalId,
+            sourceCreatedAtUtc: item.createdAtUtc
+          })
+        )
+        importedIds.push(vaultItemId)
+      }
+      if (input.requireAllSupported && unsupportedIds.length > 0) {
+        throw new Error(
+          `Migration contains ${unsupportedIds.length} item(s) outside the Cairn catalog: ${unsupportedIds.join(', ')}`
+        )
+      }
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+    return { importedIds, duplicateIds, unsupportedIds }
   }
 
   prepareIngestOperation(input: PreparedIngestOperation): void {
@@ -893,6 +1050,36 @@ export interface PreparedIngestOperation {
     payload: unknown
   }>
   detail: unknown
+}
+
+export interface ArchiveVaultItem {
+  id: string
+  baseRecord: string
+  payload: unknown
+}
+
+export interface VaultImport {
+  sourcePath: string
+  sourceSha256: string
+  backupPath: string
+  importedAtUtc: string
+  requireAllSupported?: boolean
+  items: Array<{
+    externalId: string
+    baseRecord: string
+    isHardcore: boolean
+    createdAtUtc: string
+    payload: unknown
+    sourcePath?: string
+    sourceSha256?: string
+    backupPath?: string
+  }>
+}
+
+export interface VaultImportResult {
+  importedIds: string[]
+  duplicateIds: string[]
+  unsupportedIds: string[]
 }
 
 export interface CompletedIngestOperation {

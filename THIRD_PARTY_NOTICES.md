@@ -27,8 +27,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-The app-owned live hook is built from the same MIT-licensed project. Build
-provenance and compatibility fingerprints are recorded in
+The app-owned live hook and bundled injector are built/copied from the same
+MIT-licensed project. Build provenance and compatibility fingerprints are recorded in
 `docs/live-hook-compatibility.md`.
 
 ## Boost

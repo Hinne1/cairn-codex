@@ -14,7 +14,7 @@ items.
 
 ## Architecture
 
-Live-game mutation is a separate, opt-in GDIA-hook adapter; see
+Live-game mutation is a separate, opt-in Cairn-owned adapter derived from GDIA; see
 [`docs/architecture/live-game-adapter.md`](docs/architecture/live-game-adapter.md).
 
 ```text
@@ -38,9 +38,9 @@ renderer has no direct filesystem or database access.
 
 Write eligibility is represented by separate adapters. Atomic transfer-stash
 file writes require Grim Dawn to be closed. An explicit per-session live adapter
-uses an app-owned, fingerprint-allowlisted GDIA hook and the installed Item
-Assistant injector to perform the transfer inside game memory. Item Assistant
-itself must remain closed while Cairn Codex owns that hook and queue.
+uses a bundled, fingerprint-allowlisted hook and injector to perform the transfer
+inside game memory. Item Assistant is not required; if it is still installed, it
+must remain closed while Cairn Codex owns that hook and queue.
 
 ## Initial support scope
 
@@ -92,7 +92,7 @@ forms are supported: `name:`, `set:`, `skill:`, `slot:`, `type:`, `rarity:`,
 - Closed-game mode never writes a transfer-stash file while Grim Dawn runs.
 - Live mode never rewrites the transfer-stash file; it uses an explicit,
   version-reported in-memory hook handshake and durable queue receipts.
-- Never read or write the transfer stash while GDIA is running.
+- Never read or write the transfer stash while another stash tool is running.
 - Before every write, make a restorable snapshot and validate the source hash.
 - Serialize to a temporary file beside the target, flush it, parse and verify
   it, then replace the target atomically.

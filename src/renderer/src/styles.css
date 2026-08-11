@@ -133,6 +133,8 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .search-field input::placeholder { color: #686359; }
 .filter-bar select { width: auto; min-width: 132px; padding: 0 30px 0 10px; }
 .filter-bar select option { background: #1a1916; }
+.sort-direction { min-width: 74px; padding: 0 10px; border: 1px solid #3a362d; border-radius: 5px; color: #cbb986; background: #171613; cursor: pointer; }
+.sort-direction:hover { border-color: #806a3d; color: #f0dca3; }
 .segmented-control { display: flex; padding: 3px; border: 1px solid #3a362d; border-radius: 6px; background: #171613; }
 .segmented-control button { padding: 7px 10px; border: 0; border-radius: 4px; color: #7f796d; background: transparent; cursor: pointer; text-transform: capitalize; }
 .segmented-control button.active { color: #e7d4a6; background: #373024; }

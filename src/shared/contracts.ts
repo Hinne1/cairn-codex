@@ -55,7 +55,7 @@ export interface LiveGameStatus {
   grimDawnProcessIds: number[]
   itemAssistantProcessIds: number[]
   hookAvailable: boolean
-  itemAssistantDirectory: string | null
+  adapterDirectory: string | null
   hookVersion: string | null
   connectedProcessId: number | null
   isHardcore: boolean | null

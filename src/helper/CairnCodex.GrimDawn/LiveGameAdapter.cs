@@ -18,7 +18,9 @@ internal sealed class LiveGameAdapter : IDisposable
     private const string CrashingRetailHookSha256 =
         "14e57644d5403819aebfb856053f28afbc40dcdc2d95d0d9a8c71eafdf707891";
     private const string VerifiedRetailHookSha256 =
-        "5b2b6da0319dcbc8b41bbaef68d6ed09f494737edfcde41011917803c1ba1ac0";
+        "3280adfefa5a041e1b6bcb8bb4730ca1928b603ebaf811bef5fc653eeb2e6df7";
+    private const string VerifiedInjectorSha256 =
+        "569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c";
     private const string VerifiedRetailGameDllSha256 =
         "d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7";
 
@@ -29,7 +31,7 @@ internal sealed class LiveGameAdapter : IDisposable
     private ManualResetEventSlim? windowReady;
     private WndProc? windowProcedure;
     private IntPtr window;
-    private string? itemAssistantDirectory;
+    private string? adapterDirectory;
     private string? hookPath;
     private string? queueDirectory;
     private int? gameProcessId;
@@ -54,7 +56,18 @@ internal sealed class LiveGameAdapter : IDisposable
         {
             throw new InvalidDataException("The GDIA live queue serializer failed its round trip.");
         }
-        return new LiveQueueSelfTestResult(true, 17, sample.Seed, sample.AffixRerolls);
+        var adapter = ResolveAdapterDirectory()
+            ?? throw new FileNotFoundException("The bundled Cairn live adapter is incomplete.");
+        var hookHash = Convert.ToHexStringLower(SHA256.HashData(
+            File.ReadAllBytes(Path.Combine(adapter, "ItemAssistantHook_x64.dll"))));
+        var injectorHash = Convert.ToHexStringLower(SHA256.HashData(
+            File.ReadAllBytes(Path.Combine(adapter, "DllInjector64.exe"))));
+        if (hookHash != VerifiedRetailHookSha256 || injectorHash != VerifiedInjectorSha256)
+        {
+            throw new InvalidDataException("The bundled Cairn live adapter failed fingerprint verification.");
+        }
+        return new LiveQueueSelfTestResult(
+            true, 17, sample.Seed, sample.AffixRerolls, hookHash, injectorHash);
     }
 
     public LiveGameStatus Inspect()
@@ -65,8 +78,8 @@ internal sealed class LiveGameAdapter : IDisposable
             var itemAssistant = FindProcesses(["IAGrim"]);
             try
             {
-                var install = ResolveItemAssistantDirectory();
-                var hook = ResolveLiveHookPath(install);
+                var install = ResolveAdapterDirectory();
+                var hook = install is null ? null : Path.Combine(install, "ItemAssistantHook_x64.dll");
                 var injector = install is null ? null : Path.Combine(install, "DllInjector64.exe");
                 var filesPresent = hook is not null && injector is not null && File.Exists(hook) && File.Exists(injector);
                 var compatibility = game.Count == 1 && filesPresent
@@ -92,12 +105,12 @@ internal sealed class LiveGameAdapter : IDisposable
                     currentDetail = game.Count == 0
                         ? "Start Grim Dawn and enter the world before enabling live mode."
                         : !filesPresent
-                            ? "A Grim Dawn Item Assistant hook installation was not found."
+                            ? "The bundled Cairn Codex live adapter is incomplete."
                             : !compatible
                                 ? compatibility.Reason ?? "This game and hook combination has not been verified for live transfers."
                             : itemAssistant.Count > 0
                                 ? "Close Item Assistant before Cairn Codex owns the live queue."
-                                : "Compatible game process and GDIA hook found. Live mode is ready to connect.";
+                                : "Compatible game process and Cairn live adapter found. Live mode is ready to connect.";
                 }
                 return new LiveGameStatus(
                     currentState,
@@ -150,14 +163,13 @@ internal sealed class LiveGameAdapter : IDisposable
                         ? "Start Grim Dawn and enter the world before enabling live mode."
                         : "Live mode requires exactly one Grim Dawn process.");
             }
-            itemAssistantDirectory = ResolveItemAssistantDirectory()
-                ?? throw new FileNotFoundException("Grim Dawn Item Assistant is not installed.");
-            var hook = ResolveLiveHookPath(itemAssistantDirectory)
-                ?? throw new FileNotFoundException("The Cairn Codex live hook is missing.");
-            var injector = Path.Combine(itemAssistantDirectory, "DllInjector64.exe");
+            adapterDirectory = ResolveAdapterDirectory()
+                ?? throw new FileNotFoundException("The bundled Cairn Codex live adapter is incomplete.");
+            var hook = Path.Combine(adapterDirectory, "ItemAssistantHook_x64.dll");
+            var injector = Path.Combine(adapterDirectory, "DllInjector64.exe");
             if (!File.Exists(hook) || !File.Exists(injector))
             {
-                throw new FileNotFoundException("The installed GDIA hook or injector is missing.");
+                throw new FileNotFoundException("The bundled Cairn hook or injector is missing.");
             }
             var compatibility = InspectCompatibility(game[0], hook);
             if (!compatibility.Verified)
@@ -166,9 +178,8 @@ internal sealed class LiveGameAdapter : IDisposable
                 throw new WriteSafetyException(compatibility.Reason ??
                     "This game and hook combination has not been verified for live transfers.");
             }
-            queueDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "EvilSoft", "IAGD", "itemqueue");
+            EnsureLiveSettings();
+            queueDirectory = Path.Combine(LiveDataDirectory(), "itemqueue");
             var incoming = Path.Combine(queueDirectory, "ingoing");
             Directory.CreateDirectory(incoming);
             incomingBaseline.Clear();
@@ -190,7 +201,7 @@ internal sealed class LiveGameAdapter : IDisposable
                 var start = new ProcessStartInfo
                 {
                     FileName = injector,
-                    WorkingDirectory = itemAssistantDirectory,
+                    WorkingDirectory = adapterDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
@@ -201,18 +212,18 @@ internal sealed class LiveGameAdapter : IDisposable
                 start.ArgumentList.Add("Grim Dawn.exe");
                 start.ArgumentList.Add(hook);
                 using var injection = Process.Start(start)
-                    ?? throw new InvalidOperationException("The GDIA injector did not start.");
+                    ?? throw new InvalidOperationException("The Cairn live injector did not start.");
                 if (!injection.WaitForExit(5000))
                 {
                     try { injection.Kill(); } catch { }
-                    throw new IOException("The GDIA injector did not finish within five seconds.");
+                    throw new IOException("The Cairn live injector did not finish within five seconds.");
                 }
                 injectorOutput = (injection.StandardOutput.ReadToEnd() + " " +
                     injection.StandardError.ReadToEnd()).Trim();
                 if (injection.ExitCode != 0)
                 {
                     throw new IOException(
-                        $"The GDIA injector failed with exit code {injection.ExitCode}: {injectorOutput}");
+                        $"The Cairn live injector failed with exit code {injection.ExitCode}: {injectorOutput}");
                 }
             }
 
@@ -677,34 +688,48 @@ internal sealed class LiveGameAdapter : IDisposable
         }
     }
 
-    private static string? ResolveItemAssistantDirectory()
+    private static string? ResolveAdapterDirectory()
     {
-        var candidates = new[]
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "IAGD"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "IAGD")
-        };
-        return candidates.FirstOrDefault(path =>
-            File.Exists(Path.Combine(path, "ItemAssistantHook_x64.dll")) &&
-            File.Exists(Path.Combine(path, "DllInjector64.exe")));
+        var bundled = Path.Combine(AppContext.BaseDirectory, "native");
+        return File.Exists(Path.Combine(bundled, "ItemAssistantHook_x64.dll")) &&
+               File.Exists(Path.Combine(bundled, "DllInjector64.exe"))
+            ? bundled
+            : null;
     }
 
-    private static string? ResolveLiveHookPath(string? itemAssistantDirectory)
+    private static string LiveDataDirectory()
     {
-        var bundled = Path.Combine(AppContext.BaseDirectory, "native", "ItemAssistantHook_x64.dll");
-        if (File.Exists(bundled)) return bundled;
-        if (itemAssistantDirectory is null) return null;
-        var installed = Path.Combine(itemAssistantDirectory, "ItemAssistantHook_x64.dll");
-        return File.Exists(installed) ? installed : null;
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "cairn-codex", "live-adapter");
+    }
+
+    private static void EnsureLiveSettings()
+    {
+        var directory = LiveDataDirectory();
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings.json");
+        if (File.Exists(path)) return;
+        var temporary = path + ".tmp";
+        var content = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            local = new
+            {
+                stashToLootFrom = 0,
+                stashToDepositTo = 0,
+                isGrimDawnParsed = true
+            },
+            persistent = new { isRunningInWine = false }
+        });
+        File.WriteAllBytes(temporary, content);
+        File.Move(temporary, path);
     }
 
     private static LiveQueueSettings ReadQueueSettings()
     {
         try
         {
-            var path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "EvilSoft", "IAGD", "settings.json");
+            var path = Path.Combine(LiveDataDirectory(), "settings.json");
             using var document = JsonDocument.Parse(File.ReadAllBytes(path));
             var local = document.RootElement.GetProperty("local");
             var loot = local.TryGetProperty("stashToLootFrom", out var lootValue) ? lootValue.GetInt32() : 0;
@@ -830,7 +855,13 @@ internal sealed class LiveGameAdapter : IDisposable
 
 internal sealed record LiveHookMessage(int Type, string DataHex, string ReceivedAtUtc);
 internal sealed record LiveHookCompatibility(bool Verified, string? Reason);
-internal sealed record LiveQueueSelfTestResult(bool Passed, int Fields, uint Seed, uint AffixRerolls);
+internal sealed record LiveQueueSelfTestResult(
+    bool Passed,
+    int Fields,
+    uint Seed,
+    uint AffixRerolls,
+    string HookSha256,
+    string InjectorSha256);
 internal sealed record LiveQueueSettings(
     int LootFrom,
     int DepositTo,
@@ -843,7 +874,7 @@ internal sealed record LiveGameStatus(
     IReadOnlyList<int> GrimDawnProcessIds,
     IReadOnlyList<int> ItemAssistantProcessIds,
     bool HookAvailable,
-    string? ItemAssistantDirectory,
+    string? AdapterDirectory,
     string? HookVersion,
     int? ConnectedProcessId,
     bool? IsHardcore,

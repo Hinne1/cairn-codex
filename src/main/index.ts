@@ -9,16 +9,19 @@ import {
   type CollectionSnapshot,
   type GrimDawnDiscovery,
   type IngestResult,
+  type ItemRollAnalysis,
   type LiveGameStatus,
   type LiveGameSyncResult,
   type LiveRetrievalResult,
   type RetrievalResult,
+  type ObservedStashItem,
   type StagingTabInspection,
   type VaultListItem,
   type WriteSafetyStatus
 } from '@shared/contracts'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
+import { migrateGdiaDatabase } from './gdia-migration'
 
 interface IngestCommand {
   path: string
@@ -236,7 +239,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
         return null
       }
       const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return presentCollection(database, projected, input.basis)
+      return presentCollection(helper, database, projected, input.basis)
     }
   )
   ipcMain.handle(
@@ -256,7 +259,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       })
       const snapshot = await collectionScan
       const projected = projectCollectionSources(snapshot, input.sourcePaths)
-      return presentCollection(database, projected, input.basis)
+      return presentCollection(helper, database, projected, input.basis)
     }
   )
   ipcMain.handle(
@@ -621,15 +624,86 @@ function lifetimeMode(snapshot: CollectionSnapshot): boolean | undefined {
   return modes.size === 1 ? [...modes][0] : undefined
 }
 
-function presentCollection(
+async function presentCollection(
+  helper: GrimDawnHelperClient,
   database: CollectionDatabase,
   snapshot: CollectionSnapshot,
   basis: CollectionBasis
-): CollectionSnapshot {
+): Promise<CollectionSnapshot> {
   const mode = lifetimeMode(snapshot)
-  return basis === 'archive'
-    ? database.presentArchiveSnapshot(snapshot, mode)
-    : database.presentSnapshot({ ...snapshot, basis: 'stashes' }, mode)
+  if (basis !== 'archive') {
+    return database.presentSnapshot({ ...snapshot, basis: 'stashes' }, mode)
+  }
+
+  const installation = snapshot.discovery.installations[0]
+  const archived = database.listAvailableArchiveItems(mode)
+  if (!installation || archived.length === 0) {
+    return database.presentArchiveSnapshot(snapshot, [], mode)
+  }
+  const payloads = archived.map((item) => item.payload as LiveVaultPayload)
+  const analysis = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
+    installationPath: installation.path,
+    items: payloads.map((item) => ({
+      baseRecord: item.baseRecord,
+      prefixRecord: item.prefixRecord,
+      suffixRecord: item.suffixRecord,
+      seed: item.seed
+    }))
+  })
+  const observedItems = archived.map((item, index): ObservedStashItem => {
+    const payload = payloads[index]!
+    return {
+      sourcePath: `vault://${item.id}`,
+      tabIndex: -1,
+      itemIndex: index,
+      baseRecord: payload.baseRecord,
+      prefixRecord: payload.prefixRecord,
+      suffixRecord: payload.suffixRecord,
+      modifierRecord: payload.modifierRecord,
+      transmuteRecord: payload.transmuteRecord,
+      seed: payload.seed,
+      materiaRecord: payload.materiaRecord,
+      relicCompletionBonusRecord: payload.relicCompletionBonusRecord,
+      relicSeed: payload.relicSeed,
+      enchantmentRecord: payload.enchantmentRecord,
+      ascendantRecord: payload.ascendantRecord,
+      ascendantRecord2H: payload.ascendantRecord2H,
+      enchantmentSeed: payload.enchantmentSeed,
+      materiaCombines: payload.materiaCombines,
+      stackCount: payload.stackCount,
+      rerolls: payload.rerolls,
+      affixRerolls: payload.affixRerolls,
+      rollAnalysis: analysis.items[index] ?? null,
+      instanceKey: createVaultInstanceKey(payload)
+    }
+  })
+  return database.presentArchiveSnapshot(snapshot, observedItems, mode)
+}
+
+function createVaultInstanceKey(item: LiveVaultPayload): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        item.baseRecord,
+        item.prefixRecord,
+        item.suffixRecord,
+        item.modifierRecord,
+        item.transmuteRecord,
+        item.seed,
+        item.materiaRecord,
+        item.relicCompletionBonusRecord,
+        item.relicSeed,
+        item.enchantmentRecord,
+        item.ascendantRecord,
+        item.ascendantRecord2H,
+        item.enchantmentSeed,
+        item.materiaCombines,
+        item.stackCount,
+        item.rerolls,
+        item.affixRerolls
+      ])
+    )
+    .digest('hex')
 }
 
 function registerItemIconProtocol(): void {
@@ -660,8 +734,18 @@ async function runSmokeTest(
     if (!writeTransaction.passed) {
       throw new Error('Verified write transaction self-test failed.')
     }
-    const liveQueue = await helper.request<{ passed: boolean; fields: number }>('self-test-live-queue')
-    if (!liveQueue.passed || liveQueue.fields !== 17) {
+    const liveQueue = await helper.request<{
+      passed: boolean
+      fields: number
+      hookSha256: string
+      injectorSha256: string
+    }>('self-test-live-queue')
+    if (
+      !liveQueue.passed ||
+      liveQueue.fields !== 17 ||
+      liveQueue.hookSha256 !== '3280adfefa5a041e1b6bcb8bb4730ca1928b603ebaf811bef5fc653eeb2e6df7' ||
+      liveQueue.injectorSha256 !== '569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c'
+    ) {
       throw new Error('Live queue serializer self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
@@ -866,8 +950,13 @@ async function runSmokeTest(
       isHardcore: true,
       detail: { phase: 'committed', smokeTest: true }
     })
+    const archivedSmokeCopy = helperSnapshot.observedItems.find(
+      (item) =>
+        item.baseRecord.toLowerCase() === journalPayload.baseRecord.toLowerCase() &&
+        item.seed === journalPayload.seed
+    )
     const archivedBeforeRetrieval = database
-      .presentArchiveSnapshot(snapshot, true)
+      .presentArchiveSnapshot(snapshot, archivedSmokeCopy ? [archivedSmokeCopy] : [], true)
       .items.find((item) => item.record.toLowerCase() === journalPayload.baseRecord.toLowerCase())
     if (
       !archivedBeforeRetrieval?.discovered ||
@@ -895,7 +984,7 @@ async function runSmokeTest(
       detail: { phase: 'committed', smokeTest: true }
     })
     const archivedAfterRetrieval = database
-      .presentArchiveSnapshot(snapshot, true)
+      .presentArchiveSnapshot(snapshot, [], true)
       .items.find((item) => item.record.toLowerCase() === journalPayload.baseRecord.toLowerCase())
     if (!archivedAfterRetrieval?.discovered || archivedAfterRetrieval.availableCount !== 0) {
       throw new Error('Codex Archive did not retain collection history after retrieval.')
@@ -910,6 +999,29 @@ async function runSmokeTest(
       listedVaultItem.seed !== (journalPayload.seed as number)
     ) {
       throw new Error('Vault listing did not project the stored payload and lifecycle state.')
+    }
+    const migrationInput = {
+      sourcePath: 'smoke-gdia-userdata.db',
+      sourceSha256: 'smoke-gdia-source',
+      backupPath: 'smoke-gdia-backup',
+      importedAtUtc: new Date().toISOString(),
+      items: [1, 2].map((externalId) => ({
+        externalId: String(externalId),
+        baseRecord: journalPayload.baseRecord as string,
+        isHardcore: true,
+        createdAtUtc: new Date().toISOString(),
+        payload: journalPayload
+      }))
+    }
+    const migration = database.importVaultItems(migrationInput)
+    const repeatedMigration = database.importVaultItems(migrationInput)
+    if (
+      migration.importedIds.length !== 2 ||
+      migration.duplicateIds.length !== 0 ||
+      repeatedMigration.importedIds.length !== 0 ||
+      repeatedMigration.duplicateIds.length !== 2
+    ) {
+      throw new Error('GDIA migration did not preserve copy multiplicity or idempotency.')
     }
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
@@ -936,6 +1048,7 @@ async function runSmokeTest(
         helper: 'available',
         writeTransaction: 'verified',
         liveQueue: 'verified',
+        migrationDedupe: 'verified',
         serializerRoundTrips: roundTrips.length,
         ingestPlans: ingestPlans.length,
         retrievalRoundTrips: retrievalRoundTrips.length,
@@ -1527,15 +1640,42 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
 app.whenReady().then(() => {
   registerItemIconProtocol()
   const helper = createHelperClient()
+  const databaseOverride = process.env.CAIRN_CODEX_DATABASE_PATH
   const database = new CollectionDatabase(
     process.env.CAIRN_CODEX_SMOKE_TEST === '1'
       ? ':memory:'
+      : databaseOverride
+        ? databaseOverride
       : join(app.getPath('userData'), 'cairn-codex.sqlite3')
   )
 
   const ingestCommand = process.env.CAIRN_CODEX_INGEST_REQUEST
   if (ingestCommand) {
     void runIngestCommand(helper, database, JSON.parse(ingestCommand) as IngestCommand)
+    return
+  }
+
+  const gdiaImportPath = process.env.CAIRN_CODEX_IMPORT_GDIA
+  if (gdiaImportPath) {
+    void migrateGdiaDatabase(
+      database,
+      gdiaImportPath,
+      process.env.CAIRN_CODEX_MIGRATION_BACKUP_DIR ??
+        join(app.getPath('userData'), 'migrations', 'gdia'),
+      { requireHardcoreOnly: true, requireAllCatalogued: true }
+    )
+      .then((result) => {
+        console.log(JSON.stringify({ migration: 'gdia', ...result }))
+        helper.dispose()
+        database.close()
+        app.exit(0)
+      })
+      .catch((error) => {
+        console.error(error)
+        helper.dispose()
+        database.close()
+        app.exit(1)
+      })
     return
   }
 

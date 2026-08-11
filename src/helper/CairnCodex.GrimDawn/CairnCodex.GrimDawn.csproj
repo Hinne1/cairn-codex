@@ -14,5 +14,7 @@
   <ItemGroup>
     <None Update="native\ItemAssistantHook_x64.dll"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Update="native\DllInjector64.exe"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

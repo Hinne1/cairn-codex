@@ -39,9 +39,16 @@ Build inputs:
 - Boost: `1.78.0`
 - Boost source SHA-256:
   `090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c`
-- Hook version: `1.5.9719.16086`
+- Hook version: `1.5.9719.17000`
 - Hook SHA-256:
-  `5b2b6da0319dcbc8b41bbaef68d6ed09f494737edfcde41011917803c1ba1ac0`
+  `3280adfefa5a041e1b6bcb8bb4730ca1928b603ebaf811bef5fc653eeb2e6df7`
+- Injector SHA-256:
+  `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
+
+The only additional hook source change redirects `GetIagdFolder()` from GDIA's
+local-app-data directory to `%APPDATA%\cairn-codex\live-adapter`. This isolates
+Cairn's settings, queues, replicas, and hook log from any existing or removed
+Item Assistant installation.
 
 Allowlisted development target:
 
@@ -49,7 +56,7 @@ Allowlisted development target:
 - `Game.dll` SHA-256:
   `d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7`
 
-The allowlist entry means the corrected binary layout and Cairn Codex's offline
-queue contract were verified for this exact target. It does not claim the live
-ingest/retrieval test has passed; live mode remains explicitly opt-in until both
-directions complete without a crash and their receipts are verified.
+The allowlist entry means the corrected binary layout and Cairn Codex queue
+contract were verified for this exact target. Live ingest and retrieval have
+both completed with committed durable receipts on the allowlisted target. Live
+mode remains explicitly opt-in because it mutates the running game process.

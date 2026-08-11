@@ -18,6 +18,7 @@ import type {
 type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary'
 type SortMode = 'name' | 'level' | 'completion' | 'roll'
+type SortDirection = 'asc' | 'desc'
 type ActiveView = 'collection' | 'sets' | 'vault'
 
 interface CollectionSet {
@@ -43,6 +44,7 @@ const query = ref('')
 const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('completion')
+const sortDirection = ref<SortDirection>('desc')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
 const pinning = ref(false)
@@ -223,11 +225,15 @@ const selectedCopies = computed(() => {
 })
 
 watch(
-  [activeView, activeCategory, query, ownership, rarityFilter, sortMode],
+  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection],
   () => {
     currentPage.value = 1
   }
 )
+
+watch(sortMode, (mode) => {
+  sortDirection.value = mode === 'name' ? 'asc' : 'desc'
+})
 
 watch(selectedStashPath, async (path) => {
   if (path) await refreshStaging()
@@ -454,7 +460,7 @@ async function refreshVault(): Promise<void> {
 async function startLiveMode(): Promise<void> {
   if (vaultBusy.value) return
   const confirmed = window.confirm(
-    'Enable the installed GDIA live hook for this Grim Dawn session? Item Assistant must remain closed while Cairn Codex owns its queue.'
+    'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while Cairn owns the game hook.'
   )
   if (!confirmed) return
   vaultBusy.value = true
@@ -587,20 +593,19 @@ function readableError(error: unknown): string {
 }
 
 function compareItems(left: CollectionItem, right: CollectionItem): number {
+  let comparison = 0
   if (sortMode.value === 'level') {
-    return right.levelRequirement - left.levelRequirement || left.name.localeCompare(right.name)
+    comparison = left.levelRequirement - right.levelRequirement
+  } else if (sortMode.value === 'completion') {
+    comparison = Number(Boolean(left.discovered)) - Number(Boolean(right.discovered))
+    if (comparison === 0) comparison = left.availableCount - right.availableCount
+  } else if (sortMode.value === 'roll') {
+    comparison = (left.bestRollPercentile ?? -1) - (right.bestRollPercentile ?? -1)
+  } else {
+    comparison = left.name.localeCompare(right.name)
   }
-  if (sortMode.value === 'completion') {
-    if (Boolean(left.discovered) !== Boolean(right.discovered)) return left.discovered ? -1 : 1
-    if (left.availableCount !== right.availableCount) return right.availableCount - left.availableCount
-  }
-  if (sortMode.value === 'roll') {
-    return (
-      (right.bestRollPercentile ?? -1) - (left.bestRollPercentile ?? -1) ||
-      left.name.localeCompare(right.name)
-    )
-  }
-  return left.name.localeCompare(right.name)
+  if (comparison === 0) comparison = left.name.localeCompare(right.name)
+  return sortDirection.value === 'asc' ? comparison : -comparison
 }
 
 function matchesCategory(item: CollectionItem, category: string): boolean {
@@ -1020,6 +1025,15 @@ function formatRollValue(value: number): string {
           <option value="level">Level</option>
           <option value="roll">Best roll</option>
         </select>
+        <button
+          v-if="activeView === 'collection'"
+          type="button"
+          class="sort-direction"
+          :aria-label="sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'"
+          @click="sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'"
+        >
+          {{ sortDirection === 'asc' ? '↑ Asc' : '↓ Desc' }}
+        </button>
         <span class="result-count">{{ displayedResultCount.toLocaleString() }} results</span>
       </section>
 
@@ -1044,7 +1058,7 @@ function formatRollValue(value: number): string {
             <div>
               <p class="section-label">Live game adapter</p>
               <h3>{{ liveStatus?.state === 'ready' ? 'Connected to Grim Dawn' : 'Optional live transfers' }}</h3>
-              <small>{{ liveStatus?.detail || 'Checking the installed GDIA hook…' }}</small>
+              <small>{{ liveStatus?.detail || 'Checking the bundled Cairn live adapter…' }}</small>
               <small v-if="liveStatus?.hookVersion">Hook {{ liveStatus.hookVersion }}</small>
             </div>
           </div>

@@ -85,7 +85,15 @@ Consequences for Cairn Codex:
 - A later decision can select verified atomic file serialization or a narrowly
   maintained live-game hook without changing collection persistence or UI IPC.
 
-## Deferred source areas
+## Additional imported boundary
 
-- `IAGrim/Parsers/Arz` for higher-level item interpretation.
-- `HookDll` only if live-game integration is selected after the read-only MVP.
+Live-game integration now bundles the upstream `HookDll` and injector. The hook
+has the Grim Dawn 1.3 `ItemReplicaInfo` layout correction and redirects only its
+data root to Cairn's isolated app-data directory. Exact source, build inputs,
+binary fingerprints, crash evidence, and allowlisted game target are recorded in
+`docs/live-hook-compatibility.md`.
+
+The one-time GDIA migration reads `PlayerItem` from a hash-verified database
+backup and also preserves/imports orphaned incoming queue receipts. Import is
+transactional, multiplicity-aware, idempotent, and may be configured to reject
+mixed HC/SC or uncatalogued records before commit.

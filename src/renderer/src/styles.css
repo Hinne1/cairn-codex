@@ -66,6 +66,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .background-scan div { display: grid; gap: 2px; }
 .background-scan strong { font-size: 11px; }
 .background-scan small { color: #91846b; font-size: 9px; }
+.operation-banner { position: sticky; z-index: 12; top: 8px; margin: 0 0 12px; padding: 11px 14px; border: 1px solid; border-radius: 6px; font-size: 12px; box-shadow: 0 8px 22px rgba(0,0,0,.28); }
+.operation-banner.error { border-color: #704238; color: #dfa291; background: rgba(58, 25, 20, .96); }
+.operation-banner.success { border-color: #526039; color: #bdce91; background: rgba(32, 44, 23, .96); }
 .scan-spinner { width: 16px; height: 16px; border: 2px solid #655231; border-top-color: #e0af51; border-radius: 50%; animation: scan-spin 800ms linear infinite; }
 
 .hero { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 30px; }
@@ -195,6 +198,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .roll-score { color: #e1b85d; font-size: 13px; }
 .roll-score.dim { color: #635e55; }
 .pin-indicator { color: #c7aa69; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+.card-live-retrieve { width: 100%; padding: 7px 9px; border: 1px solid #5c4b30; border-radius: 4px; color: #d9bd7a; background: rgba(50, 40, 27, .9); cursor: pointer; font-size: 10px; }
+.card-live-retrieve:hover { border-color: #92713a; color: #f3d790; }
+.card-live-retrieve:disabled { opacity: .45; cursor: default; }
 
 .set-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 .set-card { padding: 20px; border: 1px solid #454032; border-radius: 8px; background: linear-gradient(145deg, rgba(42, 39, 32, 0.94), rgba(24, 23, 20, 0.96)); }
@@ -203,6 +209,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-card h3 { margin: 0; color: #e6ddc8; font-size: 19px; font-weight: 500; }
 .set-card header > strong { display: grid; place-items: center; min-width: 52px; height: 32px; border: 1px solid #554c3a; border-radius: 999px; color: #aa956a; font-size: 12px; }
 .set-card header > strong.complete { border-color: #81652f; color: #e1bd6b; background: rgba(111, 81, 31, 0.18); }
+.set-percentage { align-self: center; min-width: 48px; color: #9c8b67; font-size: 11px; text-align: right; }
 .set-meter { margin: 16px 0; }
 .set-card ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .set-card li { color: #c3b99f; }
@@ -285,6 +292,13 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-drawer { width: min(720px, 92vw); height: 100%; overflow-y: auto; padding: 38px; border-left: 1px solid #4b402e; background: linear-gradient(155deg, #1c1a16, #0e0e0c 72%); box-shadow: -22px 0 60px rgba(0, 0, 0, 0.45); }
 .item-drawer > h2 { margin: 4px 44px 8px 0; color: #eee4ce; font-size: 34px; font-weight: 500; }
 .drawer-intro { max-width: 590px; margin: 0 0 24px; color: #817b6e; line-height: 1.55; }
+.drawer-stored-copies { display: grid; gap: 12px; margin: 0 0 20px; padding: 16px; border: 1px solid #55452e; border-radius: 8px; background: rgba(55, 43, 27, .45); }
+.drawer-stored-copies > header { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+.drawer-stored-copies > header strong { color: #dfc58b; font: 500 16px Georgia, serif; }
+.drawer-stored-copies > header small { color: #827867; font-size: 10px; }
+.drawer-stored-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.drawer-stored-actions button { padding: 8px 10px; border: 1px solid #675333; border-radius: 5px; color: #dbc486; background: #30271b; cursor: pointer; font-size: 10px; }
+.drawer-stored-actions button:disabled { opacity: .42; cursor: default; }
 .drawer-close { position: absolute; top: 22px; right: 24px; width: 38px; height: 38px; border: 1px solid #454035; border-radius: 50%; color: #aaa18f; background: #24211c; cursor: pointer; font-size: 22px; }
 .pinned-away, .withheld-note { padding: 12px; border: 1px solid #574833; border-radius: 6px; color: #b6a179; background: rgba(71, 55, 31, 0.18); font-size: 12px; }
 .drawer-empty { padding: 18px; border: 1px dashed #443e32; border-radius: 7px; color: #777064; background: rgba(25, 23, 19, 0.5); font-size: 12px; line-height: 1.5; }

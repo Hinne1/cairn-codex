@@ -17,9 +17,10 @@ import type {
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary'
-type SortMode = 'name' | 'level' | 'completion' | 'roll'
+type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
 type ActiveView = 'collection' | 'sets' | 'vault'
+type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 
 interface CollectionSet {
   record: string
@@ -43,8 +44,9 @@ const activeView = ref<ActiveView>('collection')
 const query = ref('')
 const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
-const sortMode = ref<SortMode>('completion')
+const sortMode = ref<SortMode>('recent')
 const sortDirection = ref<SortDirection>('desc')
+const setProgressFilter = ref<SetProgressFilter>('all')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
 const pinning = ref(false)
@@ -190,8 +192,11 @@ const visibleSets = computed(() => {
         rarityFilter.value === 'all' || set.items.some((item) => item.rarity === rarityFilter.value)
     )
     .filter((set) => {
-      if (ownership.value === 'owned') return set.collected > 0
-      if (ownership.value === 'missing') return set.collected < set.items.length
+      if (setProgressFilter.value === 'complete') return set.collected === set.items.length
+      if (setProgressFilter.value === 'progress') {
+        return set.collected > 0 && set.collected < set.items.length
+      }
+      if (setProgressFilter.value === 'unstarted') return set.collected === 0
       return true
     })
     .filter((set) => {
@@ -238,8 +243,27 @@ const selectedCopies = computed(() => {
     })
 })
 
+const selectedStoredCopies = computed(() => {
+  if (!selectedRecord.value) return []
+  return vaultItems.value
+    .filter(
+      (item) =>
+        item.catalogued &&
+        item.state === 'ingested' &&
+        item.baseRecord.toLocaleLowerCase() === selectedRecord.value?.toLocaleLowerCase() &&
+        (snapshot.value?.isHardcore === undefined || item.isHardcore === snapshot.value.isHardcore)
+    )
+    .map((item) => {
+      const observed = snapshot.value?.observedItems.find(
+        (copy) => copy.sourcePath === `vault://${item.id}`
+      )
+      return { item, score: observed?.rollAnalysis?.overallEstimatedPercentile ?? null }
+    })
+    .sort((left, right) => (right.score ?? -1) - (left.score ?? -1))
+})
+
 watch(
-  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection],
+  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter],
   () => {
     currentPage.value = 1
   }
@@ -282,7 +306,10 @@ onMounted(async () => {
   }
   if (cached) {
     applySnapshot(cached)
-    void scanCollection()
+    // While live mode owns the hook, keep the helper responsive to durable queue work.
+    // The cached catalog is complete enough to browse; heavy scan/roll refreshes remain
+    // manual and run automatically once the game session ends.
+    if (liveStatus.value?.state !== 'ready') void scanCollection()
   } else {
     await scanCollection()
   }
@@ -543,6 +570,9 @@ async function pollLiveLifecycle(): Promise<void> {
       }
     }
     liveStatus.value = current
+    if (previousState === 'ready' && current.state === 'unavailable' && !scanning.value) {
+      void scanCollection()
+    }
   } catch (error) {
     liveIssues.value = [readableError(error)]
     try {
@@ -563,9 +593,9 @@ async function syncLiveMode(): Promise<void> {
     liveStatus.value = result.status
     liveIssues.value = result.issues
     if (result.ingested.length > 0) {
+      applyLiveIngests(result.ingested)
       vaultMessage.value = `Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`
       await refreshVault()
-      if (collectionBasis.value === 'archive') await loadSelectedSources()
     }
   } catch (error) {
     const message = readableError(error)
@@ -576,9 +606,9 @@ async function syncLiveMode(): Promise<void> {
 }
 
 async function retrieveSelectedLive(): Promise<void> {
-  if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
+  if (selectedVaultIds.value.length !== 1 || vaultBusy.value) return
   const confirmed = window.confirm(
-    `Live-retrieve ${selectedVaultIds.value.length} item${selectedVaultIds.value.length === 1 ? '' : 's'}? Keep the shared stash open until the in-game deposit is acknowledged.`
+    `Return this copy to Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? If the tab is full, it will remain safely archived.`
   )
   if (!confirmed) return
   vaultBusy.value = true
@@ -586,16 +616,95 @@ async function retrieveSelectedLive(): Promise<void> {
   vaultMessage.value = null
   try {
     const result = await window.cairnCodex.retrieveLiveVaultItems([...selectedVaultIds.value])
+    applyLiveRetrievals(result.retrieved)
     vaultMessage.value = `Live-retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn.`
     selectedVaultIds.value = []
     await refreshVault()
-    if (collectionBasis.value === 'archive') await loadSelectedSources()
   } catch (error) {
     vaultError.value = readableError(error)
     await refreshVault()
   } finally {
     vaultBusy.value = false
   }
+}
+
+async function retrieveArchivedCopyLive(vaultItemId: string): Promise<void> {
+  selectedVaultIds.value = [vaultItemId]
+  await retrieveSelectedLive()
+}
+
+function applyLiveIngests(
+  ingested: Array<{ vaultItemId: string; baseRecord: string; name: string; seed: number }>
+): void {
+  if (!snapshot.value) return
+  const counts = new Map<string, number>()
+  for (const item of ingested) {
+    const key = item.baseRecord.toLocaleLowerCase()
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const discoveredAt = new Date().toISOString()
+  const items = snapshot.value.items.map((item) => {
+    const added = counts.get(item.record.toLocaleLowerCase()) ?? 0
+    if (added === 0) return item
+    return {
+      ...item,
+      discovered: true,
+      firstDiscoveredAt: item.firstDiscoveredAt ?? discoveredAt,
+      availableCount:
+        collectionBasis.value === 'archive' ? item.availableCount + added : item.availableCount
+    }
+  })
+  snapshot.value = withUpdatedSummaries({ ...snapshot.value, items })
+}
+
+function applyLiveRetrievals(
+  retrieved: Array<{ vaultItemId: string; baseRecord: string; seed: number }>
+): void {
+  if (!snapshot.value || collectionBasis.value !== 'archive') return
+  const removedIds = new Set(retrieved.map((item) => `vault://${item.vaultItemId}`))
+  const observedItems = snapshot.value.observedItems.filter(
+    (copy) => !removedIds.has(copy.sourcePath)
+  )
+  const counts = new Map<string, number>()
+  for (const item of retrieved) {
+    const key = item.baseRecord.toLocaleLowerCase()
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const items = snapshot.value.items.map((item) => {
+    const removed = counts.get(item.record.toLocaleLowerCase()) ?? 0
+    if (removed === 0) return item
+    const remaining = observedItems.filter(
+      (copy) => copy.baseRecord.toLocaleLowerCase() === item.record.toLocaleLowerCase()
+    )
+    const analyzed = remaining.filter(
+      (copy) =>
+        copy.rollAnalysis?.trusted === true &&
+        copy.rollAnalysis.overallEstimatedPercentile !== null
+    )
+    return {
+      ...item,
+      availableCount: Math.max(0, item.availableCount - removed),
+      analyzedCopyCount: analyzed.length,
+      bestRollPercentile:
+        analyzed.length > 0
+          ? Math.max(...analyzed.map((copy) => copy.rollAnalysis!.overallEstimatedPercentile!))
+          : null
+    }
+  })
+  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items })
+}
+
+function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
+  const rarities = (['epic', 'legendary'] as const).map((rarity) => {
+    const items = value.items.filter((item) => item.rarity === rarity)
+    return {
+      rarity,
+      total: items.length,
+      collected: items.filter((item) => item.discovered).length,
+      availableCopies: items.reduce((sum, item) => sum + item.availableCount, 0)
+    }
+  })
+  return { ...value, rarities }
 }
 
 async function refreshStaging(): Promise<void> {
@@ -674,6 +783,10 @@ function compareItems(left: CollectionItem, right: CollectionItem): number {
   } else if (sortMode.value === 'completion') {
     comparison = Number(Boolean(left.discovered)) - Number(Boolean(right.discovered))
     if (comparison === 0) comparison = left.availableCount - right.availableCount
+  } else if (sortMode.value === 'recent') {
+    comparison =
+      (left.firstDiscoveredAt ? Date.parse(left.firstDiscoveredAt) : 0) -
+      (right.firstDiscoveredAt ? Date.parse(right.firstDiscoveredAt) : 0)
   } else if (sortMode.value === 'roll') {
     comparison = (left.bestRollPercentile ?? -1) - (right.bestRollPercentile ?? -1)
   } else {
@@ -681,6 +794,29 @@ function compareItems(left: CollectionItem, right: CollectionItem): number {
   }
   if (comparison === 0) comparison = left.name.localeCompare(right.name)
   return sortDirection.value === 'asc' ? comparison : -comparison
+}
+
+function setCompletionPercent(set: CollectionSet): string {
+  return ((set.collected / set.items.length) * 100).toFixed(1) + '%'
+}
+
+function bestStoredCopy(record: string): VaultListItem | null {
+  const matches = vaultItems.value.filter(
+    (item) =>
+      item.catalogued &&
+      item.state === 'ingested' &&
+      item.baseRecord.toLocaleLowerCase() === record.toLocaleLowerCase() &&
+      (snapshot.value?.isHardcore === undefined || item.isHardcore === snapshot.value.isHardcore)
+  )
+  if (matches.length === 0) return null
+  return matches.sort((left, right) => {
+    const leftCopy = snapshot.value?.observedItems.find((copy) => copy.sourcePath === `vault://${left.id}`)
+    const rightCopy = snapshot.value?.observedItems.find((copy) => copy.sourcePath === `vault://${right.id}`)
+    return (
+      (rightCopy?.rollAnalysis?.overallEstimatedPercentile ?? -1) -
+      (leftCopy?.rollAnalysis?.overallEstimatedPercentile ?? -1)
+    )
+  })[0]!
 }
 
 function matchesCategory(item: CollectionItem, category: string): boolean {
@@ -974,6 +1110,8 @@ function formatRollValue(value: number): string {
           <small>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
         </div>
       </section>
+      <p v-if="activeView !== 'vault' && vaultError" class="operation-banner error">{{ vaultError }}</p>
+      <p v-if="activeView !== 'vault' && vaultMessage" class="operation-banner success">{{ vaultMessage }}</p>
       <section class="hero">
         <div>
           <p class="section-label">{{ collectionBasisLabel }}</p>
@@ -1031,7 +1169,7 @@ function formatRollValue(value: number): string {
           @click="setCollectionBasis('stashes')"
         >
           <strong>Stash Index</strong>
-          <small>Ownership mirrors the selected transfer stashes.</small>
+          <small>Physical copy counts from selected stashes; discoveries also include the Archive.</small>
         </button>
         <button
           type="button"
@@ -1078,7 +1216,7 @@ function formatRollValue(value: number): string {
             placeholder="Search names, stats, skills…  (try skill:wendigo)"
           />
         </label>
-        <div class="segmented-control" aria-label="Ownership filter">
+        <div v-if="activeView === 'collection'" class="segmented-control" aria-label="Collection status filter">
           <button
             v-for="option in (['all', 'owned', 'missing'] as OwnershipFilter[])"
             :key="option"
@@ -1086,7 +1224,18 @@ function formatRollValue(value: number): string {
             :class="{ active: ownership === option }"
             @click="ownership = option"
           >
-            {{ option }}
+            {{ option === 'all' ? 'All' : option === 'owned' ? 'Collected' : 'Missing' }}
+          </button>
+        </div>
+        <div v-else class="segmented-control set-progress-filter" aria-label="Set completion filter">
+          <button
+            v-for="option in (['all', 'complete', 'progress', 'unstarted'] as SetProgressFilter[])"
+            :key="option"
+            type="button"
+            :class="{ active: setProgressFilter === option }"
+            @click="setProgressFilter = option"
+          >
+            {{ option === 'all' ? 'All sets' : option === 'progress' ? 'In progress' : option === 'unstarted' ? 'Unstarted' : 'Complete' }}
           </button>
         </div>
         <select v-model="rarityFilter" aria-label="Rarity">
@@ -1095,7 +1244,8 @@ function formatRollValue(value: number): string {
           <option value="epic">Epic</option>
         </select>
         <select v-if="activeView === 'collection'" v-model="sortMode" aria-label="Sort collection">
-          <option value="completion">Collected first</option>
+          <option value="recent">Recently collected</option>
+          <option value="completion">Collected status</option>
           <option value="name">Name</option>
           <option value="level">Level</option>
           <option value="roll">Best roll</option>
@@ -1194,7 +1344,7 @@ function formatRollValue(value: number): string {
           <button
             class="vault-action live-action"
             type="button"
-            :disabled="vaultBusy || liveStatus?.state !== 'ready' || !quarantinedVaultItems.some((item) => selectedVaultIds.includes(item.id))"
+            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length !== 1 || !quarantinedVaultItems.some((item) => selectedVaultIds.includes(item.id))"
             @click="retrieveSelectedLive"
           >
             {{ vaultBusy ? 'Waiting for game…' : 'Live-return selected quarantine item' }}
@@ -1303,7 +1453,7 @@ function formatRollValue(value: number): string {
               <strong>{{ availableVaultItems.length }}</strong>
             </header>
             <p class="panel-help">
-              Auto-ingested and imported copies persist here until you retrieve them.
+              These copies are already part of the Codex Archive. Selecting one retrieves it out to the game; no filing step is required.
             </p>
             <div v-if="availableVaultItems.length" class="vault-item-list selectable">
               <label v-for="item in availableVaultItems" :key="item.id" class="vault-row">
@@ -1332,10 +1482,10 @@ function formatRollValue(value: number): string {
               v-if="liveStatus?.state === 'ready'"
               class="vault-action live-action"
               type="button"
-              :disabled="vaultBusy || selectedVaultIds.length === 0"
+              :disabled="vaultBusy || selectedVaultIds.length !== 1"
               @click="retrieveSelectedLive"
             >
-              {{ vaultBusy ? 'Waiting for game…' : `Live-retrieve ${selectedVaultIds.length} selected` }}
+              {{ vaultBusy ? 'Waiting for game…' : selectedVaultIds.length === 1 ? 'Live-retrieve selected copy' : 'Select exactly one for live retrieval' }}
             </button>
           </article>
         </div>
@@ -1369,6 +1519,7 @@ function formatRollValue(value: number): string {
             <strong :class="{ complete: set.collected === set.items.length }">
               {{ set.collected }} / {{ set.items.length }}
             </strong>
+            <span class="set-percentage">{{ setCompletionPercent(set) }}</span>
           </header>
           <div class="set-meter">
             <span :style="{ width: `${(set.collected / set.items.length) * 100}%` }" />
@@ -1469,6 +1620,16 @@ function formatRollValue(value: number): string {
               <strong v-else-if="item.discovered">Discovered · no copies</strong>
               <strong v-else>Not found</strong>
             </div>
+            <button
+              v-if="liveStatus?.state === 'ready' && bestStoredCopy(item.record)"
+              class="card-live-retrieve"
+              type="button"
+              :disabled="vaultBusy"
+              title="Return the best stored copy to Grim Dawn"
+              @click.stop="retrieveArchivedCopyLive(bestStoredCopy(item.record)!.id)"
+            >
+              Retrieve live
+            </button>
             <span v-if="item.pinnedInstanceKey" class="pin-indicator">Pinned choice</span>
           </article>
           <div v-if="visibleItems.length === 0" class="no-results">No items match these filters.</div>
@@ -1616,6 +1777,26 @@ function formatRollValue(value: number): string {
         <p class="drawer-intro">
           Auto-best averages the estimated percentile of each variable stat line. Pin whichever copy you actually prefer.
         </p>
+        <section v-if="selectedStoredCopies.length" class="drawer-stored-copies">
+          <header>
+            <div>
+              <p class="section-label">Codex Archive</p>
+              <strong>{{ selectedStoredCopies.length }} stored {{ selectedStoredCopies.length === 1 ? 'copy' : 'copies' }}</strong>
+            </div>
+            <small>Returns land in the {{ liveStatus?.depositTabDescription ?? 'configured retrieval tab' }}.</small>
+          </header>
+          <div class="drawer-stored-actions">
+            <button
+              v-for="copy in selectedStoredCopies"
+              :key="copy.item.id"
+              type="button"
+              :disabled="vaultBusy || liveStatus?.state !== 'ready'"
+              @click="retrieveArchivedCopyLive(copy.item.id)"
+            >
+              Retrieve seed {{ copy.item.seed }}<span v-if="copy.score !== null"> · {{ copy.score.toFixed(1) }}%</span>
+            </button>
+          </div>
+        </section>
         <p
           v-if="selectedItem.pinnedInstanceKey && !selectedCopies.some((copy) => copy.instanceKey === selectedItem?.pinnedInstanceKey)"
           class="pinned-away"

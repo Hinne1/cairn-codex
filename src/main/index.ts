@@ -239,7 +239,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
         return null
       }
       const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return presentCollection(helper, database, projected, input.basis)
+      return presentCollection(helper, database, projected, input.basis, false)
     }
   )
   ipcMain.handle(
@@ -408,6 +408,9 @@ async function executeLiveRetrieval(
   vaultItemIds: string[]
 ): Promise<LiveRetrievalResult> {
   if (vaultItemIds.length === 0) throw new Error('Select at least one vault item to retrieve.')
+  if (vaultItemIds.length !== 1) {
+    throw new Error('Live retrieval currently returns one item at a time so every deposit has an unambiguous acknowledgement.')
+  }
   const listed = new Map(database.listVaultItems().map((item) => [item.id, item]))
   const selected = vaultItemIds.map((id) => {
     const item = listed.get(id)
@@ -463,7 +466,20 @@ async function executeLiveRetrieval(
         if (receipts.has(index)) continue
         const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
         if (result.state === 'rejected') {
-          throw new Error(`The game rejected vault item ${vaultItemIds[index]}; receipt: ${result.receiptPath}`)
+          if (!result.receiptPath) {
+            throw new Error('The game rejected the item without returning a durable queue receipt.')
+          }
+          await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+            path: result.receiptPath,
+            expectedSha256: queue.semanticSha256,
+            receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-returns')
+          })
+          const rejection = new Error(
+            `The ${status.depositTabDescription} is full. The item remains safely stored in the Codex Archive.`
+          )
+          database.failRetrievalOperation(operationId, vaultItemIds, rejection)
+          prepared = false
+          throw rejection
         }
         if (result.state === 'deposited' && result.receiptPath) receipts.set(index, result.receiptPath)
       }
@@ -634,7 +650,8 @@ async function presentCollection(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase,
   snapshot: CollectionSnapshot,
-  basis: CollectionBasis
+  basis: CollectionBasis,
+  analyzeMissing = true
 ): Promise<CollectionSnapshot> {
   const mode = lifetimeMode(snapshot)
   if (basis !== 'archive') {
@@ -647,15 +664,29 @@ async function presentCollection(
     return database.presentArchiveSnapshot(snapshot, [], mode)
   }
   const payloads = archived.map((item) => item.payload as LiveVaultPayload)
-  const analysis = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
-    installationPath: installation.path,
-    items: payloads.map((item) => ({
-      baseRecord: item.baseRecord,
-      prefixRecord: item.prefixRecord,
-      suffixRecord: item.suffixRecord,
-      seed: item.seed
-    }))
-  })
+  const missingAnalysis = archived
+    .map((item, index) => ({ item, payload: payloads[index]! }))
+    .filter(({ item }) => item.rollAnalysis === null)
+  if (analyzeMissing && missingAnalysis.length > 0) {
+    const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
+      installationPath: installation.path,
+      items: missingAnalysis.map(({ payload }) => ({
+        baseRecord: payload.baseRecord,
+        prefixRecord: payload.prefixRecord,
+        suffixRecord: payload.suffixRecord,
+        seed: payload.seed
+      }))
+    })
+    database.setVaultRollAnalyses(
+      missingAnalysis.map(({ item }, index) => ({
+        id: item.id,
+        rollAnalysis: analyzed.items[index]!
+      }))
+    )
+    for (const [index, entry] of missingAnalysis.entries()) {
+      entry.item.rollAnalysis = analyzed.items[index] ?? null
+    }
+  }
   const observedItems = archived.map((item, index): ObservedStashItem => {
     const payload = payloads[index]!
     return {
@@ -679,7 +710,7 @@ async function presentCollection(
       stackCount: payload.stackCount,
       rerolls: payload.rerolls,
       affixRerolls: payload.affixRerolls,
-      rollAnalysis: analysis.items[index] ?? null,
+      rollAnalysis: archived[index]!.rollAnalysis,
       instanceKey: createVaultInstanceKey(payload)
     }
   })

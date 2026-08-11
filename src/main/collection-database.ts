@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type {
   CollectionItem,
   CollectionSnapshot,
+  ItemRollAnalysis,
   ObservedStashItem,
   VaultListItem
 } from '@shared/contracts'
@@ -140,9 +141,11 @@ export class CollectionDatabase {
   listAvailableArchiveItems(isHardcore?: boolean): ArchiveVaultItem[] {
     const rows = this.database
       .prepare(`
-        SELECT id, base_record, serialized_item
+        SELECT vault_item.id, vault_item.base_record, vault_item.serialized_item, vault_item.roll_json
         FROM vault_item
+        JOIN catalog_item ON catalog_item.record = vault_item.base_record
         WHERE state = 'ingested'
+          AND catalog_item.content_pack != 'cairn-quarantine'
           ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
         ORDER BY ingested_at_utc, id
       `)
@@ -150,12 +153,27 @@ export class CollectionDatabase {
       id: string
       base_record: string
       serialized_item: Uint8Array
+      roll_json: string | null
     }>
     return rows.map((row) => ({
       id: row.id,
       baseRecord: row.base_record,
-      payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown
+      payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown,
+      rollAnalysis: row.roll_json ? (JSON.parse(row.roll_json) as ItemRollAnalysis) : null
     }))
+  }
+
+  setVaultRollAnalyses(items: Array<{ id: string; rollAnalysis: ItemRollAnalysis }>): void {
+    if (items.length === 0) return
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const update = this.database.prepare('UPDATE vault_item SET roll_json = ? WHERE id = ?')
+      for (const item of items) update.run(JSON.stringify(item.rollAnalysis), item.id)
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
   }
 
   importVaultItems(input: VaultImport): VaultImportResult {
@@ -623,7 +641,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 5) {
+    if (version > 6) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )
@@ -828,6 +846,17 @@ export class CollectionDatabase {
         PRAGMA user_version = 5;
         COMMIT;
       `)
+      version = 5
+    }
+
+    if (version === 5) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE vault_item ADD COLUMN roll_json TEXT;
+        PRAGMA user_version = 6;
+        COMMIT;
+      `)
+      version = 6
     }
   }
 
@@ -962,18 +991,29 @@ export class CollectionDatabase {
     const rows = (isHardcore === undefined
       ? this.database
           .prepare(`
-            SELECT record, MIN(first_discovered_at_utc) AS first_discovered_at_utc
-            FROM collection_entry_mode
+            SELECT record, MIN(first_discovered_at_utc) AS first_discovered_at_utc FROM (
+              SELECT record, first_discovered_at_utc FROM collection_entry_mode
+              UNION ALL
+              SELECT base_record AS record, ingested_at_utc AS first_discovered_at_utc
+              FROM vault_item
+            )
             GROUP BY record
           `)
           .all()
       : this.database
           .prepare(`
-            SELECT record, first_discovered_at_utc
-            FROM collection_entry_mode
-            WHERE is_hardcore = ?
+            SELECT record, MIN(first_discovered_at_utc) AS first_discovered_at_utc FROM (
+              SELECT record, first_discovered_at_utc
+              FROM collection_entry_mode
+              WHERE is_hardcore = ?
+              UNION ALL
+              SELECT base_record AS record, ingested_at_utc AS first_discovered_at_utc
+              FROM vault_item
+              WHERE is_hardcore = ?
+            )
+            GROUP BY record
           `)
-          .all(isHardcore ? 1 : 0)) as Array<{
+          .all(isHardcore ? 1 : 0, isHardcore ? 1 : 0)) as Array<{
       record: string
       first_discovered_at_utc: string
     }>
@@ -1075,6 +1115,7 @@ export interface ArchiveVaultItem {
   id: string
   baseRecord: string
   payload: unknown
+  rollAnalysis: ItemRollAnalysis | null
 }
 
 export interface VaultImport {

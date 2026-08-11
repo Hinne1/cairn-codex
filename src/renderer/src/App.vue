@@ -59,10 +59,13 @@ const vaultMessage = ref<string | null>(null)
 const liveStatus = ref<LiveGameStatus | null>(null)
 const liveIssues = ref<string[]>([])
 const liveSyncing = ref(false)
+const liveLifecyclePolling = ref(false)
+const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
 const tooltipRecord = ref<string | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
-let liveTimer: ReturnType<typeof setInterval> | null = null
+let liveSyncTimer: ReturnType<typeof setInterval> | null = null
+let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 const pageSize = 48
 
 const categories = [
@@ -85,7 +88,18 @@ const targetStash = computed(() =>
 )
 const availableVaultItems = computed(() =>
   vaultItems.value.filter(
-    (item) => item.state === 'ingested' && item.isHardcore === targetStash.value?.isHardcore
+    (item) =>
+      item.catalogued &&
+      item.state === 'ingested' &&
+      item.isHardcore === targetStash.value?.isHardcore
+  )
+)
+const quarantinedVaultItems = computed(() =>
+  vaultItems.value.filter(
+    (item) =>
+      !item.catalogued &&
+      item.state === 'ingested' &&
+      item.isHardcore === targetStash.value?.isHardcore
   )
 )
 const retrievedVaultItems = computed(() =>
@@ -240,7 +254,10 @@ watch(selectedStashPath, async (path) => {
 })
 
 watch(activeView, async (view) => {
-  if (view === 'vault') await refreshVault()
+  if (view === 'vault') {
+    await refreshVault()
+    await pollLiveLifecycle()
+  }
 })
 
 onMounted(async () => {
@@ -248,6 +265,11 @@ onMounted(async () => {
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
   status.value = await window.cairnCodex.getAppStatus()
+  // Establish live ownership before catalog projection/scanning queues any heavyweight
+  // helper work. This keeps reconnect independent from collection startup time.
+  await pollLiveLifecycle()
+  liveSyncTimer = setInterval(() => void syncLiveMode(), 1000)
+  liveLifecycleTimer = setInterval(() => void pollLiveLifecycle(), 10_000)
   let cached: CollectionSnapshot | null = null
   try {
     cached = await window.cairnCodex.getCachedCollection(
@@ -265,15 +287,14 @@ onMounted(async () => {
     await scanCollection()
   }
   await refreshVault()
-  liveStatus.value = await window.cairnCodex.inspectLiveGame()
-  liveTimer = setInterval(() => void syncLiveMode(), 1000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
-  if (liveTimer) clearInterval(liveTimer)
+  if (liveSyncTimer) clearInterval(liveSyncTimer)
+  if (liveLifecycleTimer) clearInterval(liveLifecycleTimer)
 })
 
 async function scanCollection(): Promise<void> {
@@ -353,6 +374,17 @@ async function setCollectionBasis(basis: CollectionBasis): Promise<void> {
 function readStoredZoomFactor(): number {
   const stored = Number(localStorage.getItem('cairn-codex-zoom'))
   return Number.isFinite(stored) && stored >= 0.7 && stored <= 1.8 ? stored : 1
+}
+
+function readStoredBoolean(key: string, fallback: boolean): boolean {
+  const stored = localStorage.getItem(key)
+  return stored === null ? fallback : stored === 'true'
+}
+
+function setAutoLiveConnect(enabled: boolean): void {
+  autoLiveConnect.value = enabled
+  localStorage.setItem('cairn-codex-auto-live-connect', String(enabled))
+  if (enabled) void pollLiveLifecycle()
 }
 
 async function setZoom(factor: number): Promise<void> {
@@ -477,6 +509,49 @@ async function startLiveMode(): Promise<void> {
     liveStatus.value = await window.cairnCodex.inspectLiveGame()
   } finally {
     vaultBusy.value = false
+  }
+}
+
+async function stopLiveMode(): Promise<void> {
+  if (vaultBusy.value || liveLifecyclePolling.value) return
+  liveLifecyclePolling.value = true
+  try {
+    liveStatus.value = await window.cairnCodex.stopLiveGame()
+    liveIssues.value = []
+    vaultMessage.value = 'Live mode disconnected.'
+  } catch (error) {
+    liveIssues.value = [readableError(error)]
+  } finally {
+    liveLifecyclePolling.value = false
+  }
+}
+
+async function pollLiveLifecycle(): Promise<void> {
+  if (liveLifecyclePolling.value || vaultBusy.value) return
+  liveLifecyclePolling.value = true
+  try {
+    const previousState = liveStatus.value?.state
+    let current = await window.cairnCodex.inspectLiveGame()
+    if (current.state === 'blocked' && current.connectedProcessId === null) {
+      current = await window.cairnCodex.stopLiveGame()
+      liveIssues.value = []
+    }
+    if (autoLiveConnect.value && current.state === 'available') {
+      current = await window.cairnCodex.startLiveGame()
+      if (current.state === 'ready' && previousState !== 'ready') {
+        vaultMessage.value = 'Auto-connected to Grim Dawn. Live ingest is watching the configured stash tab.'
+      }
+    }
+    liveStatus.value = current
+  } catch (error) {
+    liveIssues.value = [readableError(error)]
+    try {
+      liveStatus.value = await window.cairnCodex.inspectLiveGame()
+    } catch {
+      // Preserve the last known status when the helper is temporarily unavailable.
+    }
+  } finally {
+    liveLifecyclePolling.value = false
   }
 }
 
@@ -977,7 +1052,7 @@ function formatRollValue(value: number): string {
           <span>Sets</span><small>{{ collectionSets.length }} catalogued</small>
         </button>
         <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
-          <span>Vault</span><small>{{ availableVaultItems.length }} ready</small>
+          <span>Vault</span><small>{{ availableVaultItems.length }} stored</small>
         </button>
       </nav>
 
@@ -1062,21 +1137,69 @@ function formatRollValue(value: number): string {
               <small v-if="liveStatus?.hookVersion">Hook {{ liveStatus.hookVersion }}</small>
             </div>
           </div>
-          <button
-            v-if="liveStatus?.state !== 'ready'"
-            type="button"
-            :disabled="vaultBusy || liveStatus?.state === 'unavailable' || liveStatus?.state === 'blocked'"
-            @click="startLiveMode"
-          >
-            {{ liveStatus?.state === 'connecting' ? 'Retry connection' : 'Enable live mode' }}
-          </button>
-          <div v-else class="live-ready-instructions">
+          <div class="live-mode-actions">
+            <label class="live-auto-toggle">
+              <input
+                type="checkbox"
+                :checked="autoLiveConnect"
+                @change="setAutoLiveConnect(($event.target as HTMLInputElement).checked)"
+              />
+              <span>Auto-connect</span>
+            </label>
+            <button
+              v-if="liveStatus?.state !== 'ready'"
+              type="button"
+              :disabled="vaultBusy || liveLifecyclePolling || liveStatus?.state === 'unavailable' || liveStatus?.state === 'blocked'"
+              @click="startLiveMode"
+            >
+              {{ liveStatus?.state === 'connecting' ? 'Connecting…' : 'Enable live mode' }}
+            </button>
+            <button v-else type="button" :disabled="vaultBusy || liveLifecyclePolling" @click="stopLiveMode">
+              Disconnect
+            </button>
+          </div>
+          <div v-if="liveStatus?.state === 'ready'" class="live-ready-instructions">
             <strong>{{ liveSyncing ? 'Checking queue…' : `Watching the ${liveStatus.ingestTabDescription}` }}</strong>
             <small>Retrieval target: {{ liveStatus.depositTabDescription }}.</small>
             <small>Only place Epics or Legendaries in the watched tab.</small>
           </div>
         </section>
         <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>
+
+        <section v-if="quarantinedVaultItems.length" class="vault-quarantine">
+          <header>
+            <div>
+              <p class="section-label">Recovery quarantine</p>
+              <h3>{{ quarantinedVaultItems.length }} non-catalog item{{ quarantinedVaultItems.length === 1 ? '' : 's' }} safely stored</h3>
+            </div>
+          </header>
+          <p>
+            Cairn intercepted these items but they are outside the Epic/Legendary collection.
+            Select them and use live return; their verified receipt remains on disk until the return is acknowledged.
+          </p>
+          <div class="vault-item-list selectable">
+            <label v-for="item in quarantinedVaultItems" :key="item.id" class="vault-row unsupported">
+              <input
+                type="checkbox"
+                :checked="selectedVaultIds.includes(item.id)"
+                :disabled="vaultBusy"
+                @change="toggleVaultItem(item.id)"
+              />
+              <div>
+                <strong>{{ item.name }}</strong>
+                <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.baseRecord }} · seed {{ item.seed }}</small>
+              </div>
+            </label>
+          </div>
+          <button
+            class="vault-action live-action"
+            type="button"
+            :disabled="vaultBusy || liveStatus?.state !== 'ready' || !quarantinedVaultItems.some((item) => selectedVaultIds.includes(item.id))"
+            @click="retrieveSelectedLive"
+          >
+            {{ vaultBusy ? 'Waiting for game…' : 'Live-return selected quarantine item' }}
+          </button>
+        </section>
 
         <section class="source-selector" aria-label="Collection stash sources">
           <header>
@@ -1175,12 +1298,12 @@ function formatRollValue(value: number): string {
             <header>
               <div>
                 <p>Codex vault</p>
-                <h3>Ready to retrieve</h3>
+                <h3>Stored copies</h3>
               </div>
               <strong>{{ availableVaultItems.length }}</strong>
             </header>
             <p class="panel-help">
-              Retrieval requires the final stash tab to be empty. Select one or more archived copies.
+              Auto-ingested and imported copies persist here until you retrieve them.
             </p>
             <div v-if="availableVaultItems.length" class="vault-item-list selectable">
               <label v-for="item in availableVaultItems" :key="item.id" class="vault-row">

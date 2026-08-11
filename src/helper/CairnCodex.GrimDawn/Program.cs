@@ -36,6 +36,7 @@ while ((line = Console.ReadLine()) is not null)
             "inspect-write-safety" => HelperResponse.Success(request.Id, WriteSafetyGate.Inspect()),
             "inspect-live-game" => HelperResponse.Success(request.Id, liveGame.Inspect()),
             "start-live-game" => HelperResponse.Success(request.Id, liveGame.Start()),
+            "stop-live-game" => HelperResponse.Success(request.Id, liveGame.Stop()),
             "poll-live-incoming" => HelperResponse.Success(request.Id, liveGame.PollIncoming()),
             "copy-live-incoming" => CopyLiveIncoming(request),
             "ack-live-incoming" => AcknowledgeLiveIncoming(request),

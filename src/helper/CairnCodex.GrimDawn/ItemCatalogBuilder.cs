@@ -93,7 +93,8 @@ internal static class ItemCatalogBuilder
         if (classification is not ("Epic" or "Legendary") ||
             record.Name.Contains("/enemygear/", StringComparison.OrdinalIgnoreCase) ||
             record.Name.Contains("/npcgear/", StringComparison.OrdinalIgnoreCase) ||
-            record.Name.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase))
+            record.Name.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
+            IsCategoryTemplate(record.Name))
         {
             return null;
         }
@@ -145,6 +146,21 @@ internal static class ItemCatalogBuilder
             setRecord is null ? null : setPresentations.GetValueOrDefault(setRecord),
             BuildAcquisition(record.Name, acquisitionReferences),
             ItemPresentationBuilder.Build(record, presentationSource));
+    }
+
+    private static bool IsCategoryTemplate(string recordName)
+    {
+        // Grim Dawn ships one internal category/default DBR per content-pack namespace
+        // (c000_*, c100_*, c200_*, ...). They inherit a real item's display tag and
+        // bitmap but are not lootable item bases, which otherwise creates duplicate,
+        // partially populated Codex entries.
+        var filename = Path.GetFileName(recordName);
+        return filename.Length > 5 &&
+               filename[0] == 'c' &&
+               char.IsDigit(filename[1]) &&
+               filename[2] == '0' &&
+               filename[3] == '0' &&
+               filename[4] == '_';
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> BuildAcquisitionReferences(

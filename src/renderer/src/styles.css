@@ -309,13 +309,19 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .vault-workspace { padding-top: 26px; }
 .live-mode-card { margin-top: 16px; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid #474033; border-radius: 8px; background: rgba(24, 23, 20, 0.9); }
 .live-mode-card.state-ready { border-color: #68713f; background: linear-gradient(120deg, rgba(40, 53, 29, 0.72), rgba(24, 25, 20, 0.94)); box-shadow: inset 3px 0 #a8bd5b; }
+.vault-quarantine { margin: 14px 0; padding: 16px; border: 1px solid #9b5738; background: linear-gradient(120deg, rgba(77, 30, 19, .72), rgba(25, 23, 19, .96)); }
+.vault-quarantine > p { color: #c9b09d; max-width: 1000px; }
+.vault-quarantine .unsupported { border-color: rgba(196, 99, 57, .52); }
 .live-mode-card.state-connecting { border-color: #76643b; }
 .live-mode-status { display: flex; align-items: center; gap: 13px; }
 .live-mode-status > div, .live-ready-instructions { display: grid; gap: 3px; }
 .live-mode-status h3 { margin: 0; color: #ded4bd; font-size: 18px; font-weight: 500; }
 .live-mode-status small, .live-ready-instructions small { color: #8c8372; font-size: 10px; }
-.live-mode-card > button { padding: 10px 15px; border: 1px solid #6c5632; border-radius: 5px; color: #e3c77f; background: #332a1c; cursor: pointer; }
-.live-mode-card > button:disabled { opacity: 0.4; cursor: default; }
+.live-mode-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.live-mode-actions > button { padding: 10px 15px; border: 1px solid #6c5632; border-radius: 5px; color: #e3c77f; background: #332a1c; cursor: pointer; }
+.live-mode-actions > button:disabled { opacity: 0.4; cursor: default; }
+.live-auto-toggle { display: flex; align-items: center; gap: 7px; color: #a89d87; font-size: 11px; cursor: pointer; }
+.live-auto-toggle input { accent-color: #a8bd5b; }
 .live-ready-instructions { min-width: 250px; }
 .live-ready-instructions strong { color: #c9da83; font-size: 12px; }
 .live-action { margin-top: 8px; border-color: #66743e; color: #d3e58e; background: #27301d; }

@@ -403,7 +403,8 @@ export class CollectionDatabase {
           vault_item.retrieved_at_utc,
           vault_item.is_hardcore,
           catalog_item.name,
-          catalog_item.rarity
+          catalog_item.rarity,
+          catalog_item.content_pack
         FROM vault_item
         JOIN catalog_item ON catalog_item.record = vault_item.base_record
         ${isHardcore === undefined ? '' : 'WHERE vault_item.is_hardcore = ?'}
@@ -418,6 +419,7 @@ export class CollectionDatabase {
       retrieved_at_utc: string | null
       name: string
       rarity: 'epic' | 'legendary'
+      content_pack: string
       is_hardcore: number
     }>
 
@@ -430,6 +432,7 @@ export class CollectionDatabase {
         baseRecord: row.base_record,
         name: row.name,
         rarity: row.rarity,
+        catalogued: row.content_pack !== 'cairn-quarantine',
         isHardcore: row.is_hardcore === 1,
         state: row.state,
         seed: payload.seed ?? 0,
@@ -437,6 +440,22 @@ export class CollectionDatabase {
         retrievedAtUtc: row.retrieved_at_utc
       }
     })
+  }
+
+  ensureQuarantineCatalogItem(baseRecord: string): string {
+    const fileName = baseRecord.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.dbr$/i, '')
+    const name = `Quarantined item (${fileName || baseRecord})`
+    this.database
+      .prepare(`
+        INSERT INTO catalog_item (
+          record, name, rarity, item_class, slot, level_requirement, item_level,
+          set_name, set_record, bitmap, content_pack, updated_at_utc
+        ) VALUES (?, ?, 'epic', 'Quarantined', 'unknown', 0, 0, NULL, NULL, NULL,
+          'cairn-quarantine', ?)
+        ON CONFLICT(record) DO NOTHING
+      `)
+      .run(baseRecord, name, new Date().toISOString())
+    return name
   }
 
   getCatalogNames(records: string[]): Map<string, string> {

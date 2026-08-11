@@ -25,7 +25,6 @@ internal sealed class LiveGameAdapter : IDisposable
         "d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7";
 
     private readonly object sync = new();
-    private readonly HashSet<string> incomingBaseline = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<LiveHookMessage> messages = [];
     private Thread? windowThread;
     private ManualResetEventSlim? windowReady;
@@ -36,6 +35,9 @@ internal sealed class LiveGameAdapter : IDisposable
     private string? queueDirectory;
     private int? gameProcessId;
     private bool? isHardcore;
+    private int? compatibilityProcessId;
+    private string? compatibilityHookPath;
+    private LiveHookCompatibility? cachedCompatibility;
     private string state = "unavailable";
     private string detail = "Live mode has not been started.";
     private string? injectorOutput;
@@ -83,7 +85,7 @@ internal sealed class LiveGameAdapter : IDisposable
                 var injector = install is null ? null : Path.Combine(install, "DllInjector64.exe");
                 var filesPresent = hook is not null && injector is not null && File.Exists(hook) && File.Exists(injector);
                 var compatibility = game.Count == 1 && filesPresent
-                    ? InspectCompatibility(game[0], hook!)
+                    ? GetCompatibility(game[0], hook!)
                     : new LiveHookCompatibility(false, null);
                 var compatible = filesPresent && compatibility.Verified;
                 var queueSettings = ReadQueueSettings();
@@ -140,12 +142,10 @@ internal sealed class LiveGameAdapter : IDisposable
 
     public LiveGameStatus Start()
     {
-        lock (sync)
+        if (window != IntPtr.Zero)
         {
-            if (window != IntPtr.Zero)
-            {
-                return Inspect();
-            }
+            return Inspect();
+        }
             var itemAssistant = FindProcesses(["IAGrim"]);
             if (itemAssistant.Count > 0)
             {
@@ -171,7 +171,7 @@ internal sealed class LiveGameAdapter : IDisposable
             {
                 throw new FileNotFoundException("The bundled Cairn hook or injector is missing.");
             }
-            var compatibility = InspectCompatibility(game[0], hook);
+            var compatibility = GetCompatibility(game[0], hook);
             if (!compatibility.Verified)
             {
                 foreach (var process in game) process.Dispose();
@@ -182,11 +182,6 @@ internal sealed class LiveGameAdapter : IDisposable
             queueDirectory = Path.Combine(LiveDataDirectory(), "itemqueue");
             var incoming = Path.Combine(queueDirectory, "ingoing");
             Directory.CreateDirectory(incoming);
-            incomingBaseline.Clear();
-            foreach (var path in Directory.EnumerateFiles(incoming, "*.csv"))
-            {
-                incomingBaseline.Add(Path.GetFullPath(path));
-            }
             messages.Clear();
             isHardcore = null;
             hookPath = hook;
@@ -194,7 +189,20 @@ internal sealed class LiveGameAdapter : IDisposable
             state = "connecting";
             detail = "Creating the live hook handshake window.";
             StartWindow();
-            SignalHookWorker();
+            var existingHook = ProcessHasModule(game[0], hook);
+            // The upstream worker caches its last host-window lookup for one second.
+            // Wait out that cache before waking it so a newly-created Cairn window
+            // replaces a stale handle from a previous app process.
+            if (existingHook) Thread.Sleep(1100);
+            var existingWorker = existingHook && SignalHookWorker();
+
+            if (existingWorker)
+            {
+                state = "ready";
+                detail = "Reconnected to the existing verified live hook.";
+                foreach (var process in game) process.Dispose();
+                return Inspect();
+            }
 
             if (!ProcessHasModule(game[0], hook))
             {
@@ -230,7 +238,7 @@ internal sealed class LiveGameAdapter : IDisposable
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while (DateTime.UtcNow < deadline)
             {
-                if (ProcessHasModule(game[0], hook))
+                if (state == "ready" || ProcessHasModule(game[0], hook))
                 {
                     state = "ready";
                     detail = "Live hook connected. Open the shared stash to ingest or retrieve items.";
@@ -245,7 +253,12 @@ internal sealed class LiveGameAdapter : IDisposable
                 : "Injection was requested but the hook has not completed its handshake yet.";
             foreach (var process in game) process.Dispose();
             return Inspect();
-        }
+    }
+
+    public LiveGameStatus Stop()
+    {
+        StopConnection();
+        return Inspect();
     }
 
     public IReadOnlyList<LiveIncomingItem> PollIncoming()
@@ -259,7 +272,6 @@ internal sealed class LiveGameAdapter : IDisposable
                          .OrderBy(path => File.GetCreationTimeUtc(path)))
             {
                 var fullPath = Path.GetFullPath(path);
-                if (incomingBaseline.Contains(fullPath)) continue;
                 byte[] bytes;
                 try
                 {
@@ -297,7 +309,6 @@ internal sealed class LiveGameAdapter : IDisposable
             var target = Path.Combine(receiptDirectory, $"{hash}.{Path.GetFileName(fullPath)}");
             if (File.Exists(target)) File.Delete(fullPath);
             else File.Move(fullPath, target);
-            incomingBaseline.Add(fullPath);
             return new LiveQueueReceipt(hash, target);
         }
     }
@@ -645,6 +656,21 @@ internal sealed class LiveGameAdapter : IDisposable
         catch { return false; }
     }
 
+    private LiveHookCompatibility GetCompatibility(Process game, string hookPath)
+    {
+        if (compatibilityProcessId == game.Id &&
+            string.Equals(compatibilityHookPath, hookPath, StringComparison.OrdinalIgnoreCase) &&
+            cachedCompatibility is not null)
+        {
+            return cachedCompatibility;
+        }
+        var result = InspectCompatibility(game, hookPath);
+        compatibilityProcessId = game.Id;
+        compatibilityHookPath = hookPath;
+        cachedCompatibility = result;
+        return result;
+    }
+
     private static LiveHookCompatibility InspectCompatibility(Process game, string hookPath)
     {
         try
@@ -748,23 +774,42 @@ internal sealed class LiveGameAdapter : IDisposable
 
     public void Dispose()
     {
-        var hwnd = window;
-        if (hwnd != IntPtr.Zero) PostMessage(hwnd, WmClose, IntPtr.Zero, IntPtr.Zero);
-        windowThread?.Join(TimeSpan.FromSeconds(2));
-        // The injected hook caches whether the GDIA host window exists. Wake its named
-        // worker event after our window is gone so it immediately observes the disconnect
-        // and disables interception rather than waiting for another in-game event.
-        SignalHookWorker();
-        Thread.Sleep(150);
-        windowReady?.Dispose();
+        StopConnection();
         foreach (var process in FindProcesses(["Grim Dawn", "GrimDawn", "IAGrim"])) process.Dispose();
     }
 
-    private static void SignalHookWorker()
+    private void StopConnection()
+    {
+        var hwnd = window;
+        if (hwnd != IntPtr.Zero) PostMessage(hwnd, WmClose, IntPtr.Zero, IntPtr.Zero);
+        windowThread?.Join(TimeSpan.FromSeconds(2));
+        windowReady?.Dispose();
+        // The injected hook caches its host-window lookup for one second and only checks
+        // it when the named worker event fires. Wait out that cache, then wake it after
+        // our window is gone so interception cannot remain active without Cairn running.
+        Thread.Sleep(1100);
+        _ = SignalHookWorker();
+        lock (sync)
+        {
+            window = IntPtr.Zero;
+            windowThread = null;
+            windowReady = null;
+            windowProcedure = null;
+            hookPath = null;
+            queueDirectory = null;
+            gameProcessId = null;
+            isHardcore = null;
+            state = "unavailable";
+            detail = "Live mode is disconnected.";
+            injectorOutput = null;
+        }
+    }
+
+    private static bool SignalHookWorker()
     {
         var workerEvent = OpenEvent(0x0002, false, "IA_Worker");
-        if (workerEvent == IntPtr.Zero) return;
-        try { SetEvent(workerEvent); }
+        if (workerEvent == IntPtr.Zero) return false;
+        try { return SetEvent(workerEvent); }
         finally { CloseHandle(workerEvent); }
     }
 

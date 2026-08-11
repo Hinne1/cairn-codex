@@ -12,6 +12,7 @@ export const IPC_CHANNELS = {
   retrieveVaultItems: 'vault:retrieve-items',
   inspectLiveGame: 'live:inspect',
   startLiveGame: 'live:start',
+  stopLiveGame: 'live:stop',
   syncLiveGame: 'live:sync',
   retrieveLiveVaultItems: 'live:retrieve-items'
 } as const
@@ -38,6 +39,7 @@ export interface CairnCodexApi {
   retrieveVaultItems: (path: string, vaultItemIds: string[]) => Promise<RetrievalResult>
   inspectLiveGame: () => Promise<LiveGameStatus>
   startLiveGame: () => Promise<LiveGameStatus>
+  stopLiveGame: () => Promise<LiveGameStatus>
   syncLiveGame: () => Promise<LiveGameSyncResult>
   retrieveLiveVaultItems: (vaultItemIds: string[]) => Promise<LiveRetrievalResult>
 }
@@ -107,6 +109,7 @@ export interface VaultListItem {
   baseRecord: string
   name: string
   rarity: 'epic' | 'legendary'
+  catalogued: boolean
   isHardcore: boolean
   state: VaultItemState
   seed: number

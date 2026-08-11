@@ -301,6 +301,10 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('start-live-game')
   )
   ipcMain.handle(
+    IPC_CHANNELS.stopLiveGame,
+    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('stop-live-game')
+  )
+  ipcMain.handle(
     IPC_CHANNELS.syncLiveGame,
     (): Promise<LiveGameSyncResult> => runExclusive(() => syncLiveIncoming(helper, database))
   )
@@ -321,14 +325,10 @@ async function syncLiveIncoming(
   const ingested: LiveGameSyncResult['ingested'] = []
   const issues: string[] = []
   for (const source of incoming) {
-    const name = database.getCatalogNames([source.item.baseRecord]).get(source.item.baseRecord.toLowerCase())
-    if (!name) {
-      issues.push(
-        `Live item ${source.item.baseRecord} is outside the Epic/Legendary catalog. ` +
-          `Its durable GDIA queue file was retained at ${source.path}.`
-      )
-      continue
-    }
+    const catalogName = database.getCatalogNames([source.item.baseRecord]).get(
+      source.item.baseRecord.toLowerCase()
+    )
+    const name = catalogName ?? database.ensureQuarantineCatalogItem(source.item.baseRecord)
     const identity = createHash('sha256')
       .update(source.path.toLowerCase())
       .update('\0')
@@ -384,6 +384,12 @@ async function syncLiveIncoming(
         name,
         seed: source.item.seed
       })
+      if (!catalogName) {
+        issues.push(
+          `${name} was safely stored outside the Epic/Legendary collection. ` +
+            'It is available in Vault quarantine for an immediate live return.'
+        )
+      }
     } catch (error) {
       if (prepared && !committed) database.failIngestOperation(operationId, error)
       issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)

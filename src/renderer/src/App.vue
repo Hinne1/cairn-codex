@@ -359,11 +359,18 @@ const skillItemRows = computed(() => {
       .flatMap((section) => section.lines)
     if (amount === 0 && modifiers.length === 0) return []
     const conversionLines = modifiers.filter((line) => /converted to/i.test(line.label))
+    const globalConversionLines = sections
+      .filter((section) => section.kind === 'base')
+      .flatMap((section) => section.lines)
+      .filter((line) => /converted to/i.test(line.label))
     const specialLines = modifiers.filter((line) => !/converted to/i.test(line.label))
     return [{
       item,
       amount,
-      conversion: conversionLines.map(formatPresentationLine).join('; '),
+      conversion: [
+        ...conversionLines.map((line) => `Skill: ${formatPresentationLine(line)}`),
+        ...globalConversionLines.map((line) => `Global: ${formatPresentationLine(line)}`)
+      ].join('; '),
       special: specialLines.map(formatPresentationLine).join('; ')
     }]
   })

@@ -1688,15 +1688,24 @@ async function createWindow(): Promise<void> {
   window.on('unmaximize', scheduleWindowStateSave)
   window.on('close', () => rememberWindowState(window))
 
-  window.once('ready-to-show', () => {
-    if (!screenshotPath) window.show()
-  })
+  const revealWindow = (): void => {
+    if (screenshotPath || window.isDestroyed()) return
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  }
+  window.once('ready-to-show', revealWindow)
+  window.webContents.once('did-finish-load', revealWindow)
+  if (!screenshotPath) setTimeout(revealWindow, 1500)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     void window.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  window.webContents.on('did-fail-load', (_event, code, description) => {
+    console.error('[window] renderer load failed', { code, description })
+  })
 
   if (screenshotPath) {
     window.webContents.once('did-finish-load', () => {

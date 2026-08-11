@@ -74,7 +74,7 @@ internal static class MapLocationIndexer
             })
             .ToArray();
         return new MapLocationIndexResult(
-            4,
+            5,
             DateTimeOffset.UtcNow,
             fingerprints,
             scannedRegions,
@@ -226,13 +226,13 @@ internal static class MapLocationIndexer
         {
             // Region bounds are stored as integer world units in MAP9. The world
             // editor's legacy WRL format converts these values to floats later.
-            var originX = (float)reader.ReadInt32();
-            var originY = (float)reader.ReadInt32();
-            _ = reader.ReadInt32();
-            _ = reader.ReadInt32();
-            _ = reader.ReadInt32();
-            _ = reader.ReadInt32();
-            for (var field = 6; field < 13; field++) _ = reader.ReadInt32();
+            var rawFields = new int[13];
+            for (var field = 0; field < rawFields.Length; field++) rawFields[field] = reader.ReadInt32();
+            // MAP9 stores the level's horizontal world origin in fields 6 and 8.
+            // Fields 0/2/3/5 are tile dimensions (commonly 64); treating those as
+            // coordinates collapses every region into a vertical line.
+            var originX = (float)rawFields[6];
+            var originY = (float)rawFields[8];
             var zoneRecord = ReadSizedString(reader);
             if (version > 6) _ = ReadSizedString(reader);
             if (version >= 8) _ = ReadSizedString(reader);

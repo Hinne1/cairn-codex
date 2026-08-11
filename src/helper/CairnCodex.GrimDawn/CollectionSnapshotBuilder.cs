@@ -15,6 +15,7 @@ internal static class CollectionSnapshotBuilder
         var observedItems = new List<ObservedStashItem>();
         var warnings = new List<CollectionScanWarning>();
         var eligibleRecords = catalog.Items
+            .Concat(catalog.PlannerItems)
             .Select(item => item.Record)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var rollDistributions = new Dictionary<RollTemplateKey, RollDistribution>();
@@ -120,6 +121,13 @@ internal static class CollectionSnapshotBuilder
                 group.Count(item => item.AvailableCount > 0),
                 group.Sum(item => item.AvailableCount)))
             .ToArray();
+        var plannerItems = catalog.PlannerItems
+            .Select(item => new CollectionCatalogItem(
+                item,
+                availableByRecord.GetValueOrDefault(item.Record),
+                rollSummary.TryGetValue(item.Record, out var rolls) ? rolls.Best : null,
+                rollSummary.TryGetValue(item.Record, out rolls) ? rolls.Count : 0))
+            .ToArray();
         var affixes = catalog.Affixes
             .Select(affix => new CollectionAffix(
                 affix.Key,
@@ -144,7 +152,8 @@ internal static class CollectionSnapshotBuilder
             summaries,
             items,
             affixSummary,
-            affixes);
+            affixes,
+            plannerItems);
     }
 }
 
@@ -158,7 +167,8 @@ internal sealed record CollectionSnapshot(
     IReadOnlyList<CollectionRaritySummary> Rarities,
     IReadOnlyList<CollectionCatalogItem> Items,
     CollectionAffixSummary AffixSummary,
-    IReadOnlyList<CollectionAffix> Affixes);
+    IReadOnlyList<CollectionAffix> Affixes,
+    IReadOnlyList<CollectionCatalogItem> PlannerItems);
 
 internal sealed record ScannedStash(
     string Path,

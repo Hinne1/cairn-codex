@@ -65,10 +65,31 @@ internal static class ItemCatalogBuilder
                 data.Records,
                 presentationSource,
                 acquisitionReferences,
-                setPresentations))
+                setPresentations,
+                false))
             .Where(item => item is not null)
             .Cast<CatalogItem>()
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var plannerItems = data.Records.Values
+            .Where(source =>
+                source.Record.Text("itemClassification") == "Rare" &&
+                source.Record.Name.Replace('\\', '/').Contains(
+                    "/items/faction/",
+                    StringComparison.OrdinalIgnoreCase))
+            .Select(source => Project(
+                source,
+                data.Tags,
+                data.Records,
+                presentationSource,
+                acquisitionReferences,
+                setPresentations,
+                true))
+            .Where(item => item is not null && item.Rarity == "faction")
+            .Cast<CatalogItem>()
+            .OrderBy(item => item.LevelRequirement)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var affixes = data.Records.Values
@@ -101,6 +122,7 @@ internal static class ItemCatalogBuilder
             data.Records.Count,
             data.Tags.Count,
             items,
+            plannerItems,
             affixes);
     }
 
@@ -110,12 +132,17 @@ internal static class ItemCatalogBuilder
         IReadOnlyDictionary<string, CatalogSourceRecord> records,
         ItemPresentationSource presentationSource,
         IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences,
-        IReadOnlyDictionary<string, ItemSetPresentation?> setPresentations)
+        IReadOnlyDictionary<string, ItemSetPresentation?> setPresentations,
+        bool includeFactionRare)
     {
         var record = source.Record;
         var classification = record.Text("itemClassification");
         var isMonsterInfrequent = classification == "Rare" && IsMonsterInfrequent(record);
-        if (classification is not ("Epic" or "Legendary") && !isMonsterInfrequent ||
+        var isFactionPlanningItem = includeFactionRare &&
+            classification == "Rare" &&
+            record.Name.Replace('\\', '/').Contains("/items/faction/", StringComparison.OrdinalIgnoreCase) &&
+            !isMonsterInfrequent;
+        if (classification is not ("Epic" or "Legendary") && !isMonsterInfrequent && !isFactionPlanningItem ||
             record.Name.Contains("/enemygear/", StringComparison.OrdinalIgnoreCase) ||
             record.Name.Contains("/npcgear/", StringComparison.OrdinalIgnoreCase) ||
             record.Name.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
@@ -179,7 +206,7 @@ internal static class ItemCatalogBuilder
         return new CatalogItem(
             record.Name,
             name,
-            isMonsterInfrequent ? "mi" : classification!.ToLowerInvariant(),
+            isMonsterInfrequent ? "mi" : isFactionPlanningItem ? "faction" : classification!.ToLowerInvariant(),
             itemClass,
             slot,
             checked((int)Math.Round(record.Number("levelRequirement") ?? 0)),
@@ -285,6 +312,7 @@ internal static class ItemCatalogBuilder
         var sawDropTable = false;
         var sawVendor = false;
         var sawBlueprint = false;
+        var factionRequirements = new List<ItemFactionRequirement>();
 
         // An MI normally reaches its source through two or more reverse references:
         // item -> dynamic loot table -> monster, sometimes with one or more pool tables
@@ -310,7 +338,11 @@ internal static class ItemCatalogBuilder
                 if (path.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) && !isVendor)
                     sawDropTable = true;
                 if (isVendor)
+                {
                     sawVendor = true;
+                    var requirement = ParseFactionRequirement(path);
+                    if (requirement is not null) factionRequirements.Add(requirement);
+                }
 
                 if (isMonster)
                 {
@@ -331,13 +363,61 @@ internal static class ItemCatalogBuilder
         }
 
         if (sawBlueprint) hints.Add("Craftable from a learned blueprint");
-        if (sawVendor) hints.Add("Merchant or faction inventory");
+        foreach (var requirement in factionRequirements
+                     .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase))
+        {
+            hints.Add($"Faction vendor: {requirement.Faction} · {requirement.Reputation}");
+        }
+        if (sawVendor && factionRequirements.Count == 0) hints.Add("Merchant inventory");
         if (hints.Count == 0 && sawDropTable) hints.Add("Random drop");
         if (hints.Count == 0) hints.Add("Special source; exact location not yet indexed");
         return new ItemAcquisitionPresentation(
             hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray(),
-            sourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray());
+            sourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
+            factionRequirements
+                .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)
+                .ToArray());
     }
+
+    private static ItemFactionRequirement? ParseFactionRequirement(string path)
+    {
+        const string marker = "/merchants/factiontables/";
+        var markerIndex = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0) return null;
+        var stem = Path.GetFileNameWithoutExtension(path);
+        foreach (var reputation in new[] { "friendly", "respected", "honored", "revered" })
+        {
+            var suffix = $"_{reputation}_";
+            var suffixIndex = stem.LastIndexOf(suffix, StringComparison.OrdinalIgnoreCase);
+            if (suffixIndex <= 0) continue;
+            var key = stem[..suffixIndex];
+            return new ItemFactionRequirement(
+                FactionDisplayName(key),
+                char.ToUpperInvariant(reputation[0]) + reputation[1..],
+                path);
+        }
+        return null;
+    }
+
+    private static string FactionDisplayName(string key) => key.ToLowerInvariant() switch
+    {
+        "avian" => "Noktukari",
+        "blacklegion" => "Black Legion",
+        "bysmiel" => "Cult of Bysmiel",
+        "coven" => "Coven of Ugdenbog",
+        "devilscrossing" => "Devil's Crossing",
+        "dreeg" => "Cult of Dreeg",
+        "exile" => "The Outcast",
+        "homestead" => "Homestead",
+        "kurn" => "Kurn",
+        "kymonchosen" => "Kymon's Chosen",
+        "malmouth" => "Malmouth Resistance",
+        "orderdeathsvigil" => "Order of Death's Vigil",
+        "rovers" => "Rovers",
+        "solael" => "Cult of Solael",
+        "wendigo" => "Barrowholm",
+        _ => key
+    };
 
     private static bool IsAcquisitionBridge(string path, string type) =>
         path.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) ||
@@ -349,9 +429,11 @@ internal static class ItemCatalogBuilder
         path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/vendors/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/merchants/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/items/crafting/blueprints/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/quests/", StringComparison.OrdinalIgnoreCase) ||
         type.Contains("Loot", StringComparison.OrdinalIgnoreCase) ||
-        type.Contains("Merchant", StringComparison.OrdinalIgnoreCase);
+        type.Contains("Merchant", StringComparison.OrdinalIgnoreCase) ||
+        type.Contains("Formula", StringComparison.OrdinalIgnoreCase);
 
     private static void AddNamedSource(
         string verb,
@@ -461,6 +543,7 @@ internal sealed record ItemCatalogResult(
     int SourceRecordCount,
     int TagCount,
     IReadOnlyList<CatalogItem> Items,
+    IReadOnlyList<CatalogItem> PlannerItems,
     IReadOnlyList<CatalogAffix> Affixes);
 
 internal sealed record CatalogContentPack(string Id, string DatabasePath, string TagsPath);
@@ -493,4 +576,6 @@ internal sealed record CatalogAffixRecord(string Record, string Name, string Kin
 internal sealed record AcquisitionReference(string Record, string Type, string Field);
 internal sealed record ItemAcquisitionPresentation(
     IReadOnlyList<string> Sources,
-    IReadOnlyList<string> SourceRecords);
+    IReadOnlyList<string> SourceRecords,
+    IReadOnlyList<ItemFactionRequirement> Factions);
+internal sealed record ItemFactionRequirement(string Faction, string Reputation, string VendorRecord);

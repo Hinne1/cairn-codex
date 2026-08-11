@@ -197,6 +197,7 @@ export interface CollectionSnapshot {
   items: CollectionItem[]
   affixSummary: CollectionAffixSummary
   affixes: CollectionAffix[]
+  plannerItems?: CollectionItem[]
 }
 
 export interface CatalogContentPack {
@@ -226,7 +227,7 @@ export interface CollectionRaritySummary {
   availableCopies: number
 }
 
-export type CollectionItemRarity = 'epic' | 'legendary' | 'mi'
+export type CollectionItemRarity = 'epic' | 'legendary' | 'mi' | 'faction'
 
 export interface CollectionAffixSummary {
   total: number
@@ -317,6 +318,13 @@ export interface ItemAcquisitionPresentation {
   sourceRecords?: string[]
   locations?: MapRegionLocation[]
   additionalLocationCount?: number
+  factions?: ItemFactionRequirement[]
+}
+
+export interface ItemFactionRequirement {
+  faction: string
+  reputation: 'Friendly' | 'Respected' | 'Honored' | 'Revered' | string
+  vendorRecord: string
 }
 
 export interface MapRegionLocation {

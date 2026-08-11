@@ -11,6 +11,7 @@ and Monster Infrequent items.
 - Track an automatically selected best roll and an optional user-pinned favorite.
 - Ingest and retrieve real items through Grim Dawn's transfer stash.
 - Track Monster Infrequent bases by level tier plus discovered prefix/suffix affixes.
+- Build a level-ordered character shopping list from any selected subset of skills.
 
 ## Architecture
 
@@ -92,6 +93,13 @@ the highest installed `Levels.arc`, associates them with named map regions, and
 shows the result in item tooltips. The catalog and map index are cached locally;
 database/map timestamps invalidate them after a game update, stash timestamps
 trigger an inventory refresh, and Settings offers a manual rebuild command.
+
+The Leveling Planner merges all selected skills into one list of supporting MIs,
+Epics, Legendaries, and faction rares up to a configurable level cap (70 by
+default). Faction-table traversal preserves the required faction and reputation
+tier. Its MI Atlas can show only the selected build's sources or every MI under
+the current cap, using corrected MAP9 world-region origins plus an area list;
+points represent source regions rather than invented exact monster coordinates.
 
 ## Safety invariants
 

@@ -18,11 +18,21 @@ type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
-type ActiveView = 'collection' | 'sets' | 'skills' | 'mi-workshop' | 'vault' | 'settings'
+type ActiveView = 'collection' | 'sets' | 'skills' | 'planner' | 'mi-workshop' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
 type TransferMode = 'live' | 'offline'
+type PlannerDisplay = 'list' | 'map'
+type PlannerMapScope = 'selected' | 'all'
+
+interface SkillMatch {
+  skill: string
+  amount: number
+  conversionTarget: string
+  conversionDetails: string
+  special: string
+}
 
 interface CollectionSet {
   record: string
@@ -66,6 +76,16 @@ const skillSort = ref<SkillSort>('amount')
 const skillSortDirection = ref<SortDirection>('desc')
 const skillPickerOpen = ref(false)
 const skillPickerIndex = ref(0)
+const plannerSkills = ref<string[]>(
+  localStorage.getItem('cairn-codex-planner-skills') === null
+    ? ['Wendigo Totem']
+    : readStoredStringArray('cairn-codex-planner-skills')
+)
+const plannerSkillDraft = ref('')
+const plannerLevelCap = ref(readStoredPlannerLevelCap())
+const plannerDisplay = ref<PlannerDisplay>('list')
+const plannerMapScope = ref<PlannerMapScope>('selected')
+const selectedAtlasRegion = ref<string | null>(null)
 const transferMode = ref<TransferMode>('live')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
@@ -253,12 +273,17 @@ const displayedResultCount = computed(() =>
       : filteredItems.value.length
 )
 
+const plannerCatalogItems = computed(() => [
+  ...(snapshot.value?.items ?? []),
+  ...(snapshot.value?.plannerItems ?? [])
+])
+
 const selectedItem = computed(() =>
-  snapshot.value?.items.find((item) => item.record === selectedRecord.value) ?? null
+  plannerCatalogItems.value.find((item) => item.record === selectedRecord.value) ?? null
 )
 
 const tooltipItem = computed(() =>
-  snapshot.value?.items.find((item) => item.record === tooltipRecord.value) ?? null
+  plannerCatalogItems.value.find((item) => item.record === tooltipRecord.value) ?? null
 )
 
 const selectedCopies = computed(() => {
@@ -298,7 +323,7 @@ const selectedStoredCopies = computed(() => {
 
 const skillNames = computed(() => {
   const names = new Set<string>()
-  for (const item of snapshot.value?.items ?? []) {
+  for (const item of plannerCatalogItems.value) {
     for (const section of item.presentation?.sections ?? []) {
       if (section.kind === 'skill-modifier' && section.heading) names.add(section.heading)
       for (const line of section.lines) {
@@ -337,53 +362,10 @@ const skillItemRows = computed(() => {
       .filter((item) => archiveModes.has(item.isHardcore))
       .map((item) => item.baseRecord.toLocaleLowerCase())
   )
-  const rows = (snapshot.value?.items ?? []).flatMap((item) => {
+  const rows = plannerCatalogItems.value.flatMap((item) => {
     if (skillScope.value === 'archive' && !archivedRecords.has(item.record.toLocaleLowerCase())) return []
-    const sections = item.presentation?.sections ?? []
-    const amount = Math.max(
-      0,
-      ...sections
-        .flatMap((section) => section.lines)
-        .filter(
-          (line) =>
-            line.tone === 'skill' &&
-            line.label.startsWith('to ') &&
-            line.label.slice(3).toLocaleLowerCase() === skill
-        )
-        .map((line) => line.minimum ?? 0)
-    )
-    const modifiers = sections
-      .filter(
-        (section) =>
-          section.kind === 'skill-modifier' &&
-          section.heading?.toLocaleLowerCase() === skill
-      )
-      .flatMap((section) => section.lines)
-    if (amount === 0 && modifiers.length === 0) return []
-    const conversionLines = modifiers.filter((line) => isDamageTypeConversion(line.label))
-    const globalConversionLines = sections
-      .filter((section) => section.kind === 'base')
-      .flatMap((section) => section.lines)
-      .filter((line) => isDamageTypeConversion(line.label))
-    const specialLines = modifiers.filter((line) => !isDamageTypeConversion(line.label))
-    const allConversionLines = [
-      ...conversionLines.map((line) => ({ scope: 'Skill', line })),
-      ...globalConversionLines.map((line) => ({ scope: 'Global', line }))
-    ]
-    const conversionTargets = [...new Set(
-      allConversionLines
-        .map(({ line }) => conversionTarget(line.label))
-        .filter((target): target is string => target !== null)
-    )]
-    return [{
-      item,
-      amount,
-      conversionTarget: conversionTargets.join(', '),
-      conversionDetails: allConversionLines
-        .map(({ scope, line }) => `${scope}: ${formatPresentationLine(line)}`)
-        .join('; '),
-      special: specialLines.map(formatPresentationLine).join('; ')
-    }]
+    const match = skillMatchForItem(item, skill)
+    return match ? [{ item, ...match }] : []
   })
   return rows.sort((left, right) => {
     let comparison = 0
@@ -401,6 +383,90 @@ const skillItemRows = computed(() => {
     return skillSortDirection.value === 'asc' ? comparison : -comparison
   })
 })
+
+const plannerSkillOptions = computed(() => {
+  const needle = plannerSkillDraft.value.trim().toLocaleLowerCase()
+  return skillNames.value
+    .filter((skill) => !plannerSkills.value.includes(skill))
+    .filter((skill) => !needle || skill.toLocaleLowerCase().includes(needle))
+    .slice(0, 30)
+})
+
+const plannerRows = computed(() => plannerCatalogItems.value
+  .filter((item) => item.levelRequirement <= plannerLevelCap.value)
+  .flatMap((item) => {
+    const matches = plannerSkills.value
+      .map((skill) => skillMatchForItem(item, skill))
+      .filter((match): match is SkillMatch => match !== null)
+    return matches.length > 0 ? [{ item, matches }] : []
+  })
+  .sort((left, right) =>
+    left.item.levelRequirement - right.item.levelRequirement ||
+    left.item.name.localeCompare(right.item.name)
+  ))
+
+const plannerMiItems = computed(() => {
+  const source = plannerMapScope.value === 'selected'
+    ? plannerRows.value.map((row) => row.item)
+    : (snapshot.value?.items ?? []).filter((item) => item.rarity === 'mi')
+  return source.filter((item, index) =>
+    item.rarity === 'mi' && source.findIndex((candidate) => candidate.record === item.record) === index
+  )
+})
+
+const atlasRegions = computed(() => {
+  const regions = new Map<string, {
+    key: string
+    name: string
+    contentPack: string
+    originX: number
+    originY: number
+    items: CollectionItem[]
+  }>()
+  for (const item of plannerMiItems.value) {
+    for (const location of item.acquisition?.locations ?? []) {
+      const key = `${location.contentPack}|${location.levelFile}|${location.name}`
+      const existing = regions.get(key)
+      if (existing) {
+        if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
+      } else {
+        regions.set(key, {
+          key,
+          name: location.name,
+          contentPack: location.contentPack,
+          originX: location.originX,
+          originY: location.originY,
+          items: [item]
+        })
+      }
+    }
+  }
+  return [...regions.values()].sort((left, right) =>
+    left.contentPack.localeCompare(right.contentPack) || left.name.localeCompare(right.name)
+  )
+})
+
+const atlasPoints = computed(() => {
+  const positioned = atlasRegions.value.filter((region) => region.originX !== 0 || region.originY !== 0)
+  if (positioned.length === 0) return []
+  const xs = positioned.map((region) => region.originX)
+  const ys = positioned.map((region) => region.originY)
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+  const spanX = Math.max(1, maxX - minX)
+  const spanY = Math.max(1, maxY - minY)
+  return positioned.map((region) => ({
+    ...region,
+    left: 3 + ((region.originX - minX) / spanX) * 94,
+    top: 3 + (1 - (region.originY - minY) / spanY) * 94
+  }))
+})
+
+const selectedAtlasItems = computed(() =>
+  atlasRegions.value.find((region) => region.key === selectedAtlasRegion.value)?.items ?? []
+)
 
 const affixByRecord = computed(() => {
   const byRecord = new Map<string, { name: string; kind: 'prefix' | 'suffix'; rarity: 'magical' | 'rare' }>()
@@ -475,6 +541,56 @@ const miWorkshopRows = computed(() => {
     )
 })
 
+function skillMatchForItem(item: CollectionItem, requestedSkill: string): SkillMatch | null {
+  const normalizedSkill = requestedSkill.trim().toLocaleLowerCase()
+  if (!normalizedSkill) return null
+  const sections = item.presentation?.sections ?? []
+  const amount = Math.max(
+    0,
+    ...sections
+      .flatMap((section) => section.lines)
+      .filter(
+        (line) =>
+          line.tone === 'skill' &&
+          line.label.startsWith('to ') &&
+          line.label.slice(3).toLocaleLowerCase() === normalizedSkill
+      )
+      .map((line) => line.minimum ?? 0)
+  )
+  const modifiers = sections
+    .filter(
+      (section) =>
+        section.kind === 'skill-modifier' &&
+        section.heading?.toLocaleLowerCase() === normalizedSkill
+    )
+    .flatMap((section) => section.lines)
+  if (amount === 0 && modifiers.length === 0) return null
+  const conversionLines = modifiers.filter((line) => isDamageTypeConversion(line.label))
+  const globalConversionLines = sections
+    .filter((section) => section.kind === 'base')
+    .flatMap((section) => section.lines)
+    .filter((line) => isDamageTypeConversion(line.label))
+  const specialLines = modifiers.filter((line) => !isDamageTypeConversion(line.label))
+  const allConversionLines = [
+    ...conversionLines.map((line) => ({ scope: 'Skill', line })),
+    ...globalConversionLines.map((line) => ({ scope: 'Global', line }))
+  ]
+  const conversionTargets = [...new Set(
+    allConversionLines
+      .map(({ line }) => conversionTarget(line.label))
+      .filter((target): target is string => target !== null)
+  )]
+  return {
+    skill: requestedSkill,
+    amount,
+    conversionTarget: conversionTargets.join(', '),
+    conversionDetails: allConversionLines
+      .map(({ scope, line }) => `${scope}: ${formatPresentationLine(line)}`)
+      .join('; '),
+    special: specialLines.map(formatPresentationLine).join('; ')
+  }
+}
+
 function conversionTarget(label: string): string | null {
   const match = label.match(/converted to\s+(.+)$/i)
   const target = match?.[1]?.replace(/\s+Damage$/i, '').trim()
@@ -505,6 +621,19 @@ function openSkillPicker(): void {
 function selectSkill(skill: string): void {
   selectedSkill.value = skill
   skillPickerOpen.value = false
+}
+
+function addPlannerSkill(skill = plannerSkillDraft.value): void {
+  const exact = skillNames.value.find(
+    (candidate) => candidate.toLocaleLowerCase() === skill.trim().toLocaleLowerCase()
+  ) ?? plannerSkillOptions.value[0]
+  if (!exact || plannerSkills.value.includes(exact)) return
+  plannerSkills.value = [...plannerSkills.value, exact]
+  plannerSkillDraft.value = ''
+}
+
+function removePlannerSkill(skill: string): void {
+  plannerSkills.value = plannerSkills.value.filter((candidate) => candidate !== skill)
 }
 
 function handleSkillPickerKey(event: KeyboardEvent): void {
@@ -548,6 +677,13 @@ watch(sortMode, (mode) => {
 
 watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
 watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
+watch(plannerSkills, (skills) => {
+  localStorage.setItem('cairn-codex-planner-skills', JSON.stringify(skills))
+}, { deep: true })
+watch(plannerLevelCap, (level) => localStorage.setItem('cairn-codex-planner-level-cap', String(level)))
+watch([plannerMapScope, plannerLevelCap, plannerSkills], () => {
+  selectedAtlasRegion.value = null
+})
 watch(transferMode, () => {
   selectedVaultIds.value = []
   vaultError.value = null
@@ -684,6 +820,32 @@ function readStoredSourcePaths(basis: CollectionBasis): string[] {
   } catch {
     return []
   }
+}
+
+function readStoredStringArray(key: string): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? '[]') as unknown
+    return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string') ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number): number {
+  const stored = localStorage.getItem(key)
+  if (stored === null) return fallback
+  const value = Number(stored)
+  return Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback
+}
+
+function readStoredPlannerLevelCap(): number {
+  const versionKey = 'cairn-codex-planner-level-cap-version'
+  if (localStorage.getItem(versionKey) !== '1') {
+    localStorage.setItem(versionKey, '1')
+    localStorage.setItem('cairn-codex-planner-level-cap', '70')
+    return 70
+  }
+  return readStoredNumber('cairn-codex-planner-level-cap', 70, 1, 100)
 }
 
 function storeSourcePaths(): void {
@@ -1654,6 +1816,9 @@ function formatPercentile(value: number | null | undefined): string {
         <button type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
           <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
         </button>
+        <button type="button" :class="{ active: activeView === 'planner' }" @click="activeView = 'planner'">
+          <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · to {{ plannerLevelCap }}</small>
+        </button>
         <button type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
           <span>MI Workshop</span><small>{{ miWorkshopRows.length }} affix combinations</small>
         </button>
@@ -1838,6 +2003,168 @@ function formatPercentile(value: number | null | undefined): string {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section v-else-if="activeView === 'planner'" class="leveling-planner" aria-label="Character leveling shopping list">
+        <header class="planner-heading">
+          <div>
+            <p class="section-label">Character shopping list</p>
+            <h2>Leveling Planner</h2>
+            <p>Pick the skills your character actually uses. Cairn merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route.</p>
+          </div>
+          <div class="segmented-control planner-display" aria-label="Planner display">
+            <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">Shopping list</button>
+            <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI atlas</button>
+          </div>
+        </header>
+
+        <div class="planner-controls">
+          <div class="planner-skill-control">
+            <label for="planner-skill-input">Add a skill</label>
+            <span>
+              <input
+                id="planner-skill-input"
+                v-model="plannerSkillDraft"
+                type="search"
+                list="planner-skill-options"
+                autocomplete="off"
+                placeholder="Type a skill name…"
+                @keydown.enter.prevent="addPlannerSkill()"
+              />
+              <datalist id="planner-skill-options">
+                <option v-for="skill in plannerSkillOptions" :key="skill" :value="skill" />
+              </datalist>
+              <button type="button" :disabled="plannerSkillOptions.length === 0" @click="addPlannerSkill()">Add</button>
+            </span>
+          </div>
+          <label class="planner-level-control">
+            <span>Level cap</span>
+            <input v-model.number="plannerLevelCap" type="range" min="1" max="100" step="1" />
+            <input v-model.number="plannerLevelCap" type="number" min="1" max="100" />
+          </label>
+          <div class="planner-skill-chips" aria-label="Selected skills">
+            <button
+              v-for="skill in plannerSkills"
+              :key="skill"
+              type="button"
+              :aria-label="`Remove ${skill}`"
+              @click="removePlannerSkill(skill)"
+            >
+              {{ skill }} <span>×</span>
+            </button>
+            <small v-if="plannerSkills.length === 0">Add two or three build-defining skills to begin.</small>
+          </div>
+        </div>
+
+        <template v-if="plannerDisplay === 'list'">
+          <div class="planner-summary">
+            <span><strong>{{ plannerRows.length }}</strong> relevant item tiers</span>
+            <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'mi').length }}</strong> MIs</span>
+            <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
+          </div>
+          <div class="planner-table-wrap">
+            <table class="planner-table">
+              <thead>
+                <tr><th>Level</th><th>Item</th><th>Supports</th><th>What it does</th><th>How to get it</th></tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in plannerRows"
+                  :key="row.item.record"
+                  tabindex="0"
+                  @mouseenter="queueTooltip(row.item, $event)"
+                  @mousemove="moveTooltip"
+                  @mouseleave="hideTooltip"
+                  @focus="queueTooltip(row.item, $event)"
+                  @blur="hideTooltip"
+                  @click="openItem(row.item)"
+                  @keydown.enter="openItem(row.item)"
+                >
+                  <td class="planner-level">{{ row.item.levelRequirement }}</td>
+                  <td>
+                    <span class="planner-item-cell">
+                      <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
+                      <span>
+                        <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
+                        <small>{{ row.item.rarity === 'faction' ? 'Faction rare' : row.item.rarity }} · {{ row.item.slot }}</small>
+                      </span>
+                    </span>
+                  </td>
+                  <td>
+                    <span class="planner-match-skills">
+                      <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
+                    </span>
+                  </td>
+                  <td class="planner-effects">
+                    <span v-for="match in row.matches" :key="`${match.skill}:effect`">
+                      <b v-if="match.conversionTarget">→ {{ match.conversionTarget }}</b>
+                      {{ [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support') }}
+                    </span>
+                  </td>
+                  <td class="planner-acquisition">
+                    <span v-for="faction in row.item.acquisition?.factions ?? []" :key="faction.vendorRecord">
+                      <b>{{ faction.faction }}</b> · {{ faction.reputation }}
+                    </span>
+                    <span v-if="!(row.item.acquisition?.factions?.length)">{{ row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
+                    <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map((location) => location.name).slice(0, 2).join(', ') }}</small>
+                  </td>
+                </tr>
+                <tr v-if="plannerRows.length === 0"><td colspan="5" class="skill-empty">Select at least one skill, or raise the level cap, to build a shopping list.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="planner-map-toolbar">
+            <div class="segmented-control" aria-label="MI map scope">
+              <button type="button" :class="{ active: plannerMapScope === 'selected' }" @click="plannerMapScope = 'selected'">Selected build</button>
+              <button type="button" :class="{ active: plannerMapScope === 'all' }" @click="plannerMapScope = 'all'">All MI tiers</button>
+            </div>
+            <span>{{ plannerMiItems.length }} MI tiers · {{ atlasRegions.length }} areas</span>
+          </div>
+          <div class="mi-atlas-layout">
+            <div class="mi-atlas-plot" aria-label="Schematic Grim Dawn MI region map">
+              <div class="atlas-grid-lines" />
+              <button
+                v-for="point in atlasPoints"
+                :key="point.key"
+                type="button"
+                :class="{ active: selectedAtlasRegion === point.key }"
+                :style="{ left: `${point.left}%`, top: `${point.top}%`, '--atlas-size': `${Math.min(24, 8 + Math.sqrt(point.items.length) * 3)}px` }"
+                :title="`${point.name}: ${point.items.length} MI tiers`"
+                @click="selectedAtlasRegion = point.key"
+              ><span class="sr-only">{{ point.name }}</span></button>
+              <p v-if="atlasPoints.length === 0">No positioned MI regions match the current selection.</p>
+              <small>Area-level schematic from the installed world archive; dots are regions, not fabricated exact monster coordinates.</small>
+            </div>
+            <aside class="mi-atlas-regions">
+              <button
+                v-for="region in atlasRegions"
+                :key="region.key"
+                type="button"
+                :class="{ active: selectedAtlasRegion === region.key }"
+                @click="selectedAtlasRegion = region.key"
+              >
+                <span><strong>{{ region.name }}</strong><small>{{ region.contentPack.toUpperCase() }}</small></span>
+                <b>{{ region.items.length }}</b>
+              </button>
+            </aside>
+          </div>
+          <div v-if="selectedAtlasItems.length" class="atlas-item-list">
+            <button
+              v-for="item in selectedAtlasItems"
+              :key="item.record"
+              type="button"
+              @mouseenter="queueTooltip(item, $event)"
+              @mouseleave="hideTooltip"
+              @click="openItem(item)"
+            >
+              <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
+              <span><strong>{{ item.name }}</strong><small>Lv{{ item.levelRequirement }} · {{ item.acquisition?.sources[0] }}</small></span>
+            </button>
+          </div>
+        </template>
       </section>
 
       <section v-else-if="activeView === 'mi-workshop'" class="mi-workshop" aria-label="Monster Infrequent workshop">

@@ -24,7 +24,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 8
+const CATALOG_PRESENTATION_VERSION = 9
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -364,11 +364,27 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
   ipcMain.handle(
     IPC_CHANNELS.inspectLiveGame,
-    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('inspect-live-game')
+    async (): Promise<LiveGameStatus> => {
+      const status = await helper.request<LiveGameStatus>('inspect-live-game')
+      if (!process.env.CAIRN_CODEX_SCREENSHOT_PATH) return status
+      return {
+        ...status,
+        state: 'unavailable',
+        detail: 'Live transfers are disabled during visual diagnostics.',
+        connectedProcessId: null,
+        hostWindowReady: false,
+        messages: []
+      }
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.startLiveGame,
-    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('start-live-game')
+    (): Promise<LiveGameStatus> => {
+      if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) {
+        throw new Error('Live transfers are disabled during visual diagnostics.')
+      }
+      return helper.request<LiveGameStatus>('start-live-game')
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.stopLiveGame,
@@ -595,7 +611,7 @@ async function attachItemIcons(
   if (!installation) return snapshot
   const bitmaps = [
     ...new Set(
-      snapshot.items
+      [...snapshot.items, ...(snapshot.plannerItems ?? [])]
         .map((item) => item.bitmap)
         .filter((bitmap): bitmap is string => Boolean(bitmap))
     )
@@ -616,6 +632,10 @@ async function attachItemIcons(
     items: snapshot.items.map((item) => ({
       ...item,
       iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
+    })),
+    plannerItems: (snapshot.plannerItems ?? []).map((item) => ({
+      ...item,
+      iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
     }))
   }
 }
@@ -626,6 +646,7 @@ async function readCollectionCache(path: string): Promise<CollectionSnapshot | n
     if (
       parsed.catalogPresentationVersion !== CATALOG_PRESENTATION_VERSION ||
       !Array.isArray(parsed.items) ||
+      !Array.isArray(parsed.plannerItems) ||
       !Array.isArray(parsed.observedItems) ||
       !Array.isArray(parsed.scannedStashes)
     ) {
@@ -661,7 +682,7 @@ async function readMapLocationIndex(path: string): Promise<MapLocationIndex | nu
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as MapLocationIndex
     if (
-      parsed.version !== 4 ||
+      parsed.version !== 5 ||
       !Array.isArray(parsed.archives) ||
       !parsed.sourceLocations ||
       typeof parsed.sourceLocations !== 'object'
@@ -1008,6 +1029,18 @@ async function runSmokeTest(
       throw new Error('Live queue serializer self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const factionPlannerItems = helperSnapshot.plannerItems ?? []
+    const chosenArcanespark = factionPlannerItems.find((item) => item.name === 'Chosen Arcanespark')
+    if (
+      factionPlannerItems.length < 450 ||
+      factionPlannerItems.some((item) => item.rarity !== 'faction') ||
+      !chosenArcanespark?.acquisition?.factions?.some(
+        (requirement) =>
+          requirement.faction === "Kymon's Chosen" && requirement.reputation === 'Respected'
+      )
+    ) {
+      throw new Error('Faction planning catalog did not preserve reputation vendor requirements.')
+    }
     const monsterInfrequents = helperSnapshot.items.filter((item) => item.rarity === 'mi')
     const frostsnarlTiers = monsterInfrequents.filter((item) => item.name === "Frostsnarl's Horns")
     if (
@@ -1974,6 +2007,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
               ?.click()
           `)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_MAP === '1') {
+          await window.webContents.executeJavaScript(
+            "document.querySelector('.planner-display button:last-child')?.click()"
+          )
         }
         const skillScope = process.env.CAIRN_CODEX_SCREENSHOT_SKILL_SCOPE
         if (skillScope) {

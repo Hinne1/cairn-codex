@@ -197,6 +197,18 @@ internal static class ItemCatalogBuilder
         }
         if (!isMonsterInfrequent)
         {
+            if (!isFactionPlanningItem &&
+                acquisition.Sources.Count >= 4 &&
+                acquisition.Sources.All(sourceName =>
+                    sourceName.StartsWith("Dropped by", StringComparison.OrdinalIgnoreCase)))
+            {
+                // A global Epic/Legendary table is referenced by many ordinary monster
+                // records. Those references describe who rolls the global table, not a
+                // farmable item-specific source (for example Devil's Mark previously
+                // claimed a dozen arbitrary dranghouls). Keep small named-source sets,
+                // but collapse broad consumers to the honest acquisition label.
+                acquisition = acquisition with { Sources = ["Random drop"] };
+            }
             // Reverse-record IDs are only serialized for MI map-location joins. Keeping
             // up to 64 monster records on every global-drop Epic/Legendary made the
             // otherwise compact catalog cache balloon by tens of megabytes.
@@ -329,7 +341,7 @@ internal static class ItemCatalogBuilder
                 var isVendor = path.Contains("/vendors/", StringComparison.OrdinalIgnoreCase) ||
                                path.Contains("/merchants/", StringComparison.OrdinalIgnoreCase);
                 var isMonster = source.Record.Type == "Monster" ||
-                                path.Contains("/creatures/", StringComparison.OrdinalIgnoreCase);
+                                path.Contains("/creatures/enemies/", StringComparison.OrdinalIgnoreCase);
                 var isContainer = path.Contains("/interactiveobjects/loot", StringComparison.OrdinalIgnoreCase) ||
                                   path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase);
 
@@ -439,8 +451,8 @@ internal static class ItemCatalogBuilder
         string verb,
         CatalogSourceRecord source,
         IReadOnlyDictionary<string, string> tags,
-        ICollection<string> hints,
-        ICollection<string> sourceRecords)
+        IList<string> hints,
+        IList<string> sourceRecords)
     {
         var record = source.Record;
         var name = new[]
@@ -459,8 +471,25 @@ internal static class ItemCatalogBuilder
             if (IsUsefulSourceName(fallback)) name = fallback;
         }
 
-        sourceRecords.Add(record.Name);
-        if (name is not null) hints.Add($"{verb} {name}");
+        // Ordinary world monsters are the most useful answer to "where can I farm
+        // this?". Boss, hero, devotion and procedural variants often share the same
+        // legitimate MI table, but listing those first made broad families look like
+        // corrupt acquisition data and polluted their first map locations.
+        var normalizedPath = record.Name.Replace('\\', '/');
+        var isOrdinaryMonster = verb == "Dropped by" &&
+            !normalizedPath.Contains("/boss&quest/", StringComparison.OrdinalIgnoreCase) &&
+            !normalizedPath.Contains("/hero/", StringComparison.OrdinalIgnoreCase) &&
+            !normalizedPath.Contains("/devotion/", StringComparison.OrdinalIgnoreCase);
+        if (isOrdinaryMonster)
+        {
+            sourceRecords.Insert(0, record.Name);
+            if (name is not null) hints.Insert(0, $"{verb} {name}");
+        }
+        else
+        {
+            sourceRecords.Add(record.Name);
+            if (name is not null) hints.Add($"{verb} {name}");
+        }
     }
 
     private static bool IsUsefulSourceName(string? value) =>

@@ -24,7 +24,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 9
+const CATALOG_PRESENTATION_VERSION = 12
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -748,6 +748,9 @@ function attachMapLocations(
         const key = location.name.toLocaleLowerCase()
         if (!unique.has(key)) unique.set(key, location)
       }
+      const distinctLocations = [...unique.values()]
+      const namedWorldLocations = distinctLocations.filter((location) => Boolean(location.zoneRecord))
+      const usefulLocations = namedWorldLocations.length > 0 ? namedWorldLocations : distinctLocations
       return item.acquisition
         ? {
             ...item,
@@ -756,10 +759,8 @@ function attachMapLocations(
               // Source records are an internal join key; once locations are attached,
               // retaining thousands of repeated paths only bloats the persisted catalog.
               sourceRecords: [],
-              locations: [...unique.values()]
-                .sort((left, right) => left.name.localeCompare(right.name))
-                .slice(0, 8),
-              additionalLocationCount: Math.max(0, unique.size - 8)
+              locations: usefulLocations.slice(0, 8),
+              additionalLocationCount: Math.max(0, usefulLocations.length - 8)
             }
           }
         : item
@@ -2059,7 +2060,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           await new Promise((resolve) => setTimeout(resolve, 250))
           await window.webContents.executeJavaScript(`
             (() => {
-              const card = document.querySelector('.item-card[role=button], .set-card li button')
+              const card = document.querySelector('.item-card[role=button], .set-card li button, .planner-table tbody tr, .atlas-item-list button')
               if (!card) return
               const rect = card.getBoundingClientRect()
               card.dispatchEvent(new MouseEvent('mouseenter', {
@@ -2083,6 +2084,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           copyCards: document.querySelectorAll('.copy-card').length,
           drawer: document.querySelector('.item-drawer h2')?.textContent?.trim(),
           tooltip: document.querySelector('.game-tooltip')?.textContent?.trim(),
+          tooltipRect: (() => {
+            const tooltip = document.querySelector('.game-tooltip')
+            if (!tooltip) return null
+            const rect = tooltip.getBoundingClientRect()
+            return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }
+          })(),
           cacheIssue: document.querySelector('.app-shell')?.getAttribute('data-cache-issue'),
           cacheApi: typeof window.cairnCodex?.getCachedCollection,
           icons: [...document.querySelectorAll('.item-mark img')].map((image) => ({

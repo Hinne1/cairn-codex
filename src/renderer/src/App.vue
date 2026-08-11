@@ -8,6 +8,7 @@ import type {
   GrimDawnDiscovery,
   ItemPresentationLine,
   LiveGameStatus,
+  MapRegionLocation,
   ObservedStashItem,
   StagingTabInspection,
   VaultListItem,
@@ -85,6 +86,9 @@ const plannerSkillDraft = ref('')
 const plannerLevelCap = ref(readStoredPlannerLevelCap())
 const plannerDisplay = ref<PlannerDisplay>('list')
 const plannerMapScope = ref<PlannerMapScope>('selected')
+const plannerQuery = ref('')
+const plannerOwnership = ref<OwnershipFilter>('all')
+const atlasRegionQuery = ref('')
 const selectedAtlasRegion = ref<string | null>(null)
 const transferMode = ref<TransferMode>('live')
 const currentPage = ref(1)
@@ -106,6 +110,7 @@ const showMiReserves = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
 const tooltipRecord = ref<string | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
+const tooltipMaxHeight = computed(() => Math.max(180, window.innerHeight - tooltipPosition.value.top - 14))
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
@@ -278,6 +283,19 @@ const plannerCatalogItems = computed(() => [
   ...(snapshot.value?.plannerItems ?? [])
 ])
 
+const activeArchiveModes = computed(() => new Set(
+  stashChoices.value
+    .filter((stash) => archiveStashPaths.value.includes(stash.path))
+    .map((stash) => stash.isHardcore)
+))
+const archivedRecordSet = computed(() => new Set(
+  vaultItems.value
+    .filter((item) =>
+      item.catalogued && item.state === 'ingested' && activeArchiveModes.value.has(item.isHardcore)
+    )
+    .map((item) => item.baseRecord.toLocaleLowerCase())
+))
+
 const selectedItem = computed(() =>
   plannerCatalogItems.value.find((item) => item.record === selectedRecord.value) ?? null
 )
@@ -352,18 +370,8 @@ const skillSuggestions = computed(() => {
 const skillItemRows = computed(() => {
   const skill = selectedSkill.value.trim().toLocaleLowerCase()
   if (!skill) return []
-  const archiveModes = new Set(
-    stashChoices.value
-      .filter((stash) => archiveStashPaths.value.includes(stash.path))
-      .map((stash) => stash.isHardcore)
-  )
-  const archivedRecords = new Set(
-    vaultItems.value
-      .filter((item) => archiveModes.has(item.isHardcore))
-      .map((item) => item.baseRecord.toLocaleLowerCase())
-  )
   const rows = plannerCatalogItems.value.flatMap((item) => {
-    if (skillScope.value === 'archive' && !archivedRecords.has(item.record.toLocaleLowerCase())) return []
+    if (skillScope.value === 'archive' && !isArchivedItem(item)) return []
     const match = skillMatchForItem(item, skill)
     return match ? [{ item, ...match }] : []
   })
@@ -394,11 +402,22 @@ const plannerSkillOptions = computed(() => {
 
 const plannerRows = computed(() => plannerCatalogItems.value
   .filter((item) => item.levelRequirement <= plannerLevelCap.value)
+  .filter((item) => {
+    const archived = isArchivedItem(item)
+    if (plannerOwnership.value === 'owned') return archived
+    if (plannerOwnership.value === 'missing') return !archived
+    return true
+  })
+  .filter((item) => matchesPlannerQuery(item, plannerQuery.value))
   .flatMap((item) => {
     const matches = plannerSkills.value
       .map((skill) => skillMatchForItem(item, skill))
       .filter((match): match is SkillMatch => match !== null)
-    return matches.length > 0 ? [{ item, matches }] : []
+    const petBonuses = (item.presentation?.sections ?? [])
+      .filter((section) => section.kind === 'pet')
+      .flatMap((section) => section.lines)
+      .map(formatPresentationLine)
+    return matches.length > 0 ? [{ item, matches, petBonuses }] : []
   })
   .sort((left, right) =>
     left.item.levelRequirement - right.item.levelRequirement ||
@@ -418,14 +437,11 @@ const atlasRegions = computed(() => {
   const regions = new Map<string, {
     key: string
     name: string
-    contentPack: string
-    originX: number
-    originY: number
     items: CollectionItem[]
   }>()
   for (const item of plannerMiItems.value) {
     for (const location of item.acquisition?.locations ?? []) {
-      const key = `${location.contentPack}|${location.levelFile}|${location.name}`
+      const key = location.name.toLocaleLowerCase()
       const existing = regions.get(key)
       if (existing) {
         if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
@@ -433,35 +449,26 @@ const atlasRegions = computed(() => {
         regions.set(key, {
           key,
           name: location.name,
-          contentPack: location.contentPack,
-          originX: location.originX,
-          originY: location.originY,
           items: [item]
         })
       }
     }
   }
   return [...regions.values()].sort((left, right) =>
-    left.contentPack.localeCompare(right.contentPack) || left.name.localeCompare(right.name)
+    left.name.localeCompare(right.name)
   )
 })
 
-const atlasPoints = computed(() => {
-  const positioned = atlasRegions.value.filter((region) => region.originX !== 0 || region.originY !== 0)
-  if (positioned.length === 0) return []
-  const xs = positioned.map((region) => region.originX)
-  const ys = positioned.map((region) => region.originY)
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...ys)
-  const maxY = Math.max(...ys)
-  const spanX = Math.max(1, maxX - minX)
-  const spanY = Math.max(1, maxY - minY)
-  return positioned.map((region) => ({
-    ...region,
-    left: 3 + ((region.originX - minX) / spanX) * 94,
-    top: 3 + (1 - (region.originY - minY) / spanY) * 94
-  }))
+const visibleAtlasRegions = computed(() => {
+  const needle = normalizeLoose(atlasRegionQuery.value)
+  if (!needle) return atlasRegions.value
+  return atlasRegions.value.filter((region) =>
+    normalizeLoose([
+      region.name,
+      ...region.items.map((item) => item.name),
+      ...region.items.flatMap((item) => item.acquisition?.sources ?? [])
+    ].join(' ')).includes(needle)
+  )
 })
 
 const selectedAtlasItems = computed(() =>
@@ -684,6 +691,11 @@ watch(plannerLevelCap, (level) => localStorage.setItem('cairn-codex-planner-leve
 watch([plannerMapScope, plannerLevelCap, plannerSkills], () => {
   selectedAtlasRegion.value = null
 })
+watch(visibleAtlasRegions, (regions) => {
+  if (!regions.some((region) => region.key === selectedAtlasRegion.value)) {
+    selectedAtlasRegion.value = regions[0]?.key ?? null
+  }
+}, { immediate: true })
 watch(transferMode, () => {
   selectedVaultIds.value = []
   vaultError.value = null
@@ -1437,6 +1449,64 @@ function itemIconUrl(item: CollectionItem): string | null {
   return item.iconKey ? `cairn-icon://asset/${item.iconKey}.png` : null
 }
 
+function isArchivedItem(item: CollectionItem): boolean {
+  return archivedRecordSet.value.has(item.record.toLocaleLowerCase()) ||
+    (collectionBasis.value === 'archive' && Boolean(item.discovered))
+}
+
+function normalizeLoose(value: string): string {
+  return value.normalize('NFKD').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function matchesPlannerQuery(item: CollectionItem, rawQuery: string): boolean {
+  const needle = normalizeLoose(rawQuery)
+  if (!needle) return true
+  const haystack = [
+    item.name,
+    item.itemClass,
+    item.slot,
+    item.rarity,
+    item.presentation?.searchText,
+    ...(item.acquisition?.sources ?? []),
+    ...(item.acquisition?.locations ?? []).map((location) => location.name)
+  ].filter(Boolean).join(' ')
+  return normalizeLoose(haystack).includes(needle)
+}
+
+function itemTypeLabel(item: CollectionItem): string {
+  const itemClass = item.itemClass.toLocaleLowerCase()
+  if (itemClass.includes('ranged2h')) return 'Two-handed ranged weapon'
+  if (itemClass.includes('ranged1h')) return 'One-handed ranged weapon'
+  if (itemClass.includes('melee') && itemClass.includes('2h')) return 'Two-handed melee weapon'
+  if (itemClass.includes('scepter')) return 'Scepter'
+  if (itemClass.includes('dagger')) return 'Dagger'
+  if (itemClass.includes('sword')) return 'Sword'
+  if (itemClass.includes('axe')) return 'Axe'
+  if (itemClass.includes('mace') || itemClass.includes('blunt')) return 'Mace'
+  if (itemClass.includes('shield')) return 'Shield'
+  if (itemClass.includes('focus')) return 'Caster offhand'
+  const labels: Record<string, string> = {
+    head: 'Head armor', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Hands',
+    legs: 'Leg armor', feet: 'Feet', waist: 'Waist', ring: 'Ring', amulet: 'Amulet',
+    medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon'
+  }
+  return labels[item.slot] ?? item.slot
+}
+
+function rarityLabel(item: CollectionItem): string {
+  if (item.rarity === 'mi') return 'Monster Infrequent'
+  if (item.rarity === 'faction') return 'Faction Rare'
+  return item.rarity.charAt(0).toLocaleUpperCase() + item.rarity.slice(1)
+}
+
+function tooltipSources(item: CollectionItem): string[] {
+  return (item.acquisition?.sources ?? []).slice(0, 5)
+}
+
+function tooltipLocations(item: CollectionItem): MapRegionLocation[] {
+  return (item.acquisition?.locations ?? []).slice(0, 6)
+}
+
 function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
   const tokens = normalizedQuery.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []
   const fields: Record<string, string> = {
@@ -2014,7 +2084,7 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
           <div class="segmented-control planner-display" aria-label="Planner display">
             <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">Shopping list</button>
-            <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI atlas</button>
+            <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI sources</button>
           </div>
         </header>
 
@@ -2057,6 +2127,14 @@ function formatPercentile(value: number | null | undefined): string {
         </div>
 
         <template v-if="plannerDisplay === 'list'">
+          <div class="planner-filterbar">
+            <input v-model="plannerQuery" type="search" placeholder="Filter items, monsters, areas… (try zarias)" />
+            <div class="segmented-control" aria-label="Archive ownership">
+              <button type="button" :class="{ active: plannerOwnership === 'all' }" @click="plannerOwnership = 'all'">All</button>
+              <button type="button" :class="{ active: plannerOwnership === 'owned' }" @click="plannerOwnership = 'owned'">In Archive</button>
+              <button type="button" :class="{ active: plannerOwnership === 'missing' }" @click="plannerOwnership = 'missing'">Not archived</button>
+            </div>
+          </div>
           <div class="planner-summary">
             <span><strong>{{ plannerRows.length }}</strong> relevant item tiers</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'mi').length }}</strong> MIs</span>
@@ -2086,6 +2164,7 @@ function formatPercentile(value: number | null | undefined): string {
                       <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
                       <span>
                         <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
+                        <small class="planner-item-type">{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="isArchivedItem(row.item)" class="archive-mark"> · Archived</span></small>
                         <small>{{ row.item.rarity === 'faction' ? 'Faction rare' : row.item.rarity }} · {{ row.item.slot }}</small>
                       </span>
                     </span>
@@ -2096,6 +2175,9 @@ function formatPercentile(value: number | null | undefined): string {
                     </span>
                   </td>
                   <td class="planner-effects">
+                    <span v-if="row.petBonuses.length" class="planner-pet-bonuses">
+                      <b>All pets</b> {{ row.petBonuses.join('; ') }}
+                    </span>
                     <span v-for="match in row.matches" :key="`${match.skill}:effect`">
                       <b v-if="match.conversionTarget">→ {{ match.conversionTarget }}</b>
                       {{ [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support') }}
@@ -2121,48 +2203,51 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" :class="{ active: plannerMapScope === 'selected' }" @click="plannerMapScope = 'selected'">Selected build</button>
               <button type="button" :class="{ active: plannerMapScope === 'all' }" @click="plannerMapScope = 'all'">All MI tiers</button>
             </div>
-            <span>{{ plannerMiItems.length }} MI tiers · {{ atlasRegions.length }} areas</span>
+            <input v-model="atlasRegionQuery" type="search" placeholder="Filter areas, MIs, or monsters…" />
+            <span>{{ plannerMiItems.length }} MI tiers · {{ visibleAtlasRegions.length }} areas</span>
           </div>
-          <div class="mi-atlas-layout">
-            <div class="mi-atlas-plot" aria-label="Schematic Grim Dawn MI region map">
-              <div class="atlas-grid-lines" />
-              <button
-                v-for="point in atlasPoints"
-                :key="point.key"
-                type="button"
-                :class="{ active: selectedAtlasRegion === point.key }"
-                :style="{ left: `${point.left}%`, top: `${point.top}%`, '--atlas-size': `${Math.min(24, 8 + Math.sqrt(point.items.length) * 3)}px` }"
-                :title="`${point.name}: ${point.items.length} MI tiers`"
-                @click="selectedAtlasRegion = point.key"
-              ><span class="sr-only">{{ point.name }}</span></button>
-              <p v-if="atlasPoints.length === 0">No positioned MI regions match the current selection.</p>
-              <small>Area-level schematic from the installed world archive; dots are regions, not fabricated exact monster coordinates.</small>
-            </div>
+          <div class="mi-source-layout">
             <aside class="mi-atlas-regions">
               <button
-                v-for="region in atlasRegions"
+                v-for="region in visibleAtlasRegions"
                 :key="region.key"
                 type="button"
                 :class="{ active: selectedAtlasRegion === region.key }"
                 @click="selectedAtlasRegion = region.key"
               >
-                <span><strong>{{ region.name }}</strong><small>{{ region.contentPack.toUpperCase() }}</small></span>
-                <b>{{ region.items.length }}</b>
+                <span>
+                  <strong>{{ region.name }}</strong>
+                  <small>{{ [...new Set(region.items.flatMap((item) => item.acquisition?.sources ?? []))].slice(0, 2).join(' · ') }}</small>
+                </span>
+                <b>{{ region.items.length }} tiers</b>
               </button>
             </aside>
-          </div>
-          <div v-if="selectedAtlasItems.length" class="atlas-item-list">
-            <button
-              v-for="item in selectedAtlasItems"
-              :key="item.record"
-              type="button"
-              @mouseenter="queueTooltip(item, $event)"
-              @mouseleave="hideTooltip"
-              @click="openItem(item)"
-            >
-              <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
-              <span><strong>{{ item.name }}</strong><small>Lv{{ item.levelRequirement }} · {{ item.acquisition?.sources[0] }}</small></span>
-            </button>
+            <section class="mi-source-detail">
+              <header v-if="selectedAtlasRegion">
+                <p class="section-label">Area drops</p>
+                <h3>{{ atlasRegions.find((region) => region.key === selectedAtlasRegion)?.name }}</h3>
+                <p>Item tiers whose indexed monster source can appear in this area.</p>
+              </header>
+              <div v-if="selectedAtlasItems.length" class="atlas-item-list">
+                <button
+                  v-for="item in selectedAtlasItems"
+                  :key="item.record"
+                  type="button"
+                  @mouseenter="queueTooltip(item, $event)"
+                  @mousemove="moveTooltip"
+                  @mouseleave="hideTooltip"
+                  @click="openItem(item)"
+                >
+                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
+                  <span>
+                    <strong>{{ item.name }}</strong>
+                    <small>Lv{{ item.levelRequirement }} · {{ itemTypeLabel(item) }}</small>
+                    <small>{{ item.acquisition?.sources[0] }}</small>
+                  </span>
+                </button>
+              </div>
+              <p v-else class="skill-empty">No indexed MIs match this area filter.</p>
+            </section>
           </div>
         </template>
       </section>
@@ -2774,7 +2859,7 @@ function formatPercentile(value: number | null | undefined): string {
         id="item-tooltip"
         class="game-tooltip"
         :class="tooltipItem.rarity"
-        :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px` }"
+        :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px`, maxHeight: `${tooltipMaxHeight}px` }"
         role="tooltip"
       >
         <header class="tooltip-header">
@@ -2782,7 +2867,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div>
             <h3>{{ tooltipItem.name }}</h3>
             <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
-            <strong>{{ tooltipItem.rarity }} {{ tooltipItem.slot }}</strong>
+            <strong>{{ rarityLabel(tooltipItem) }} · {{ itemTypeLabel(tooltipItem) }}</strong>
           </div>
         </header>
 
@@ -2883,14 +2968,17 @@ function formatPercentile(value: number | null | undefined): string {
 
         <section v-if="tooltipItem.acquisition?.sources.length" class="tooltip-section tooltip-acquisition">
           <h4>Acquisition</h4>
-          <p v-for="source in tooltipItem.acquisition.sources" :key="source">{{ source }}</p>
+          <p v-for="source in tooltipSources(tooltipItem)" :key="source">{{ source }}</p>
+          <p v-if="tooltipItem.acquisition.sources.length > tooltipSources(tooltipItem).length" class="tooltip-location-overflow">
+            +{{ tooltipItem.acquisition.sources.length - tooltipSources(tooltipItem).length }} more monster variants
+          </p>
           <template v-if="tooltipItem.acquisition.locations?.length">
             <h4>Drop location</h4>
-            <p v-for="location in tooltipItem.acquisition.locations" :key="`${location.name}:${location.levelFile}`">
+            <p v-for="location in tooltipLocations(tooltipItem)" :key="`${location.name}:${location.levelFile}`">
               {{ location.name }}
             </p>
-            <p v-if="tooltipItem.acquisition.additionalLocationCount" class="tooltip-location-overflow">
-              +{{ tooltipItem.acquisition.additionalLocationCount }} more indexed regions (broad monster family)
+            <p v-if="(tooltipItem.acquisition.locations.length - tooltipLocations(tooltipItem).length) + (tooltipItem.acquisition.additionalLocationCount ?? 0)" class="tooltip-location-overflow">
+              +{{ (tooltipItem.acquisition.locations.length - tooltipLocations(tooltipItem).length) + (tooltipItem.acquisition.additionalLocationCount ?? 0) }} more indexed regions
             </p>
           </template>
         </section>

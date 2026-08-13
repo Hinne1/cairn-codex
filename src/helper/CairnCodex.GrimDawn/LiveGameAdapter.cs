@@ -144,7 +144,19 @@ internal sealed class LiveGameAdapter : IDisposable
     {
         if (window != IntPtr.Zero)
         {
-            return Inspect();
+            bool injectionWasDeferred;
+            lock (sync)
+            {
+                injectionWasDeferred = state == "connecting" &&
+                    messages.Any(message => message.Type == TypeInjectionCancelled);
+            }
+            if (!injectionWasDeferred) return Inspect();
+
+            // The hook can be injected before Grim Dawn has published its game-engine
+            // pointer. It then unloads cleanly, but the Cairn handshake window remains.
+            // Tear down that stale attempt so a manual or automatic retry performs a
+            // real injection after the character enters the world.
+            StopConnection();
         }
             var itemAssistant = FindProcesses(["IAGrim"]);
             if (itemAssistant.Count > 0)

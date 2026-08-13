@@ -1112,7 +1112,9 @@ async function pollLiveLifecycle(): Promise<void> {
       current = await window.cairnCodex.stopLiveGame()
       liveIssues.value = []
     }
-    if (autoLiveConnect.value && current.state === 'available') {
+    const deferredUntilWorldReady = current.state === 'connecting' &&
+      current.detail.toLocaleLowerCase().includes('world is not ready')
+    if (autoLiveConnect.value && (current.state === 'available' || deferredUntilWorldReady)) {
       current = await window.cairnCodex.startLiveGame()
       if (current.state === 'ready' && previousState !== 'ready') {
         vaultMessage.value = 'Auto-connected to Grim Dawn. Live ingest is watching the configured stash tab.'

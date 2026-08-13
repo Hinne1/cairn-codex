@@ -159,6 +159,15 @@ Build the Grim Dawn helper:
 dotnet build .\src\helper\CairnCodex.GrimDawn\CairnCodex.GrimDawn.csproj
 ```
 
+Build a directly launchable Windows folder:
+
+```powershell
+npm.cmd run package:win
+```
+
+Then run `dist\Cairn Codex-win32-x64\Cairn Codex.exe`. Keep the rest of that
+folder beside the executable; it contains Electron and the Grim Dawn helper.
+
 The renderer communicates only through the narrow API exposed by the preload
 script. The helper's versioned newline-JSON protocol is documented in
 [`docs/architecture/helper-protocol.md`](docs/architecture/helper-protocol.md).

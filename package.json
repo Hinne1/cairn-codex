@@ -9,6 +9,7 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "build:helper": "dotnet build ./src/helper/CairnCodex.GrimDawn/CairnCodex.GrimDawn.csproj",
+    "package:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1",
     "preview": "electron-vite preview",
     "smoke:desktop": "npm run build:helper && npm run build && node ./scripts/smoke-desktop.mjs",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",

@@ -503,6 +503,7 @@ const atlasRegions = computed(() => {
     name: string
     contentPack: string
     minimumItemLevel: number
+    location: MapRegionLocation
     items: CollectionItem[]
   }>()
   for (const item of plannerMiItems.value) {
@@ -518,6 +519,7 @@ const atlasRegions = computed(() => {
           name: location.name,
           contentPack: location.contentPack,
           minimumItemLevel: item.levelRequirement,
+          location,
           items: [item]
         })
       }
@@ -530,6 +532,10 @@ const atlasRegions = computed(() => {
   )
 })
 
+const unlocatedPlannerMiItems = computed(() =>
+  plannerMiItems.value.filter((item) => !(item.acquisition?.locations?.length))
+)
+
 const visibleAtlasRegions = computed(() => {
   const needle = normalizeLoose(atlasRegionQuery.value)
   if (!needle) return atlasRegions.value
@@ -540,6 +546,28 @@ const visibleAtlasRegions = computed(() => {
       ...region.items.flatMap((item) => item.acquisition?.sources ?? [])
     ].join(' ')).includes(needle)
   )
+})
+
+const atlasMapPins = computed(() => {
+  const regions = visibleAtlasRegions.value.filter((region) =>
+    Boolean(region.location.zoneRecord) &&
+    Number.isFinite(region.location.originX) &&
+    Number.isFinite(region.location.originY)
+  )
+  if (regions.length === 0) return []
+  const xs = regions.map((region) => region.location.originX)
+  const ys = regions.map((region) => region.location.originY)
+  const minimumX = Math.min(...xs)
+  const maximumX = Math.max(...xs)
+  const minimumY = Math.min(...ys)
+  const maximumY = Math.max(...ys)
+  const width = Math.max(1, maximumX - minimumX)
+  const height = Math.max(1, maximumY - minimumY)
+  return regions.map((region) => ({
+    ...region,
+    left: 4 + ((region.location.originX - minimumX) / width) * 92,
+    top: 4 + ((maximumY - region.location.originY) / height) * 92
+  }))
 })
 
 const selectedAtlasItems = computed(() =>
@@ -2758,8 +2786,33 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" :class="{ active: plannerMapScope === 'all' }" @click="plannerMapScope = 'all'">All MI tiers</button>
             </div>
             <input v-model="atlasRegionQuery" type="search" placeholder="Filter areas, MIs, or monsters…" />
-            <span>{{ plannerMiItems.length }} MI tiers · {{ visibleAtlasRegions.length }} areas</span>
+            <span>{{ plannerMiItems.length }} MI tiers · {{ visibleAtlasRegions.length }} areas<span v-if="unlocatedPlannerMiItems.length"> · {{ unlocatedPlannerMiItems.length }} unlocated</span></span>
           </div>
+          <section class="planner-world-map" aria-label="Cairn item source map">
+            <header>
+              <span><strong>Campaign source map</strong><small>Positions come directly from Grim Dawn's world-region coordinates.</small></span>
+              <span class="planner-map-legend">
+                <i class="base" />GD <i class="gdx1" />AoM <i class="gdx2" />FG <i class="gdx3" />FoA
+              </span>
+            </header>
+            <div v-if="atlasMapPins.length" class="planner-map-canvas">
+              <button
+                v-for="pin in atlasMapPins"
+                :key="pin.key"
+                type="button"
+                class="planner-map-pin"
+                :class="[pin.contentPack, { active: selectedAtlasRegion === pin.key }]"
+                :style="{ left: `${pin.left}%`, top: `${pin.top}%` }"
+                :aria-label="`${pin.name}, ${pin.items.length} matching item tiers`"
+                :title="`${pin.name} (${contentPackShortLabel(pin.contentPack)}) · ${pin.items.length} tiers`"
+                @click="selectedAtlasRegion = pin.key"
+              >
+                <b>{{ pin.items.length }}</b>
+                <span>{{ pin.name }}</span>
+              </button>
+            </div>
+            <p v-else class="skill-empty">No campaign coordinates are available for the current filter.</p>
+          </section>
           <div class="mi-source-layout">
             <aside class="mi-atlas-regions">
               <button

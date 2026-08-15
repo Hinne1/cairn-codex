@@ -25,7 +25,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 14
+const CATALOG_PRESENTATION_VERSION = 15
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -733,7 +733,7 @@ async function readMapLocationIndex(path: string): Promise<MapLocationIndex | nu
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as MapLocationIndex
     if (
-      parsed.version !== 6 ||
+      parsed.version !== 7 ||
       !Array.isArray(parsed.archives) ||
       !parsed.sourceLocations ||
       typeof parsed.sourceLocations !== 'object'
@@ -1146,6 +1146,18 @@ async function runSmokeTest(
     ) {
       throw new Error('Build-defining green skill bases were not catalogued with their source tiers.')
     }
+    const ignusShoulders = helperSnapshot.items.find((item) => item.name === "Ignus' Shoulderguards")
+    const bloodswornSignet = helperSnapshot.items.find((item) => item.name === 'Bloodsworn Signet')
+    const kravallShoulders = helperSnapshot.items.find((item) => item.name === "Kra'vall Shoulderguards")
+    const loghorreanShoulders = helperSnapshot.items.find((item) => item.name === "Loghorrean's Corruption")
+    if (
+      !ignusShoulders?.acquisition?.sources.every((source) => source.startsWith('Dropped by ')) ||
+      !bloodswornSignet?.acquisition?.sources.every((source) => source.startsWith('Dropped by ')) ||
+      !kravallShoulders?.acquisition?.sources.some((source) => source.startsWith('Found in ')) ||
+      !loghorreanShoulders?.acquisition?.sources.some((source) => source.startsWith('Found in '))
+    ) {
+      throw new Error('MI acquisition indexing did not separate monster drops from chest-only bases.')
+    }
     const deterministicRecipes = helperSnapshot.items.filter((item) => item.acquisition?.crafting)
     const abyssalMask = deterministicRecipes.find((item) => item.name === 'Abyssal Mask')
     const randomLegendary = helperSnapshot.items.find((item) => item.name === 'Demonbone Legplates')
@@ -1165,6 +1177,16 @@ async function runSmokeTest(
       ] ?? []
     if (!frostsnarlLocations.some((location) => location.name.includes("Kruu'Sul Crags"))) {
       throw new Error('Map location index did not place Frostsnarl in Kruu\'Sul Crags.')
+    }
+    const campaignLocationExamples = [
+      'records/creatures/enemies/nemesis/nemesis_kymon_01.dbr',
+      'records/creatures/enemies/nemesis/nemesis_orderdeathsvigil_02.dbr',
+      'records/creatures/enemies/boss&quest/cultist_chthonianmonstrosity.dbr'
+    ]
+    if (campaignLocationExamples.some((record) =>
+      !(mapIndex.sourceLocations[record] ?? []).some((location) => location.zoneRecord)
+    )) {
+      throw new Error('Map location index did not resolve scripted nemesis and summoned-boss campaign sources.')
     }
     if (mapIndex.miTierCount - mapIndex.locatedMiTierCount > 32) {
       throw new Error('Map location index lost an unexpected number of green item tiers.')

@@ -74,7 +74,7 @@ internal static class MapLocationIndexer
             })
             .ToArray();
         return new MapLocationIndexResult(
-            6,
+            7,
             DateTimeOffset.UtcNow,
             fingerprints,
             scannedRegions,
@@ -122,6 +122,7 @@ internal static class MapLocationIndexer
         IReadOnlyDictionary<string, HashSet<MapRegionLocation>> placements)
     {
         var result = new HashSet<MapRegionLocation>();
+        AddScriptedNemesisLocations(monsterRecord, placements, result);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { monsterRecord };
         var queue = new Queue<(string Record, int Depth)>();
         queue.Enqueue((monsterRecord, 0));
@@ -145,6 +146,32 @@ internal static class MapLocationIndexer
             .OrderBy(location => location.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(location => location.LevelFile, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static void AddScriptedNemesisLocations(
+        string monsterRecord,
+        IReadOnlyDictionary<string, HashSet<MapRegionLocation>> placements,
+        ISet<MapRegionLocation> result)
+    {
+        var stem = Path.GetFileNameWithoutExtension(monsterRecord.Replace('\\', '/'));
+        if (!stem.StartsWith("nemesis_", StringComparison.OrdinalIgnoreCase)) return;
+        var faction = stem["nemesis_".Length..].Split('_', 2)[0];
+        if (faction.Equals("kymon", StringComparison.OrdinalIgnoreCase)) faction = "kymonchosen";
+
+        // Nemesis spawn points are SetPiece records activated by world scripts. They
+        // intentionally have no DBR reference to the monster chosen for that faction,
+        // so the ordinary reverse-reference graph cannot connect them.
+        foreach (var root in new[]
+                 {
+                     "records/proxies/factionspawns",
+                     "records/proxies/factionspawnsgdx1",
+                     "records/proxies/factionspawnsgdx2",
+                     "records/proxies/factionspawnsgdx3"
+                 })
+        {
+            var setPiece = $"{root}/setpieceproxies/setpiece_nemesis_{faction}.dbr";
+            if (placements.TryGetValue(setPiece, out var locations)) result.UnionWith(locations);
+        }
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildReverseReferences(

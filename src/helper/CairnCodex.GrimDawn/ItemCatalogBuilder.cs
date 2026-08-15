@@ -327,7 +327,10 @@ internal static class ItemCatalogBuilder
         KnownFormulaIndex? knownFormulas)
     {
         var hints = new List<string>();
-        var sourceRecords = new List<string>();
+        var monsterHints = new List<string>();
+        var monsterSourceRecords = new List<string>();
+        var containerHints = new List<string>();
+        var containerSourceRecords = new List<string>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { itemRecord };
         var queue = new Queue<(string Record, int Depth)>();
         queue.Enqueue((itemRecord, 0));
@@ -353,7 +356,8 @@ internal static class ItemCatalogBuilder
                 var isMonster = source.Record.Type == "Monster" ||
                                 path.Contains("/creatures/enemies/", StringComparison.OrdinalIgnoreCase);
                 var isContainer = path.Contains("/interactiveobjects/loot", StringComparison.OrdinalIgnoreCase) ||
-                                  path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase);
+                                  path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase) ||
+                                  path.Contains("/items/lootchests/", StringComparison.OrdinalIgnoreCase);
 
                 // Only a formula whose artifactName points directly at this item is a
                 // deterministic recipe for it. Formulae for broad random-item tables
@@ -372,7 +376,7 @@ internal static class ItemCatalogBuilder
 
                 if (isMonster)
                 {
-                    AddNamedSource("Dropped by", source, tags, hints, sourceRecords);
+                    AddNamedSource("Dropped by", source, tags, monsterHints, monsterSourceRecords);
                     // Proxies point at monsters, but they are not needed to discover the
                     // drop graph. Map placement is indexed independently from sourceRecords.
                     continue;
@@ -380,13 +384,22 @@ internal static class ItemCatalogBuilder
 
                 if (isContainer)
                 {
-                    AddNamedSource("Found in", source, tags, hints, sourceRecords);
+                    AddNamedSource("Found in", source, tags, containerHints, containerSourceRecords);
                 }
 
                 if (visited.Add(reference.Record) && IsAcquisitionBridge(path, source.Record.Type))
                     queue.Enqueue((reference.Record, depth + 1));
             }
         }
+
+        // A boss-specific item table can also be reachable through broad reward
+        // chests. When a real monster consumer exists, that is the actionable farming
+        // source and its placement graph must not be polluted by every generic chest.
+        var preferredHints = monsterHints.Count > 0 ? monsterHints : containerHints;
+        var preferredSourceRecords = monsterSourceRecords.Count > 0
+            ? monsterSourceRecords
+            : containerSourceRecords;
+        hints.AddRange(preferredHints);
 
         if (blueprintRecords.Count > 0) hints.Add("Craftable from a blueprint");
         foreach (var requirement in factionRequirements
@@ -399,7 +412,7 @@ internal static class ItemCatalogBuilder
         if (hints.Count == 0) hints.Add("Special source; exact location not yet indexed");
         return new ItemAcquisitionPresentation(
             hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
-            sourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
+            preferredSourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
             factionRequirements
                 .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
@@ -463,6 +476,7 @@ internal static class ItemCatalogBuilder
         path.Contains("/proxies/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/interactiveobjects/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/items/lootchests/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/vendors/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/merchants/", StringComparison.OrdinalIgnoreCase) ||
         path.Contains("/items/crafting/blueprints/", StringComparison.OrdinalIgnoreCase) ||

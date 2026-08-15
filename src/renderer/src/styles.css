@@ -468,7 +468,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .planner-filterbar > input { min-width: 260px; flex: 1; padding: 10px 12px; border: 1px solid #465866; border-radius: 5px; color: #d9e6eb; background: #111517; }
 .planner-ignored-filter { padding: 8px 11px; border: 1px solid #4b4b43; border-radius: 4px; color: #918f83; background: #201f1b; cursor: pointer; white-space: nowrap; }
 .planner-ignored-filter.active { border-color: #9b7150; color: #e1b88d; background: #38281f; }
-.planner-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.planner-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .planner-summary span { display: flex; align-items: baseline; gap: 7px; padding: 13px 15px; border: 1px solid #35434a; border-radius: 6px; color: #7f8b8f; background: #171b1d; font-size: 10px; }
 .planner-summary strong { color: #86bfd4; font: 500 20px Georgia, serif; }
 .planner-table-wrap { max-height: 68vh; overflow: auto; border: 1px solid #39464d; border-radius: 8px; background: rgba(18,21,22,.94); }
@@ -509,6 +509,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .planner-effects .planner-pet-bonuses b { display: block; color: #e2c171; }
 .planner-acquisition b { color: #d1b36f; }
 .planner-acquisition small { color: #718087; }
+.recipe-status { color: #b9a98a; }
+.recipe-status.known { color: #b9cd75; }
+.recipe-status.missing { color: #c78672; }
 .planner-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(225px, 1fr)); gap: 11px; align-items: stretch; }
 .planner-card { position: relative; display: grid; grid-template-rows: auto 100px auto auto minmax(0,1fr) auto; gap: 9px; min-height: 330px; padding: 13px; overflow: hidden; border: 1px solid #36454c; border-top: 2px solid #65767d; border-radius: 7px; color: #aab4b2; background: linear-gradient(155deg, #1d2326, #151819 70%); cursor: pointer; }
 .planner-card:hover, .planner-card:focus-visible { border-color: #7794a0; outline: none; background: linear-gradient(155deg, #242e32, #181b1c 70%); }
@@ -530,7 +533,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .planner-card-pets, .planner-card-effect { margin: 0; color: #9ca9a6; font-size: 10px; line-height: 1.4; }
 .planner-card-pets { padding: 6px 7px; border-left: 2px solid #b9954e; color: #c7a96d; background: rgba(102,76,33,.16); }
 .planner-card-pets b { color: #e2c171; }
-.planner-card footer { align-self: end; padding-top: 8px; border-top: 1px solid #30383b; color: #7c898c; font-size: 9px; }
+.planner-card footer { align-self: end; display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid #30383b; color: #7c898c; font-size: 9px; }
 .planner-card-empty { grid-column: 1 / -1; border: 1px dashed #39464d; border-radius: 7px; }
 .planner-map-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; border: 1px solid #35434a; border-radius: 7px; background: #171b1d; }
 .planner-map-toolbar > span { color: #7e9098; font-size: 10px; }

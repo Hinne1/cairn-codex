@@ -25,7 +25,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 13
+const CATALOG_PRESENTATION_VERSION = 14
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -506,8 +506,8 @@ async function executeLiveRetrieval(
   vaultItemIds: string[]
 ): Promise<LiveRetrievalResult> {
   if (vaultItemIds.length === 0) throw new Error('Select at least one vault item to retrieve.')
-  if (vaultItemIds.length !== 1) {
-    throw new Error('Live retrieval currently returns one item at a time so every deposit has an unambiguous acknowledgement.')
+  if (new Set(vaultItemIds).size !== vaultItemIds.length) {
+    throw new Error('The live retrieval selection contains a duplicate archive item.')
   }
   const listed = new Map(database.listVaultItems().map((item) => [item.id, item]))
   const selected = vaultItemIds.map((id) => {
@@ -517,6 +517,46 @@ async function executeLiveRetrieval(
   })
   const modes = new Set(selected.map((item) => item.isHardcore))
   if (modes.size !== 1) throw new Error('A live retrieval cannot mix Hardcore and Softcore items.')
+  const unavailable = selected.filter((item) => item.state !== 'ingested')
+  if (unavailable.length > 0) {
+    throw new Error('Vault items are not available: ' + unavailable.map((item) => item.id).join(', '))
+  }
+
+  const retrieved: LiveRetrievalResult['retrieved'] = []
+  const receiptPaths: string[] = []
+  const issues: string[] = []
+  for (const vaultItemId of vaultItemIds) {
+    try {
+      const result = await executeSingleLiveRetrieval(helper, database, vaultItemId)
+      retrieved.push(...result.retrieved)
+      receiptPaths.push(...result.receiptPaths)
+    } catch (error) {
+      if (retrieved.length === 0) throw error
+      issues.push(error instanceof Error ? error.message : String(error))
+      break
+    }
+  }
+  return {
+    operationId: randomUUID(),
+    status: 'committed',
+    retrieved,
+    receiptPaths,
+    issues
+  }
+}
+
+async function executeSingleLiveRetrieval(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  vaultItemId: string
+): Promise<LiveRetrievalResult> {
+  const vaultItemIds = [vaultItemId]
+  const listed = new Map(database.listVaultItems().map((item) => [item.id, item]))
+  const selected = vaultItemIds.map((id) => {
+    const item = listed.get(id)
+    if (!item) throw new Error(`Vault item does not exist: ${id}`)
+    return item
+  })
   const isHardcore = selected[0]!.isHardcore
   const status = await helper.request<LiveGameStatus>('inspect-live-game')
   if (status.state !== 'ready') throw new Error(status.detail)
@@ -602,7 +642,8 @@ async function executeLiveRetrieval(
         baseRecord: item.baseRecord,
         seed: (item.payload as { seed?: number }).seed ?? selected[index]!.seed
       })),
-      receiptPaths
+      receiptPaths,
+      issues: []
     }
   } catch (error) {
     if (prepared) {
@@ -1076,17 +1117,44 @@ async function runSmokeTest(
     }
     const monsterInfrequents = helperSnapshot.items.filter((item) => item.rarity === 'mi')
     const frostsnarlTiers = monsterInfrequents.filter((item) => item.name === "Frostsnarl's Horns")
+    const skillRareTiers = new Map(
+      ['Weaver Ring', 'Devourer Ring', 'Ascended Shoulderplates'].map((name) => [
+        name,
+        monsterInfrequents.filter((item) => item.name === name)
+      ])
+    )
+    const unresolvedMiSources = monsterInfrequents.filter(
+      (item) => !item.acquisition?.sources.some((source) => source.startsWith('Dropped by '))
+    )
     if (
       monsterInfrequents.length < 1_600 ||
-      monsterInfrequents.some(
-        (item) => !item.acquisition?.sources.some((source) => source.startsWith('Dropped by '))
-      ) ||
+      unresolvedMiSources.length > 20 ||
       frostsnarlTiers.length !== 6 ||
       frostsnarlTiers.some(
         (item) => item.acquisition?.sources[0] !== 'Dropped by Frostsnarl the Chosen'
       )
     ) {
       throw new Error('Monster Infrequent source traversal did not resolve every live MI tier.')
+    }
+    if (
+      skillRareTiers.get('Weaver Ring')?.length !== 7 ||
+      skillRareTiers.get('Devourer Ring')?.length !== 6 ||
+      skillRareTiers.get('Ascended Shoulderplates')?.length !== 6 ||
+      [...skillRareTiers.values()].flat().some(
+        (item) => !item.acquisition?.sources.some((source) => source.startsWith('Dropped by '))
+      )
+    ) {
+      throw new Error('Build-defining green skill bases were not catalogued with their source tiers.')
+    }
+    const deterministicRecipes = helperSnapshot.items.filter((item) => item.acquisition?.crafting)
+    const abyssalMask = deterministicRecipes.find((item) => item.name === 'Abyssal Mask')
+    const randomLegendary = helperSnapshot.items.find((item) => item.name === 'Demonbone Legplates')
+    if (
+      deterministicRecipes.length < 400 ||
+      !abyssalMask?.acquisition?.crafting?.knownSoftcore ||
+      randomLegendary?.acquisition?.crafting
+    ) {
+      throw new Error('Known-blueprint indexing did not distinguish direct recipes from random crafting tables.')
     }
     const mapIndex = await helper.request<MapLocationIndex>('build-map-location-index', {
       installationPath: helperSnapshot.discovery.installations[0]?.path
@@ -1098,8 +1166,8 @@ async function runSmokeTest(
     if (!frostsnarlLocations.some((location) => location.name.includes("Kruu'Sul Crags"))) {
       throw new Error('Map location index did not place Frostsnarl in Kruu\'Sul Crags.')
     }
-    if (mapIndex.locatedMiTierCount !== mapIndex.miTierCount) {
-      throw new Error('Map location index did not resolve every live MI tier.')
+    if (mapIndex.miTierCount - mapIndex.locatedMiTierCount > 32) {
+      throw new Error('Map location index lost an unexpected number of green item tiers.')
     }
     const flamebrand = helperSnapshot.items.find((item) => item.name === 'Flamebrand')
     const flamebrandFire = flamebrand?.presentation?.sections

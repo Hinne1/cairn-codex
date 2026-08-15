@@ -8,7 +8,8 @@ internal static class CollectionSnapshotBuilder
         var installation = discovery.Installations.FirstOrDefault()
             ?? throw new DirectoryNotFoundException("No Grim Dawn installation was discovered.");
         var gameData = ItemCatalogBuilder.Load(installation.Path);
-        var catalog = ItemCatalogBuilder.Build(gameData);
+        var knownFormulas = FormulaSaveScanner.Scan(discovery);
+        var catalog = ItemCatalogBuilder.Build(gameData, knownFormulas);
         var availableByRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var availableByAffixRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var scannedStashes = new List<ScannedStash>();

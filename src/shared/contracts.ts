@@ -98,6 +98,7 @@ export interface LiveRetrievalResult {
   status: 'committed'
   retrieved: Array<{ vaultItemId: string; baseRecord: string; seed: number }>
   receiptPaths: string[]
+  issues: string[]
 }
 
 export interface StagingTabInspection {
@@ -345,6 +346,13 @@ export interface ItemAcquisitionPresentation {
   locations?: MapRegionLocation[]
   additionalLocationCount?: number
   factions?: ItemFactionRequirement[]
+  crafting?: ItemCraftingPresentation | null
+}
+
+export interface ItemCraftingPresentation {
+  blueprintRecords: string[]
+  knownSoftcore: boolean | null
+  knownHardcore: boolean | null
 }
 
 export interface ItemFactionRequirement {

@@ -172,7 +172,9 @@ HelperResponse InspectGameRecords(HelperRequest request)
             string.Equals(source.Record.Type, parameters.Type, StringComparison.OrdinalIgnoreCase))
         .Where(source => string.IsNullOrWhiteSpace(parameters.ValueContains) ||
             source.Record.Values.Values.SelectMany(values => values).Any(value =>
-                value.Text?.Contains(parameters.ValueContains, StringComparison.OrdinalIgnoreCase) == true))
+                value.Text?.Contains(parameters.ValueContains, StringComparison.OrdinalIgnoreCase) == true ||
+                value.Text is { } tag && data.Tags.TryGetValue(tag, out var resolved) &&
+                resolved.Contains(parameters.ValueContains, StringComparison.OrdinalIgnoreCase)))
         .Where(source => string.IsNullOrWhiteSpace(parameters.Field) ||
             source.Record.Values.TryGetValue(parameters.Field, out var values) &&
             (string.IsNullOrWhiteSpace(parameters.ValueEquals) || values.Any(value =>

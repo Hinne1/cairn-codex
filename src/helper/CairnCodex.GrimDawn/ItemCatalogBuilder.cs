@@ -46,7 +46,7 @@ internal static class ItemCatalogBuilder
         return new ItemCatalogData(root, contentPacks, tags, records);
     }
 
-    public static ItemCatalogResult Build(ItemCatalogData data)
+    public static ItemCatalogResult Build(ItemCatalogData data, KnownFormulaIndex? knownFormulas = null)
     {
         var presentationSource = new ItemPresentationSource(data.Tags, data.Records);
         var acquisitionReferences = BuildAcquisitionReferences(data.Records);
@@ -66,7 +66,8 @@ internal static class ItemCatalogBuilder
                 presentationSource,
                 acquisitionReferences,
                 setPresentations,
-                false))
+                false,
+                knownFormulas))
             .Where(item => item is not null)
             .Cast<CatalogItem>()
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -85,7 +86,8 @@ internal static class ItemCatalogBuilder
                 presentationSource,
                 acquisitionReferences,
                 setPresentations,
-                true))
+                true,
+                knownFormulas))
             .Where(item => item is not null && item.Rarity == "faction")
             .Cast<CatalogItem>()
             .OrderBy(item => item.LevelRequirement)
@@ -133,14 +135,17 @@ internal static class ItemCatalogBuilder
         ItemPresentationSource presentationSource,
         IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences,
         IReadOnlyDictionary<string, ItemSetPresentation?> setPresentations,
-        bool includeFactionRare)
+        bool includeFactionRare,
+        KnownFormulaIndex? knownFormulas)
     {
         var record = source.Record;
         var classification = record.Text("itemClassification");
-        var isMonsterInfrequent = classification == "Rare" && IsMonsterInfrequent(record);
+        var normalizedPath = record.Name.Replace('\\', '/');
+        var isFactionPath = normalizedPath.Contains("/items/faction/", StringComparison.OrdinalIgnoreCase);
+        var isMonsterInfrequent = classification == "Rare" && !isFactionPath && IsMonsterInfrequent(record);
         var isFactionPlanningItem = includeFactionRare &&
             classification == "Rare" &&
-            record.Name.Replace('\\', '/').Contains("/items/faction/", StringComparison.OrdinalIgnoreCase) &&
+            isFactionPath &&
             !isMonsterInfrequent;
         if (classification is not ("Epic" or "Legendary") && !isMonsterInfrequent && !isFactionPlanningItem ||
             record.Name.Contains("/enemygear/", StringComparison.OrdinalIgnoreCase) ||
@@ -183,7 +188,7 @@ internal static class ItemCatalogBuilder
             setName = Resolve(setSource.Record.Text("setName"), tags);
         }
 
-        var acquisition = BuildAcquisition(record.Name, acquisitionReferences, records, tags);
+        var acquisition = BuildAcquisition(record.Name, acquisitionReferences, records, tags, knownFormulas);
         if (isMonsterInfrequent &&
             acquisition.SourceRecords.Count == 0 &&
             acquisition.Sources.Count == 1 &&
@@ -233,6 +238,10 @@ internal static class ItemCatalogBuilder
     }
 
     private static bool IsMonsterInfrequent(ArzRecord record) =>
+        record.Values
+            .Where(field => field.Key.StartsWith("augmentSkillName", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(field => field.Value)
+            .Count(value => value.Text?.StartsWith("records/skills/playerclass", StringComparison.OrdinalIgnoreCase) == true) >= 2 ||
         record.Values.Values
             .SelectMany(values => values)
             .Select(value => value.Text)
@@ -314,7 +323,8 @@ internal static class ItemCatalogBuilder
         string itemRecord,
         IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> references,
         IReadOnlyDictionary<string, CatalogSourceRecord> records,
-        IReadOnlyDictionary<string, string> tags)
+        IReadOnlyDictionary<string, string> tags,
+        KnownFormulaIndex? knownFormulas)
     {
         var hints = new List<string>();
         var sourceRecords = new List<string>();
@@ -323,7 +333,7 @@ internal static class ItemCatalogBuilder
         queue.Enqueue((itemRecord, 0));
         var sawDropTable = false;
         var sawVendor = false;
-        var sawBlueprint = false;
+        var blueprintRecords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var factionRequirements = new List<ItemFactionRequirement>();
 
         // An MI normally reaches its source through two or more reverse references:
@@ -345,8 +355,12 @@ internal static class ItemCatalogBuilder
                 var isContainer = path.Contains("/interactiveobjects/loot", StringComparison.OrdinalIgnoreCase) ||
                                   path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase);
 
-                if (source.Record.Type == "ItemArtifactFormula" && reference.Field == "artifactName")
-                    sawBlueprint = true;
+                // Only a formula whose artifactName points directly at this item is a
+                // deterministic recipe for it. Formulae for broad random-item tables
+                // are reachable through the drop graph too, but are not useful shopping
+                // list recipes for every possible table result.
+                if (depth == 0 && source.Record.Type == "ItemArtifactFormula" && reference.Field == "artifactName")
+                    blueprintRecords.Add(source.Record.Name);
                 if (path.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) && !isVendor)
                     sawDropTable = true;
                 if (isVendor)
@@ -374,7 +388,7 @@ internal static class ItemCatalogBuilder
             }
         }
 
-        if (sawBlueprint) hints.Add("Craftable from a learned blueprint");
+        if (blueprintRecords.Count > 0) hints.Add("Craftable from a blueprint");
         foreach (var requirement in factionRequirements
                      .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase))
         {
@@ -388,7 +402,17 @@ internal static class ItemCatalogBuilder
             sourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
             factionRequirements
                 .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)
-                .ToArray());
+                .ToArray(),
+            blueprintRecords.Count == 0
+                ? null
+                : new ItemCraftingPresentation(
+                    blueprintRecords.OrderBy(record => record, StringComparer.OrdinalIgnoreCase).ToArray(),
+                    knownFormulas is null
+                        ? null
+                        : blueprintRecords.Any(knownFormulas.SoftcoreRecords.Contains),
+                    knownFormulas is null
+                        ? null
+                        : blueprintRecords.Any(knownFormulas.HardcoreRecords.Contains)));
     }
 
     private static ItemFactionRequirement? ParseFactionRequirement(string path)
@@ -606,5 +630,10 @@ internal sealed record AcquisitionReference(string Record, string Type, string F
 internal sealed record ItemAcquisitionPresentation(
     IReadOnlyList<string> Sources,
     IReadOnlyList<string> SourceRecords,
-    IReadOnlyList<ItemFactionRequirement> Factions);
+    IReadOnlyList<ItemFactionRequirement> Factions,
+    ItemCraftingPresentation? Crafting);
+internal sealed record ItemCraftingPresentation(
+    IReadOnlyList<string> BlueprintRecords,
+    bool? KnownSoftcore,
+    bool? KnownHardcore);
 internal sealed record ItemFactionRequirement(string Faction, string Reputation, string VendorRecord);

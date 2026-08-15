@@ -49,8 +49,8 @@ must remain closed while Cairn Codex owns that hook and queue.
 - English item data.
 - Vanilla Grim Dawn plus locally installed official expansions.
 - Local save data; broader save-location support can be added when needed.
-- Epic, Legendary, and Monster Infrequent bases; MI affix combinations are managed
-  separately in the Workshop.
+- Epic, Legendary, Monster Infrequent, and named green skill-support bases;
+  affix combinations are managed separately in the Workshop.
 
 ## Milestones
 
@@ -97,7 +97,9 @@ trigger an inventory refresh, and Settings offers a manual rebuild command.
 The Leveling Planner merges all selected skills into one list of supporting MIs,
 Epics, Legendaries, and faction rares up to a configurable level cap (70 by
 default). Faction-table traversal preserves the required faction and reputation
-tier. Its MI Atlas can show only the selected build's sources or every MI under
+tier. Deterministic blueprint recipes are joined to the account's read-only
+`formulas.*` indexes, with separate Softcore and Hardcore learned states. Its MI
+Atlas can show only the selected build's sources or every MI under
 the current cap, using corrected MAP9 world-region origins plus an area list;
 points represent source regions rather than invented exact monster coordinates.
 
@@ -108,6 +110,8 @@ points represent source regions rather than invented exact monster coordinates.
 - Closed-game mode never writes a transfer-stash file while Grim Dawn runs.
 - Live mode never rewrites the transfer-stash file; it uses an explicit,
   version-reported in-memory hook handshake and durable queue receipts.
+- Multi-item live returns are serialized into individually acknowledged commits;
+  a full destination stops the batch without releasing unacknowledged copies.
 - Never read or write the transfer stash while another stash tool is running.
 - Before every write, make a restorable snapshot and validate the source hash.
 - Serialize to a temporary file beside the target, flush it, parse and verify

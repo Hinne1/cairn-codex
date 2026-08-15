@@ -36,6 +36,7 @@ interface PlannerProfile {
   levelCap: number
   source: 'manual' | 'character'
   characterPath?: string
+  isHardcore?: boolean
   modifiedAt: string
 }
 
@@ -782,6 +783,7 @@ function importCharacterProfile(character: CharacterSaveProfile): void {
     levelCap: existing?.levelCap ?? Math.max(70, character.level),
     source: 'character',
     characterPath: character.path,
+    isHardcore: character.isHardcore,
     modifiedAt: new Date().toISOString()
   }
   plannerProfiles.value = existing
@@ -801,6 +803,27 @@ function deletePlannerProfile(): void {
 
 function plannerRecordKey(item: CollectionItem): string {
   return `${item.rarity}:${item.slot}:${normalizeLoose(item.name)}`
+}
+
+function recipeStatus(item: CollectionItem): { label: string; known: boolean | null } | null {
+  const crafting = item.acquisition?.crafting
+  if (!crafting) return null
+  const profileMode = selectedPlannerProfile.value?.isHardcore
+  if (profileMode !== undefined) {
+    const known = profileMode ? crafting.knownHardcore : crafting.knownSoftcore
+    return {
+      known,
+      label: known === null
+        ? 'Recipe status unavailable'
+        : `${known ? 'Recipe learned' : 'Recipe not learned'} (${profileMode ? 'HC' : 'SC'})`
+    }
+  }
+  if (crafting.knownSoftcore || crafting.knownHardcore) {
+    const modes = [crafting.knownSoftcore ? 'SC' : '', crafting.knownHardcore ? 'HC' : ''].filter(Boolean).join(' + ')
+    return { known: true, label: `Recipe learned (${modes})` }
+  }
+  const known = crafting.knownSoftcore === false && crafting.knownHardcore === false ? false : null
+  return { known, label: known === false ? 'Recipe not learned' : 'Recipe status unavailable' }
 }
 
 function isPlannerFavorite(item: CollectionItem): boolean {
@@ -1425,9 +1448,10 @@ async function syncLiveMode(): Promise<void> {
 }
 
 async function retrieveSelectedLive(): Promise<void> {
-  if (selectedVaultIds.value.length !== 1 || vaultBusy.value) return
+  if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
+  const count = selectedVaultIds.value.length
   const confirmed = window.confirm(
-    `Return this copy to Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? If the tab is full, it will remain safely archived.`
+    `Return ${count} ${count === 1 ? 'copy' : 'copies'} to Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? Each item is committed only after the game acknowledges it; if the tab fills, the remaining copies stay safely archived.`
   )
   if (!confirmed) return
   vaultBusy.value = true
@@ -1436,8 +1460,11 @@ async function retrieveSelectedLive(): Promise<void> {
   try {
     const result = await window.cairnCodex.retrieveLiveVaultItems([...selectedVaultIds.value])
     applyLiveRetrievals(result.retrieved)
-    vaultMessage.value = `Live-retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn.`
-    selectedVaultIds.value = []
+    vaultMessage.value = result.issues.length
+      ? `Live-retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}; stopped safely: ${result.issues[0]}`
+      : `Live-retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn.`
+    const retrievedIds = new Set(result.retrieved.map((item) => item.vaultItemId))
+    selectedVaultIds.value = selectedVaultIds.value.filter((id) => !retrievedIds.has(id))
     await refreshVault()
   } catch (error) {
     vaultError.value = readableError(error)
@@ -2564,6 +2591,7 @@ function formatPercentile(value: number | null | undefined): string {
             <span><strong>{{ plannerRows.length }}</strong> relevant item tiers</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'mi').length }}</strong> MIs</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
+            <span><strong>{{ plannerRows.filter((row) => row.item.acquisition?.crafting).length }}</strong> craftable</span>
           </div>
           <div v-if="plannerDisplay === 'list'" class="planner-table-wrap">
             <table class="planner-table">
@@ -2614,6 +2642,13 @@ function formatPercentile(value: number | null | undefined): string {
                     </span>
                   </td>
                   <td class="planner-acquisition">
+                    <span
+                      v-if="recipeStatus(row.item)"
+                      class="recipe-status"
+                      :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }"
+                    >
+                      <b>Blueprint</b> · {{ recipeStatus(row.item)?.label }}
+                    </span>
                     <span v-for="faction in row.item.acquisition?.factions ?? []" :key="faction.vendorRecord">
                       <b>{{ faction.faction }}</b> · {{ faction.reputation }}
                     </span>
@@ -2660,7 +2695,10 @@ function formatPercentile(value: number | null | undefined): string {
                 {{ row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support')).join(' · ') }}
               </p>
               <footer>
-                {{ row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}
+                <b v-if="recipeStatus(row.item)" class="recipe-status" :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }">
+                  {{ recipeStatus(row.item)?.label }}
+                </b>
+                <span>{{ row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
               </footer>
             </article>
             <p v-if="plannerRows.length === 0" class="skill-empty planner-card-empty">Select at least one skill, or restore an ignored base, to build a shopping list.</p>
@@ -2964,7 +3002,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div v-if="liveStatus?.state === 'ready'" class="live-ready-instructions">
             <strong>{{ liveSyncing ? 'Checking queue…' : `Watching the ${liveStatus.ingestTabDescription}` }}</strong>
             <small>Retrieval target: {{ liveStatus.depositTabDescription }}.</small>
-            <small>Only place Epics or Legendaries in the watched tab.</small>
+            <small>Place Epics, Legendaries, MIs, or named green skill bases in the watched tab.</small>
           </div>
         </section>
         <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>
@@ -2997,10 +3035,10 @@ function formatPercentile(value: number | null | undefined): string {
           <button
             class="vault-action live-action"
             type="button"
-            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length !== 1 || !quarantinedVaultItems.some((item) => selectedVaultIds.includes(item.id))"
+            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0 || selectedVaultIds.some((id) => !quarantinedVaultItems.some((item) => item.id === id))"
             @click="retrieveSelectedLive"
           >
-            {{ vaultBusy ? 'Waiting for game…' : 'Live-return selected quarantine item' }}
+            {{ vaultBusy ? 'Waiting for game…' : `Live-return ${selectedVaultIds.length || ''} selected` }}
           </button>
         </section>
 
@@ -3013,17 +3051,16 @@ function formatPercentile(value: number | null | undefined): string {
             <strong>{{ availableVaultItems.length }}</strong>
           </header>
           <p class="panel-help">
-            Select exactly one copy. Cairn sends it to {{ liveStatus?.depositTabDescription ?? 'the live deposit tab' }}
-            and keeps the archived copy reserved until the game acknowledges receipt.
+            Select one or more copies. Cairn sends them one at a time to {{ liveStatus?.depositTabDescription ?? 'the live deposit tab' }}
+            and commits each return only after the game acknowledges receipt.
           </p>
           <div v-if="availableVaultItems.length" class="vault-item-list selectable">
             <label v-for="item in availableVaultItems" :key="item.id" class="vault-row">
               <input
-                type="radio"
-                name="live-vault-item"
+                type="checkbox"
                 :checked="selectedVaultIds.includes(item.id)"
                 :disabled="vaultBusy"
-                @change="selectedVaultIds = [item.id]"
+                @change="toggleVaultItem(item.id)"
               />
               <div>
                 <strong>{{ item.name }}</strong>
@@ -3035,10 +3072,10 @@ function formatPercentile(value: number | null | undefined): string {
           <button
             class="vault-action live-action"
             type="button"
-            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length !== 1"
+            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0 || selectedVaultIds.some((id) => !availableVaultItems.some((item) => item.id === id))"
             @click="retrieveSelectedLive"
           >
-            {{ vaultBusy ? 'Waiting for game…' : selectedVaultIds.length === 1 ? 'Return selected copy live' : 'Select one stored copy' }}
+            {{ vaultBusy ? 'Waiting for game…' : selectedVaultIds.length ? `Return ${selectedVaultIds.length} selected live` : 'Select stored copies' }}
           </button>
         </article>
         </template>
@@ -3448,6 +3485,9 @@ function formatPercentile(value: number | null | undefined): string {
 
         <section v-if="tooltipItem.acquisition?.sources.length" class="tooltip-section tooltip-acquisition">
           <h4>Acquisition</h4>
+          <p v-if="recipeStatus(tooltipItem)" class="recipe-status" :class="{ known: recipeStatus(tooltipItem)?.known, missing: recipeStatus(tooltipItem)?.known === false }">
+            {{ recipeStatus(tooltipItem)?.label }}
+          </p>
           <p v-for="source in tooltipSources(tooltipItem)" :key="source">{{ source }}</p>
           <p v-if="tooltipItem.acquisition.sources.length > tooltipSources(tooltipItem).length" class="tooltip-location-overflow">
             +{{ tooltipItem.acquisition.sources.length - tooltipSources(tooltipItem).length }} more monster variants

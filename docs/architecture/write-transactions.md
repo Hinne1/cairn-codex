@@ -53,6 +53,12 @@ making the items available twice. This conservative state is also used when a
 commit request was sent but its response was lost, because the file outcome is
 then unknown until hashes and stash contents are audited.
 
+Live multi-selection uses the same invariant at item granularity. The desktop
+queues one copy, waits for the game's durable deposited/rejected receipt, and
+commits that journal operation before queueing the next copy. If the destination
+fills or the hook stops responding, the batch stops: acknowledged items remain
+retrieved and every not-yet-queued copy remains `ingested` in the Archive.
+
 The matching two-item v11 retrieval has now also been accepted by Grim Dawn.
 The game displayed both exact retrieved instances in the designated tab and
 left every other tab intact. The committed stash contained 210 items, including

@@ -5,6 +5,7 @@ import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
 import {
   IPC_CHANNELS,
   type AppStatus,
+  type CharacterSaveProfile,
   type CollectionBasis,
   type CollectionSnapshot,
   type GrimDawnDiscovery,
@@ -255,6 +256,15 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   ipcMain.handle(
     IPC_CHANNELS.discoverGrimDawn,
     (): Promise<GrimDawnDiscovery> => helper.request<GrimDawnDiscovery>('discover-grim-dawn')
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.listCharacters,
+    async (): Promise<CharacterSaveProfile[]> => {
+      const discovered = latestCollection?.discovery ?? await helper.request<GrimDawnDiscovery>('discover-grim-dawn')
+      const installationPath = discovered.installations[0]?.path
+      if (!installationPath) return []
+      return helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.getCachedCollection,
@@ -1041,6 +1051,17 @@ async function runSmokeTest(
       throw new Error('Live queue serializer self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const characterProfiles = await helper.request<CharacterSaveProfile[]>('list-characters', {
+      installationPath: helperSnapshot.discovery.installations[0]?.path
+    })
+    const sanya = characterProfiles.find((profile) => profile.name === 'Sanya' && !profile.error)
+    if (
+      characterProfiles.length === 0 ||
+      characterProfiles.some((profile) => profile.error) ||
+      !sanya?.skills.some((skill) => skill.name === 'Devouring Swarm' && skill.level > 0)
+    ) {
+      throw new Error('Read-only character import did not validate current local and cloud saves.')
+    }
     const factionPlannerItems = helperSnapshot.plannerItems ?? []
     const chosenArcanespark = factionPlannerItems.find((item) => item.name === 'Chosen Arcanespark')
     if (

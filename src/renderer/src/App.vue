@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
+  CharacterSaveProfile,
   CollectionBasis,
   CollectionItem,
   CollectionRaritySummary,
@@ -24,8 +25,19 @@ type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
 type TransferMode = 'live' | 'offline'
-type PlannerDisplay = 'list' | 'map'
+type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
+
+interface PlannerProfile {
+  id: string
+  name: string
+  skills: string[]
+  excludedSkills: string[]
+  levelCap: number
+  source: 'manual' | 'character'
+  characterPath?: string
+  modifiedAt: string
+}
 
 interface SkillMatch {
   skill: string
@@ -77,17 +89,25 @@ const skillSort = ref<SkillSort>('amount')
 const skillSortDirection = ref<SortDirection>('desc')
 const skillPickerOpen = ref(false)
 const skillPickerIndex = ref(0)
-const plannerSkills = ref<string[]>(
-  localStorage.getItem('cairn-codex-planner-skills') === null
-    ? ['Wendigo Totem']
-    : readStoredStringArray('cairn-codex-planner-skills')
-)
+const plannerProfiles = ref<PlannerProfile[]>(readStoredPlannerProfiles())
+const selectedPlannerProfileId = ref(readStoredPlannerProfileId(plannerProfiles.value))
+const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)
+  ?? plannerProfiles.value[0]
+const plannerSkills = ref<string[]>([...(initialPlannerProfile?.skills ?? ['Wendigo Totem'])])
 const plannerSkillDraft = ref('')
-const plannerLevelCap = ref(readStoredPlannerLevelCap())
-const plannerDisplay = ref<PlannerDisplay>('list')
+const plannerProfileDraft = ref('')
+const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? readStoredPlannerLevelCap())
+const plannerDisplay = ref<PlannerDisplay>(readStoredPlannerDisplay())
 const plannerMapScope = ref<PlannerMapScope>('selected')
 const plannerQuery = ref('')
 const plannerOwnership = ref<OwnershipFilter>('all')
+const plannerIgnoredRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-ignored-records'))
+const plannerFavoriteRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-favorite-records'))
+const plannerShowIgnored = ref(false)
+const discoveredCharacters = ref<CharacterSaveProfile[]>([])
+const characterImportOpen = ref(false)
+const characterImportLoading = ref(false)
+const characterImportError = ref<string | null>(null)
 const atlasRegionQuery = ref('')
 const selectedAtlasRegion = ref<string | null>(null)
 const transferMode = ref<TransferMode>('live')
@@ -305,6 +325,15 @@ const plannerCatalogItems = computed(() => [
   ...(snapshot.value?.items ?? []),
   ...(snapshot.value?.plannerItems ?? [])
 ])
+const selectedPlannerProfile = computed(() =>
+  plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value) ?? null
+)
+const plannerIgnoredRecordSet = computed(() => new Set(
+  plannerIgnoredRecords.value.map((record) => record.toLocaleLowerCase())
+))
+const plannerFavoriteRecordSet = computed(() => new Set(
+  plannerFavoriteRecords.value.map((record) => record.toLocaleLowerCase())
+))
 
 const activeArchiveModes = computed(() => new Set(
   stashChoices.value
@@ -423,7 +452,7 @@ const plannerSkillOptions = computed(() => {
     .slice(0, 30)
 })
 
-const plannerRows = computed(() => plannerCatalogItems.value
+const plannerCandidateRows = computed(() => plannerCatalogItems.value
   .filter((item) => item.levelRequirement <= plannerLevelCap.value)
   .filter((item) => {
     const archived = isArchivedItem(item)
@@ -446,6 +475,11 @@ const plannerRows = computed(() => plannerCatalogItems.value
     left.item.levelRequirement - right.item.levelRequirement ||
     left.item.name.localeCompare(right.item.name)
   ))
+
+const plannerRows = computed(() => plannerCandidateRows.value.filter(({ item }) => {
+  const ignored = plannerIgnoredRecordSet.value.has(plannerRecordKey(item))
+  return plannerShowIgnored.value ? ignored : !ignored
+}))
 
 const plannerMiItems = computed(() => {
   const source = plannerMapScope.value === 'selected'
@@ -670,7 +704,121 @@ function addPlannerSkill(skill = plannerSkillDraft.value): void {
 }
 
 function removePlannerSkill(skill: string): void {
+  const profile = selectedPlannerProfile.value
+  if (profile?.source === 'character' && !profile.excludedSkills.includes(skill)) {
+    plannerProfiles.value = plannerProfiles.value.map((candidate) =>
+      candidate.id === profile.id
+        ? { ...candidate, excludedSkills: [...candidate.excludedSkills, skill] }
+        : candidate
+    )
+  }
   plannerSkills.value = plannerSkills.value.filter((candidate) => candidate !== skill)
+}
+
+function restorePlannerSkill(skill: string): void {
+  const profile = selectedPlannerProfile.value
+  if (!profile || plannerSkills.value.includes(skill)) return
+  plannerProfiles.value = plannerProfiles.value.map((candidate) =>
+    candidate.id === profile.id
+      ? { ...candidate, excludedSkills: candidate.excludedSkills.filter((value) => value !== skill) }
+      : candidate
+  )
+  plannerSkills.value = [...plannerSkills.value, skill]
+}
+
+function selectPlannerProfile(profileId: string): void {
+  const profile = plannerProfiles.value.find((candidate) => candidate.id === profileId)
+  if (!profile) return
+  selectedPlannerProfileId.value = profile.id
+  plannerSkills.value = [...profile.skills]
+  plannerLevelCap.value = profile.levelCap
+}
+
+function createPlannerProfile(): void {
+  const name = plannerProfileDraft.value.trim()
+  if (!name) return
+  const profile: PlannerProfile = {
+    id: crypto.randomUUID(),
+    name,
+    skills: [...plannerSkills.value],
+    excludedSkills: [],
+    levelCap: plannerLevelCap.value,
+    source: 'manual',
+    modifiedAt: new Date().toISOString()
+  }
+  plannerProfiles.value = [...plannerProfiles.value, profile]
+  plannerProfileDraft.value = ''
+  selectPlannerProfile(profile.id)
+}
+
+async function loadCharacterProfiles(): Promise<void> {
+  characterImportOpen.value = true
+  characterImportLoading.value = true
+  characterImportError.value = null
+  try {
+    discoveredCharacters.value = await window.cairnCodex.listCharacters()
+  } catch (error) {
+    characterImportError.value = readableError(error)
+  } finally {
+    characterImportLoading.value = false
+  }
+}
+
+function importCharacterProfile(character: CharacterSaveProfile): void {
+  if (character.error) return
+  const validNames = new Map(skillNames.value.map((name) => [name.toLocaleLowerCase(), name]))
+  const parsedSkills = [...new Set(character.skills
+    .map((skill) => validNames.get(skill.name.toLocaleLowerCase()))
+    .filter((skill): skill is string => Boolean(skill)))]
+  const existing = plannerProfiles.value.find((profile) =>
+    profile.source === 'character' && profile.characterPath?.toLocaleLowerCase() === character.path.toLocaleLowerCase()
+  )
+  const excluded = existing?.excludedSkills.filter((skill) => parsedSkills.includes(skill)) ?? []
+  const profile: PlannerProfile = {
+    id: existing?.id ?? crypto.randomUUID(),
+    name: character.name,
+    skills: parsedSkills.filter((skill) => !excluded.includes(skill)),
+    excludedSkills: excluded,
+    levelCap: existing?.levelCap ?? Math.max(70, character.level),
+    source: 'character',
+    characterPath: character.path,
+    modifiedAt: new Date().toISOString()
+  }
+  plannerProfiles.value = existing
+    ? plannerProfiles.value.map((candidate) => candidate.id === existing.id ? profile : candidate)
+    : [...plannerProfiles.value, profile]
+  selectPlannerProfile(profile.id)
+  characterImportOpen.value = false
+}
+
+function deletePlannerProfile(): void {
+  if (plannerProfiles.value.length <= 1) return
+  const index = plannerProfiles.value.findIndex((profile) => profile.id === selectedPlannerProfileId.value)
+  plannerProfiles.value = plannerProfiles.value.filter((profile) => profile.id !== selectedPlannerProfileId.value)
+  const fallback = plannerProfiles.value[Math.max(0, index - 1)] ?? plannerProfiles.value[0]
+  if (fallback) selectPlannerProfile(fallback.id)
+}
+
+function plannerRecordKey(item: CollectionItem): string {
+  return `${item.rarity}:${item.slot}:${normalizeLoose(item.name)}`
+}
+
+function isPlannerFavorite(item: CollectionItem): boolean {
+  return plannerFavoriteRecordSet.value.has(plannerRecordKey(item))
+}
+
+function togglePlannerFavorite(item: CollectionItem): void {
+  const key = plannerRecordKey(item)
+  plannerFavoriteRecords.value = plannerFavoriteRecordSet.value.has(key)
+    ? plannerFavoriteRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
+    : [...plannerFavoriteRecords.value, key]
+}
+
+function togglePlannerIgnored(item: CollectionItem): void {
+  const key = plannerRecordKey(item)
+  plannerIgnoredRecords.value = plannerIgnoredRecordSet.value.has(key)
+    ? plannerIgnoredRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
+    : [...plannerIgnoredRecords.value, key]
 }
 
 function handleSkillPickerKey(event: KeyboardEvent): void {
@@ -718,6 +866,31 @@ watch(plannerSkills, (skills) => {
   localStorage.setItem('cairn-codex-planner-skills', JSON.stringify(skills))
 }, { deep: true })
 watch(plannerLevelCap, (level) => localStorage.setItem('cairn-codex-planner-level-cap', String(level)))
+watch(plannerDisplay, (display) => localStorage.setItem('cairn-codex-planner-display', display))
+watch([plannerSkills, plannerLevelCap], () => {
+  plannerProfiles.value = plannerProfiles.value.map((profile) =>
+    profile.id === selectedPlannerProfileId.value
+      ? {
+          ...profile,
+          skills: [...plannerSkills.value],
+          levelCap: plannerLevelCap.value,
+          modifiedAt: new Date().toISOString()
+        }
+      : profile
+  )
+}, { deep: true })
+watch(plannerProfiles, (profiles) => {
+  localStorage.setItem('cairn-codex-planner-profiles', JSON.stringify(profiles))
+}, { deep: true, immediate: true })
+watch(selectedPlannerProfileId, (profileId) => {
+  localStorage.setItem('cairn-codex-planner-profile', profileId)
+})
+watch(plannerIgnoredRecords, (records) => {
+  localStorage.setItem('cairn-codex-planner-ignored-records', JSON.stringify(records))
+}, { deep: true })
+watch(plannerFavoriteRecords, (records) => {
+  localStorage.setItem('cairn-codex-planner-favorite-records', JSON.stringify(records))
+}, { deep: true })
 watch([plannerMapScope, plannerLevelCap, plannerSkills], () => {
   selectedAtlasRegion.value = null
 })
@@ -872,6 +1045,51 @@ function readStoredStringArray(key: string): string[] {
   } catch {
     return []
   }
+}
+
+function readStoredPlannerProfiles(): PlannerProfile[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('cairn-codex-planner-profiles') ?? '[]') as unknown
+    if (Array.isArray(parsed)) {
+      const profiles = parsed.filter((value): value is PlannerProfile => {
+        if (!value || typeof value !== 'object') return false
+        const profile = value as Partial<PlannerProfile>
+        return typeof profile.id === 'string' && typeof profile.name === 'string' &&
+          Array.isArray(profile.skills) && profile.skills.every((skill) => typeof skill === 'string') &&
+          typeof profile.levelCap === 'number'
+      }).map((profile) => ({
+        ...profile,
+        excludedSkills: Array.isArray(profile.excludedSkills) ? profile.excludedSkills : [],
+        source: profile.source === 'character' ? 'character' as const : 'manual' as const,
+        modifiedAt: profile.modifiedAt || new Date().toISOString()
+      }))
+      if (profiles.length > 0) return profiles
+    }
+  } catch {
+    // Fall through to the legacy planner migration below.
+  }
+  const legacySkills = localStorage.getItem('cairn-codex-planner-skills') === null
+    ? ['Wendigo Totem']
+    : readStoredStringArray('cairn-codex-planner-skills')
+  return [{
+    id: crypto.randomUUID(),
+    name: 'Current build',
+    skills: legacySkills,
+    excludedSkills: [],
+    levelCap: readStoredPlannerLevelCap(),
+    source: 'manual',
+    modifiedAt: new Date().toISOString()
+  }]
+}
+
+function readStoredPlannerProfileId(profiles: PlannerProfile[]): string {
+  const stored = localStorage.getItem('cairn-codex-planner-profile')
+  return profiles.some((profile) => profile.id === stored) ? stored! : profiles[0]?.id ?? ''
+}
+
+function readStoredPlannerDisplay(): PlannerDisplay {
+  const stored = localStorage.getItem('cairn-codex-planner-display')
+  return stored === 'grid' || stored === 'map' ? stored : 'list'
 }
 
 function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number): number {
@@ -2236,12 +2454,35 @@ function formatPercentile(value: number | null | undefined): string {
             <p>Pick the skills your character actually uses. Cairn merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route.</p>
           </div>
           <div class="segmented-control planner-display" aria-label="Planner display">
-            <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">Shopping list</button>
+            <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">Table</button>
+            <button type="button" :class="{ active: plannerDisplay === 'grid' }" @click="plannerDisplay = 'grid'">Cards</button>
             <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI sources</button>
           </div>
         </header>
 
         <div class="planner-controls">
+          <div class="planner-profile-control">
+            <label for="planner-profile-select">Saved character / build</label>
+            <span>
+              <select
+                id="planner-profile-select"
+                :value="selectedPlannerProfileId"
+                @change="selectPlannerProfile(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="profile in plannerProfiles" :key="profile.id" :value="profile.id">
+                  {{ profile.name }}{{ profile.source === 'character' ? ' · imported' : '' }}
+                </option>
+              </select>
+              <button type="button" :disabled="plannerProfiles.length <= 1" title="Delete this build" @click="deletePlannerProfile">Delete</button>
+            </span>
+            <span class="planner-profile-create">
+              <input v-model="plannerProfileDraft" type="text" maxlength="60" placeholder="Save current skills as…" @keydown.enter.prevent="createPlannerProfile" />
+              <button type="button" :disabled="!plannerProfileDraft.trim()" @click="createPlannerProfile">Save as</button>
+            </span>
+            <button type="button" class="planner-character-import-button" @click="loadCharacterProfiles">
+              Import / refresh character saves
+            </button>
+          </div>
           <div class="planner-skill-control">
             <label for="planner-skill-input">Add a skill</label>
             <span>
@@ -2277,9 +2518,37 @@ function formatPercentile(value: number | null | undefined): string {
             </button>
             <small v-if="plannerSkills.length === 0">Add two or three build-defining skills to begin.</small>
           </div>
+          <div v-if="selectedPlannerProfile?.excludedSkills.length" class="planner-excluded-skills">
+            <small>Ignored character skills</small>
+            <button v-for="skill in selectedPlannerProfile.excludedSkills" :key="skill" type="button" @click="restorePlannerSkill(skill)">
+              + {{ skill }}
+            </button>
+          </div>
+          <section v-if="characterImportOpen" class="planner-character-import">
+            <header>
+              <span><strong>Character saves</strong><small>Read-only import. Existing profiles refresh without losing excluded skills.</small></span>
+              <button type="button" aria-label="Close character importer" @click="characterImportOpen = false">×</button>
+            </header>
+            <p v-if="characterImportLoading">Reading and validating local and Steam Cloud saves…</p>
+            <p v-else-if="characterImportError" class="planner-character-error">{{ characterImportError }}</p>
+            <div v-else class="planner-character-list">
+              <button
+                v-for="character in discoveredCharacters"
+                :key="character.path"
+                type="button"
+                :disabled="Boolean(character.error)"
+                :title="character.error ?? character.path"
+                @click="importCharacterProfile(character)"
+              >
+                <span><strong>{{ character.name }}</strong><small>{{ character.isHardcore ? 'HC' : 'SC' }} · Lv{{ character.level }} · {{ character.skills.length }} allocated skill records</small></span>
+                <b v-if="character.error">Unreadable</b><b v-else>Import</b>
+              </button>
+              <p v-if="discoveredCharacters.length === 0">No character saves were found.</p>
+            </div>
+          </section>
         </div>
 
-        <template v-if="plannerDisplay === 'list'">
+        <template v-if="plannerDisplay !== 'map'">
           <div class="planner-filterbar">
             <input v-model="plannerQuery" type="search" placeholder="Filter items, monsters, areas… (try zarias)" />
             <div class="segmented-control" aria-label="Archive ownership">
@@ -2287,13 +2556,16 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" :class="{ active: plannerOwnership === 'owned' }" @click="plannerOwnership = 'owned'">In Archive</button>
               <button type="button" :class="{ active: plannerOwnership === 'missing' }" @click="plannerOwnership = 'missing'">Not archived</button>
             </div>
+            <button type="button" class="planner-ignored-filter" :class="{ active: plannerShowIgnored }" @click="plannerShowIgnored = !plannerShowIgnored">
+              {{ plannerShowIgnored ? 'Back to list' : `Ignored (${plannerIgnoredRecords.length})` }}
+            </button>
           </div>
           <div class="planner-summary">
             <span><strong>{{ plannerRows.length }}</strong> relevant item tiers</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'mi').length }}</strong> MIs</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
           </div>
-          <div class="planner-table-wrap">
+          <div v-if="plannerDisplay === 'list'" class="planner-table-wrap">
             <table class="planner-table">
               <thead>
                 <tr><th>Level</th><th>Item</th><th>Supports</th><th>What it does</th><th>How to get it</th></tr>
@@ -2302,6 +2574,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <tr
                   v-for="row in plannerRows"
                   :key="row.item.record"
+                  :class="{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }"
                   tabindex="0"
                   @mouseenter="queueTooltip(row.item, $event)"
                   @mousemove="moveTooltip"
@@ -2318,6 +2591,10 @@ function formatPercentile(value: number | null | undefined): string {
                       <span>
                         <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
                         <small class="planner-item-type">{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="isArchivedItem(row.item)" class="archive-mark"> · Archived</span></small>
+                        <span class="planner-item-actions">
+                          <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
+                          <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore base' }}</button>
+                        </span>
                         <small>{{ row.item.rarity === 'faction' ? 'Faction rare' : row.item.rarity }} · {{ row.item.slot }}</small>
                       </span>
                     </span>
@@ -2347,6 +2624,46 @@ function formatPercentile(value: number | null | undefined): string {
                 <tr v-if="plannerRows.length === 0"><td colspan="5" class="skill-empty">Select at least one skill, or raise the level cap, to build a shopping list.</td></tr>
               </tbody>
             </table>
+          </div>
+          <div v-else class="planner-card-grid">
+            <article
+              v-for="row in plannerRows"
+              :key="row.item.record"
+              class="planner-card"
+              :class="[{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }, `rarity-${row.item.rarity}`]"
+              tabindex="0"
+              @mouseenter="queueTooltip(row.item, $event)"
+              @mousemove="moveTooltip"
+              @mouseleave="scheduleTooltipHide"
+              @focus="queueTooltip(row.item, $event)"
+              @blur="scheduleTooltipHide"
+              @click="openItem(row.item)"
+              @keydown.enter="openItem(row.item)"
+            >
+              <header>
+                <span class="planner-card-level">Lv{{ row.item.levelRequirement }}</span>
+                <span class="planner-card-actions">
+                  <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
+                  <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore' }}</button>
+                </span>
+              </header>
+              <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
+              <div class="planner-card-title">
+                <strong>{{ row.item.name }}</strong>
+                <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="isArchivedItem(row.item)" class="archive-mark"> · Archived</span></small>
+              </div>
+              <div class="planner-match-skills">
+                <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
+              </div>
+              <p v-if="row.petBonuses.length" class="planner-card-pets"><b>All pets</b> {{ row.petBonuses.join('; ') }}</p>
+              <p class="planner-card-effect">
+                {{ row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support')).join(' · ') }}
+              </p>
+              <footer>
+                {{ row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}
+              </footer>
+            </article>
+            <p v-if="plannerRows.length === 0" class="skill-empty planner-card-empty">Select at least one skill, or restore an ignored base, to build a shopping list.</p>
           </div>
         </template>
 

@@ -3,6 +3,7 @@ import {
   IPC_CHANNELS,
   type AppStatus,
   type CairnCodexApi,
+  type CharacterSaveProfile,
   type CollectionSnapshot,
   type GrimDawnDiscovery,
   type IngestResult,
@@ -23,6 +24,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.getCachedCollection, { sourcePaths, basis }) as Promise<CollectionSnapshot | null>,
   discoverGrimDawn: () =>
     ipcRenderer.invoke(IPC_CHANNELS.discoverGrimDawn) as Promise<GrimDawnDiscovery>,
+  listCharacters: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.listCharacters) as Promise<CharacterSaveProfile[]>,
   scanCollection: (sourcePaths, basis) =>
     ipcRenderer.invoke(IPC_CHANNELS.scanCollection, { sourcePaths, basis }) as Promise<CollectionSnapshot>,
   rebuildGameDataIndex: (sourcePaths, basis) =>

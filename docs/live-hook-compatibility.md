@@ -66,3 +66,24 @@ the worker handshake, status inspection, disconnect signaling, and game-process
 survival were verified on 2026-08-15 without opening either item queue. The
 first item round trip remains a release follow-up. Live mode remains explicitly
 opt-in because it mutates the running game process.
+
+## Planned local compatibility approval
+
+A future "Compatibility Lab" may let an advanced user approve an exact new
+`Game.dll` fingerprint locally. It must not be a generic bypass for the allowlist.
+Approval is earned by one guided, recoverable round trip:
+
+1. Record the game version, Steam build, `Game.dll`, hook, and injector hashes.
+2. Snapshot the archive database, live queues, receipts, and relevant save files.
+3. Complete a handshake-only injection and confirm that the game remains alive.
+4. Ingest one explicitly selected sacrificial Epic or Legendary and verify its
+   durable incoming receipt and exact archived replica before acknowledging it.
+5. Retrieve that same instance, verify the outgoing receipt, and have the user
+   confirm it is visible and usable in game.
+6. Persist approval for that exact five-part fingerprint only. Any changed hash
+   invalidates approval immediately.
+
+The workflow must time out safely, retain diagnostics and recovery artifacts,
+and never infer success merely because injection or ingest succeeded. Until this
+state machine is implemented and tested, new game builds remain fail-closed and
+must be added to the shipped allowlist after a maintainer-run round trip.

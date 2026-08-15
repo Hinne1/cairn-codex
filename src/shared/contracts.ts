@@ -3,6 +3,7 @@ export const IPC_CHANNELS = {
   setZoomFactor: 'app:set-zoom-factor',
   getCachedCollection: 'collection:get-cached',
   discoverGrimDawn: 'grim-dawn:discover',
+  listCharacters: 'grim-dawn:list-characters',
   scanCollection: 'grim-dawn:scan-collection',
   rebuildGameDataIndex: 'grim-dawn:rebuild-game-data-index',
   setPinnedBest: 'collection:set-pinned-best',
@@ -30,6 +31,7 @@ export interface CairnCodexApi {
   getAppStatus: () => Promise<AppStatus>
   setZoomFactor: (factor: number) => Promise<number>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
+  listCharacters: () => Promise<CharacterSaveProfile[]>
   getCachedCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot | null>
   scanCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   rebuildGameDataIndex: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
@@ -161,6 +163,24 @@ export interface RetrievalResult {
 export interface GrimDawnDiscovery {
   installations: GrimDawnInstallation[]
   saveLocations: GrimDawnSaveLocation[]
+}
+
+export interface CharacterSaveProfile {
+  path: string
+  name: string
+  level: number
+  isHardcore: boolean
+  classRecord: string
+  skills: CharacterSaveSkill[]
+  lastWriteUtc: string
+  error: string | null
+}
+
+export interface CharacterSaveSkill {
+  record: string
+  name: string
+  level: number
+  enabled: boolean
 }
 
 export interface GrimDawnInstallation {

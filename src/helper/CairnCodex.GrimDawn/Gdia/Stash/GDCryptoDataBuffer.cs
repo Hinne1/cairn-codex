@@ -209,7 +209,7 @@ namespace IAGrim.StashFile {
             else {
                 bool flag2 = len > 0u;
                 if (flag2) {
-                    bool flag3 = (long)base.Cursor + (long)((ulong)len) > (long)base.Length;
+                    bool flag3 = (long)base.Cursor + len > base.Length;
                     if (flag3) {
                         result = false;
                         return result;
@@ -243,7 +243,8 @@ namespace IAGrim.StashFile {
             else {
                 bool flag2 = len > 0u;
                 if (flag2) {
-                    bool flag3 = (long)base.Cursor + (long)((ulong)len) > (long)base.Length;
+                    bool flag3 = len > int.MaxValue / 2 ||
+                        (long)base.Cursor + (long)len * 2 > (long)base.Length;
                     if (flag3) {
                         result = false;
                         return result;
@@ -260,7 +261,7 @@ namespace IAGrim.StashFile {
                         this.m_Key ^= this.m_Table[(int)array[i]];
                         array[i] = (byte)num2;
                     }
-                    pValue = Encoding.UTF8.GetString(array, 0, array.Length);
+                    pValue = Encoding.Unicode.GetString(array, 0, array.Length);
                 }
                 result = true;
             }

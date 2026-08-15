@@ -29,6 +29,7 @@ while ((line = Console.ReadLine()) is not null)
                 mode = "read-only"
             }),
             "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
+            "list-characters" => ListCharacters(request),
             "build-item-catalog" => BuildItemCatalog(request),
             "inspect-game-record" => InspectGameRecord(request),
             "inspect-game-records" => InspectGameRecords(request),
@@ -136,6 +137,13 @@ HelperResponse BuildItemCatalog(HelperRequest request)
     var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
         ?? throw new JsonException("build-item-catalog requires an installationPath parameter.");
     return HelperResponse.Success(request.Id, ItemCatalogBuilder.Build(parameters.InstallationPath));
+}
+
+HelperResponse ListCharacters(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
+        ?? throw new JsonException("list-characters requires an installationPath parameter.");
+    return HelperResponse.Success(request.Id, CharacterSaveReader.Discover(parameters.InstallationPath));
 }
 
 HelperResponse InspectGameRecord(HelperRequest request)

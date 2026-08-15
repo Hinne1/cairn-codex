@@ -101,6 +101,8 @@ const plannerSkillDraft = ref('')
 const plannerProfileDraft = ref('')
 const plannerMinimumLevel = ref(initialPlannerProfile?.minimumLevel ?? 1)
 const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? readStoredPlannerLevelCap())
+const plannerMinimumLevelDraft = ref(plannerMinimumLevel.value)
+const plannerLevelCapDraft = ref(plannerLevelCap.value)
 const plannerDisplay = ref<PlannerDisplay>(readStoredPlannerDisplay())
 const plannerMapScope = ref<PlannerMapScope>('selected')
 const plannerQuery = ref('')
@@ -740,6 +742,18 @@ function selectPlannerProfile(profileId: string): void {
   plannerLevelCap.value = profile.levelCap
 }
 
+function commitPlannerMinimumLevel(): void {
+  const next = Math.min(plannerLevelCap.value, Math.max(1, Number(plannerMinimumLevelDraft.value) || 1))
+  plannerMinimumLevelDraft.value = next
+  plannerMinimumLevel.value = next
+}
+
+function commitPlannerLevelCap(): void {
+  const next = Math.max(plannerMinimumLevel.value, Math.min(100, Number(plannerLevelCapDraft.value) || 100))
+  plannerLevelCapDraft.value = next
+  plannerLevelCap.value = next
+}
+
 function createPlannerProfile(): void {
   const name = plannerProfileDraft.value.trim()
   if (!name) return
@@ -898,9 +912,11 @@ watch(plannerSkills, (skills) => {
 }, { deep: true })
 watch(plannerLevelCap, (level) => localStorage.setItem('cairn-codex-planner-level-cap', String(level)))
 watch(plannerMinimumLevel, (level) => {
+  plannerMinimumLevelDraft.value = level
   if (level > plannerLevelCap.value) plannerLevelCap.value = level
 })
 watch(plannerLevelCap, (level) => {
+  plannerLevelCapDraft.value = level
   if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
 })
 watch(plannerDisplay, (display) => localStorage.setItem('cairn-codex-planner-display', display))
@@ -2554,13 +2570,13 @@ function formatPercentile(value: number | null | undefined): string {
           <div class="planner-level-range" aria-label="Item level range">
             <label class="planner-level-control">
               <span>Minimum item level</span>
-              <input v-model.number="plannerMinimumLevel" type="range" min="1" :max="plannerLevelCap" step="1" />
-              <input v-model.number="plannerMinimumLevel" type="number" min="1" :max="plannerLevelCap" />
+              <input v-model.number="plannerMinimumLevelDraft" type="range" min="1" :max="plannerLevelCapDraft" step="1" @change="commitPlannerMinimumLevel" />
+              <input v-model.number="plannerMinimumLevelDraft" type="number" min="1" :max="plannerLevelCapDraft" @change="commitPlannerMinimumLevel" @keydown.enter.prevent="commitPlannerMinimumLevel" />
             </label>
             <label class="planner-level-control">
               <span>Level cap</span>
-              <input v-model.number="plannerLevelCap" type="range" :min="plannerMinimumLevel" max="100" step="1" />
-              <input v-model.number="plannerLevelCap" type="number" :min="plannerMinimumLevel" max="100" />
+              <input v-model.number="plannerLevelCapDraft" type="range" :min="plannerMinimumLevelDraft" max="100" step="1" @change="commitPlannerLevelCap" />
+              <input v-model.number="plannerLevelCapDraft" type="number" :min="plannerMinimumLevelDraft" max="100" @change="commitPlannerLevelCap" @keydown.enter.prevent="commitPlannerLevelCap" />
             </label>
           </div>
           <div class="planner-skill-chips" aria-label="Selected skills">

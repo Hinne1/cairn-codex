@@ -33,9 +33,11 @@ interface PlannerProfile {
   name: string
   skills: string[]
   excludedSkills: string[]
+  minimumLevel: number
   levelCap: number
   source: 'manual' | 'character'
   characterPath?: string
+  characterLevel?: number
   isHardcore?: boolean
   modifiedAt: string
 }
@@ -97,6 +99,7 @@ const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id
 const plannerSkills = ref<string[]>([...(initialPlannerProfile?.skills ?? ['Wendigo Totem'])])
 const plannerSkillDraft = ref('')
 const plannerProfileDraft = ref('')
+const plannerMinimumLevel = ref(initialPlannerProfile?.minimumLevel ?? 1)
 const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? readStoredPlannerLevelCap())
 const plannerDisplay = ref<PlannerDisplay>(readStoredPlannerDisplay())
 const plannerMapScope = ref<PlannerMapScope>('selected')
@@ -454,6 +457,7 @@ const plannerSkillOptions = computed(() => {
 })
 
 const plannerCandidateRows = computed(() => plannerCatalogItems.value
+  .filter((item) => item.levelRequirement >= plannerMinimumLevel.value)
   .filter((item) => item.levelRequirement <= plannerLevelCap.value)
   .filter((item) => {
     const archived = isArchivedItem(item)
@@ -732,6 +736,7 @@ function selectPlannerProfile(profileId: string): void {
   if (!profile) return
   selectedPlannerProfileId.value = profile.id
   plannerSkills.value = [...profile.skills]
+  plannerMinimumLevel.value = profile.minimumLevel
   plannerLevelCap.value = profile.levelCap
 }
 
@@ -743,6 +748,7 @@ function createPlannerProfile(): void {
     name,
     skills: [...plannerSkills.value],
     excludedSkills: [],
+    minimumLevel: plannerMinimumLevel.value,
     levelCap: plannerLevelCap.value,
     source: 'manual',
     modifiedAt: new Date().toISOString()
@@ -780,9 +786,11 @@ function importCharacterProfile(character: CharacterSaveProfile): void {
     name: character.name,
     skills: parsedSkills.filter((skill) => !excluded.includes(skill)),
     excludedSkills: excluded,
+    minimumLevel: existing?.characterLevel === undefined ? character.level : existing.minimumLevel,
     levelCap: existing?.levelCap ?? Math.max(70, character.level),
     source: 'character',
     characterPath: character.path,
+    characterLevel: character.level,
     isHardcore: character.isHardcore,
     modifiedAt: new Date().toISOString()
   }
@@ -889,13 +897,20 @@ watch(plannerSkills, (skills) => {
   localStorage.setItem('cairn-codex-planner-skills', JSON.stringify(skills))
 }, { deep: true })
 watch(plannerLevelCap, (level) => localStorage.setItem('cairn-codex-planner-level-cap', String(level)))
+watch(plannerMinimumLevel, (level) => {
+  if (level > plannerLevelCap.value) plannerLevelCap.value = level
+})
+watch(plannerLevelCap, (level) => {
+  if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
+})
 watch(plannerDisplay, (display) => localStorage.setItem('cairn-codex-planner-display', display))
-watch([plannerSkills, plannerLevelCap], () => {
+watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   plannerProfiles.value = plannerProfiles.value.map((profile) =>
     profile.id === selectedPlannerProfileId.value
       ? {
           ...profile,
           skills: [...plannerSkills.value],
+          minimumLevel: plannerMinimumLevel.value,
           levelCap: plannerLevelCap.value,
           modifiedAt: new Date().toISOString()
         }
@@ -914,7 +929,7 @@ watch(plannerIgnoredRecords, (records) => {
 watch(plannerFavoriteRecords, (records) => {
   localStorage.setItem('cairn-codex-planner-favorite-records', JSON.stringify(records))
 }, { deep: true })
-watch([plannerMapScope, plannerLevelCap, plannerSkills], () => {
+watch([plannerMapScope, plannerMinimumLevel, plannerLevelCap, plannerSkills], () => {
   selectedAtlasRegion.value = null
 })
 watch(visibleAtlasRegions, (regions) => {
@@ -1083,6 +1098,9 @@ function readStoredPlannerProfiles(): PlannerProfile[] {
       }).map((profile) => ({
         ...profile,
         excludedSkills: Array.isArray(profile.excludedSkills) ? profile.excludedSkills : [],
+        minimumLevel: typeof profile.minimumLevel === 'number'
+          ? Math.min(100, Math.max(1, profile.minimumLevel))
+          : 1,
         source: profile.source === 'character' ? 'character' as const : 'manual' as const,
         modifiedAt: profile.modifiedAt || new Date().toISOString()
       }))
@@ -1099,6 +1117,7 @@ function readStoredPlannerProfiles(): PlannerProfile[] {
     name: 'Current build',
     skills: legacySkills,
     excludedSkills: [],
+    minimumLevel: 1,
     levelCap: readStoredPlannerLevelCap(),
     source: 'manual',
     modifiedAt: new Date().toISOString()
@@ -2289,7 +2308,7 @@ function formatPercentile(value: number | null | undefined): string {
           <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
         </button>
         <button type="button" :class="{ active: activeView === 'planner' }" @click="activeView = 'planner'">
-          <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · to {{ plannerLevelCap }}</small>
+          <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · Lv{{ plannerMinimumLevel }}–{{ plannerLevelCap }}</small>
         </button>
         <button type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
           <span>MI Workshop</span><small>{{ miWorkshopRows.length }} affix combinations</small>
@@ -2532,11 +2551,18 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" :disabled="plannerSkillOptions.length === 0" @click="addPlannerSkill()">Add</button>
             </span>
           </div>
-          <label class="planner-level-control">
-            <span>Level cap</span>
-            <input v-model.number="plannerLevelCap" type="range" min="1" max="100" step="1" />
-            <input v-model.number="plannerLevelCap" type="number" min="1" max="100" />
-          </label>
+          <div class="planner-level-range" aria-label="Item level range">
+            <label class="planner-level-control">
+              <span>Minimum item level</span>
+              <input v-model.number="plannerMinimumLevel" type="range" min="1" :max="plannerLevelCap" step="1" />
+              <input v-model.number="plannerMinimumLevel" type="number" min="1" :max="plannerLevelCap" />
+            </label>
+            <label class="planner-level-control">
+              <span>Level cap</span>
+              <input v-model.number="plannerLevelCap" type="range" :min="plannerMinimumLevel" max="100" step="1" />
+              <input v-model.number="plannerLevelCap" type="number" :min="plannerMinimumLevel" max="100" />
+            </label>
+          </div>
           <div class="planner-skill-chips" aria-label="Selected skills">
             <button
               v-for="skill in plannerSkills"
@@ -2660,7 +2686,7 @@ function formatPercentile(value: number | null | undefined): string {
                     <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map(locationDisplayName).slice(0, 2).join(', ') }}</small>
                   </td>
                 </tr>
-                <tr v-if="plannerRows.length === 0"><td colspan="5" class="skill-empty">Select at least one skill, or raise the level cap, to build a shopping list.</td></tr>
+                <tr v-if="plannerRows.length === 0"><td colspan="5" class="skill-empty">Select at least one skill, or widen the item level range, to build a shopping list.</td></tr>
               </tbody>
             </table>
           </div>

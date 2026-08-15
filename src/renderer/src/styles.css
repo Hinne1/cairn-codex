@@ -437,6 +437,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .planner-skill-control input { min-width: 0; flex: 1; padding: 10px 12px; border: 1px solid #465866; border-radius: 5px 0 0 5px; color: #d9e6eb; background: #161a1c; }
 .planner-skill-control button { padding: 0 18px; border: 1px solid #607787; border-left: 0; border-radius: 0 5px 5px 0; color: #bad3df; background: #273943; cursor: pointer; }
 .planner-skill-control button:disabled { opacity: .4; cursor: default; }
+.planner-level-range { display: grid; gap: 12px; }
 .planner-level-control { grid-template-columns: auto 1fr 64px; align-items: center; }
 .planner-level-control > span { grid-column: 1 / -1; }
 .planner-level-control input[type="range"] { accent-color: #69a3bd; }

@@ -33,18 +33,37 @@ button, select { color: inherit; }
   backdrop-filter: blur(14px);
 }
 .topbar > div:first-child { flex-shrink: 0; }
-.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.topbar-actions { display: flex; flex: 1; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
 .source-pill { padding: 8px 12px; border: 1px solid #403a2c; border-radius: 999px; color: #a99b77; background: #171613; font-size: 10px; }
-.system-nav { display: flex; gap: 4px; padding: 4px; border: 1px solid #373229; border-radius: 7px; background: #171613; }
+.system-nav { display: flex; flex-shrink: 0; gap: 4px; padding: 4px; border: 1px solid #373229; border-radius: 7px; background: #171613; }
 .system-nav button { padding: 8px 12px; border: 0; border-radius: 4px; color: #918876; background: transparent; cursor: pointer; font-size: 11px; }
 .system-nav button:hover { color: #dec68f; }
 .system-nav button.active { color: #f0d598; background: #372e21; }
-.game-status-pill { display: flex; align-items: center; gap: 9px; min-width: 190px; padding: 8px 12px; border: 1px solid #403a2c; border-radius: 7px; background: #171613; }
-.game-status-pill > span:last-child { display: grid; gap: 2px; }
+.connection-control { position: relative; display: flex; flex: 0 1 330px; align-items: stretch; min-width: 190px; }
+.game-status-pill { display: flex; flex: 1; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px 8px 12px; border: 1px solid #403a2c; border-radius: 7px 0 0 7px; background: #171613; cursor: pointer; text-align: left; }
+.game-status-pill:disabled { cursor: wait; opacity: .72; }
+.game-status-pill > span:nth-child(2) { display: grid; flex: 1; gap: 2px; }
 .game-status-pill strong { color: #bcb39c; font-size: 10px; font-weight: 600; }
 .game-status-pill small { color: #6f685c; font-size: 8px; text-transform: uppercase; }
+.game-status-pill em { padding-left: 8px; border-left: 1px solid #393329; color: #b79452; font-size: 9px; font-style: normal; text-transform: uppercase; }
 .game-status-pill.state-ready { border-color: #58643b; background: #1d2418; }
 .game-status-pill.state-ready strong { color: #c9dc8a; }
+.connection-info-button { width: 34px; border: 1px solid #403a2c; border-left: 0; border-radius: 0 7px 7px 0; color: #9e947f; background: #1c1a16; cursor: pointer; font: italic 600 13px Georgia, serif; }
+.connection-info-button:hover, .connection-info-button[aria-expanded='true'] { color: #edcf87; background: #2c261d; }
+.connection-diagnostics { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; width: min(420px, calc(100vw - 48px)); padding: 18px; border: 1px solid #5b4c33; border-radius: 8px; background: rgba(24, 22, 18, .99); box-shadow: 0 18px 50px rgba(0,0,0,.58); }
+.connection-diagnostics header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.connection-diagnostics h3 { margin: 0; color: #e7dbc1; font-size: 20px; font-weight: 500; }
+.connection-diagnostics header > button { border: 0; color: #8f8676; background: transparent; cursor: pointer; font-size: 20px; }
+.connection-diagnostics > p { margin: 14px 0; color: #a39a89; font-size: 11px; line-height: 1.5; }
+.connection-diagnostics dl { display: grid; gap: 1px; margin: 0; overflow: hidden; border: 1px solid #373229; border-radius: 5px; }
+.connection-diagnostics dl > div { display: grid; grid-template-columns: 105px 1fr; gap: 12px; padding: 8px 10px; background: #151411; }
+.connection-diagnostics dt { color: #716a5f; font-size: 9px; text-transform: uppercase; }
+.connection-diagnostics dd { min-width: 0; margin: 0; overflow: hidden; color: #c8bda6; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.connection-diagnostics code { color: #d3b66f; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.connection-recommendation { display: grid; gap: 4px; margin-top: 12px; padding: 11px; border-left: 2px solid #b4873f; color: #9e9583; background: #201c16; font-size: 10px; line-height: 1.45; }
+.connection-recommendation strong { color: #d7bd7e; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.connection-diagnostics footer { display: flex; gap: 7px; margin-top: 13px; }
+.connection-diagnostics footer button { padding: 8px 10px; border: 1px solid #51442f; border-radius: 4px; color: #d5bc80; background: #2b251c; cursor: pointer; font-size: 10px; }
 
 .eyebrow, .section-label {
   margin: 0 0 5px;
@@ -528,6 +547,10 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .settings-toggle strong { color: #d6c5a3; font-size: 12px; }
 .settings-toggle small { color: #797164; font-size: 10px; }
 .settings-status { display: flex; align-items: center; gap: 8px; color: #82796a; font-size: 10px; }
+.settings-status > span:last-child { display: grid; gap: 3px; }
+.settings-status strong { color: #c8bda7; font-size: 11px; }
+.settings-recommendation { padding-left: 11px; border-left: 2px solid #8b6c37; }
+.settings-recommendation strong { color: #cdb478; }
 .zoom-controls { display: flex; align-items: center; gap: 7px; }
 .zoom-controls button, .settings-card select { padding: 8px 11px; border: 1px solid #51452f; border-radius: 5px; color: #d2bd88; background: #2a241b; cursor: pointer; }
 .zoom-controls strong { min-width: 56px; color: #e2cf9e; text-align: center; }
@@ -620,6 +643,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
   .metrics, .workspace-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mi-source-layout { grid-template-columns: 1fr; }
   .mi-atlas-regions { grid-template-columns: repeat(2, minmax(0,1fr)); max-height: 320px; }
+  .topbar { gap: 18px; }
+  .connection-control { flex-basis: 230px; }
+  .game-status-pill small { display: none; }
 }
 
 @media (max-width: 900px) {
@@ -637,6 +663,12 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 
 @media (max-width: 760px) {
   .topbar, main { padding-left: 24px; padding-right: 24px; }
+  .topbar h1 { font-size: 21px; }
+  .topbar .eyebrow { display: none; }
+  .system-nav button { padding-inline: 8px; }
+  .connection-control { min-width: 150px; }
+  .game-status-pill { padding-inline: 9px; }
+  .game-status-pill em { display: none; }
   .hero { align-items: start; flex-direction: column; }
   .metrics { grid-template-columns: 1fr; }
   .filter-bar select { flex: 1; }

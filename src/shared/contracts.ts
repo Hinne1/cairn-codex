@@ -70,6 +70,12 @@ export interface LiveGameStatus {
   hostWindowReady: boolean
   injectorOutput: string | null
   messages: Array<{ type: number; dataHex: string; receivedAtUtc: string }>
+  gameVersion: string | null
+  gameBuildId: string | null
+  gameDllSha256: string | null
+  gameDllLastWriteUtc: string | null
+  hookSha256: string | null
+  recommendation: string | null
 }
 
 export interface LiveGameSyncResult {

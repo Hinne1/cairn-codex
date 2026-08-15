@@ -50,13 +50,19 @@ local-app-data directory to `%APPDATA%\cairn-codex\live-adapter`. This isolates
 Cairn's settings, queues, replicas, and hook log from any existing or removed
 Item Assistant installation.
 
-Allowlisted development target:
+Allowlisted targets:
 
 - Grim Dawn: `1.3.0.6` (x64)
 - `Game.dll` SHA-256:
   `d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7`
+- Grim Dawn: `1.3.0.7` (x64), Steam build `24742013`
+- `Game.dll` SHA-256:
+  `4a746c1e455d30e4c95a591eeead77f03d6187cd66aa1e3191ee25fb25a419aa`
 
 The allowlist entry means the corrected binary layout and Cairn Codex queue
-contract were verified for this exact target. Live ingest and retrieval have
-both completed with committed durable receipts on the allowlisted target. Live
-mode remains explicitly opt-in because it mutates the running game process.
+contract were verified for an exact target. Live ingest and retrieval have both
+completed with committed durable receipts on `1.3.0.6`. On `1.3.0.7`, injection,
+the worker handshake, status inspection, disconnect signaling, and game-process
+survival were verified on 2026-08-15 without opening either item queue. The
+first item round trip remains a release follow-up. Live mode remains explicitly
+opt-in because it mutates the running game process.

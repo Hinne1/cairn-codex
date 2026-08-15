@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CairnCodex.GrimDawn;
 
@@ -21,8 +22,14 @@ internal sealed class LiveGameAdapter : IDisposable
         "3280adfefa5a041e1b6bcb8bb4730ca1928b603ebaf811bef5fc653eeb2e6df7";
     private const string VerifiedInjectorSha256 =
         "569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c";
-    private const string VerifiedRetailGameDllSha256 =
-        "d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7";
+    private static readonly IReadOnlyDictionary<string, string> VerifiedRetailGameDlls =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7"] = "v1.3.0.6",
+            // Steam build 24742013. Keep this exact fingerprint fail-closed when
+            // the next Grim Dawn update replaces Game.dll.
+            ["4a746c1e455d30e4c95a591eeead77f03d6187cd66aa1e3191ee25fb25a419aa"] = "v1.3.0.7"
+        };
 
     private readonly object sync = new();
     private readonly List<LiveHookMessage> messages = [];
@@ -130,7 +137,13 @@ internal sealed class LiveGameAdapter : IDisposable
                     queueSettings.DepositDescription,
                     window != IntPtr.Zero,
                     injectorOutput,
-                    messages.TakeLast(20).ToArray());
+                    messages.TakeLast(20).ToArray(),
+                    compatibility.GameVersion,
+                    compatibility.GameBuildId,
+                    compatibility.GameDllSha256,
+                    compatibility.GameDllLastWriteUtc,
+                    compatibility.HookSha256,
+                    compatibility.Recommendation);
             }
             finally
             {
@@ -662,8 +675,16 @@ internal sealed class LiveGameAdapter : IDisposable
     {
         try
         {
-            return process.Modules.Cast<ProcessModule>().Any(module =>
-                module.FileName.Equals(modulePath, StringComparison.OrdinalIgnoreCase));
+            foreach (ProcessModule module in process.Modules)
+            {
+                if (module.FileName.Equals(modulePath, StringComparison.OrdinalIgnoreCase)) return true;
+                if (!module.ModuleName.Equals(Path.GetFileName(modulePath), StringComparison.OrdinalIgnoreCase)) continue;
+                if (!File.Exists(module.FileName) || !File.Exists(modulePath)) continue;
+                var loadedHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(module.FileName)));
+                var requestedHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(modulePath)));
+                if (loadedHash.Equals(requestedHash, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
         }
         catch { return false; }
     }
@@ -697,33 +718,59 @@ internal sealed class LiveGameAdapter : IDisposable
             var gameDllSha256 = gameDll is not null && File.Exists(gameDll)
                 ? Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(gameDll)))
                 : null;
+            var gameBuildId = ReadSteamBuildId(executable);
+            var gameDllLastWriteUtc = gameDll is not null && File.Exists(gameDll)
+                ? File.GetLastWriteTimeUtc(gameDll).ToString("O")
+                : null;
+            var knownVersion = gameDllSha256 is not null && VerifiedRetailGameDlls.TryGetValue(gameDllSha256, out var value)
+                ? value
+                : gameVersion;
 
             if (hookSha256.Equals(CrashingRetailHookSha256, StringComparison.OrdinalIgnoreCase))
             {
                 return new LiveHookCompatibility(false,
                     $"Live mode is disabled for Grim Dawn {gameVersion} with GDIA hook {hookVersion}: " +
-                    "this exact hook crashed in the item-replica path during an item drop. Closed-game transfers remain available.");
+                    "this exact hook crashed in the item-replica path during an item drop. Closed-game transfers remain available.",
+                    knownVersion, gameBuildId, gameDllSha256, gameDllLastWriteUtc, hookSha256,
+                    "Use Offline staging. Replace the incompatible hook before attempting live transfers.");
             }
 
             if (hookSha256.Equals(VerifiedRetailHookSha256, StringComparison.OrdinalIgnoreCase) &&
-                gameDllSha256?.Equals(VerifiedRetailGameDllSha256, StringComparison.OrdinalIgnoreCase) == true)
+                gameDllSha256 is not null && VerifiedRetailGameDlls.ContainsKey(gameDllSha256))
             {
                 return new LiveHookCompatibility(true,
-                    $"Verified Cairn Codex hook {hookVersion} for Grim Dawn {gameVersion}.");
+                    $"Verified Cairn Codex hook {hookVersion} for Grim Dawn {knownVersion}.",
+                    knownVersion, gameBuildId, gameDllSha256, gameDllLastWriteUtc, hookSha256,
+                    "Select Connect, or enable Auto-connect for future game sessions.");
             }
 
             // Injection mutates a running game process. Unknown binaries must be opted in
-            // here only after an item-drop and item-restore test has passed for the exact
-            // Game.dll and hook fingerprints.
+            // here only after controlled compatibility testing has been documented for
+            // the exact Game.dll and hook fingerprints.
+            var fingerprint = gameDllSha256 is null ? "unknown" : gameDllSha256[..Math.Min(12, gameDllSha256.Length)];
             return new LiveHookCompatibility(false,
-                $"Grim Dawn {gameVersion} with GDIA hook {hookVersion} has not been verified for live transfers. " +
-                "Closed-game transfers remain available.");
+                $"This Grim Dawn build is new to Cairn (Game.dll {fingerprint}). Live injection is blocked until this exact build is verified. " +
+                "Closed-game transfers remain available.",
+                knownVersion, gameBuildId, gameDllSha256, gameDllLastWriteUtc, hookSha256,
+                "Update Cairn Codex after a Grim Dawn patch. Until then, use Offline staging; do not bypass the compatibility check.");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return new LiveHookCompatibility(false,
                 $"Could not verify the live hook safely: {exception.Message}");
         }
+    }
+
+    private static string? ReadSteamBuildId(string? executable)
+    {
+        if (executable is null) return null;
+        var gameDirectory = Directory.GetParent(Path.GetDirectoryName(executable) ?? string.Empty)?.FullName;
+        var commonDirectory = gameDirectory is null ? null : Directory.GetParent(gameDirectory)?.FullName;
+        var steamAppsDirectory = commonDirectory is null ? null : Directory.GetParent(commonDirectory)?.FullName;
+        var manifest = steamAppsDirectory is null ? null : Path.Combine(steamAppsDirectory, "appmanifest_219990.acf");
+        if (manifest is null || !File.Exists(manifest)) return null;
+        var match = Regex.Match(File.ReadAllText(manifest), "\\\"buildid\\\"\\s+\\\"(?<id>\\d+)\\\"");
+        return match.Success ? match.Groups["id"].Value : null;
     }
 
     private static string? ResolveAdapterDirectory()
@@ -911,7 +958,15 @@ internal sealed class LiveGameAdapter : IDisposable
 }
 
 internal sealed record LiveHookMessage(int Type, string DataHex, string ReceivedAtUtc);
-internal sealed record LiveHookCompatibility(bool Verified, string? Reason);
+internal sealed record LiveHookCompatibility(
+    bool Verified,
+    string? Reason,
+    string? GameVersion = null,
+    string? GameBuildId = null,
+    string? GameDllSha256 = null,
+    string? GameDllLastWriteUtc = null,
+    string? HookSha256 = null,
+    string? Recommendation = null);
 internal sealed record LiveQueueSelfTestResult(
     bool Passed,
     int Fields,
@@ -941,7 +996,13 @@ internal sealed record LiveGameStatus(
     string DepositTabDescription,
     bool HostWindowReady,
     string? InjectorOutput,
-    IReadOnlyList<LiveHookMessage> Messages);
+    IReadOnlyList<LiveHookMessage> Messages,
+    string? GameVersion,
+    string? GameBuildId,
+    string? GameDllSha256,
+    string? GameDllLastWriteUtc,
+    string? HookSha256,
+    string? Recommendation);
 
 internal sealed record LiveIncomingItem(
     string Path,

@@ -106,6 +106,8 @@ const liveStatus = ref<LiveGameStatus | null>(null)
 const liveIssues = ref<string[]>([])
 const liveSyncing = ref(false)
 const liveLifecyclePolling = ref(false)
+const showConnectionDiagnostics = ref(false)
+const manualDisconnectProcessId = ref<number | null>(null)
 const showMiReserves = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
 const tooltipRecord = ref<string | null>(null)
@@ -176,6 +178,24 @@ const gameConnectionLabel = computed(() => {
   if (liveStatus.value?.state === 'blocked') return 'Live adapter blocked'
   return 'Grim Dawn offline'
 })
+const headerConnectionAction = computed(() => {
+  if (liveStatus.value?.state === 'ready' || liveStatus.value?.state === 'connecting' || liveStatus.value?.hostWindowReady) {
+    return 'Disconnect'
+  }
+  if (liveStatus.value?.state === 'available') return 'Connect'
+  return 'Details'
+})
+const connectionRecommendation = computed(() => {
+  if (liveStatus.value?.state === 'ready') {
+    return `Live ingest is watching the ${liveStatus.value.ingestTabDescription}; retrieval uses the ${liveStatus.value.depositTabDescription}.`
+  }
+  if (liveStatus.value?.state === 'connecting') return 'Enter the character world, then retry Connect if the handshake does not complete.'
+  if (manualDisconnectProcessId.value !== null) return 'Disconnected for this game session. Select Connect whenever you want to resume.'
+  if (liveStatus.value?.recommendation) return liveStatus.value.recommendation
+  if (liveStatus.value?.state === 'available') return 'Select Connect, or enable Auto-connect in Settings.'
+  return 'Start Grim Dawn and enter a character world. Cairn will detect it within ten seconds.'
+})
+const connectionFingerprint = computed(() => liveStatus.value?.gameDllSha256?.slice(0, 12) ?? null)
 const collectionBasisLabel = computed(() =>
   collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Scanner'
 )
@@ -954,7 +974,25 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
 function setAutoLiveConnect(enabled: boolean): void {
   autoLiveConnect.value = enabled
   localStorage.setItem('cairn-codex-auto-live-connect', String(enabled))
-  if (enabled) void pollLiveLifecycle()
+  if (enabled) {
+    manualDisconnectProcessId.value = null
+    void pollLiveLifecycle()
+  }
+}
+
+async function handleHeaderLiveAction(): Promise<void> {
+  const status = liveStatus.value
+  if (status?.state === 'ready' || status?.state === 'connecting' || status?.hostWindowReady) {
+    await stopLiveMode()
+    showConnectionDiagnostics.value = false
+    return
+  }
+  if (status?.state === 'available') {
+    await startLiveMode()
+    showConnectionDiagnostics.value = liveStatus.value?.state !== 'ready'
+    return
+  }
+  showConnectionDiagnostics.value = !showConnectionDiagnostics.value
 }
 
 async function setZoom(factor: number): Promise<void> {
@@ -1071,6 +1109,7 @@ async function startLiveMode(): Promise<void> {
     'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while Cairn owns the game hook.'
   )
   if (!confirmed) return
+  manualDisconnectProcessId.value = null
   vaultBusy.value = true
   vaultError.value = null
   try {
@@ -1091,6 +1130,7 @@ async function startLiveMode(): Promise<void> {
 async function stopLiveMode(): Promise<void> {
   if (vaultBusy.value || liveLifecyclePolling.value) return
   liveLifecyclePolling.value = true
+  manualDisconnectProcessId.value = liveStatus.value?.connectedProcessId ?? liveStatus.value?.grimDawnProcessIds[0] ?? null
   try {
     liveStatus.value = await window.cairnCodex.stopLiveGame()
     liveIssues.value = []
@@ -1108,13 +1148,23 @@ async function pollLiveLifecycle(): Promise<void> {
   try {
     const previousState = liveStatus.value?.state
     let current = await window.cairnCodex.inspectLiveGame()
+    if (
+      manualDisconnectProcessId.value !== null &&
+      !current.grimDawnProcessIds.includes(manualDisconnectProcessId.value)
+    ) {
+      manualDisconnectProcessId.value = null
+    }
     if (current.state === 'blocked' && current.connectedProcessId === null) {
       current = await window.cairnCodex.stopLiveGame()
       liveIssues.value = []
     }
     const deferredUntilWorldReady = current.state === 'connecting' &&
       current.detail.toLocaleLowerCase().includes('world is not ready')
-    if (autoLiveConnect.value && (current.state === 'available' || deferredUntilWorldReady)) {
+    if (
+      autoLiveConnect.value &&
+      manualDisconnectProcessId.value === null &&
+      (current.state === 'available' || deferredUntilWorldReady)
+    ) {
       current = await window.cairnCodex.startLiveGame()
       if (current.state === 'ready' && previousState !== 'ready') {
         vaultMessage.value = 'Auto-connected to Grim Dawn. Live ingest is watching the configured stash tab.'
@@ -1704,6 +1754,7 @@ function handleEscape(event: KeyboardEvent): void {
   }
   if (event.key !== 'Escape') return
   hideTooltip()
+  showConnectionDiagnostics.value = false
   selectedRecord.value = null
 }
 
@@ -1825,9 +1876,48 @@ function formatPercentile(value: number | null | undefined): string {
             Settings
           </button>
         </nav>
-        <div class="game-status-pill" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
-          <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
-          <span><strong>{{ gameConnectionLabel }}</strong><small>{{ sourceModeLabel }} · {{ activeSourceCount }} sources</small></span>
+        <div class="connection-control">
+          <button
+            type="button"
+            class="game-status-pill"
+            :class="`state-${liveStatus?.state ?? 'unavailable'}`"
+            :disabled="vaultBusy || liveLifecyclePolling"
+            @click="handleHeaderLiveAction"
+          >
+            <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
+            <span><strong>{{ gameConnectionLabel }}</strong><small>{{ sourceModeLabel }} · {{ activeSourceCount }} sources</small></span>
+            <em>{{ headerConnectionAction }}</em>
+          </button>
+          <button
+            type="button"
+            class="connection-info-button"
+            aria-label="Show live connection diagnostics"
+            :aria-expanded="showConnectionDiagnostics"
+            @click="showConnectionDiagnostics = !showConnectionDiagnostics"
+          >i</button>
+          <aside v-if="showConnectionDiagnostics" class="connection-diagnostics" aria-live="polite">
+            <header>
+              <div><p class="section-label">Live connection</p><h3>{{ gameConnectionLabel }}</h3></div>
+              <button type="button" aria-label="Close diagnostics" @click="showConnectionDiagnostics = false">×</button>
+            </header>
+            <p>{{ liveStatus?.detail ?? 'Checking the bundled live adapter…' }}</p>
+            <dl>
+              <div><dt>State</dt><dd>{{ liveStatus?.state ?? 'checking' }}</dd></div>
+              <div><dt>Game</dt><dd>{{ liveStatus?.gameVersion ?? 'Not detected' }}</dd></div>
+              <div v-if="liveStatus?.gameBuildId"><dt>Steam build</dt><dd>{{ liveStatus.gameBuildId }}</dd></div>
+              <div v-if="connectionFingerprint"><dt>Game.dll</dt><dd><code>{{ connectionFingerprint }}</code></dd></div>
+              <div v-if="liveStatus?.hookVersion"><dt>Hook</dt><dd>{{ liveStatus.hookVersion }}</dd></div>
+              <div v-if="liveStatus?.connectedProcessId"><dt>Process</dt><dd>{{ liveStatus.connectedProcessId }}</dd></div>
+            </dl>
+            <div class="connection-recommendation">
+              <strong>Recommended</strong>
+              <span>{{ connectionRecommendation }}</span>
+            </div>
+            <footer>
+              <button type="button" @click="activeView = 'vault'; transferMode = 'live'; showConnectionDiagnostics = false">Open Transfers</button>
+              <button type="button" @click="activeView = 'settings'; showConnectionDiagnostics = false">Settings</button>
+            </footer>
+          </aside>
         </div>
       </div>
     </header>
@@ -2400,8 +2490,10 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
             <div class="settings-status">
               <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
-              <span>{{ liveStatus?.detail ?? 'Checking live adapter…' }}</span>
+              <span><strong>{{ gameConnectionLabel }}</strong>{{ liveStatus?.detail ?? 'Checking live adapter…' }}</span>
             </div>
+            <small class="settings-recommendation"><strong>Recommended:</strong> {{ connectionRecommendation }}</small>
+            <button class="settings-action" type="button" @click="showConnectionDiagnostics = true">View connection diagnostics</button>
           </article>
 
           <article class="settings-card">

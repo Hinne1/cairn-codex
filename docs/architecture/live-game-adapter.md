@@ -68,3 +68,9 @@ reports the detected hook version and configured ingest/deposit tabs, requires
 an explicit confirmation for each game session, and retains the closed-game
 adapter as a fallback. Unsupported live items are left in the durable incoming
 queue and surfaced as a recovery issue rather than being discarded.
+
+The persistent header status is also the manual connect/disconnect control. Its
+diagnostics disclose the detected game version, Steam build, shortened
+`Game.dll` fingerprint, hook version, current state, and the recommended next
+action. This distinguishes an offline game from a new game patch that Cairn has
+deliberately blocked pending compatibility verification.

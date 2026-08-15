@@ -1789,14 +1789,14 @@ function itemTypeLabel(item: CollectionItem): string {
   if (itemClass.includes('sword2h')) return 'Two-handed sword'
   if (itemClass.includes('axe2h')) return 'Two-handed axe'
   if (itemClass.includes('mace2h') || itemClass.includes('blunt2h')) return 'Two-handed mace'
-  if (itemClass.includes('scepter')) return 'One-handed scepter'
-  if (itemClass.includes('dagger')) return 'One-handed dagger'
+  if (itemClass.includes('scepter')) return 'One-handed scepter (caster weapon)'
+  if (itemClass.includes('dagger')) return 'One-handed dagger (caster weapon)'
   if (itemClass.includes('sword')) return 'One-handed sword'
   if (itemClass.includes('axe')) return 'One-handed axe'
   if (itemClass.includes('mace') || itemClass.includes('blunt')) return 'One-handed mace'
   if (itemClass.includes('melee') && itemClass.includes('2h')) return 'Two-handed melee weapon'
   if (itemClass.includes('shield')) return 'Shield'
-  if (itemClass.includes('focus')) return 'Caster offhand'
+  if (itemClass.includes('offhand') || itemClass.includes('focus')) return 'Caster off-hand'
   const labels: Record<string, string> = {
     head: 'Head armor', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Hands',
     legs: 'Leg armor', feet: 'Feet', waist: 'Waist', ring: 'Ring', amulet: 'Amulet',

@@ -22,6 +22,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.setZoomFactor, { factor }) as Promise<number>,
   getCachedCollection: (sourcePaths, basis) =>
     ipcRenderer.invoke(IPC_CHANNELS.getCachedCollection, { sourcePaths, basis }) as Promise<CollectionSnapshot | null>,
+  hydrateArchiveRolls: (sourcePaths) =>
+    ipcRenderer.invoke(IPC_CHANNELS.hydrateArchiveRolls, { sourcePaths }) as Promise<CollectionSnapshot | null>,
   discoverGrimDawn: () =>
     ipcRenderer.invoke(IPC_CHANNELS.discoverGrimDawn) as Promise<GrimDawnDiscovery>,
   listCharacters: () =>

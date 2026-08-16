@@ -677,7 +677,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 7) {
+    if (version > 8) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )

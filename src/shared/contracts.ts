@@ -2,6 +2,7 @@ export const IPC_CHANNELS = {
   getAppStatus: 'app:get-status',
   setZoomFactor: 'app:set-zoom-factor',
   getCachedCollection: 'collection:get-cached',
+  hydrateArchiveRolls: 'collection:hydrate-archive-rolls',
   discoverGrimDawn: 'grim-dawn:discover',
   listCharacters: 'grim-dawn:list-characters',
   scanCollection: 'grim-dawn:scan-collection',
@@ -33,6 +34,7 @@ export interface CairnCodexApi {
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   listCharacters: () => Promise<CharacterSaveProfile[]>
   getCachedCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot | null>
+  hydrateArchiveRolls: (sourcePaths: string[]) => Promise<CollectionSnapshot | null>
   scanCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   rebuildGameDataIndex: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>

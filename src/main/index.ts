@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
 import {
   IPC_CHANNELS,
@@ -281,6 +281,15 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
         ...(await presentCollection(helper, database, projected, input.basis, false)),
         cacheNeedsRefresh
       }
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.hydrateArchiveRolls,
+    async (_event, input: { sourcePaths: string[] }): Promise<CollectionSnapshot | null> => {
+      latestCollection ??= await readCollectionCache(collectionCachePath)
+      if (!latestCollection) return null
+      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+      return presentCollection(helper, database, projected, 'archive', true)
     }
   )
   ipcMain.handle(
@@ -1125,6 +1134,20 @@ async function runSmokeTest(
   database: CollectionDatabase
 ): Promise<void> {
   try {
+    const schemaSmokePath = join(
+      app.getPath('temp'),
+      `cairn-codex-schema-smoke-${randomUUID()}.sqlite3`
+    )
+    try {
+      new CollectionDatabase(schemaSmokePath).close()
+      new CollectionDatabase(schemaSmokePath).close()
+    } finally {
+      await Promise.all(
+        [schemaSmokePath, `${schemaSmokePath}-wal`, `${schemaSmokePath}-shm`].map((path) =>
+          unlink(path).catch(() => undefined)
+        )
+      )
+    }
     await helper.request('health')
     const writeTransaction = await helper.request<{ passed: boolean }>('self-test-write-transaction')
     if (!writeTransaction.passed) {
@@ -2328,7 +2351,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
   }
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock()
+// Visual diagnostics run in a disposable process and must not be mistaken for a
+// user-launched second instance while an earlier test process is winding down.
+const hasSingleInstanceLock = process.env.CAIRN_CODEX_SCREENSHOT_PATH
+  ? true
+  : app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
   app.quit()
 } else {
@@ -2343,8 +2370,10 @@ if (!hasSingleInstanceLock) {
 
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return
+  console.log('[startup] Electron ready; opening Cairn Codex services.')
   Menu.setApplicationMenu(null)
   registerItemIconProtocol()
+  console.log('[startup] Item icon protocol registered.')
   const helper = createHelperClient()
   const databaseOverride = process.env.CAIRN_CODEX_DATABASE_PATH
   const database = new CollectionDatabase(
@@ -2354,6 +2383,7 @@ app.whenReady().then(() => {
         ? databaseOverride
       : join(app.getPath('userData'), 'cairn-codex.sqlite3')
   )
+  console.log('[startup] Collection database ready.')
 
   const ingestCommand = process.env.CAIRN_CODEX_INGEST_REQUEST
   if (ingestCommand) {
@@ -2411,6 +2441,7 @@ app.whenReady().then(() => {
   }
 
   registerIpcHandlers(helper, database)
+  console.log('[startup] IPC handlers registered; creating the main window.')
   void createWindow()
 
   app.once('before-quit', () => {

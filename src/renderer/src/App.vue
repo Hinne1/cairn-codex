@@ -79,6 +79,7 @@ const enabledStashPaths = computed<string[]>({
   }
 })
 const scanning = ref(false)
+const archiveRollHydrating = ref(false)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
 const scanError = ref<string | null>(null)
 const cacheIssue = ref<string | null>(null)
@@ -1048,6 +1049,7 @@ onMounted(async () => {
     // The cached catalog is complete enough to browse; heavy scan/roll refreshes remain
     // manual and run automatically once the game session ends.
     if (cached.cacheNeedsRefresh && liveStatus.value?.state !== 'ready') void scanCollection()
+    if (!cached.cacheNeedsRefresh || liveStatus.value?.state === 'ready') void hydrateArchiveRolls()
   } else {
     await scanCollection()
   }
@@ -1409,9 +1411,32 @@ async function loadSelectedSources(): Promise<void> {
     [...enabledStashPaths.value],
     collectionBasis.value
   )
-  if (cached) applySnapshot(cached)
+  if (cached) {
+    applySnapshot(cached)
+    void hydrateArchiveRolls()
+  }
   else await scanCollection()
   await refreshVault()
+}
+
+async function hydrateArchiveRolls(): Promise<void> {
+  if (archiveRollHydrating.value || collectionBasis.value !== 'archive' || !snapshot.value) return
+  archiveRollHydrating.value = true
+  const requestedSources = [...enabledStashPaths.value]
+  try {
+    const hydrated = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
+    if (
+      hydrated &&
+      collectionBasis.value === 'archive' &&
+      JSON.stringify([...enabledStashPaths.value].sort()) === JSON.stringify(requestedSources.sort())
+    ) {
+      applySnapshot(hydrated)
+    }
+  } catch (error) {
+    console.warn('Archived item rolls could not be hydrated in the background.', error)
+  } finally {
+    archiveRollHydrating.value = false
+  }
 }
 
 function rarity(name: 'epic' | 'legendary' | 'mi'): CollectionRaritySummary | undefined {
@@ -1591,6 +1616,7 @@ async function syncLiveMode(): Promise<void> {
       applyLiveIngests(result.ingested)
       vaultMessage.value = `Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`
       await refreshVault()
+      void hydrateArchiveRolls()
     }
   } catch (error) {
     const message = readableError(error)
@@ -2386,11 +2412,12 @@ function formatPercentile(value: number | null | undefined): string {
     </div>
 
     <main>
-      <section v-if="scanning && snapshot" class="background-scan" aria-live="polite">
+      <section v-if="(scanning || archiveRollHydrating) && snapshot" class="background-scan" aria-live="polite">
         <span class="scan-spinner" aria-hidden="true" />
         <div>
-          <strong>{{ scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>
-          <small v-if="scanActivity === 'game-data'">Your cached Codex remains usable while map regions, drop sources, and game records are reindexed.</small>
+          <strong>{{ archiveRollHydrating ? 'Rating archived item rolls' : scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>
+          <small v-if="archiveRollHydrating">The Codex remains usable while missing copy scores are calculated and saved.</small>
+          <small v-else-if="scanActivity === 'game-data'">Your cached Codex remains usable while map regions, drop sources, and game records are reindexed.</small>
           <small v-else>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
         </div>
       </section>

@@ -25,7 +25,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 15
+const CATALOG_PRESENTATION_VERSION = 16
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -955,13 +955,16 @@ async function presentCollection(
 ): Promise<CollectionSnapshot> {
   const mode = lifetimeMode(snapshot)
   if (basis !== 'archive') {
-    return database.presentSnapshot({ ...snapshot, basis: 'stashes' }, mode)
+    return withRecipeCollection(
+      database.presentSnapshot({ ...snapshot, basis: 'stashes' }, mode),
+      mode
+    )
   }
 
   const installation = snapshot.discovery.installations[0]
   const archived = database.listAvailableArchiveItems(mode)
   if (!installation || archived.length === 0) {
-    return database.presentArchiveSnapshot(snapshot, [], mode)
+    return withRecipeCollection(database.presentArchiveSnapshot(snapshot, [], mode), mode)
   }
   const payloads = archived.map((item) => item.payload as LiveVaultPayload)
   const missingAnalysis = archived
@@ -1020,7 +1023,57 @@ async function presentCollection(
       instanceKey: createVaultInstanceKey(payload)
     }
   })
-  return database.presentArchiveSnapshot(snapshot, observedItems, mode)
+  return withRecipeCollection(database.presentArchiveSnapshot(snapshot, observedItems, mode), mode)
+}
+
+function withRecipeCollection(
+  snapshot: CollectionSnapshot,
+  isHardcore?: boolean
+): CollectionSnapshot {
+  const recipeKnown = (item: CollectionSnapshot['items'][number]): boolean => {
+    const crafting = item.acquisition?.crafting
+    if (!crafting) return false
+    if (isHardcore === true) return crafting.knownHardcore === true
+    if (isHardcore === false) return crafting.knownSoftcore === true
+    return crafting.knownSoftcore === true || crafting.knownHardcore === true
+  }
+  const decorate = (item: CollectionSnapshot['items'][number]) => {
+    const recipeUnlocked = recipeKnown(item)
+    return {
+      ...item,
+      recipeUnlocked,
+      discovered:
+        snapshot.basis === 'archive' ? Boolean(item.discovered || recipeUnlocked) : item.discovered
+    }
+  }
+  const items = snapshot.items.map(decorate)
+  const plannerItems = (snapshot.plannerItems ?? []).map(decorate)
+  const recipeItems = [...items, ...plannerItems].filter(
+    (item, index, all) =>
+      Boolean(item.acquisition?.crafting) &&
+      all.findIndex((candidate) => candidate.record.toLowerCase() === item.record.toLowerCase()) === index
+  )
+  const rarities = snapshot.rarities.map((summary) => {
+    const matching = items.filter((item) => item.rarity === summary.rarity)
+    return {
+      ...summary,
+      total: matching.length,
+      collected: matching.filter((item) => item.discovered).length,
+      availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
+    }
+  })
+  const collectedRecipes = recipeItems.filter((item) => item.recipeUnlocked).length
+  return {
+    ...snapshot,
+    items,
+    plannerItems,
+    rarities,
+    recipeSummary: {
+      total: recipeItems.length,
+      collected: collectedRecipes,
+      unlockedItems: collectedRecipes
+    }
+  }
 }
 
 function createVaultInstanceKey(item: LiveVaultPayload): string {
@@ -1364,6 +1417,22 @@ async function runSmokeTest(
       throw new Error('A transfer stash failed the in-memory ingest/retrieval roundtrip.')
     }
     const snapshot = database.persistSnapshot(helperSnapshot)
+    const recipeArchiveSnapshot = withRecipeCollection(
+      database.presentArchiveSnapshot(snapshot, [], false),
+      false
+    )
+    const recipeUnlockedMask = recipeArchiveSnapshot.items.find(
+      (item) => item.name === 'Abyssal Mask'
+    )
+    if (
+      recipeArchiveSnapshot.recipeSummary.total < 400 ||
+      recipeArchiveSnapshot.recipeSummary.collected === 0 ||
+      !recipeUnlockedMask?.recipeUnlocked ||
+      !recipeUnlockedMask.discovered ||
+      recipeUnlockedMask.availableCount !== 0
+    ) {
+      throw new Error('Known recipes did not unlock their Codex items without creating stored copies.')
+    }
     const pinCandidate = snapshot.observedItems.find(
       (item) => item.instanceKey && item.rollAnalysis?.trusted
     )

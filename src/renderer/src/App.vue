@@ -17,7 +17,7 @@ import type {
 } from '@shared/contracts'
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
-type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi'
+type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'recipe'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
 type ActiveView = 'collection' | 'sets' | 'skills' | 'planner' | 'mi-workshop' | 'vault' | 'settings'
@@ -241,7 +241,12 @@ const filteredItems = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
   return snapshot.value.items
     .filter((item) => matchesCategory(item, activeCategory.value))
-    .filter((item) => rarityFilter.value === 'all' || item.rarity === rarityFilter.value)
+    .filter((item) =>
+      rarityFilter.value === 'all' ||
+      (rarityFilter.value === 'recipe'
+        ? Boolean(item.acquisition?.crafting)
+        : item.rarity === rarityFilter.value)
+    )
     .filter((item) => {
       if (ownership.value === 'owned') return Boolean(item.discovered)
       if (ownership.value === 'missing') return !item.discovered
@@ -1349,6 +1354,13 @@ function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
   window.scrollTo({ top: 500, behavior: 'smooth' })
 }
 
+function filterToRecipes(): void {
+  activeView.value = 'collection'
+  activeCategory.value = 'All'
+  rarityFilter.value = 'recipe'
+  window.scrollTo({ top: 500, behavior: 'smooth' })
+}
+
 function percentage(summary: CollectionRaritySummary | undefined): string {
   if (!summary || summary.total === 0) return '0%'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
@@ -1356,6 +1368,12 @@ function percentage(summary: CollectionRaritySummary | undefined): string {
 
 function affixPercentage(): string {
   const summary = snapshot.value?.affixSummary
+  if (!summary || summary.total === 0) return '0%'
+  return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
+}
+
+function recipePercentage(): string {
+  const summary = snapshot.value?.recipeSummary
   if (!summary || summary.total === 0) return '0%'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
 }
@@ -1823,6 +1841,13 @@ function itemIconUrl(item: CollectionItem): string | null {
 function isArchivedItem(item: CollectionItem): boolean {
   return archivedRecordSet.value.has(item.record.toLocaleLowerCase()) ||
     (collectionBasis.value === 'archive' && Boolean(item.discovered))
+}
+
+function plannerOwnershipLabel(item: CollectionItem): string | null {
+  if (archivedRecordSet.value.has(item.record.toLocaleLowerCase())) return 'Archived'
+  if (item.recipeUnlocked) return 'Recipe learned'
+  if (collectionBasis.value === 'archive' && item.discovered) return 'Archived'
+  return null
 }
 
 function normalizeLoose(value: string): string {
@@ -2317,6 +2342,18 @@ function formatPercentile(value: number | null | undefined): string {
           <div class="meter affix"><span :style="{ width: affixPercentage() }" /></div>
           <small>{{ affixPercentage() }} discovered · prefixes and suffixes</small>
         </button>
+        <button
+          type="button"
+          :aria-pressed="rarityFilter === 'recipe'"
+          @click="filterToRecipes"
+        >
+          <div class="metric-heading">
+            <span>Recipes</span>
+            <strong>{{ snapshot?.recipeSummary.collected ?? 0 }} / {{ snapshot?.recipeSummary.total ?? '—' }}</strong>
+          </div>
+          <div class="meter recipe"><span :style="{ width: recipePercentage() }" /></div>
+          <small>{{ recipePercentage() }} learned · crafted items count as unlocked</small>
+        </button>
       </section>
 
       <section class="collection-basis" aria-label="Collection persistence">
@@ -2408,6 +2445,7 @@ function formatPercentile(value: number | null | undefined): string {
           <option value="legendary">Legendary</option>
           <option value="epic">Epic</option>
           <option value="mi">Monster Infrequent</option>
+          <option value="recipe">Craftable from recipe</option>
         </select>
         <select v-if="activeView === 'collection'" v-model="sortMode" aria-label="Sort collection">
           <option value="recent">Recently collected</option>
@@ -2692,7 +2730,7 @@ function formatPercentile(value: number | null | undefined): string {
                       <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
                       <span>
                         <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
-                        <small class="planner-item-type">{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="isArchivedItem(row.item)" class="archive-mark"> · Archived</span></small>
+                        <small class="planner-item-type">{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
                         <span class="planner-item-actions">
                           <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
                           <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore base' }}</button>
@@ -2759,7 +2797,7 @@ function formatPercentile(value: number | null | undefined): string {
               <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
               <div class="planner-card-title">
                 <strong>{{ row.item.name }}</strong>
-                <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="isArchivedItem(row.item)" class="archive-mark"> · Archived</span></small>
+                <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
               </div>
               <div class="planner-match-skills">
                 <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
@@ -3435,6 +3473,7 @@ function formatPercentile(value: number | null | undefined): string {
               <strong v-if="item.availableCount > 0">
                 {{ item.availableCount }} {{ item.availableCount === 1 ? 'copy' : 'copies' }}
               </strong>
+              <strong v-else-if="item.recipeUnlocked">Recipe unlocked · no stored copy</strong>
               <strong v-else-if="item.discovered">Discovered · no copies</strong>
               <strong v-else>Not found</strong>
             </div>

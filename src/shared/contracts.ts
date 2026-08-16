@@ -222,6 +222,7 @@ export interface CollectionSnapshot {
   warnings: CollectionScanWarning[]
   rarities: CollectionRaritySummary[]
   items: CollectionItem[]
+  recipeSummary: CollectionRecipeSummary
   affixSummary: CollectionAffixSummary
   affixes: CollectionAffix[]
   plannerItems?: CollectionItem[]
@@ -262,6 +263,12 @@ export interface CollectionAffixSummary {
   availableCopies: number
 }
 
+export interface CollectionRecipeSummary {
+  total: number
+  collected: number
+  unlockedItems: number
+}
+
 export interface CollectionAffix {
   key: string
   name: string
@@ -292,6 +299,7 @@ export interface CollectionItem {
   analyzedCopyCount: number
   pinnedInstanceKey: string | null
   discovered?: boolean
+  recipeUnlocked?: boolean
   firstDiscoveredAt?: string | null
 }
 

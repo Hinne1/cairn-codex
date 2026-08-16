@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   CharacterSaveProfile,
   CollectionBasis,
@@ -48,6 +48,13 @@ interface SkillMatch {
   conversionTarget: string
   conversionDetails: string
   special: string
+}
+
+interface TodoItem {
+  id: string
+  text: string
+  done: boolean
+  createdAt: string
 }
 
 interface CollectionSet {
@@ -133,6 +140,10 @@ const liveIssues = ref<string[]>([])
 const liveSyncing = ref(false)
 const liveLifecyclePolling = ref(false)
 const showConnectionDiagnostics = ref(false)
+const todoOpen = ref(false)
+const todoDraft = ref('')
+const todoInput = ref<HTMLInputElement | null>(null)
+const todos = ref<TodoItem[]>(readStoredTodos())
 const manualDisconnectProcessId = ref<number | null>(null)
 const showMiReserves = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
@@ -362,6 +373,12 @@ const archivedRecordSet = computed(() => new Set(
 const selectedItem = computed(() =>
   plannerCatalogItems.value.find((item) => item.record === selectedRecord.value) ?? null
 )
+
+const remainingTodoCount = computed(() => todos.value.filter((todo) => !todo.done).length)
+const orderedTodos = computed(() => [...todos.value].sort((left, right) =>
+  Number(left.done) - Number(right.done) ||
+  Date.parse(right.createdAt) - Date.parse(left.createdAt)
+))
 
 const tooltipItem = computed(() =>
   plannerCatalogItems.value.find((item) => item.record === tooltipRecord.value) ?? null
@@ -1132,6 +1149,60 @@ function readStoredStringArray(key: string): string[] {
   } catch {
     return []
   }
+}
+
+function readStoredTodos(): TodoItem[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('cairn-codex-todos') ?? '[]') as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((value): value is TodoItem => {
+      if (!value || typeof value !== 'object') return false
+      const todo = value as Partial<TodoItem>
+      return typeof todo.id === 'string' && typeof todo.text === 'string' &&
+        typeof todo.done === 'boolean' && typeof todo.createdAt === 'string'
+    })
+  } catch {
+    return []
+  }
+}
+
+function storeTodos(): void {
+  localStorage.setItem('cairn-codex-todos', JSON.stringify(todos.value))
+}
+
+async function openTodos(): Promise<void> {
+  todoOpen.value = true
+  showConnectionDiagnostics.value = false
+  await nextTick()
+  todoInput.value?.focus()
+}
+
+function addTodo(): void {
+  const text = todoDraft.value.trim()
+  if (!text) return
+  todos.value.push({
+    id: crypto.randomUUID(),
+    text,
+    done: false,
+    createdAt: new Date().toISOString()
+  })
+  todoDraft.value = ''
+  storeTodos()
+}
+
+function setTodoDone(todo: TodoItem, done: boolean): void {
+  todo.done = done
+  storeTodos()
+}
+
+function removeTodo(id: string): void {
+  todos.value = todos.value.filter((todo) => todo.id !== id)
+  storeTodos()
+}
+
+function clearCompletedTodos(): void {
+  todos.value = todos.value.filter((todo) => !todo.done)
+  storeTodos()
 }
 
 function readStoredPlannerProfiles(): PlannerProfile[] {
@@ -2090,6 +2161,10 @@ function handleEscape(event: KeyboardEvent): void {
     return
   }
   if (event.key !== 'Escape') return
+  if (todoOpen.value) {
+    todoOpen.value = false
+    return
+  }
   hideTooltip()
   showConnectionDiagnostics.value = false
   selectedRecord.value = null
@@ -2206,6 +2281,9 @@ function formatPercentile(value: number | null | undefined): string {
       </div>
       <div class="topbar-actions">
         <nav class="system-nav" aria-label="Cairn Codex system views">
+          <button type="button" :aria-expanded="todoOpen" @click="openTodos">
+            To-do <span v-if="remainingTodoCount" class="todo-nav-count">{{ remainingTodoCount }}</span>
+          </button>
           <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
             Transfers
           </button>
@@ -2258,6 +2336,52 @@ function formatPercentile(value: number | null | undefined): string {
         </div>
       </div>
     </header>
+
+    <div v-if="todoOpen" class="todo-backdrop" @click.self="todoOpen = false">
+      <section class="todo-dialog" role="dialog" aria-modal="true" aria-labelledby="todo-title">
+        <header>
+          <div>
+            <p class="section-label">Cairn scratchpad</p>
+            <h2 id="todo-title">To-do list</h2>
+          </div>
+          <button type="button" class="todo-close" aria-label="Close to-do list" @click="todoOpen = false">×</button>
+        </header>
+        <form class="todo-entry" @submit.prevent="addTodo">
+          <input
+            ref="todoInput"
+            v-model="todoDraft"
+            type="text"
+            maxlength="240"
+            autocomplete="off"
+            placeholder="Add something to remember…"
+            aria-label="New to-do"
+          />
+          <button type="submit" :disabled="!todoDraft.trim()">Add</button>
+        </form>
+        <div v-if="orderedTodos.length" class="todo-list">
+          <article v-for="todo in orderedTodos" :key="todo.id" :class="{ done: todo.done }">
+            <label>
+              <input
+                type="checkbox"
+                :checked="todo.done"
+                @change="setTodoDone(todo, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ todo.text }}</span>
+            </label>
+            <button type="button" aria-label="Delete to-do" title="Delete" @click="removeTodo(todo.id)">×</button>
+          </article>
+        </div>
+        <p v-else class="todo-empty">Nothing queued. Suspiciously organized.</p>
+        <footer>
+          <span>{{ remainingTodoCount }} remaining · {{ todos.length }} total</span>
+          <button
+            type="button"
+            :disabled="!todos.some((todo) => todo.done)"
+            @click="clearCompletedTodos"
+          >Clear completed</button>
+        </footer>
+      </section>
+    </div>
 
     <main>
       <section v-if="scanning && snapshot" class="background-scan" aria-live="polite">

@@ -39,6 +39,28 @@ button, select { color: inherit; }
 .system-nav button { padding: 8px 12px; border: 0; border-radius: 4px; color: #918876; background: transparent; cursor: pointer; font-size: 11px; }
 .system-nav button:hover { color: #dec68f; }
 .system-nav button.active { color: #f0d598; background: #372e21; }
+.todo-nav-count { display: inline-grid; min-width: 17px; height: 17px; margin-left: 4px; padding: 0 4px; place-items: center; border-radius: 999px; color: #18140d; background: #d2a650; font-size: 9px; font-weight: 750; }
+.todo-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(3, 3, 3, .72); backdrop-filter: blur(7px); }
+.todo-dialog { width: min(620px, 100%); max-height: min(760px, calc(100vh - 48px)); overflow: hidden; border: 1px solid #665334; border-radius: 10px; background: linear-gradient(145deg, #24211b, #171612 72%); box-shadow: 0 30px 90px rgba(0, 0, 0, .72); }
+.todo-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 20px; padding: 23px 24px 18px; border-bottom: 1px solid #393329; }
+.todo-dialog h2 { margin: 0; color: #eee3ca; font-size: 28px; font-weight: 500; }
+.todo-close { width: 32px; height: 32px; border: 1px solid #494134; border-radius: 5px; color: #9f9480; background: #1a1916; cursor: pointer; font-size: 21px; line-height: 1; }
+.todo-close:hover { border-color: #80683f; color: #edce88; }
+.todo-entry { display: flex; gap: 8px; padding: 18px 24px; border-bottom: 1px solid #332f27; }
+.todo-entry input { flex: 1; min-width: 0; padding: 11px 13px; border: 1px solid #494238; border-radius: 5px; color: #e5dcc8; outline: none; background: #11110f; }
+.todo-entry input:focus { border-color: #a67e3d; box-shadow: 0 0 0 2px rgba(166, 126, 61, .15); }
+.todo-entry button, .todo-dialog > footer button { padding: 9px 13px; border: 1px solid #665333; border-radius: 5px; color: #e4c67f; background: #30281d; cursor: pointer; }
+.todo-entry button:disabled, .todo-dialog > footer button:disabled { opacity: .38; cursor: default; }
+.todo-list { display: grid; gap: 6px; max-height: min(470px, 55vh); padding: 16px 24px; overflow-y: auto; }
+.todo-list article { display: flex; align-items: start; gap: 10px; padding: 11px 10px; border: 1px solid #38342c; border-radius: 5px; background: rgba(18, 18, 15, .7); }
+.todo-list article label { display: flex; flex: 1; align-items: start; gap: 11px; min-width: 0; color: #d1c6ad; cursor: pointer; font-size: 12px; line-height: 1.5; }
+.todo-list article input { flex: 0 0 auto; margin-top: 2px; accent-color: #c69a48; }
+.todo-list article label span { overflow-wrap: anywhere; }
+.todo-list article.done label span { color: #716b60; text-decoration: line-through; }
+.todo-list article > button { flex: 0 0 auto; width: 25px; height: 25px; border: 0; border-radius: 4px; color: #746d61; background: transparent; cursor: pointer; font-size: 17px; line-height: 1; }
+.todo-list article > button:hover { color: #dc9b87; background: #38221d; }
+.todo-empty { margin: 0; padding: 54px 24px; color: #756e61; text-align: center; font: italic 14px Georgia, serif; }
+.todo-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; border-top: 1px solid #393329; color: #7d7567; font-size: 10px; }
 .connection-control { position: relative; display: flex; flex: 0 1 330px; align-items: stretch; min-width: 190px; }
 .game-status-pill { display: flex; flex: 1; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px 8px 12px; border: 1px solid #403a2c; border-radius: 7px 0 0 7px; background: #171613; cursor: pointer; text-align: left; }
 .game-status-pill:disabled { cursor: wait; opacity: .72; }

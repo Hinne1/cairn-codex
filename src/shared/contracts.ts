@@ -255,7 +255,7 @@ export interface CollectionRaritySummary {
   availableCopies: number
 }
 
-export type CollectionItemRarity = 'epic' | 'legendary' | 'mi' | 'faction'
+export type CollectionItemRarity = 'epic' | 'legendary' | 'mi' | 'rare' | 'faction'
 
 export interface CollectionAffixSummary {
   total: number

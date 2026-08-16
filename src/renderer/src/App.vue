@@ -17,7 +17,7 @@ import type {
 } from '@shared/contracts'
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
-type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'recipe'
+type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare' | 'recipe'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
 type ActiveView = 'collection' | 'sets' | 'skills' | 'planner' | 'mi-workshop' | 'vault' | 'settings'
@@ -1428,6 +1428,7 @@ function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
 function filterToRecipes(): void {
   activeView.value = 'collection'
   activeCategory.value = 'All'
+  ownership.value = 'all'
   rarityFilter.value = 'recipe'
   window.scrollTo({ top: 500, behavior: 'smooth' })
 }
@@ -1966,6 +1967,7 @@ function itemTypeLabel(item: CollectionItem): string {
 
 function rarityLabel(item: CollectionItem): string {
   if (item.rarity === 'mi') return 'Monster Infrequent'
+  if (item.rarity === 'rare') return 'Rare'
   if (item.rarity === 'faction') return 'Faction Rare'
   return item.rarity.charAt(0).toLocaleUpperCase() + item.rarity.slice(1)
 }
@@ -2569,6 +2571,7 @@ function formatPercentile(value: number | null | undefined): string {
           <option value="legendary">Legendary</option>
           <option value="epic">Epic</option>
           <option value="mi">Monster Infrequent</option>
+          <option value="rare">Rare recipe item</option>
           <option value="recipe">Craftable from recipe</option>
         </select>
         <select v-if="activeView === 'collection'" v-model="sortMode" aria-label="Sort collection">
@@ -3568,7 +3571,7 @@ function formatPercentile(value: number | null | undefined): string {
             v-for="item in visibleItems"
             :key="item.record"
             class="item-card"
-            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi' }"
+            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare' }"
             role="button"
             tabindex="0"
             aria-describedby="item-tooltip"
@@ -3586,7 +3589,7 @@ function formatPercentile(value: number | null | undefined): string {
             </div>
             <div class="item-copy">
               <h3>{{ item.name }}</h3>
-              <p>{{ item.rarity }} · {{ item.slot }} · Lv{{ item.levelRequirement }}</p>
+              <p>{{ rarityLabel(item) }} · {{ item.slot }} · Lv{{ item.levelRequirement }}</p>
               <small v-if="item.setName">{{ item.setName }}</small>
             </div>
             <div class="card-result">

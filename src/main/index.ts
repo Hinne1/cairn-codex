@@ -25,7 +25,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 16
+const CATALOG_PRESENTATION_VERSION = 17
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -1213,10 +1213,15 @@ async function runSmokeTest(
     }
     const deterministicRecipes = helperSnapshot.items.filter((item) => item.acquisition?.crafting)
     const abyssalMask = deterministicRecipes.find((item) => item.name === 'Abyssal Mask')
+    const mistbornTalisman = deterministicRecipes.find((item) => item.name === 'Mistborn Talisman')
     const randomLegendary = helperSnapshot.items.find((item) => item.name === 'Demonbone Legplates')
     if (
       deterministicRecipes.length < 400 ||
       !abyssalMask?.acquisition?.crafting?.knownSoftcore ||
+      mistbornTalisman?.rarity !== 'rare' ||
+      !mistbornTalisman.acquisition?.crafting?.blueprintRecords.some((record) =>
+        record.endsWith('/craft_relic_b011.dbr')
+      ) ||
       randomLegendary?.acquisition?.crafting
     ) {
       throw new Error('Known-blueprint indexing did not distinguish direct recipes from random crafting tables.')

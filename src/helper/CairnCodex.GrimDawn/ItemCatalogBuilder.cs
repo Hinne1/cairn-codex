@@ -50,6 +50,11 @@ internal static class ItemCatalogBuilder
     {
         var presentationSource = new ItemPresentationSource(data.Tags, data.Records);
         var acquisitionReferences = BuildAcquisitionReferences(data.Records);
+        var deterministicRecipeOutputs = data.Records.Values
+            .Where(source => source.Record.Type == "ItemArtifactFormula")
+            .Select(source => source.Record.Text("artifactName"))
+            .OfType<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var setPresentations = data.Records.Values
             .Select(source => source.Record.Text("itemSetName"))
             .OfType<string>()
@@ -66,6 +71,7 @@ internal static class ItemCatalogBuilder
                 presentationSource,
                 acquisitionReferences,
                 setPresentations,
+                deterministicRecipeOutputs,
                 false,
                 knownFormulas))
             .Where(item => item is not null)
@@ -86,6 +92,7 @@ internal static class ItemCatalogBuilder
                 presentationSource,
                 acquisitionReferences,
                 setPresentations,
+                deterministicRecipeOutputs,
                 true,
                 knownFormulas))
             .Where(item => item is not null && item.Rarity == "faction")
@@ -135,19 +142,24 @@ internal static class ItemCatalogBuilder
         ItemPresentationSource presentationSource,
         IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences,
         IReadOnlyDictionary<string, ItemSetPresentation?> setPresentations,
+        IReadOnlySet<string> deterministicRecipeOutputs,
         bool includeFactionRare,
         KnownFormulaIndex? knownFormulas)
     {
         var record = source.Record;
         var classification = record.Text("itemClassification");
         var normalizedPath = record.Name.Replace('\\', '/');
+        var itemClass = record.Text("Class") ?? string.Empty;
+        var slot = NormalizeSlot(itemClass);
         var isFactionPath = normalizedPath.Contains("/items/faction/", StringComparison.OrdinalIgnoreCase);
         var isMonsterInfrequent = classification == "Rare" && !isFactionPath && IsMonsterInfrequent(record);
+        var isRecipeRelic = slot == "relic" && deterministicRecipeOutputs.Contains(record.Name);
         var isFactionPlanningItem = includeFactionRare &&
             classification == "Rare" &&
             isFactionPath &&
             !isMonsterInfrequent;
-        if (classification is not ("Epic" or "Legendary") && !isMonsterInfrequent && !isFactionPlanningItem ||
+        if (classification is not ("Epic" or "Legendary") && !isMonsterInfrequent &&
+            !isFactionPlanningItem && !isRecipeRelic ||
             record.Name.Contains("/enemygear/", StringComparison.OrdinalIgnoreCase) ||
             record.Name.Contains("/npcgear/", StringComparison.OrdinalIgnoreCase) ||
             record.Name.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
@@ -156,8 +168,6 @@ internal static class ItemCatalogBuilder
             return null;
         }
 
-        var itemClass = record.Text("Class") ?? string.Empty;
-        var slot = NormalizeSlot(itemClass);
         if (!CollectionSlots.Contains(slot))
         {
             return null;

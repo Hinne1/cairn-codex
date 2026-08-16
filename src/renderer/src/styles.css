@@ -226,7 +226,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-card[role='button']:focus-visible { outline: 2px solid #b88c40; outline-offset: 2px; }
 .item-card.legendary { border-color: #6d3b82; }
 .item-card.epic { border-color: #315a79; }
-.item-card.mi { border-color: #3d7434; }
+.item-card.mi, .item-card.rare { border-color: #3d7434; }
 .item-card.missing { border-color: #302e29; filter: saturate(0.3); opacity: 0.63; }
 .item-mark {
   display: grid;
@@ -241,11 +241,11 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-mark img { display: block; max-width: 112px; max-height: 118px; object-fit: contain; image-rendering: auto; filter: drop-shadow(0 5px 8px rgba(0, 0, 0, 0.72)); }
 .item-card.epic .item-mark { border-color: #3d759e; box-shadow: inset 0 0 14px rgba(53, 117, 164, 0.16); }
 .item-card.legendary .item-mark { border-color: #8a48a7; box-shadow: inset 0 0 14px rgba(139, 68, 171, 0.18); }
-.item-card.mi .item-mark { border-color: #569448; box-shadow: inset 0 0 14px rgba(76, 143, 60, 0.18); }
+.item-card.mi .item-mark, .item-card.rare .item-mark { border-color: #569448; box-shadow: inset 0 0 14px rgba(76, 143, 60, 0.18); }
 .item-card.missing .item-mark img { filter: grayscale(1) brightness(0.34) opacity(0.75); }
 .item-card.epic .item-copy h3 { color: #58a9dd; }
 .item-card.legendary .item-copy h3 { color: #c05cf0; }
-.item-card.mi .item-copy h3 { color: #72d05e; }
+.item-card.mi .item-copy h3, .item-card.rare .item-copy h3 { color: #72d05e; }
 .item-copy h3 { margin: 0 0 5px; color: #e7dec9; font-size: 18px; font-weight: 600; line-height: 1.15; }
 .item-copy p { margin: 0 0 4px; color: #8e8269; font-size: 9px; letter-spacing: 0.09em; text-transform: capitalize; }
 .item-copy small { color: #746e63; font-size: 10px; }
@@ -319,7 +319,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .tooltip-header img { width: 42px; height: 52px; object-fit: contain; filter: drop-shadow(0 2px 4px #000); }
 .tooltip-header h3 { margin: 0; color: #5aaeff; font-size: 18px; font-weight: 500; line-height: 1.08; }
 .game-tooltip.legendary .tooltip-header h3 { color: #c157f4; }
-.game-tooltip.mi .tooltip-header h3 { color: #72d05e; }
+.game-tooltip.mi .tooltip-header h3, .game-tooltip.rare .tooltip-header h3 { color: #72d05e; }
 .tooltip-header p { margin: 3px 0 4px; color: #d8c69e; font-style: normal; }
 .tooltip-header strong { color: #f0bc54; font-weight: 500; text-transform: capitalize; }
 .tooltip-actions { display: flex; gap: 4px; position: sticky; top: 0; }
@@ -518,7 +518,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .planner-item-actions button, .planner-card-actions button { padding: 3px 7px; border: 1px solid #414b4f; border-radius: 3px; color: #7f8d92; background: #1b2022; cursor: pointer; font-size: 9px; }
 .planner-item-actions button:first-child, .planner-card-actions button:first-child { font-size: 13px; line-height: 1; }
 .planner-item-actions button.active, .planner-card-actions button.active { border-color: #a98539; color: #f0c65f; background: #3b301b; }
-.planner-item-cell .rarity-mi, .planner-item-cell .rarity-faction { color: #72d05e; }
+.planner-item-cell .rarity-mi, .planner-item-cell .rarity-rare, .planner-item-cell .rarity-faction { color: #72d05e; }
 .planner-item-cell .rarity-epic { color: #5aaeff; }
 .planner-item-cell .rarity-legendary { color: #c157f4; }
 .archive-mark { color: #b9cd75; }
@@ -540,7 +540,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .planner-card:hover, .planner-card:focus-visible { border-color: #7794a0; outline: none; background: linear-gradient(155deg, #242e32, #181b1c 70%); }
 .planner-card.favorite { border-color: #b88e39; box-shadow: 0 0 0 1px rgba(218,170,69,.18), inset 0 0 24px rgba(131,91,19,.1); }
 .planner-card.ignored { opacity: .7; }
-.planner-card.rarity-mi, .planner-card.rarity-faction { border-top-color: #64b953; }
+.planner-card.rarity-mi, .planner-card.rarity-rare, .planner-card.rarity-faction { border-top-color: #64b953; }
 .planner-card.rarity-epic { border-top-color: #4b9ddd; }
 .planner-card.rarity-legendary { border-top-color: #9c4dc4; }
 .planner-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -549,7 +549,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .planner-card > img { justify-self: center; width: 104px; height: 100px; object-fit: contain; filter: drop-shadow(0 5px 5px rgba(0,0,0,.75)); }
 .planner-card-title { display: grid; gap: 4px; min-width: 0; }
 .planner-card-title strong { color: #d9c99d; font: 600 15px Georgia, serif; line-height: 1.15; }
-.planner-card.rarity-mi .planner-card-title strong, .planner-card.rarity-faction .planner-card-title strong { color: #78cf65; }
+.planner-card.rarity-mi .planner-card-title strong, .planner-card.rarity-rare .planner-card-title strong, .planner-card.rarity-faction .planner-card-title strong { color: #78cf65; }
 .planner-card.rarity-epic .planner-card-title strong { color: #64aff2; }
 .planner-card.rarity-legendary .planner-card-title strong { color: #c36bea; }
 .planner-card-title small { color: #718087; font-size: 9px; }

@@ -472,7 +472,7 @@ export class CollectionDatabase {
       ingested_at_utc: string
       retrieved_at_utc: string | null
       name: string
-      rarity: 'epic' | 'legendary' | 'mi'
+      rarity: 'epic' | 'legendary' | 'mi' | 'rare' | 'faction'
       content_pack: string
       is_hardcore: number
     }>
@@ -921,6 +921,37 @@ export class CollectionDatabase {
           COMMIT;
         `)
         version = 7
+      } finally {
+        this.database.exec('PRAGMA foreign_keys = ON')
+      }
+    }
+    if (version === 7) {
+      this.database.exec('PRAGMA foreign_keys = OFF')
+      try {
+        this.database.exec(`
+          BEGIN IMMEDIATE;
+          CREATE TABLE catalog_item_next (
+            record TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            rarity TEXT NOT NULL CHECK (rarity IN ('epic', 'legendary', 'mi', 'rare', 'faction')),
+            item_class TEXT NOT NULL,
+            slot TEXT NOT NULL,
+            level_requirement INTEGER NOT NULL,
+            item_level INTEGER NOT NULL,
+            set_name TEXT,
+            set_record TEXT,
+            bitmap TEXT,
+            content_pack TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+          ) STRICT;
+          INSERT INTO catalog_item_next SELECT * FROM catalog_item;
+          DROP TABLE catalog_item;
+          ALTER TABLE catalog_item_next RENAME TO catalog_item;
+          CREATE INDEX catalog_item_browse_idx ON catalog_item(rarity, slot, name);
+          PRAGMA user_version = 8;
+          COMMIT;
+        `)
+        version = 8
       } finally {
         this.database.exec('PRAGMA foreign_keys = ON')
       }

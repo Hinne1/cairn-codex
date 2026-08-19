@@ -58,14 +58,22 @@ Allowlisted targets:
 - Grim Dawn: `1.3.0.7` (x64), Steam build `24742013`
 - `Game.dll` SHA-256:
   `4a746c1e455d30e4c95a591eeead77f03d6187cd66aa1e3191ee25fb25a419aa`
+- Grim Dawn: `1.3.0.7` (x64), silent Steam rebuild `24825149`
+- `Game.dll` SHA-256:
+  `07775a297050e84a846af1182731700614fb8b7bb41cca46b37fd24c90529387`
 
 The allowlist entry means the corrected binary layout and Cairn Codex queue
 contract were verified for an exact target. Live ingest and retrieval have both
 completed with committed durable receipts on `1.3.0.6`. On `1.3.0.7`, injection,
 the worker handshake, status inspection, disconnect signaling, and game-process
 survival were verified on 2026-08-15 without opening either item queue. The
-first item round trip remains a release follow-up. Live mode remains explicitly
-opt-in because it mutates the running game process.
+first item round trip remains a release follow-up. Steam build `24825149` was
+deployed on 2026-08-19 without a public Crate changelog found at verification
+time. On 2026-08-20, the bundled hook and injector fingerprints, compatibility
+inspection, injection, worker handshake, repeated ready-state inspection,
+clean disconnect, and game-process survival were verified against its exact
+`Game.dll`. Its first item round trip also remains a release follow-up. Live
+mode remains explicitly opt-in because it mutates the running game process.
 
 ## Planned local compatibility approval
 

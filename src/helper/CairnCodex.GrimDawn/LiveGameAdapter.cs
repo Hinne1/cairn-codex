@@ -28,7 +28,10 @@ internal sealed class LiveGameAdapter : IDisposable
             ["d91c184b65ace035672403a00eb7ba4f67dc506e635b6090d77c1d54b91e48d7"] = "v1.3.0.6",
             // Steam build 24742013. Keep this exact fingerprint fail-closed when
             // the next Grim Dawn update replaces Game.dll.
-            ["4a746c1e455d30e4c95a591eeead77f03d6187cd66aa1e3191ee25fb25a419aa"] = "v1.3.0.7"
+            ["4a746c1e455d30e4c95a591eeead77f03d6187cd66aa1e3191ee25fb25a419aa"] = "v1.3.0.7",
+            // Silent same-version Steam rebuild 24825149, deployed 2026-08-19.
+            ["07775a297050e84a846af1182731700614fb8b7bb41cca46b37fd24c90529387"] =
+                "v1.3.0.7 (Steam build 24825149)"
         };
 
     private readonly object sync = new();

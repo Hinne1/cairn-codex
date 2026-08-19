@@ -264,6 +264,7 @@ const gameConnectionLabel = computed(() => {
   if (liveStatus.value?.state === 'connecting') return 'Connecting to Grim Dawn'
   if (liveStatus.value?.state === 'available') return 'Grim Dawn detected'
   if (liveStatus.value?.state === 'blocked') return 'Live adapter blocked'
+  if (liveStatus.value?.grimDawnProcessIds.length && liveStatus.value.gameDllSha256) return 'Build verification needed'
   return 'Grim Dawn offline'
 })
 const connectionColorState = computed(() =>
@@ -307,6 +308,12 @@ const connectionRecommendation = computed(() => {
   return 'Start Grim Dawn and enter a character world. Cairn will detect it within ten seconds.'
 })
 const connectionFingerprint = computed(() => liveStatus.value?.gameDllSha256?.slice(0, 12) ?? null)
+const canApproveCurrentGameBuild = computed(() =>
+  liveStatus.value?.state === 'unavailable' &&
+  liveStatus.value.grimDawnProcessIds.length === 1 &&
+  Boolean(liveStatus.value.gameDllSha256) &&
+  liveStatus.value.detail.includes('new to Cairn')
+)
 const collectionBasisLabel = computed(() =>
   collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Scanner'
 )
@@ -1578,7 +1585,7 @@ async function handleHeaderLiveAction(): Promise<void> {
 }
 
 async function approveCurrentGameBuild(): Promise<void> {
-  if (!connectionFingerprint.value || vaultBusy.value) return
+  if (!canApproveCurrentGameBuild.value || !connectionFingerprint.value || vaultBusy.value) return
   const confirmed = window.confirm(
     'Trust this exact Grim Dawn Game.dll (' + connectionFingerprint.value + ') for live injection?\n\n' +
     'This is an advanced override. Cairn will still require its verified hook, but cannot prove that a new game patch kept the same internal ABI. Run one disposable ingest-and-return round trip before using valuable items.'
@@ -2695,7 +2702,7 @@ function formatPercentile(value: number | null | undefined): string {
             </div>
             <footer>
               <button type="button" :disabled="vaultBusy || liveLifecyclePolling" @click="handleHeaderLiveAction">{{ headerConnectionAction }}</button>
-              <button v-if="liveStatus?.state === 'blocked' && connectionFingerprint" type="button" :disabled="vaultBusy" @click="approveCurrentGameBuild">Trust exact build…</button>
+              <button v-if="canApproveCurrentGameBuild" type="button" :disabled="vaultBusy" @click="approveCurrentGameBuild">Trust exact build…</button>
               <button type="button" @click="activeView = 'vault'; transferMode = 'live'; showConnectionDiagnostics = false">Transfers</button>
               <button type="button" @click="activeView = 'settings'; showConnectionDiagnostics = false">Settings</button>
             </footer>

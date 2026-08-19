@@ -10,6 +10,8 @@ and Monster Infrequent items.
 - Keep every owned item instance while presenting one canonical entry per base item.
 - Track an automatically selected best roll and an optional user-pinned favorite.
 - Ingest and retrieve real items through Grim Dawn's transfer stash.
+- Unlock writs, mandates, augments, and movement runes once, then dispense
+  reusable single copies without consuming the archived template.
 - Track Monster Infrequent bases by level tier plus discovered prefix/suffix affixes.
 - Build a level-ordered character shopping list from any selected subset of skills.
 
@@ -51,6 +53,7 @@ must remain closed while Cairn Codex owns that hook and queue.
 - Local save data; broader save-location support can be added when needed.
 - Epic, Legendary, Monster Infrequent, and named green skill-support bases;
   affix combinations are managed separately in the Workshop.
+- Reusable faction writs/mandates and equipment augments/movement runes.
 
 ## Milestones
 
@@ -75,6 +78,12 @@ These four milestones are implemented. The desktop Vault screen exposes the
 journaled ingest and retrieval flows: choose a transfer stash, stage supported
 items in its final tab, and explicitly confirm the operation. Retrieval remains
 deliberately conservative and requires that final tab to be empty.
+
+The Transfers screen keeps consumable account supplies separate from equipment.
+Ingesting a writ, mandate, augment, or movement rune records it as a reusable
+unlock. Each dispense writes one unit into the game and returns the stored row
+to its available state only after the normal backup/receipt verification has
+completed; the original stack size is never duplicated.
 
 The collection browser also extracts item art from the installed game archives,
 uses Grim Dawn rarity colors, and builds game-style catalog tooltips from the

@@ -133,6 +133,8 @@ const staging = ref<StagingTabInspection | null>(null)
 const writeSafety = ref<WriteSafetyStatus | null>(null)
 const selectedStashPath = ref(localStorage.getItem('cairn-codex-retrieval-stash') ?? '')
 const selectedVaultIds = ref<string[]>([])
+const selectedReusableIds = ref<string[]>([])
+const reusableSupplyQuery = ref('')
 const vaultBusy = ref(false)
 const vaultError = ref<string | null>(null)
 const vaultMessage = ref<string | null>(null)
@@ -181,20 +183,38 @@ const categories = [
 const targetStash = computed(() =>
   stashChoices.value.find((stash) => stash.path === selectedStashPath.value) ?? null
 )
+const activeTransferHardcore = computed(() =>
+  transferMode.value === 'live' && liveStatus.value?.isHardcore !== null && liveStatus.value?.isHardcore !== undefined
+    ? liveStatus.value.isHardcore
+    : targetStash.value?.isHardcore
+)
 const availableVaultItems = computed(() =>
   vaultItems.value.filter(
     (item) =>
       item.catalogued &&
+      !item.reusable &&
       item.state === 'ingested' &&
-      item.isHardcore === targetStash.value?.isHardcore
+      item.isHardcore === activeTransferHardcore.value
   )
 )
+const reusableVaultItems = computed(() => {
+  const unique = new Map<string, VaultListItem>()
+  for (const item of vaultItems.value) {
+    if (!item.reusable || item.state !== 'ingested' || item.isHardcore !== activeTransferHardcore.value) continue
+    const key = `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
+    if (!unique.has(key)) unique.set(key, item)
+  }
+  const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
+  return [...unique.values()]
+    .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) || item.slot.includes(needle))
+    .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
+})
 const quarantinedVaultItems = computed(() =>
   vaultItems.value.filter(
     (item) =>
       !item.catalogued &&
       item.state === 'ingested' &&
-      item.isHardcore === targetStash.value?.isHardcore
+      item.isHardcore === activeTransferHardcore.value
   )
 )
 const retrievedVaultItems = computed(() =>
@@ -1006,6 +1026,7 @@ watch(visibleAtlasRegions, (regions) => {
 }, { immediate: true })
 watch(transferMode, () => {
   selectedVaultIds.value = []
+  selectedReusableIds.value = []
   vaultError.value = null
   vaultMessage.value = null
 })
@@ -1516,6 +1537,9 @@ async function refreshVault(): Promise<void> {
     selectedVaultIds.value = selectedVaultIds.value.filter((id) =>
       items.some((item) => item.id === id && item.state === 'ingested')
     )
+    selectedReusableIds.value = selectedReusableIds.value.filter((id) =>
+      items.some((item) => item.id === id && item.state === 'ingested' && item.reusable)
+    )
     await refreshStaging()
   } catch (error) {
     vaultError.value = readableError(error)
@@ -1629,8 +1653,11 @@ async function syncLiveMode(): Promise<void> {
 async function retrieveSelectedLive(): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
   const count = selectedVaultIds.value.length
+  const reusable = selectedVaultIds.value.every((id) => vaultItems.value.find((item) => item.id === id)?.reusable)
   const confirmed = window.confirm(
-    `Return ${count} ${count === 1 ? 'copy' : 'copies'} to Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? Each item is committed only after the game acknowledges it; if the tab fills, the remaining copies stay safely archived.`
+    reusable
+      ? `Dispense ${count} reusable ${count === 1 ? 'supply' : 'supplies'} into Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? The Codex unlocks remain available afterward.`
+      : `Return ${count} ${count === 1 ? 'copy' : 'copies'} to Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? Each item is committed only after the game acknowledges it; if the tab fills, the remaining copies stay safely archived.`
   )
   if (!confirmed) return
   vaultBusy.value = true
@@ -1640,8 +1667,8 @@ async function retrieveSelectedLive(): Promise<void> {
     const result = await window.cairnCodex.retrieveLiveVaultItems([...selectedVaultIds.value])
     applyLiveRetrievals(result.retrieved)
     vaultMessage.value = result.issues.length
-      ? `Live-retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}; stopped safely: ${result.issues[0]}`
-      : `Live-retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn.`
+      ? `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}; stopped safely: ${result.issues[0]}`
+      : `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn${reusable ? '; the unlocks remain in Cairn.' : '.'}`
     const retrievedIds = new Set(result.retrieved.map((item) => item.vaultItemId))
     selectedVaultIds.value = selectedVaultIds.value.filter((id) => !retrievedIds.has(id))
     await refreshVault()
@@ -1651,6 +1678,14 @@ async function retrieveSelectedLive(): Promise<void> {
   } finally {
     vaultBusy.value = false
   }
+}
+
+async function retrieveReusableSupplies(): Promise<void> {
+  if (selectedReusableIds.value.length === 0 || vaultBusy.value) return
+  selectedVaultIds.value = [...selectedReusableIds.value]
+  if (transferMode.value === 'live') await retrieveSelectedLive()
+  else await retrieveSelected()
+  selectedReusableIds.value = []
 }
 
 async function retrieveArchivedCopyLive(vaultItemId: string): Promise<void> {
@@ -1722,12 +1757,15 @@ function applyLiveRetrievals(
   retrieved: Array<{ vaultItemId: string; baseRecord: string; seed: number }>
 ): void {
   if (!snapshot.value || collectionBasis.value !== 'archive') return
-  const removedIds = new Set(retrieved.map((item) => `vault://${item.vaultItemId}`))
+  const consumed = retrieved.filter(
+    (item) => !vaultItems.value.find((vaultItem) => vaultItem.id === item.vaultItemId)?.reusable
+  )
+  const removedIds = new Set(consumed.map((item) => `vault://${item.vaultItemId}`))
   const observedItems = snapshot.value.observedItems.filter(
     (copy) => !removedIds.has(copy.sourcePath)
   )
   const counts = new Map<string, number>()
-  for (const item of retrieved) {
+  for (const item of consumed) {
     const key = item.baseRecord.toLocaleLowerCase()
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
@@ -1826,9 +1864,10 @@ async function ingestStagingTab(): Promise<void> {
 
 async function retrieveSelected(): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
-  const confirmed = window.confirm(
-    `Retrieve ${selectedVaultIds.value.length} item${selectedVaultIds.value.length === 1 ? '' : 's'} into the empty final shared stash tab? A verified backup will be created first.`
-  )
+  const reusable = selectedVaultIds.value.every((id) => vaultItems.value.find((item) => item.id === id)?.reusable)
+  const confirmed = window.confirm(reusable
+    ? `Dispense ${selectedVaultIds.value.length} reusable ${selectedVaultIds.value.length === 1 ? 'supply' : 'supplies'} into the empty final shared stash tab? The Codex unlocks remain available and a verified backup will be created first.`
+    : `Retrieve ${selectedVaultIds.value.length} item${selectedVaultIds.value.length === 1 ? '' : 's'} into the empty final shared stash tab? A verified backup will be created first.`)
   if (!confirmed) return
   vaultBusy.value = true
   vaultError.value = null
@@ -1839,7 +1878,9 @@ async function retrieveSelected(): Promise<void> {
       selectedVaultIds.value
     )
     selectedVaultIds.value = []
-    vaultMessage.value = `Safely retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`
+    vaultMessage.value = reusable
+      ? `Dispensed ${result.retrieved.length} reusable ${result.retrieved.length === 1 ? 'supply' : 'supplies'}; the unlocks remain in Cairn. Backup: ${result.backupPath}`
+      : `Safely retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`
     await scanCollection()
     await refreshVault()
   } catch (error) {
@@ -1854,6 +1895,12 @@ function toggleVaultItem(id: string): void {
   selectedVaultIds.value = selectedVaultIds.value.includes(id)
     ? selectedVaultIds.value.filter((candidate) => candidate !== id)
     : [...selectedVaultIds.value, id]
+}
+
+function toggleReusableSupply(id: string): void {
+  selectedReusableIds.value = selectedReusableIds.value.includes(id)
+    ? selectedReusableIds.value.filter((candidate) => candidate !== id)
+    : [...selectedReusableIds.value, id]
 }
 
 function readableError(error: unknown): string {
@@ -3258,6 +3305,53 @@ function formatPercentile(value: number | null | undefined): string {
         <p v-if="vaultError" class="vault-notice error">{{ vaultError }}</p>
         <p v-if="vaultMessage" class="vault-notice success">{{ vaultMessage }}</p>
 
+        <article class="vault-panel reusable-supplies-panel">
+          <header>
+            <div>
+              <p>Reusable supplies</p>
+              <h3>Unlocked writs and augments</h3>
+            </div>
+            <strong>{{ reusableVaultItems.length }}</strong>
+          </header>
+          <p class="panel-help">
+            Ingest one writ, mandate, augment, or movement rune to unlock it. Each return creates one
+            usable copy while keeping the template safely available in Cairn.
+          </p>
+          <input
+            v-model="reusableSupplyQuery"
+            class="vault-search"
+            type="search"
+            placeholder="Filter unlocked supplies…"
+          />
+          <div v-if="reusableVaultItems.length" class="vault-item-list selectable reusable-supply-list">
+            <label v-for="item in reusableVaultItems" :key="item.id" class="vault-row">
+              <input
+                type="checkbox"
+                :checked="selectedReusableIds.includes(item.id)"
+                :disabled="vaultBusy"
+                @change="toggleReusableSupply(item.id)"
+              />
+              <div>
+                <strong>{{ item.name }}</strong>
+                <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.slot === 'rune' ? 'movement rune' : item.slot }}</small>
+              </div>
+              <span class="reusable-mark">∞</span>
+            </label>
+          </div>
+          <div v-else class="vault-empty">
+            {{ reusableSupplyQuery ? 'No unlocked supplies match this filter.' : 'No reusable supplies unlocked for this mode yet.' }}
+          </div>
+          <button
+            class="vault-action"
+            :class="{ 'live-action': transferMode === 'live' }"
+            type="button"
+            :disabled="vaultBusy || selectedReusableIds.length === 0 || (transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
+            @click="retrieveReusableSupplies"
+          >
+            {{ vaultBusy ? 'Verifying…' : selectedReusableIds.length ? `Dispense ${selectedReusableIds.length} selected` : 'Select reusable supplies' }}
+          </button>
+        </article>
+
         <template v-if="transferMode === 'live'">
         <section class="live-mode-card" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
           <div class="live-mode-status">
@@ -3293,7 +3387,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div v-if="liveStatus?.state === 'ready'" class="live-ready-instructions">
             <strong>{{ liveSyncing ? 'Checking queue…' : `Watching the ${liveStatus.ingestTabDescription}` }}</strong>
             <small>Retrieval target: {{ liveStatus.depositTabDescription }}.</small>
-            <small>Place Epics, Legendaries, MIs, or named green skill bases in the watched tab.</small>
+              <small>Place equipment, writs, mandates, augments, or movement runes in the watched tab.</small>
           </div>
         </section>
         <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>
@@ -3432,7 +3526,7 @@ function formatPercentile(value: number | null | undefined): string {
               <strong>{{ staging?.itemCount ?? '—' }}</strong>
             </header>
             <p class="panel-help">
-              Put only the Epics and Legendaries you want archived into tab
+              Put equipment or reusable supplies you want archived into tab
               {{ staging ? staging.tabIndex + 1 : '—' }}.
             </p>
             <div v-if="staging?.items.length" class="vault-item-list">
@@ -3445,7 +3539,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <span class="item-rune">{{ item.supported ? '◆' : '!' }}</span>
                 <div>
                   <strong>{{ item.name }}</strong>
-                  <small>Seed {{ item.seed }}{{ item.supported ? '' : ' · not an Epic/Legendary/MI' }}</small>
+                  <small>Seed {{ item.seed }}{{ item.supported ? '' : ' · not supported by the Codex' }}</small>
                 </div>
               </div>
             </div>

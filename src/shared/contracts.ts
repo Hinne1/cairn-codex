@@ -129,7 +129,9 @@ export interface VaultListItem {
   baseRecord: string
   name: string
   rarity: CollectionItemRarity
+  slot: string
   catalogued: boolean
+  reusable: boolean
   isHardcore: boolean
   state: VaultItemState
   seed: number
@@ -228,6 +230,7 @@ export interface CollectionSnapshot {
   affixSummary: CollectionAffixSummary
   affixes: CollectionAffix[]
   plannerItems?: CollectionItem[]
+  supplies?: CollectionItem[]
 }
 
 export interface CatalogContentPack {
@@ -257,7 +260,7 @@ export interface CollectionRaritySummary {
   availableCopies: number
 }
 
-export type CollectionItemRarity = 'epic' | 'legendary' | 'mi' | 'rare' | 'faction'
+export type CollectionItemRarity = 'epic' | 'legendary' | 'mi' | 'rare' | 'faction' | 'supply'
 
 export interface CollectionAffixSummary {
   total: number

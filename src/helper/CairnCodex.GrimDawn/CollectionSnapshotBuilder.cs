@@ -129,6 +129,13 @@ internal static class CollectionSnapshotBuilder
                 rollSummary.TryGetValue(item.Record, out var rolls) ? rolls.Best : null,
                 rollSummary.TryGetValue(item.Record, out rolls) ? rolls.Count : 0))
             .ToArray();
+        var supplies = catalog.Supplies
+            .Select(item => new CollectionCatalogItem(
+                item,
+                availableByRecord.GetValueOrDefault(item.Record),
+                null,
+                0))
+            .ToArray();
         var affixes = catalog.Affixes
             .Select(affix => new CollectionAffix(
                 affix.Key,
@@ -154,7 +161,8 @@ internal static class CollectionSnapshotBuilder
             items,
             affixSummary,
             affixes,
-            plannerItems);
+            plannerItems,
+            supplies);
     }
 }
 
@@ -169,7 +177,8 @@ internal sealed record CollectionSnapshot(
     IReadOnlyList<CollectionCatalogItem> Items,
     CollectionAffixSummary AffixSummary,
     IReadOnlyList<CollectionAffix> Affixes,
-    IReadOnlyList<CollectionCatalogItem> PlannerItems);
+    IReadOnlyList<CollectionCatalogItem> PlannerItems,
+    IReadOnlyList<CollectionCatalogItem> Supplies);
 
 internal sealed record ScannedStash(
     string Path,

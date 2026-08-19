@@ -727,6 +727,10 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .vault-row strong { font-size: 12px; font-weight: 600; }
 .vault-row small { color: #756e61; font-size: 10px; text-transform: capitalize; }
 .vault-row.unsupported { border-color: #704238; color: #d49b8b; }
+.reusable-supplies-panel { min-height: 330px; margin-bottom: 16px; }
+.vault-search { box-sizing: border-box; width: 100%; margin: 2px 0 12px; padding: 10px 12px; border: 1px solid #454034; border-radius: 5px; color: #ded3bc; background: rgba(13, 14, 12, .72); }
+.reusable-supply-list .vault-row { grid-template-columns: 24px 1fr auto; }
+.reusable-mark { color: #d5af5d; font: 600 20px Georgia, serif; }
 .item-rune { color: #c69a4b; font-size: 12px; text-align: center; }
 .vault-empty { display: grid; min-height: 86px; place-items: center; margin-bottom: 16px; border: 1px dashed #39352d; border-radius: 6px; color: #676157; font-size: 12px; }
 .vault-action { width: 100%; margin-top: auto; }

@@ -20,6 +20,12 @@ state machine. Pending ingest payloads are committed before the source item is
 removed. Retrieval atomically advances selected vault items through
 `ingested`, `retrieval_pending`, and `retrieved` states.
 
+Schema version 9 adds reusable supply rows for faction writs/mandates and
+equipment augments/movement runes. These remain ordinary journaled `vault_item`
+payloads, but retrieval normalizes the emitted stack to one and returns a
+verified reusable row to `ingested` instead of consuming it. Supply catalog
+records are excluded from equipment roll analysis and collection completion.
+
 Each collection scan is persisted in one immediate transaction. Catalog
 metadata is upserted, scan evidence is appended, and collection_entry rows are
 inserted or last-seen timestamps advanced. A missing currently available copy

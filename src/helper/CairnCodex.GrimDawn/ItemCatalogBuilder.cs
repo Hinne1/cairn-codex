@@ -101,6 +101,19 @@ internal static class ItemCatalogBuilder
             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var supplies = data.Records.Values
+            .Select(source => ProjectSupply(
+                source,
+                data.Tags,
+                data.Records,
+                presentationSource,
+                acquisitionReferences))
+            .Where(item => item is not null)
+            .Cast<CatalogItem>()
+            .OrderBy(item => item.Slot, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var affixes = data.Records.Values
             .Select(source => ProjectAffix(source, data.Tags))
             .Where(affix => affix is not null)
@@ -132,7 +145,54 @@ internal static class ItemCatalogBuilder
             data.Tags.Count,
             items,
             plannerItems,
+            supplies,
             affixes);
+    }
+
+    private static CatalogItem? ProjectSupply(
+        CatalogSourceRecord source,
+        IReadOnlyDictionary<string, string> tags,
+        IReadOnlyDictionary<string, CatalogSourceRecord> records,
+        ItemPresentationSource presentationSource,
+        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences)
+    {
+        var record = source.Record;
+        var normalizedPath = record.Name.Replace('\\', '/');
+        var isFactionBooster = record.Type == "ItemFactionBooster" &&
+            normalizedPath.Contains("/items/faction/booster/", StringComparison.OrdinalIgnoreCase);
+        var isAugment = record.Type == "ItemEnchantment" &&
+            normalizedPath.Contains("/items/enchants/", StringComparison.OrdinalIgnoreCase);
+        if ((!isFactionBooster && !isAugment) ||
+            normalizedPath.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
+            IsCategoryTemplate(record.Name))
+        {
+            return null;
+        }
+
+        var name = Resolve(record.Text("itemNameTag") ?? record.Text("description"), tags)?.Trim();
+        if (!IsUsefulSourceName(name))
+        {
+            return null;
+        }
+
+        var slot = isAugment
+            ? normalizedPath.Contains("/runes/", StringComparison.OrdinalIgnoreCase) ? "rune" : "augment"
+            : name!.StartsWith("Mandate", StringComparison.OrdinalIgnoreCase) ? "mandate" : "writ";
+        return new CatalogItem(
+            record.Name,
+            name!,
+            "supply",
+            record.Text("Class") ?? record.Type,
+            slot,
+            checked((int)Math.Round(record.Number("levelRequirement") ?? 0)),
+            checked((int)Math.Round(record.Number("itemLevel") ?? 0)),
+            null,
+            null,
+            record.Text("bitmap") ?? record.Text("relicBitmap") ?? record.Text("shardBitmap"),
+            source.ContentPack,
+            null,
+            BuildAcquisition(record.Name, acquisitionReferences, records, tags, null),
+            ItemPresentationBuilder.Build(record, presentationSource));
     }
 
     private static CatalogItem? Project(
@@ -621,6 +681,7 @@ internal sealed record ItemCatalogResult(
     int TagCount,
     IReadOnlyList<CatalogItem> Items,
     IReadOnlyList<CatalogItem> PlannerItems,
+    IReadOnlyList<CatalogItem> Supplies,
     IReadOnlyList<CatalogAffix> Affixes);
 
 internal sealed record CatalogContentPack(string Id, string DatabasePath, string TagsPath);

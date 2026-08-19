@@ -25,7 +25,7 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 17
+const CATALOG_PRESENTATION_VERSION = 18
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -707,6 +707,7 @@ async function readCollectionCache(path: string): Promise<CollectionSnapshot | n
       parsed.catalogPresentationVersion !== CATALOG_PRESENTATION_VERSION ||
       !Array.isArray(parsed.items) ||
       !Array.isArray(parsed.plannerItems) ||
+      !Array.isArray(parsed.supplies) ||
       !Array.isArray(parsed.observedItems) ||
       !Array.isArray(parsed.scannedStashes)
     ) {
@@ -1168,6 +1169,21 @@ async function runSmokeTest(
       throw new Error('Live queue serializer self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const supplies = helperSnapshot.supplies ?? []
+    const writ = supplies.find((item) => item.slot === 'writ')
+    const mandate = supplies.find((item) => item.slot === 'mandate')
+    const augment = supplies.find((item) => item.slot === 'augment')
+    const movementRune = supplies.find((item) => item.slot === 'rune')
+    if (
+      supplies.length < 300 ||
+      supplies.some((item) => item.rarity !== 'supply') ||
+      !writ ||
+      !mandate ||
+      !augment ||
+      !movementRune
+    ) {
+      throw new Error('Reusable supply catalog did not include writs, mandates, augments, and movement runes.')
+    }
     const characterProfiles = await helper.request<CharacterSaveProfile[]>('list-characters', {
       installationPath: helperSnapshot.discovery.installations[0]?.path
     })
@@ -1555,6 +1571,64 @@ async function runSmokeTest(
       listedVaultItem.seed !== (journalPayload.seed as number)
     ) {
       throw new Error('Vault listing did not project the stored payload and lifecycle state.')
+    }
+    const reusableVaultItemId = randomUUID()
+    const reusableIngestOperationId = randomUUID()
+    database.prepareIngestOperation({
+      operationId: reusableIngestOperationId,
+      stashPath: 'smoke-test-transfer.gsh',
+      sourceSha256: 'smoke-reusable-source',
+      startedAtUtc: new Date().toISOString(),
+      items: [
+        {
+          vaultItemId: reusableVaultItemId,
+          baseRecord: augment.record,
+          payload: { baseRecord: augment.record, seed: 42, stackCount: 99 }
+        }
+      ],
+      detail: { phase: 'prepared', smokeTest: true, reusable: true }
+    })
+    database.completeIngestOperation({
+      operationId: reusableIngestOperationId,
+      backupPath: 'smoke-reusable-ingest-backup',
+      completedAtUtc: new Date().toISOString(),
+      isHardcore: true,
+      detail: { phase: 'committed', smokeTest: true, reusable: true }
+    })
+    const reusableBeforeRetrieval = database.getVaultItems([reusableVaultItemId])[0]
+    if (
+      !reusableBeforeRetrieval?.reusable ||
+      reusableBeforeRetrieval.state !== 'ingested' ||
+      (reusableBeforeRetrieval.payload as { stackCount?: number }).stackCount !== 1
+    ) {
+      throw new Error('Reusable supply ingest did not retain one normalized dispensable template.')
+    }
+    const reusableRetrievalOperationId = randomUUID()
+    database.prepareRetrievalOperation({
+      operationId: reusableRetrievalOperationId,
+      stashPath: 'smoke-test-transfer.gsh',
+      sourceSha256: 'smoke-reusable-retrieval-source',
+      startedAtUtc: new Date().toISOString(),
+      vaultItemIds: [reusableVaultItemId],
+      detail: { phase: 'prepared', smokeTest: true, reusable: true }
+    })
+    database.completeRetrievalOperation({
+      operationId: reusableRetrievalOperationId,
+      backupPath: 'smoke-reusable-retrieval-backup',
+      completedAtUtc: new Date().toISOString(),
+      vaultItemIds: [reusableVaultItemId],
+      detail: { phase: 'committed', smokeTest: true, reusable: true }
+    })
+    const reusableAfterRetrieval = database.getVaultItems([reusableVaultItemId])[0]
+    const listedReusable = database.listVaultItems().find((item) => item.id === reusableVaultItemId)
+    if (
+      reusableAfterRetrieval?.state !== 'ingested' ||
+      !reusableAfterRetrieval.reusable ||
+      listedReusable?.state !== 'ingested' ||
+      !listedReusable.reusable ||
+      listedReusable.slot !== 'augment'
+    ) {
+      throw new Error('Dispensing a reusable supply consumed its stored unlock.')
     }
     const migrationInput = {
       sourcePath: 'smoke-gdia-userdata.db',
@@ -2055,7 +2129,7 @@ async function executeStagingTabIngest(
   const unsupported = staging.items.filter((item) => !item.supported)
   if (unsupported.length > 0) {
     throw new Error(
-      'The staging tab contains items outside the Epic/Legendary/MI collection: ' +
+      'The staging tab contains items that Cairn cannot archive: ' +
         unsupported.map((item) => item.name).join(', ')
     )
   }

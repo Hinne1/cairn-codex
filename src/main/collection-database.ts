@@ -92,7 +92,7 @@ export class CollectionDatabase {
         .run(snapshot.scannedAtUtc, snapshot.warnings.length, snapshot.scannedStashes.length)
       const scanId = Number(scanResult.lastInsertRowid)
 
-      this.persistCatalog(snapshot.items)
+      this.persistCatalog([...snapshot.items, ...(snapshot.supplies ?? [])])
       this.persistStashSnapshots(scanId, snapshot)
       this.persistDiscoveries(snapshot)
       this.database.exec('COMMIT')
@@ -182,6 +182,7 @@ export class CollectionDatabase {
         JOIN catalog_item ON catalog_item.record = vault_item.base_record
         WHERE state = 'ingested'
           AND catalog_item.content_pack != 'cairn-quarantine'
+          AND catalog_item.rarity != 'supply'
           ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
         ORDER BY ingested_at_utc, id
       `)
@@ -226,11 +227,12 @@ export class CollectionDatabase {
     const importedIds: string[] = []
     const duplicateIds: string[] = []
     const unsupportedIds: string[] = []
-    const catalogItem = this.database.prepare('SELECT 1 AS found FROM catalog_item WHERE record = ?')
+    const catalogItem = this.database.prepare('SELECT rarity FROM catalog_item WHERE record = ?')
     const insertVault = this.database.prepare(`
       INSERT OR IGNORE INTO vault_item (
-        id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc, is_hardcore
-      ) VALUES (?, ?, 'ingested', ?, ?, NULL, ?)
+        id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc,
+        is_hardcore, reusable
+      ) VALUES (?, ?, 'ingested', ?, ?, NULL, ?, ?)
     `)
     const insertJournal = this.database.prepare(`
       INSERT OR IGNORE INTO operation_journal (
@@ -242,7 +244,8 @@ export class CollectionDatabase {
     this.database.exec('BEGIN IMMEDIATE')
     try {
       for (const item of input.items) {
-        if (!(catalogItem.get(item.baseRecord) as { found: number } | undefined)) {
+        const catalog = catalogItem.get(item.baseRecord) as { rarity: string } | undefined
+        if (!catalog) {
           unsupportedIds.push(item.externalId)
           continue
         }
@@ -261,7 +264,8 @@ export class CollectionDatabase {
           item.baseRecord,
           Buffer.from(JSON.stringify(item.payload), 'utf8'),
           item.createdAtUtc,
-          item.isHardcore ? 1 : 0
+          item.isHardcore ? 1 : 0,
+          catalog.rarity === 'supply' ? 1 : 0
         )
         if (Number(inserted.changes) !== 1) {
           duplicateIds.push(item.externalId)
@@ -339,8 +343,13 @@ export class CollectionDatabase {
     try {
       const pending = this.database
         .prepare(`
-          SELECT vault_item_id, base_record, payload_json
+          SELECT
+            pending_ingest_item.vault_item_id,
+            pending_ingest_item.base_record,
+            pending_ingest_item.payload_json,
+            CASE WHEN catalog_item.rarity = 'supply' THEN 1 ELSE 0 END AS reusable
           FROM pending_ingest_item
+          JOIN catalog_item ON catalog_item.record = pending_ingest_item.base_record
           WHERE operation_id = ?
           ORDER BY ordinal
         `)
@@ -348,6 +357,7 @@ export class CollectionDatabase {
         vault_item_id: string
         base_record: string
         payload_json: string
+        reusable: number
       }>
       if (pending.length === 0) {
         throw new Error('Prepared ingest operation has no persisted item payloads.')
@@ -355,8 +365,9 @@ export class CollectionDatabase {
 
       const insertVault = this.database.prepare(`
         INSERT INTO vault_item (
-          id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc, is_hardcore
-        ) VALUES (?, ?, 'ingested', ?, ?, NULL, ?)
+          id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc,
+          is_hardcore, reusable
+        ) VALUES (?, ?, 'ingested', ?, ?, NULL, ?, ?)
       `)
       for (const item of pending) {
         insertVault.run(
@@ -364,7 +375,8 @@ export class CollectionDatabase {
           item.base_record,
           Buffer.from(item.payload_json, 'utf8'),
           input.completedAtUtc,
-          input.isHardcore ? 1 : 0
+          input.isHardcore ? 1 : 0,
+          item.reusable
         )
       }
       this.database
@@ -419,7 +431,7 @@ export class CollectionDatabase {
     const placeholders = vaultItemIds.map(() => '?').join(', ')
     const rows = this.database
       .prepare(`
-        SELECT id, base_record, state, serialized_item
+        SELECT id, base_record, state, serialized_item, reusable
         FROM vault_item
         WHERE id IN (${placeholders})
           ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
@@ -429,6 +441,7 @@ export class CollectionDatabase {
       base_record: string
       state: VaultItemState
       serialized_item: Uint8Array
+      reusable: number
     }>
     const byId = new Map(rows.map((row) => [row.id, row]))
     return vaultItemIds.map((id) => {
@@ -436,11 +449,14 @@ export class CollectionDatabase {
       if (!row) {
         throw new Error('Vault item does not exist: ' + id)
       }
+      const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as Record<string, unknown>
+      if (row.reusable === 1) payload.stackCount = 1
       return {
         id: row.id,
         baseRecord: row.base_record,
         state: row.state,
-        payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown
+        payload,
+        reusable: row.reusable === 1
       }
     })
   }
@@ -456,8 +472,10 @@ export class CollectionDatabase {
           vault_item.ingested_at_utc,
           vault_item.retrieved_at_utc,
           vault_item.is_hardcore,
+          vault_item.reusable,
           catalog_item.name,
           catalog_item.rarity,
+          catalog_item.slot,
           catalog_item.content_pack
         FROM vault_item
         JOIN catalog_item ON catalog_item.record = vault_item.base_record
@@ -472,9 +490,11 @@ export class CollectionDatabase {
       ingested_at_utc: string
       retrieved_at_utc: string | null
       name: string
-      rarity: 'epic' | 'legendary' | 'mi' | 'rare' | 'faction'
+      rarity: 'epic' | 'legendary' | 'mi' | 'rare' | 'faction' | 'supply'
+      slot: string
       content_pack: string
       is_hardcore: number
+      reusable: number
     }>
 
     return rows.map((row) => {
@@ -486,7 +506,9 @@ export class CollectionDatabase {
         baseRecord: row.base_record,
         name: row.name,
         rarity: row.rarity,
+        slot: row.slot,
         catalogued: row.content_pack !== 'cairn-quarantine',
+        reusable: row.reusable === 1,
         isHardcore: row.is_hardcore === 1,
         state: row.state,
         seed: payload.seed ?? 0,
@@ -561,7 +583,8 @@ export class CollectionDatabase {
     try {
       const update = this.database.prepare(`
         UPDATE vault_item
-        SET state = 'retrieved', retrieved_at_utc = ?
+        SET state = CASE reusable WHEN 1 THEN 'ingested' ELSE 'retrieved' END,
+            retrieved_at_utc = ?
         WHERE id = ? AND state = 'retrieval_pending'
       `)
       for (const vaultItemId of input.vaultItemIds) {
@@ -677,7 +700,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 8) {
+    if (version > 9) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )
@@ -956,6 +979,41 @@ export class CollectionDatabase {
         this.database.exec('PRAGMA foreign_keys = ON')
       }
     }
+    if (version === 8) {
+      this.database.exec('PRAGMA foreign_keys = OFF')
+      try {
+        this.database.exec(`
+          BEGIN IMMEDIATE;
+          CREATE TABLE catalog_item_next (
+            record TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            rarity TEXT NOT NULL CHECK (rarity IN ('epic', 'legendary', 'mi', 'rare', 'faction', 'supply')),
+            item_class TEXT NOT NULL,
+            slot TEXT NOT NULL,
+            level_requirement INTEGER NOT NULL,
+            item_level INTEGER NOT NULL,
+            set_name TEXT,
+            set_record TEXT,
+            bitmap TEXT,
+            content_pack TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+          ) STRICT;
+          INSERT INTO catalog_item_next SELECT * FROM catalog_item;
+          DROP TABLE catalog_item;
+          ALTER TABLE catalog_item_next RENAME TO catalog_item;
+          CREATE INDEX catalog_item_browse_idx ON catalog_item(rarity, slot, name);
+          ALTER TABLE vault_item ADD COLUMN reusable INTEGER NOT NULL DEFAULT 0
+            CHECK (reusable IN (0, 1));
+          CREATE INDEX vault_item_reusable_idx
+            ON vault_item(reusable, is_hardcore, base_record, state);
+          PRAGMA user_version = 9;
+          COMMIT;
+        `)
+        version = 9
+      } finally {
+        this.database.exec('PRAGMA foreign_keys = ON')
+      }
+    }
   }
 
   private persistCatalog(items: CollectionItem[]): void {
@@ -994,6 +1052,13 @@ export class CollectionDatabase {
         now
       )
     }
+    this.database.exec(`
+      UPDATE vault_item
+      SET reusable = 1
+      WHERE reusable = 0
+        AND state = 'ingested'
+        AND base_record IN (SELECT record FROM catalog_item WHERE rarity = 'supply')
+    `)
   }
 
   private persistStashSnapshots(scanId: number, snapshot: CollectionSnapshot): void {
@@ -1255,6 +1320,7 @@ export interface VaultItem {
   baseRecord: string
   state: VaultItemState
   payload: unknown
+  reusable: boolean
 }
 
 export interface PreparedRetrievalOperation {

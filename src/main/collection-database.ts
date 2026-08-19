@@ -10,6 +10,15 @@ import type {
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
+function summarizeSupplies(supplies: CollectionItem[]): CollectionSnapshot['supplySummary'] {
+  return {
+    rarity: 'supply',
+    total: supplies.length,
+    collected: supplies.filter((item) => item.discovered).length,
+    availableCopies: supplies.reduce((count, item) => count + item.availableCount, 0)
+  }
+}
+
 function withAffixAvailability(
   snapshot: CollectionSnapshot,
   observedItems: ObservedStashItem[]
@@ -118,7 +127,8 @@ export class CollectionDatabase {
       .prepare(`
         SELECT
           base_record,
-          MIN(ingested_at_utc) AS first_ingested_at_utc
+          MIN(ingested_at_utc) AS first_ingested_at_utc,
+          SUM(CASE WHEN state = 'ingested' THEN 1 ELSE 0 END) AS available_count
         FROM vault_item
         ${isHardcore === undefined ? '' : 'WHERE is_hardcore = ?'}
         GROUP BY base_record
@@ -126,6 +136,7 @@ export class CollectionDatabase {
       .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
       base_record: string
       first_ingested_at_utc: string
+      available_count: number
     }>
     const archived = new Map(rows.map((row) => [row.base_record.toLowerCase(), row]))
     const copiesByRecord = new Map<string, ObservedStashItem[]>()
@@ -159,6 +170,15 @@ export class CollectionDatabase {
         pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
       }
     })
+    const supplies = (snapshot.supplies ?? []).map((item) => {
+      const row = archived.get(item.record.toLowerCase())
+      return {
+        ...item,
+        availableCount: row?.available_count ?? 0,
+        discovered: Boolean(row),
+        firstDiscoveredAt: row?.first_ingested_at_utc ?? null
+      }
+    })
     const rarities = collectionRarities.map((rarity) => {
       const matching = items.filter((item) => item.rarity === rarity)
       return {
@@ -169,7 +189,15 @@ export class CollectionDatabase {
       }
     })
     return withAffixAvailability(
-      { ...snapshot, basis: 'archive', observedItems, items, rarities },
+      {
+        ...snapshot,
+        basis: 'archive',
+        observedItems,
+        items,
+        supplies,
+        supplySummary: summarizeSupplies(supplies),
+        rarities
+      },
       observedItems
     )
   }
@@ -214,6 +242,7 @@ export class CollectionDatabase {
   }
 
   importVaultItems(input: VaultImport): VaultImportResult {
+    const infiniteSupplies = this.getInfiniteSupplies()
     const existingRows = this.database
       .prepare("SELECT serialized_item, is_hardcore FROM vault_item WHERE state = 'ingested'")
       .all() as Array<{ serialized_item: Uint8Array; is_hardcore: number }>
@@ -265,7 +294,7 @@ export class CollectionDatabase {
           Buffer.from(JSON.stringify(item.payload), 'utf8'),
           item.createdAtUtc,
           item.isHardcore ? 1 : 0,
-          catalog.rarity === 'supply' ? 1 : 0
+          catalog.rarity === 'supply' && infiniteSupplies ? 1 : 0
         )
         if (Number(inserted.changes) !== 1) {
           duplicateIds.push(item.externalId)
@@ -339,6 +368,7 @@ export class CollectionDatabase {
   }
 
   completeIngestOperation(input: CompletedIngestOperation): string[] {
+    const infiniteSupplies = this.getInfiniteSupplies()
     this.database.exec('BEGIN IMMEDIATE')
     try {
       const pending = this.database
@@ -376,7 +406,7 @@ export class CollectionDatabase {
           Buffer.from(item.payload_json, 'utf8'),
           input.completedAtUtc,
           input.isHardcore ? 1 : 0,
-          item.reusable
+          item.reusable === 1 && infiniteSupplies ? 1 : 0
         )
       }
       this.database
@@ -693,6 +723,44 @@ export class CollectionDatabase {
       .run(record, isHardcore ? 1 : 0, instanceKey, new Date().toISOString())
   }
 
+  getInfiniteSupplies(): boolean {
+    const row = this.database
+      .prepare("SELECT value FROM app_setting WHERE key = 'infinite_supplies'")
+      .get() as { value: string } | undefined
+    return row?.value !== 'false'
+  }
+
+  setInfiniteSupplies(enabled: boolean): boolean {
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      this.database
+        .prepare(`
+          INSERT INTO app_setting (key, value) VALUES ('infinite_supplies', ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `)
+        .run(enabled ? 'true' : 'false')
+      if (enabled) {
+        this.database.exec(`
+          UPDATE vault_item
+          SET reusable = 1
+          WHERE state = 'ingested'
+            AND base_record IN (SELECT record FROM catalog_item WHERE rarity = 'supply')
+        `)
+      } else {
+        this.database.exec(`
+          UPDATE vault_item
+          SET reusable = 0
+          WHERE base_record IN (SELECT record FROM catalog_item WHERE rarity = 'supply')
+        `)
+      }
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+    return enabled
+  }
+
   close(): void {
     this.database.close()
   }
@@ -700,7 +768,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 9) {
+    if (version > 10) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )
@@ -1014,6 +1082,19 @@ export class CollectionDatabase {
         this.database.exec('PRAGMA foreign_keys = ON')
       }
     }
+    if (version === 9) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE app_setting (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        ) STRICT;
+        INSERT INTO app_setting (key, value) VALUES ('infinite_supplies', 'true');
+        PRAGMA user_version = 10;
+        COMMIT;
+      `)
+      version = 10
+    }
   }
 
   private persistCatalog(items: CollectionItem[]): void {
@@ -1052,13 +1133,15 @@ export class CollectionDatabase {
         now
       )
     }
-    this.database.exec(`
-      UPDATE vault_item
-      SET reusable = 1
-      WHERE reusable = 0
-        AND state = 'ingested'
-        AND base_record IN (SELECT record FROM catalog_item WHERE rarity = 'supply')
-    `)
+    if (this.getInfiniteSupplies()) {
+      this.database.exec(`
+        UPDATE vault_item
+        SET reusable = 1
+        WHERE reusable = 0
+          AND state = 'ingested'
+          AND base_record IN (SELECT record FROM catalog_item WHERE rarity = 'supply')
+      `)
+    }
   }
 
   private persistStashSnapshots(scanId: number, snapshot: CollectionSnapshot): void {
@@ -1131,7 +1214,9 @@ export class CollectionDatabase {
       ON CONFLICT(record, is_hardcore) DO UPDATE SET
         last_discovered_at_utc = excluded.last_discovered_at_utc
     `)
-    const catalogRecords = new Set(snapshot.items.map((item) => item.record.toLowerCase()))
+    const catalogRecords = new Set(
+      [...snapshot.items, ...(snapshot.supplies ?? [])].map((item) => item.record.toLowerCase())
+    )
     const modesByPath = new Map(
       snapshot.scannedStashes.map((stash) => [stash.path.toLowerCase(), stash.isHardcore])
     )
@@ -1190,6 +1275,11 @@ export class CollectionDatabase {
       firstDiscoveredAt: discovered.get(item.record.toLowerCase()) ?? null,
       pinnedInstanceKey: pinned.get(item.record.toLowerCase()) ?? null
     }))
+    const supplies = (snapshot.supplies ?? []).map((item) => ({
+      ...item,
+      discovered: discovered.has(item.record.toLowerCase()),
+      firstDiscoveredAt: discovered.get(item.record.toLowerCase()) ?? null
+    }))
     const rarities = collectionRarities.map((rarity) => {
       const matching = items.filter((item) => item.rarity === rarity)
       return {
@@ -1200,7 +1290,14 @@ export class CollectionDatabase {
       }
     })
 
-    return { ...snapshot, basis: 'stashes', items, rarities }
+    return {
+      ...snapshot,
+      basis: 'stashes',
+      items,
+      supplies,
+      supplySummary: summarizeSupplies(supplies),
+      rarities
+    }
   }
 
   private loadPinned(isHardcore?: boolean): Map<string, string> {

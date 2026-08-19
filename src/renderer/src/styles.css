@@ -130,7 +130,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .primary-action:disabled { color: #827968; cursor: wait; }
 .scan-error { margin: 12px 0 0; color: #d98978; font-size: 13px; }
 
-.metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
+.metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
 .metrics > button { padding: 22px; border: 1px solid #373329; border-radius: 8px; color: inherit; background: linear-gradient(145deg, rgba(39, 37, 31, 0.88), rgba(25, 24, 21, 0.88)); cursor: pointer; text-align: left; transition: border-color 150ms ease, transform 150ms ease; }
 .metrics > button:hover { border-color: #6d5a37; transform: translateY(-1px); }
 .metrics > button[aria-pressed='true'] { border-color: #9b7439; box-shadow: inset 3px 0 #bd8f41; }
@@ -143,6 +143,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .meter.epic span { background: #9d7fd4; }
 .meter.mi span { background: #66a84f; }
 .meter.affix span { background: #ca7f45; }
+.meter.supply span { background: #5fa8a4; }
 .metrics small { display: block; margin-top: 11px; color: #777164; }
 
 .workspace-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }

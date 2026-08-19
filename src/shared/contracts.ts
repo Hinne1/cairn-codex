@@ -8,6 +8,8 @@ export const IPC_CHANNELS = {
   scanCollection: 'grim-dawn:scan-collection',
   rebuildGameDataIndex: 'grim-dawn:rebuild-game-data-index',
   setPinnedBest: 'collection:set-pinned-best',
+  getInfiniteSupplies: 'settings:get-infinite-supplies',
+  setInfiniteSupplies: 'settings:set-infinite-supplies',
   inspectWriteSafety: 'vault:inspect-write-safety',
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
@@ -38,6 +40,8 @@ export interface CairnCodexApi {
   scanCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   rebuildGameDataIndex: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>
+  getInfiniteSupplies: () => Promise<boolean>
+  setInfiniteSupplies: (enabled: boolean) => Promise<boolean>
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>
@@ -227,6 +231,7 @@ export interface CollectionSnapshot {
   rarities: CollectionRaritySummary[]
   items: CollectionItem[]
   recipeSummary: CollectionRecipeSummary
+  supplySummary?: CollectionRaritySummary
   affixSummary: CollectionAffixSummary
   affixes: CollectionAffix[]
   plannerItems?: CollectionItem[]

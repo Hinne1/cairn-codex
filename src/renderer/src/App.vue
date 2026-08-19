@@ -133,8 +133,10 @@ const staging = ref<StagingTabInspection | null>(null)
 const writeSafety = ref<WriteSafetyStatus | null>(null)
 const selectedStashPath = ref(localStorage.getItem('cairn-codex-retrieval-stash') ?? '')
 const selectedVaultIds = ref<string[]>([])
-const selectedReusableIds = ref<string[]>([])
+const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
+const infiniteSupplies = ref(true)
+const infiniteSuppliesBusy = ref(false)
 const vaultBusy = ref(false)
 const vaultError = ref<string | null>(null)
 const vaultMessage = ref<string | null>(null)
@@ -192,15 +194,15 @@ const availableVaultItems = computed(() =>
   vaultItems.value.filter(
     (item) =>
       item.catalogued &&
-      !item.reusable &&
+      item.rarity !== 'supply' &&
       item.state === 'ingested' &&
       item.isHardcore === activeTransferHardcore.value
   )
 )
-const reusableVaultItems = computed(() => {
+const supplyVaultItems = computed(() => {
   const unique = new Map<string, VaultListItem>()
   for (const item of vaultItems.value) {
-    if (!item.reusable || item.state !== 'ingested' || item.isHardcore !== activeTransferHardcore.value) continue
+    if (item.rarity !== 'supply' || item.state !== 'ingested' || item.isHardcore !== activeTransferHardcore.value) continue
     const key = `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
     if (!unique.has(key)) unique.set(key, item)
   }
@@ -1026,7 +1028,7 @@ watch(visibleAtlasRegions, (regions) => {
 }, { immediate: true })
 watch(transferMode, () => {
   selectedVaultIds.value = []
-  selectedReusableIds.value = []
+  selectedSupplyIds.value = []
   vaultError.value = null
   vaultMessage.value = null
 })
@@ -1049,6 +1051,11 @@ onMounted(async () => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
+  try {
+    infiniteSupplies.value = await window.cairnCodex.getInfiniteSupplies()
+  } catch (error) {
+    console.warn('Stored-supply setting could not be loaded; preserving the safe default.', error)
+  }
   // Establish live ownership before catalog projection/scanning queues any heavyweight
   // helper work. This keeps reconnect independent from collection startup time.
   await pollLiveLifecycle()
@@ -1383,6 +1390,21 @@ function setAutoLiveConnect(enabled: boolean): void {
   }
 }
 
+async function setInfiniteSupplies(enabled: boolean): Promise<void> {
+  if (infiniteSuppliesBusy.value) return
+  infiniteSuppliesBusy.value = true
+  vaultError.value = null
+  try {
+    infiniteSupplies.value = await window.cairnCodex.setInfiniteSupplies(enabled)
+    selectedSupplyIds.value = []
+    await refreshVault()
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    infiniteSuppliesBusy.value = false
+  }
+}
+
 async function handleHeaderLiveAction(): Promise<void> {
   const status = liveStatus.value
   if (status?.state === 'ready' || status?.state === 'connecting' || status?.hostWindowReady) {
@@ -1479,6 +1501,17 @@ function filterToRecipes(): void {
   window.scrollTo({ top: 500, behavior: 'smooth' })
 }
 
+function openAffixWorkshop(): void {
+  activeView.value = 'mi-workshop'
+  activeCategory.value = 'All'
+  rarityFilter.value = 'all'
+}
+
+function openSupplies(): void {
+  activeView.value = 'vault'
+  reusableSupplyQuery.value = ''
+}
+
 function percentage(summary: CollectionRaritySummary | undefined): string {
   if (!summary || summary.total === 0) return '0%'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
@@ -1537,8 +1570,8 @@ async function refreshVault(): Promise<void> {
     selectedVaultIds.value = selectedVaultIds.value.filter((id) =>
       items.some((item) => item.id === id && item.state === 'ingested')
     )
-    selectedReusableIds.value = selectedReusableIds.value.filter((id) =>
-      items.some((item) => item.id === id && item.state === 'ingested' && item.reusable)
+    selectedSupplyIds.value = selectedSupplyIds.value.filter((id) =>
+      items.some((item) => item.id === id && item.state === 'ingested' && item.rarity === 'supply')
     )
     await refreshStaging()
   } catch (error) {
@@ -1653,10 +1686,14 @@ async function syncLiveMode(): Promise<void> {
 async function retrieveSelectedLive(): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
   const count = selectedVaultIds.value.length
-  const reusable = selectedVaultIds.value.every((id) => vaultItems.value.find((item) => item.id === id)?.reusable)
+  const selected = selectedVaultIds.value.map((id) => vaultItems.value.find((item) => item.id === id))
+  const reusable = selected.every((item) => item?.reusable)
+  const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(
     reusable
       ? `Dispense ${count} reusable ${count === 1 ? 'supply' : 'supplies'} into Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? The Codex unlocks remain available afterward.`
+      : supplies
+        ? `Return ${count} stored ${count === 1 ? 'supply' : 'supplies'} to Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? Infinite supplies are disabled, so this consumes the archived ${count === 1 ? 'stack' : 'stacks'}.`
       : `Return ${count} ${count === 1 ? 'copy' : 'copies'} to Grim Dawn's ${liveStatus.value?.depositTabDescription ?? 'configured retrieval tab'}? Each item is committed only after the game acknowledges it; if the tab fills, the remaining copies stay safely archived.`
   )
   if (!confirmed) return
@@ -1680,12 +1717,12 @@ async function retrieveSelectedLive(): Promise<void> {
   }
 }
 
-async function retrieveReusableSupplies(): Promise<void> {
-  if (selectedReusableIds.value.length === 0 || vaultBusy.value) return
-  selectedVaultIds.value = [...selectedReusableIds.value]
+async function retrieveSupplies(): Promise<void> {
+  if (selectedSupplyIds.value.length === 0 || vaultBusy.value) return
+  selectedVaultIds.value = [...selectedSupplyIds.value]
   if (transferMode.value === 'live') await retrieveSelectedLive()
   else await retrieveSelected()
-  selectedReusableIds.value = []
+  selectedSupplyIds.value = []
 }
 
 async function retrieveArchivedCopyLive(vaultItemId: string): Promise<void> {
@@ -1704,6 +1741,12 @@ function applyLiveIngests(
   }>
 ): void {
   if (!snapshot.value) return
+  const supplyRecords = new Set(
+    (snapshot.value.supplies ?? []).map((item) => item.record.toLocaleLowerCase())
+  )
+  const equipmentIngested = ingested.filter(
+    (item) => !supplyRecords.has(item.baseRecord.toLocaleLowerCase())
+  )
   const counts = new Map<string, number>()
   for (const item of ingested) {
     const key = item.baseRecord.toLocaleLowerCase()
@@ -1721,10 +1764,21 @@ function applyLiveIngests(
         collectionBasis.value === 'archive' ? item.availableCount + added : item.availableCount
     }
   })
+  const supplies = (snapshot.value.supplies ?? []).map((item) => {
+    const added = counts.get(item.record.toLocaleLowerCase()) ?? 0
+    if (added === 0) return item
+    return {
+      ...item,
+      discovered: true,
+      firstDiscoveredAt: item.firstDiscoveredAt ?? discoveredAt,
+      availableCount:
+        collectionBasis.value === 'archive' ? item.availableCount + added : item.availableCount
+    }
+  })
   const observedItems = collectionBasis.value === 'archive'
     ? [
         ...snapshot.value.observedItems,
-        ...ingested.map((item, index): ObservedStashItem => ({
+        ...equipmentIngested.map((item, index): ObservedStashItem => ({
           sourcePath: `vault://${item.vaultItemId}`,
           tabIndex: -1,
           itemIndex: snapshot.value!.observedItems.length + index,
@@ -1750,7 +1804,7 @@ function applyLiveIngests(
         }))
       ]
     : snapshot.value.observedItems
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items })
+  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
 }
 
 function applyLiveRetrievals(
@@ -1790,7 +1844,13 @@ function applyLiveRetrievals(
           : null
     }
   })
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items })
+  const supplies = (snapshot.value.supplies ?? []).map((item) => {
+    const removed = counts.get(item.record.toLocaleLowerCase()) ?? 0
+    return removed === 0
+      ? item
+      : { ...item, availableCount: Math.max(0, item.availableCount - removed) }
+  })
+  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
 }
 
 function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
@@ -1822,6 +1882,12 @@ function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
     ...value,
     rarities,
     affixes,
+    supplySummary: {
+      rarity: 'supply',
+      total: value.supplies?.length ?? 0,
+      collected: value.supplies?.filter((item) => item.discovered).length ?? 0,
+      availableCopies: value.supplies?.reduce((count, item) => count + item.availableCount, 0) ?? 0
+    },
     affixSummary: {
       total: affixes.length,
       collected: affixes.filter((affix) => affix.availableCount > 0).length,
@@ -1864,9 +1930,13 @@ async function ingestStagingTab(): Promise<void> {
 
 async function retrieveSelected(): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
-  const reusable = selectedVaultIds.value.every((id) => vaultItems.value.find((item) => item.id === id)?.reusable)
+  const selected = selectedVaultIds.value.map((id) => vaultItems.value.find((item) => item.id === id))
+  const reusable = selected.every((item) => item?.reusable)
+  const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(reusable
     ? `Dispense ${selectedVaultIds.value.length} reusable ${selectedVaultIds.value.length === 1 ? 'supply' : 'supplies'} into the empty final shared stash tab? The Codex unlocks remain available and a verified backup will be created first.`
+    : supplies
+      ? `Return ${selectedVaultIds.value.length} stored ${selectedVaultIds.value.length === 1 ? 'supply' : 'supplies'} into the empty final shared stash tab? Infinite supplies are disabled, so this consumes the archived ${selectedVaultIds.value.length === 1 ? 'stack' : 'stacks'}.`
     : `Retrieve ${selectedVaultIds.value.length} item${selectedVaultIds.value.length === 1 ? '' : 's'} into the empty final shared stash tab? A verified backup will be created first.`)
   if (!confirmed) return
   vaultBusy.value = true
@@ -1897,10 +1967,10 @@ function toggleVaultItem(id: string): void {
     : [...selectedVaultIds.value, id]
 }
 
-function toggleReusableSupply(id: string): void {
-  selectedReusableIds.value = selectedReusableIds.value.includes(id)
-    ? selectedReusableIds.value.filter((candidate) => candidate !== id)
-    : [...selectedReusableIds.value, id]
+function toggleSupply(id: string): void {
+  selectedSupplyIds.value = selectedSupplyIds.value.includes(id)
+    ? selectedSupplyIds.value.filter((candidate) => candidate !== id)
+    : [...selectedSupplyIds.value, id]
 }
 
 function readableError(error: unknown): string {
@@ -2496,7 +2566,7 @@ function formatPercentile(value: number | null | undefined): string {
       <section class="metrics" aria-label="Collection completion">
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'legendary'"
+          :aria-pressed="activeView === 'collection' && rarityFilter === 'legendary'"
           @click="filterToRarity('legendary')"
         >
           <div class="metric-heading">
@@ -2508,7 +2578,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'epic'"
+          :aria-pressed="activeView === 'collection' && rarityFilter === 'epic'"
           @click="filterToRarity('epic')"
         >
           <div class="metric-heading">
@@ -2520,7 +2590,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'mi'"
+          :aria-pressed="activeView === 'collection' && rarityFilter === 'mi'"
           @click="filterToRarity('mi')"
         >
           <div class="metric-heading">
@@ -2533,7 +2603,7 @@ function formatPercentile(value: number | null | undefined): string {
         <button
           type="button"
           :aria-pressed="activeView === 'mi-workshop'"
-          @click="activeView = 'mi-workshop'"
+          @click="openAffixWorkshop"
         >
           <div class="metric-heading">
             <span>Affixes</span>
@@ -2544,7 +2614,19 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'recipe'"
+          aria-pressed="false"
+          @click="openSupplies"
+        >
+          <div class="metric-heading">
+            <span>Supplies</span>
+            <strong>{{ snapshot?.supplySummary?.collected ?? 0 }} / {{ snapshot?.supplySummary?.total ?? '—' }}</strong>
+          </div>
+          <div class="meter supply"><span :style="{ width: percentage(snapshot?.supplySummary) }" /></div>
+          <small>{{ percentage(snapshot?.supplySummary) }} unlocked · {{ snapshot?.supplySummary?.availableCopies ?? 0 }} stored</small>
+        </button>
+        <button
+          type="button"
+          :aria-pressed="activeView === 'collection' && rarityFilter === 'recipe'"
           @click="filterToRecipes"
         >
           <div class="metric-heading">
@@ -3265,6 +3347,25 @@ function formatPercentile(value: number | null | undefined): string {
           </article>
 
           <article class="settings-card">
+            <p class="section-label">Stored supplies</p>
+            <h3>Dispensing behavior</h3>
+            <label class="settings-toggle">
+              <input
+                type="checkbox"
+                :checked="infiniteSupplies"
+                :disabled="infiniteSuppliesBusy || vaultBusy"
+                @change="setInfiniteSupplies(($event.target as HTMLInputElement).checked)"
+              />
+              <span>
+                <strong>Infinite supplies</strong>
+                <small>Keep an unlocked writ, mandate, augment, or movement rune after dispensing one copy.</small>
+              </span>
+            </label>
+            <small v-if="infiniteSupplies">Each return emits one unit; the archived unlock remains available.</small>
+            <small v-else>Disabled: returning a stored supply consumes that archived stack like an ordinary item.</small>
+          </article>
+
+          <article class="settings-card">
             <p class="section-label">Game data</p>
             <h3>Installed-data cache</h3>
             <p>Item records, drop-source graphs, map regions, and monster placements are cached locally. Game updates invalidate the cache automatically.</p>
@@ -3308,14 +3409,18 @@ function formatPercentile(value: number | null | undefined): string {
         <article class="vault-panel reusable-supplies-panel">
           <header>
             <div>
-              <p>Reusable supplies</p>
-              <h3>Unlocked writs and augments</h3>
+              <p>Stored supplies</p>
+              <h3>Writs, mandates, augments, and runes</h3>
             </div>
-            <strong>{{ reusableVaultItems.length }}</strong>
+            <strong>{{ supplyVaultItems.length }}</strong>
           </header>
           <p class="panel-help">
-            Ingest one writ, mandate, augment, or movement rune to unlock it. Each return creates one
-            usable copy while keeping the template safely available in Cairn.
+            <template v-if="infiniteSupplies">
+              Ingest one supply to unlock it. Each dispense creates one usable copy while keeping the template safely available in Cairn.
+            </template>
+            <template v-else>
+              Infinite supplies are disabled. Returning a supply consumes its stored stack; collection history remains tracked.
+            </template>
           </p>
           <input
             v-model="reusableSupplyQuery"
@@ -3323,32 +3428,32 @@ function formatPercentile(value: number | null | undefined): string {
             type="search"
             placeholder="Filter unlocked supplies…"
           />
-          <div v-if="reusableVaultItems.length" class="vault-item-list selectable reusable-supply-list">
-            <label v-for="item in reusableVaultItems" :key="item.id" class="vault-row">
+          <div v-if="supplyVaultItems.length" class="vault-item-list selectable reusable-supply-list">
+            <label v-for="item in supplyVaultItems" :key="item.id" class="vault-row">
               <input
                 type="checkbox"
-                :checked="selectedReusableIds.includes(item.id)"
+                :checked="selectedSupplyIds.includes(item.id)"
                 :disabled="vaultBusy"
-                @change="toggleReusableSupply(item.id)"
+                @change="toggleSupply(item.id)"
               />
               <div>
                 <strong>{{ item.name }}</strong>
                 <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.slot === 'rune' ? 'movement rune' : item.slot }}</small>
               </div>
-              <span class="reusable-mark">∞</span>
+              <span class="reusable-mark">{{ item.reusable ? '∞' : 'stored' }}</span>
             </label>
           </div>
           <div v-else class="vault-empty">
-            {{ reusableSupplyQuery ? 'No unlocked supplies match this filter.' : 'No reusable supplies unlocked for this mode yet.' }}
+            {{ reusableSupplyQuery ? 'No stored supplies match this filter.' : 'No supplies stored for this mode yet.' }}
           </div>
           <button
             class="vault-action"
             :class="{ 'live-action': transferMode === 'live' }"
             type="button"
-            :disabled="vaultBusy || selectedReusableIds.length === 0 || (transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
-            @click="retrieveReusableSupplies"
+            :disabled="vaultBusy || selectedSupplyIds.length === 0 || (transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
+            @click="retrieveSupplies"
           >
-            {{ vaultBusy ? 'Verifying…' : selectedReusableIds.length ? `Dispense ${selectedReusableIds.length} selected` : 'Select reusable supplies' }}
+            {{ vaultBusy ? 'Verifying…' : selectedSupplyIds.length ? `${infiniteSupplies ? 'Dispense' : 'Return'} ${selectedSupplyIds.length} selected` : 'Select supplies' }}
           </button>
         </article>
 

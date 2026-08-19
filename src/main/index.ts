@@ -358,6 +358,15 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     }
   )
   ipcMain.handle(
+    IPC_CHANNELS.getInfiniteSupplies,
+    (): boolean => database.getInfiniteSupplies()
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.setInfiniteSupplies,
+    (_event, input: { enabled: boolean }): Promise<boolean> =>
+      runExclusive(async () => database.setInfiniteSupplies(input.enabled))
+  )
+  ipcMain.handle(
     IPC_CHANNELS.inspectWriteSafety,
     (): Promise<WriteSafetyStatus> => helper.request<WriteSafetyStatus>('inspect-write-safety')
   )
@@ -890,6 +899,10 @@ function projectCollectionSources(
           : null
     }
   })
+  const supplies = (snapshot.supplies ?? []).map((item) => ({
+    ...item,
+    availableCount: copiesByRecord.get(item.record.toLocaleLowerCase())?.length ?? 0
+  }))
   const warnings = snapshot.warnings.filter((warning) => {
     if (paths.has(warning.path.toLocaleLowerCase())) return true
     return scannedStashes.some(
@@ -917,7 +930,8 @@ function projectCollectionSources(
     observedItems,
     warnings,
     rarities,
-    items
+    items,
+    supplies
   }, observedItems)
 }
 
@@ -1461,6 +1475,9 @@ async function runSmokeTest(
       throw new Error('A transfer stash failed the in-memory ingest/retrieval roundtrip.')
     }
     const snapshot = database.persistSnapshot(helperSnapshot)
+    if (snapshot.supplySummary?.total !== supplies.length) {
+      throw new Error('Reusable supply completion was not projected into the collection snapshot.')
+    }
     const recipeArchiveSnapshot = withRecipeCollection(
       database.presentArchiveSnapshot(snapshot, [], false),
       false
@@ -1629,6 +1646,34 @@ async function runSmokeTest(
       listedReusable.slot !== 'augment'
     ) {
       throw new Error('Dispensing a reusable supply consumed its stored unlock.')
+    }
+    if (!database.getInfiniteSupplies() || database.setInfiniteSupplies(false) !== false) {
+      throw new Error('Infinite-supplies setting did not persist its disabled state.')
+    }
+    const finiteRetrievalOperationId = randomUUID()
+    database.prepareRetrievalOperation({
+      operationId: finiteRetrievalOperationId,
+      stashPath: 'smoke-test-transfer.gsh',
+      sourceSha256: 'smoke-finite-supply-source',
+      startedAtUtc: new Date().toISOString(),
+      vaultItemIds: [reusableVaultItemId],
+      detail: { phase: 'prepared', smokeTest: true, reusable: false }
+    })
+    database.completeRetrievalOperation({
+      operationId: finiteRetrievalOperationId,
+      backupPath: 'smoke-finite-supply-backup',
+      completedAtUtc: new Date().toISOString(),
+      vaultItemIds: [reusableVaultItemId],
+      detail: { phase: 'committed', smokeTest: true, reusable: false }
+    })
+    database.setInfiniteSupplies(true)
+    const finiteAfterRetrieval = database.getVaultItems([reusableVaultItemId])[0]
+    if (
+      finiteAfterRetrieval?.state !== 'retrieved' ||
+      finiteAfterRetrieval.reusable ||
+      !database.getInfiniteSupplies()
+    ) {
+      throw new Error('Disabling infinite supplies did not consume the dispensed stored copy.')
     }
     const migrationInput = {
       sourcePath: 'smoke-gdia-userdata.db',

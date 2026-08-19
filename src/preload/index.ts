@@ -34,6 +34,10 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.rebuildGameDataIndex, { sourcePaths, basis }) as Promise<CollectionSnapshot>,
   setPinnedBest: (record, instanceKey, isHardcore) =>
     ipcRenderer.invoke(IPC_CHANNELS.setPinnedBest, { record, instanceKey, isHardcore }) as Promise<void>,
+  getInfiniteSupplies: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getInfiniteSupplies) as Promise<boolean>,
+  setInfiniteSupplies: (enabled) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setInfiniteSupplies, { enabled }) as Promise<boolean>,
   inspectWriteSafety: () =>
     ipcRenderer.invoke(IPC_CHANNELS.inspectWriteSafety) as Promise<WriteSafetyStatus>,
   inspectStagingTab: (path) =>

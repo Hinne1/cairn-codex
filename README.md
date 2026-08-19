@@ -11,7 +11,8 @@ and Monster Infrequent items.
 - Track an automatically selected best roll and an optional user-pinned favorite.
 - Ingest and retrieve real items through Grim Dawn's transfer stash.
 - Unlock writs, mandates, augments, and movement runes once, then dispense
-  reusable single copies without consuming the archived template.
+  single copies without consuming the archived template when Infinite Supplies
+  is enabled.
 - Track Monster Infrequent bases by level tier plus discovered prefix/suffix affixes.
 - Build a level-ordered character shopping list from any selected subset of skills.
 
@@ -83,7 +84,9 @@ The Transfers screen keeps consumable account supplies separate from equipment.
 Ingesting a writ, mandate, augment, or movement rune records it as a reusable
 unlock. Each dispense writes one unit into the game and returns the stored row
 to its available state only after the normal backup/receipt verification has
-completed; the original stack size is never duplicated.
+completed; the original stack size is never duplicated. Settings can disable
+Infinite Supplies, in which case returning a supply consumes its archived stack
+while retaining its lifetime collection entry.
 
 The collection browser also extracts item art from the installed game archives,
 uses Grim Dawn rarity colors, and builds game-style catalog tooltips from the

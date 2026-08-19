@@ -24,7 +24,13 @@ Schema version 9 adds reusable supply rows for faction writs/mandates and
 equipment augments/movement runes. These remain ordinary journaled `vault_item`
 payloads, but retrieval normalizes the emitted stack to one and returns a
 verified reusable row to `ingested` instead of consuming it. Supply catalog
-records are excluded from equipment roll analysis and collection completion.
+records are excluded from equipment roll analysis and equipment completion;
+their own summary tracks lifetime supply unlocks separately.
+
+Schema version 10 persists the `infinite_supplies` behavior setting. Disabling
+it clears the reusable flag on stored supply rows, so their next verified
+retrieval advances to `retrieved` normally. Re-enabling it marks only supplies
+that are still `ingested` as reusable and never resurrects a consumed row.
 
 Each collection scan is persisted in one immediate transaction. Catalog
 metadata is upserted, scan evidence is appended, and collection_entry rows are

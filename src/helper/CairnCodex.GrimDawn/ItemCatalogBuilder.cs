@@ -188,7 +188,7 @@ internal static class ItemCatalogBuilder
             checked((int)Math.Round(record.Number("itemLevel") ?? 0)),
             null,
             null,
-            record.Text("bitmap") ?? record.Text("relicBitmap") ?? record.Text("shardBitmap"),
+            ItemBitmap(record),
             source.ContentPack,
             null,
             BuildAcquisition(record.Name, acquisitionReferences, records, tags, null),
@@ -300,12 +300,20 @@ internal static class ItemCatalogBuilder
             checked((int)Math.Round(record.Number("itemLevel") ?? 0)),
             setName,
             setRecord,
-            record.Text("bitmap") ?? record.Text("relicBitmap") ?? record.Text("shardBitmap"),
+            ItemBitmap(record),
             source.ContentPack,
             setRecord is null ? null : setPresentations.GetValueOrDefault(setRecord),
             acquisition,
             ItemPresentationBuilder.Build(record, presentationSource));
     }
+
+    private static string? ItemBitmap(ArzRecord record) =>
+        record.Text("bitmap") ??
+        record.Text("relicBitmap") ??
+        record.Text("artifactBitmap") ??
+        record.Text("artifactBitmapName") ??
+        record.Text("itemBitmap") ??
+        record.Text("shardBitmap");
 
     private static bool IsMonsterInfrequent(ArzRecord record) =>
         record.Values

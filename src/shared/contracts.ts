@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
   ingestStagingTab: 'vault:ingest-staging-tab',
   retrieveVaultItems: 'vault:retrieve-items',
   inspectLiveGame: 'live:inspect',
+  approveLiveGameBuild: 'live:approve-build',
   startLiveGame: 'live:start',
   stopLiveGame: 'live:stop',
   syncLiveGame: 'live:sync',
@@ -48,6 +49,7 @@ export interface CairnCodexApi {
   ingestStagingTab: (path: string) => Promise<IngestResult>
   retrieveVaultItems: (path: string, vaultItemIds: string[]) => Promise<RetrievalResult>
   inspectLiveGame: () => Promise<LiveGameStatus>
+  approveLiveGameBuild: () => Promise<LiveGameStatus>
   startLiveGame: () => Promise<LiveGameStatus>
   stopLiveGame: () => Promise<LiveGameStatus>
   syncLiveGame: () => Promise<LiveGameSyncResult>
@@ -414,6 +416,7 @@ export interface ObservedStashItem {
 }
 
 export interface ItemRollAnalysis {
+  modelVersion?: number
   baseRecord: string
   prefixRecord: string
   suffixRecord: string

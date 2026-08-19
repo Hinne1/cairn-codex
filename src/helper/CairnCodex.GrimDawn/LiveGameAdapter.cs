@@ -280,6 +280,32 @@ internal sealed class LiveGameAdapter : IDisposable
             return Inspect();
     }
 
+    public LiveGameStatus ApproveCurrentBuild()
+    {
+        lock (sync)
+        {
+            var status = Inspect();
+            if (string.IsNullOrWhiteSpace(status.GameDllSha256))
+            {
+                throw new InvalidOperationException("Start Grim Dawn before approving an exact game build.");
+            }
+            if (!string.Equals(status.HookSha256, VerifiedRetailHookSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Only the bundled verified Cairn hook may be paired with a user-approved game build.");
+            }
+            var path = Path.Combine(LiveDataDirectory(), "approved-game-dlls.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var approved = ReadApprovedGameDlls();
+            approved.Add(status.GameDllSha256);
+            var temporary = path + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(approved.OrderBy(value => value).ToArray()));
+            File.Move(temporary, path, true);
+            compatibilityProcessId = null;
+            cachedCompatibility = null;
+            return Inspect();
+        }
+    }
+
     public LiveGameStatus Stop()
     {
         StopConnection();
@@ -735,11 +761,14 @@ internal sealed class LiveGameAdapter : IDisposable
                     "Use Offline staging. Replace the incompatible hook before attempting live transfers.");
             }
 
+            var userApproved = gameDllSha256 is not null && ReadApprovedGameDlls().Contains(gameDllSha256);
             if (hookSha256.Equals(VerifiedRetailHookSha256, StringComparison.OrdinalIgnoreCase) &&
-                gameDllSha256 is not null && VerifiedRetailGameDlls.ContainsKey(gameDllSha256))
+                gameDllSha256 is not null && (VerifiedRetailGameDlls.ContainsKey(gameDllSha256) || userApproved))
             {
                 return new LiveHookCompatibility(true,
-                    $"Verified Cairn Codex hook {hookVersion} for Grim Dawn {knownVersion}.",
+                    userApproved
+                        ? $"User-approved exact Grim Dawn build {knownVersion} with verified Cairn Codex hook {hookVersion}."
+                        : $"Verified Cairn Codex hook {hookVersion} for Grim Dawn {knownVersion}.",
                     knownVersion, gameBuildId, gameDllSha256, gameDllLastWriteUtc, hookSha256,
                     "Select Connect, or enable Auto-connect for future game sessions.");
             }
@@ -771,6 +800,21 @@ internal sealed class LiveGameAdapter : IDisposable
         if (manifest is null || !File.Exists(manifest)) return null;
         var match = Regex.Match(File.ReadAllText(manifest), "\\\"buildid\\\"\\s+\\\"(?<id>\\d+)\\\"");
         return match.Success ? match.Groups["id"].Value : null;
+    }
+
+    private static HashSet<string> ReadApprovedGameDlls()
+    {
+        var path = Path.Combine(LiveDataDirectory(), "approved-game-dlls.json");
+        if (!File.Exists(path)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            return (JsonSerializer.Deserialize<string[]>(File.ReadAllText(path)) ?? [])
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private static string? ResolveAdapterDirectory()

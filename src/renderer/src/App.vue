@@ -20,13 +20,14 @@ type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare' | 'recipe'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
-type ActiveView = 'collection' | 'sets' | 'skills' | 'planner' | 'mi-workshop' | 'vault' | 'settings'
+type ActiveView = 'collection' | 'sets' | 'skills' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
 type TransferMode = 'live' | 'offline'
 type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
+type SupplyCategory = 'writs' | 'augments'
 
 interface PlannerProfile {
   id: string
@@ -65,6 +66,14 @@ interface CollectionSet {
   availableCopies: number
 }
 
+interface FarmTarget {
+  key: string
+  name: string
+  contentPack: string
+  items: CollectionItem[]
+  minimumLevel: number
+}
+
 const discovery = ref<GrimDawnDiscovery | null>(null)
 const snapshot = ref<CollectionSnapshot | null>(null)
 const indexStashPaths = ref<string[]>(readStoredSourcePaths('stashes'))
@@ -91,6 +100,8 @@ const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('recent')
 const sortDirection = ref<SortDirection>('desc')
+const trackerCollapsed = ref(readStoredBoolean('cairn-codex-tracker-collapsed', false))
+const showLegacyScanner = ref(readStoredBoolean('cairn-codex-show-legacy-scanner', false))
 const setProgressFilter = ref<SetProgressFilter>('all')
 const selectedSkill = ref(localStorage.getItem('cairn-codex-skill') ?? 'Wendigo Totem')
 const skillScope = ref<SkillScope>(
@@ -135,12 +146,16 @@ const selectedStashPath = ref(localStorage.getItem('cairn-codex-retrieval-stash'
 const selectedVaultIds = ref<string[]>([])
 const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
+const supplyCategory = ref<SupplyCategory>('writs')
+const farmingQuery = ref('')
+const farmingRarity = ref<RarityFilter>('all')
 const infiniteSupplies = ref(true)
 const infiniteSuppliesBusy = ref(false)
 const vaultBusy = ref(false)
 const vaultError = ref<string | null>(null)
 const vaultMessage = ref<string | null>(null)
 const liveStatus = ref<LiveGameStatus | null>(null)
+const headerCharacters = ref<CharacterSaveProfile[]>([])
 const liveIssues = ref<string[]>([])
 const liveSyncing = ref(false)
 const liveLifecyclePolling = ref(false)
@@ -208,7 +223,17 @@ const supplyVaultItems = computed(() => {
   }
   const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
   return [...unique.values()]
-    .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) || item.slot.includes(needle))
+    .filter((item) => supplyCategory.value === 'writs'
+      ? item.slot === 'writ' || item.slot === 'mandate'
+      : item.slot === 'augment' || item.slot === 'rune')
+    .filter((item) => {
+      if (!needle) return true
+      const catalog = snapshot.value?.supplies?.find((entry) =>
+        entry.record.toLocaleLowerCase() === item.baseRecord.toLocaleLowerCase()
+      )
+      return item.name.toLocaleLowerCase().includes(needle) || item.slot.includes(needle) ||
+        Boolean(catalog && matchesSearch(catalog, needle))
+    })
     .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
 })
 const quarantinedVaultItems = computed(() =>
@@ -238,6 +263,29 @@ const gameConnectionLabel = computed(() => {
   if (liveStatus.value?.state === 'blocked') return 'Live adapter blocked'
   return 'Grim Dawn offline'
 })
+const connectionColorState = computed(() =>
+  liveStatus.value?.state === 'ready'
+    ? 'connected'
+    : liveStatus.value?.state === 'connecting'
+      ? 'connecting'
+      : 'offline'
+)
+const activeCharacter = computed(() => {
+  if (!liveStatus.value?.grimDawnProcessIds.length) return null
+  const matching = headerCharacters.value
+    .filter((character) => !character.error)
+    .filter((character) => liveStatus.value?.isHardcore == null || character.isHardcore === liveStatus.value.isHardcore)
+    .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))
+  return matching[0] ?? null
+})
+const activeCharacterClass = computed(() => {
+  const character = activeCharacter.value
+  if (!character) return ''
+  const allocated = character.skills
+    .map((skill) => skill.name)
+    .filter((name) => name && !name.toLocaleLowerCase().includes('mastery'))
+  return character.classRecord?.trim() || allocated.slice(0, 2).join(' · ') || 'Unknown class'
+})
 const headerConnectionAction = computed(() => {
   if (liveStatus.value?.state === 'ready' || liveStatus.value?.state === 'connecting' || liveStatus.value?.hostWindowReady) {
     return 'Disconnect'
@@ -259,6 +307,16 @@ const connectionFingerprint = computed(() => liveStatus.value?.gameDllSha256?.sl
 const collectionBasisLabel = computed(() =>
   collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Scanner'
 )
+const allItemSummary = computed(() => {
+  const summaries = ['epic', 'legendary', 'mi']
+    .map((name) => rarity(name as 'epic' | 'legendary' | 'mi'))
+    .filter((value): value is CollectionRaritySummary => Boolean(value))
+  return {
+    total: summaries.reduce((sum, value) => sum + value.total, 0),
+    collected: summaries.reduce((sum, value) => sum + value.collected, 0),
+    availableCopies: summaries.reduce((sum, value) => sum + value.availableCopies, 0)
+  }
+})
 const stagingHasUnsupported = computed(() => staging.value?.items.some((item) => !item.supported) ?? false)
 const ingestBlockedReason = computed(() => {
   if (vaultBusy.value) return 'A Vault operation is already running.'
@@ -473,11 +531,20 @@ const skillSuggestions = computed(() => {
 const skillItemRows = computed(() => {
   const skill = selectedSkill.value.trim().toLocaleLowerCase()
   if (!skill) return []
-  const rows = plannerCatalogItems.value.flatMap((item) => {
+  const candidates = plannerCatalogItems.value.flatMap((item) => {
     if (skillScope.value === 'archive' && !isArchivedItem(item)) return []
     const match = skillMatchForItem(item, skill)
     return match ? [{ item, ...match }] : []
   })
+  const miByBase = new Map<string, (typeof candidates)[number]>()
+  const rows = candidates.filter((row) => {
+    if (row.item.rarity !== 'mi') return true
+    const key = `${row.item.name.toLocaleLowerCase()}|${row.item.slot}`
+    const current = miByBase.get(key)
+    if (!current || row.item.levelRequirement < current.item.levelRequirement) miByBase.set(key, row)
+    return false
+  })
+  rows.push(...miByBase.values())
   return rows.sort((left, right) => {
     let comparison = 0
     if (skillSort.value === 'amount') {
@@ -493,6 +560,36 @@ const skillItemRows = computed(() => {
     if (comparison === 0) comparison = left.item.name.localeCompare(right.item.name)
     return skillSortDirection.value === 'asc' ? comparison : -comparison
   })
+})
+
+const farmTargets = computed<FarmTarget[]>(() => {
+  if (!snapshot.value) return []
+  const query = farmingQuery.value.trim().toLocaleLowerCase()
+  const grouped = new Map<string, FarmTarget>()
+  for (const item of snapshot.value.items) {
+    if (item.discovered) continue
+    if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
+    if (query && !matchesSearch(item, query)) continue
+    for (const location of item.acquisition?.locations ?? []) {
+      const key = `${location.contentPack}:${location.zoneRecord || location.name}`.toLocaleLowerCase()
+      const existing = grouped.get(key)
+      if (existing) {
+        if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
+        existing.minimumLevel = Math.min(existing.minimumLevel, item.levelRequirement)
+      } else {
+        grouped.set(key, {
+          key,
+          name: location.name,
+          contentPack: location.contentPack,
+          items: [item],
+          minimumLevel: item.levelRequirement
+        })
+      }
+    }
+  }
+  return [...grouped.values()]
+    .filter((target) => target.items.length > 0)
+    .sort((left, right) => right.items.length - left.items.length || left.minimumLevel - right.minimumLevel || left.name.localeCompare(right.name))
 })
 
 const plannerSkillOptions = computed(() => {
@@ -1390,6 +1487,29 @@ function setAutoLiveConnect(enabled: boolean): void {
   }
 }
 
+function setLegacyScannerVisible(enabled: boolean): void {
+  showLegacyScanner.value = enabled
+  localStorage.setItem('cairn-codex-show-legacy-scanner', String(enabled))
+  if (!enabled && collectionBasis.value !== 'archive') void setCollectionBasis('archive')
+}
+
+function toggleTracker(): void {
+  trackerCollapsed.value = !trackerCollapsed.value
+  localStorage.setItem('cairn-codex-tracker-collapsed', String(trackerCollapsed.value))
+}
+
+async function refreshHeaderCharacters(): Promise<void> {
+  if (!liveStatus.value?.grimDawnProcessIds.length) {
+    headerCharacters.value = []
+    return
+  }
+  try {
+    headerCharacters.value = await window.cairnCodex.listCharacters()
+  } catch (error) {
+    console.warn('Active character save metadata could not be refreshed.', error)
+  }
+}
+
 async function setInfiniteSupplies(enabled: boolean): Promise<void> {
   if (infiniteSuppliesBusy.value) return
   infiniteSuppliesBusy.value = true
@@ -1418,6 +1538,24 @@ async function handleHeaderLiveAction(): Promise<void> {
     return
   }
   showConnectionDiagnostics.value = !showConnectionDiagnostics.value
+}
+
+async function approveCurrentGameBuild(): Promise<void> {
+  if (!connectionFingerprint.value || vaultBusy.value) return
+  const confirmed = window.confirm(
+    'Trust this exact Grim Dawn Game.dll (' + connectionFingerprint.value + ') for live injection?\n\n' +
+    'This is an advanced override. Cairn will still require its verified hook, but cannot prove that a new game patch kept the same internal ABI. Run one disposable ingest-and-return round trip before using valuable items.'
+  )
+  if (!confirmed) return
+  vaultBusy.value = true
+  try {
+    liveStatus.value = await window.cairnCodex.approveLiveGameBuild()
+    vaultMessage.value = 'Approved exact Game.dll ' + connectionFingerprint.value + '. Connect and perform a disposable round-trip test.'
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    vaultBusy.value = false
+  }
 }
 
 async function setZoom(factor: number): Promise<void> {
@@ -1493,6 +1631,14 @@ function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
   window.scrollTo({ top: 500, behavior: 'smooth' })
 }
 
+function filterToAllRarities(): void {
+  activeView.value = 'collection'
+  activeCategory.value = 'All'
+  ownership.value = 'all'
+  rarityFilter.value = 'all'
+  window.scrollTo({ top: 420, behavior: 'smooth' })
+}
+
 function filterToRecipes(): void {
   activeView.value = 'collection'
   activeCategory.value = 'All'
@@ -1508,11 +1654,22 @@ function openAffixWorkshop(): void {
 }
 
 function openSupplies(): void {
-  activeView.value = 'vault'
+  activeView.value = 'supplies'
   reusableSupplyQuery.value = ''
 }
 
-function percentage(summary: CollectionRaritySummary | undefined): string {
+function selectAllVisibleSupplies(): void {
+  selectedSupplyIds.value = supplyVaultItems.value.map((item) => item.id)
+}
+
+async function dispenseAllWrits(): Promise<void> {
+  supplyCategory.value = 'writs'
+  await nextTick()
+  selectedSupplyIds.value = supplyVaultItems.value.map((item) => item.id)
+  await retrieveSupplies()
+}
+
+function percentage(summary: Pick<CollectionRaritySummary, 'total' | 'collected'> | undefined): string {
   if (!summary || summary.total === 0) return '0%'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
 }
@@ -1647,6 +1804,8 @@ async function pollLiveLifecycle(): Promise<void> {
       }
     }
     liveStatus.value = current
+    if (current.state === 'ready' && previousState !== 'ready') void refreshHeaderCharacters()
+    if (!current.grimDawnProcessIds.length) headerCharacters.value = []
     if (previousState === 'ready' && current.state === 'unavailable' && !scanning.value) {
       void scanCollection()
     }
@@ -2246,16 +2405,13 @@ function moveTooltip(event: MouseEvent): void {
 function positionTooltip(event: MouseEvent | FocusEvent): void {
   const width = 430
   const margin = 14
-  let x: number
-  let y: number
-  if (event instanceof MouseEvent) {
-    x = event.clientX + 18
-    y = event.clientY + 14
-  } else {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-    x = rect.right + 12
-    y = rect.top
-  }
+  const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  const rect = target?.getBoundingClientRect()
+  const anchorX = event instanceof MouseEvent ? event.clientX : rect?.right ?? margin
+  const x = rect && rect.right + width + 18 > window.innerWidth
+    ? rect.left - width - 14
+    : anchorX + 18
+  const y = event instanceof MouseEvent ? event.clientY + 14 : rect?.top ?? margin
   const expectedHeight = Math.min(760, window.innerHeight - margin * 2)
   tooltipPosition.value = {
     left: Math.max(margin, Math.min(x, window.innerWidth - width - margin)),
@@ -2303,6 +2459,11 @@ function handleEscape(event: KeyboardEvent): void {
   if (event.ctrlKey && event.key === '0') {
     event.preventDefault()
     void setZoom(1)
+    return
+  }
+  if (event.key === 'Control' && tooltipRecord.value && !tooltipPinned.value) {
+    tooltipPinned.value = true
+    cancelTooltipHide()
     return
   }
   if (event.key !== 'Escape') return
@@ -2420,13 +2581,31 @@ function formatPercentile(value: number | null | undefined): string {
 <template>
   <div class="app-shell" :data-cache-issue="cacheIssue">
     <header class="topbar">
-      <div>
+      <div class="brand-lockup">
         <p class="eyebrow">Grim Dawn collection atlas</p>
         <h1>Cairn Codex</h1>
       </div>
       <div class="topbar-actions">
+        <div class="active-character" :class="{ muted: !activeCharacter }">
+          <span v-if="activeCharacter">
+            <strong>{{ activeCharacter.name }}</strong>
+            <small>Lv{{ activeCharacter.level }} · {{ activeCharacterClass }}</small>
+          </span>
+          <span v-else><strong>No active character</strong><small>{{ liveStatus?.grimDawnProcessIds.length ? 'Waiting for save metadata' : 'Grim Dawn is closed' }}</small></span>
+        </div>
+        <div class="connection-control compact-connection">
+          <button
+            type="button"
+            class="connection-status-icon"
+            :class="'state-' + connectionColorState"
+            :aria-label="gameConnectionLabel + '. Open connection details.'"
+            :aria-expanded="showConnectionDiagnostics"
+            :title="gameConnectionLabel"
+            @click="showConnectionDiagnostics = !showConnectionDiagnostics"
+          ><span aria-hidden="true" /></button>
+        </div>
         <nav class="system-nav" aria-label="Cairn Codex system views">
-          <button type="button" :aria-expanded="todoOpen" @click="openTodos">
+          <button v-if="false" type="button" :aria-expanded="todoOpen" @click="openTodos">
             To-do <span v-if="remainingTodoCount" class="todo-nav-count">{{ remainingTodoCount }}</span>
           </button>
           <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
@@ -2438,6 +2617,7 @@ function formatPercentile(value: number | null | undefined): string {
         </nav>
         <div class="connection-control">
           <button
+            v-if="false"
             type="button"
             class="game-status-pill"
             :class="`state-${liveStatus?.state ?? 'unavailable'}`"
@@ -2449,6 +2629,7 @@ function formatPercentile(value: number | null | undefined): string {
             <em>{{ headerConnectionAction }}</em>
           </button>
           <button
+            v-if="false"
             type="button"
             class="connection-info-button"
             aria-label="Show live connection diagnostics"
@@ -2463,6 +2644,8 @@ function formatPercentile(value: number | null | undefined): string {
             <p>{{ liveStatus?.detail ?? 'Checking the bundled live adapter…' }}</p>
             <dl>
               <div><dt>State</dt><dd>{{ liveStatus?.state ?? 'checking' }}</dd></div>
+              <div v-if="activeCharacter"><dt>Character</dt><dd>{{ activeCharacter.name }} · Lv{{ activeCharacter.level }} · {{ activeCharacterClass }}</dd></div>
+              <div v-if="activeCharacter"><dt>Detected by</dt><dd>Newest matching save file</dd></div>
               <div><dt>Game</dt><dd>{{ liveStatus?.gameVersion ?? 'Not detected' }}</dd></div>
               <div v-if="liveStatus?.gameBuildId"><dt>Steam build</dt><dd>{{ liveStatus.gameBuildId }}</dd></div>
               <div v-if="connectionFingerprint"><dt>Game.dll</dt><dd><code>{{ connectionFingerprint }}</code></dd></div>
@@ -2474,7 +2657,9 @@ function formatPercentile(value: number | null | undefined): string {
               <span>{{ connectionRecommendation }}</span>
             </div>
             <footer>
-              <button type="button" @click="activeView = 'vault'; transferMode = 'live'; showConnectionDiagnostics = false">Open Transfers</button>
+              <button type="button" :disabled="vaultBusy || liveLifecyclePolling" @click="handleHeaderLiveAction">{{ headerConnectionAction }}</button>
+              <button v-if="liveStatus?.state === 'blocked' && connectionFingerprint" type="button" :disabled="vaultBusy" @click="approveCurrentGameBuild">Trust exact build…</button>
+              <button type="button" @click="activeView = 'vault'; transferMode = 'live'; showConnectionDiagnostics = false">Transfers</button>
               <button type="button" @click="activeView = 'settings'; showConnectionDiagnostics = false">Settings</button>
             </footer>
           </aside>
@@ -2540,8 +2725,8 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
       <p v-if="activeView !== 'vault' && vaultError" class="operation-banner error">{{ vaultError }}</p>
       <p v-if="activeView !== 'vault' && vaultMessage" class="operation-banner success">{{ vaultMessage }}</p>
-      <template v-if="activeView !== 'vault' && activeView !== 'settings'">
-      <section class="hero">
+      <template>
+      <section v-if="activeView !== 'vault' && activeView !== 'settings'" class="hero">
         <div>
           <p class="section-label">{{ collectionBasisLabel }}</p>
           <h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>
@@ -2563,7 +2748,24 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
       </section>
 
-      <section class="metrics" aria-label="Collection completion">
+      <section class="completion-tracker" aria-label="Collection completion">
+        <header>
+          <div><p class="section-label">Collection progress</p><strong>{{ allItemSummary.collected }} / {{ allItemSummary.total }} item bases</strong></div>
+          <button type="button" :aria-expanded="!trackerCollapsed" @click="toggleTracker">{{ trackerCollapsed ? 'Show trackers' : 'Hide trackers' }}</button>
+        </header>
+        <div v-if="!trackerCollapsed" class="metrics">
+        <button
+          type="button"
+          :aria-pressed="activeView === 'collection' && rarityFilter === 'all'"
+          @click="filterToAllRarities"
+        >
+          <div class="metric-heading">
+            <span>All items</span>
+            <strong>{{ allItemSummary.collected }} / {{ allItemSummary.total || '—' }}</strong>
+          </div>
+          <div class="meter all"><span :style="{ width: percentage(allItemSummary) }" /></div>
+          <small>{{ percentage(allItemSummary) }} discovered · Epic, Legendary, and MI bases</small>
+        </button>
         <button
           type="button"
           :aria-pressed="activeView === 'collection' && rarityFilter === 'legendary'"
@@ -2636,9 +2838,10 @@ function formatPercentile(value: number | null | undefined): string {
           <div class="meter recipe"><span :style="{ width: recipePercentage() }" /></div>
           <small>{{ recipePercentage() }} learned · crafted items count as unlocked</small>
         </button>
+        </div>
       </section>
 
-      <section class="collection-basis" aria-label="Collection persistence">
+      <section v-if="showLegacyScanner && activeView !== 'vault' && activeView !== 'settings'" class="collection-basis" aria-label="Collection persistence">
         <button
           type="button"
           :class="{ active: collectionBasis === 'archive' }"
@@ -2675,6 +2878,15 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
           <span>MI Workshop</span><small>{{ miWorkshopRows.length }} affix combinations</small>
+        </button>
+        <button type="button" :class="{ active: activeView === 'supplies' }" @click="openSupplies">
+          <span>Supplies</span><small>{{ snapshot?.supplySummary?.collected ?? 0 }} reusable unlocks</small>
+        </button>
+        <button type="button" :class="{ active: activeView === 'farming' }" @click="activeView = 'farming'">
+          <span>Collection Farming</span><small>{{ farmTargets.length }} useful areas</small>
+        </button>
+        <button type="button" :aria-expanded="todoOpen" @click="openTodos">
+          <span>To-do</span><small>{{ remainingTodoCount }} remaining</small>
         </button>
       </nav>
 
@@ -2737,15 +2949,10 @@ function formatPercentile(value: number | null | undefined): string {
           <option value="level">Level</option>
           <option value="roll">Best roll</option>
         </select>
-        <button
-          v-if="activeView === 'collection'"
-          type="button"
-          class="sort-direction"
-          :aria-label="sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'"
-          @click="sortDirection = sortDirection === 'asc' ? 'desc' : 'asc'"
-        >
-          {{ sortDirection === 'asc' ? '↑ Asc' : '↓ Desc' }}
-        </button>
+        <select v-if="activeView === 'collection'" v-model="sortDirection" class="sort-direction" aria-label="Sort direction">
+          <option value="asc">↑ Ascending</option>
+          <option value="desc">↓ Descending</option>
+        </select>
         <span class="result-count">{{ displayedResultCount.toLocaleString() }} results</span>
       </section>
 
@@ -3242,6 +3449,84 @@ function formatPercentile(value: number | null | undefined): string {
         </div>
       </section>
 
+      <section v-else-if="activeView === 'supplies'" class="supplies-workspace" aria-label="Reusable supplies">
+        <header class="tool-heading">
+          <div>
+            <p class="section-label">Reusable collection</p>
+            <h2>Supplies</h2>
+            <p>Unlock a writ, mandate, augment, or movement rune once, then dispense it whenever a character needs one.</p>
+          </div>
+          <strong>{{ snapshot?.supplySummary?.collected ?? 0 }} / {{ snapshot?.supplySummary?.total ?? '—' }}</strong>
+        </header>
+        <div class="supply-toolbar">
+          <div class="segmented-control" aria-label="Supply category">
+            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; selectedSupplyIds = []">Writs & mandates</button>
+            <button type="button" :class="{ active: supplyCategory === 'augments' }" @click="supplyCategory = 'augments'; selectedSupplyIds = []">Augments & runes</button>
+          </div>
+          <input v-model="reusableSupplyQuery" type="search" placeholder="Filter names, effects, factions…" />
+          <button type="button" :disabled="!supplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>
+          <button v-if="supplyCategory === 'writs'" type="button" :disabled="vaultBusy || !supplyVaultItems.length" @click="dispenseAllWrits">Dispense all unlocked writs</button>
+        </div>
+        <div class="supply-status">
+          <span :class="'state-' + connectionColorState">{{ transferMode === 'live' ? gameConnectionLabel : writeSafety?.permitted ? 'Offline staging ready' : 'Offline staging locked' }}</span>
+          <div class="segmented-control" aria-label="Supply transfer method">
+            <button type="button" :class="{ active: transferMode === 'live' }" @click="transferMode = 'live'">Live</button>
+            <button type="button" :class="{ active: transferMode === 'offline' }" @click="transferMode = 'offline'">Offline</button>
+          </div>
+        </div>
+        <div v-if="supplyVaultItems.length" class="supply-grid">
+          <label v-for="item in supplyVaultItems" :key="item.id" class="supply-card">
+            <input type="checkbox" :checked="selectedSupplyIds.includes(item.id)" :disabled="vaultBusy" @change="toggleSupply(item.id)" />
+            <span><strong>{{ item.name }}</strong><small>{{ item.slot === 'rune' ? 'Movement rune' : item.slot }} · {{ item.isHardcore ? 'HC' : 'SC' }}</small></span>
+            <b>{{ item.reusable ? '∞' : '1' }}</b>
+          </label>
+        </div>
+        <p v-else class="vault-empty">{{ reusableSupplyQuery ? 'No unlocked supplies match this filter.' : 'No supplies unlocked in this category yet.' }}</p>
+        <button
+          class="supply-dispense"
+          type="button"
+          :disabled="vaultBusy || selectedSupplyIds.length === 0 || (transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
+          @click="retrieveSupplies"
+        >{{ vaultBusy ? 'Verifying…' : (infiniteSupplies ? 'Dispense ' : 'Return ') + selectedSupplyIds.length + ' selected' }}</button>
+      </section>
+
+      <section v-else-if="activeView === 'farming'" class="farming-workspace" aria-label="Collection farming planner">
+        <header class="tool-heading">
+          <div>
+            <p class="section-label">Collection completion</p>
+            <h2>Where should I farm?</h2>
+            <p>Areas are ranked by how many currently missing item bases their indexed enemies can drop.</p>
+          </div>
+          <strong>{{ farmTargets.length }} useful areas</strong>
+        </header>
+        <div class="farming-toolbar">
+          <input v-model="farmingQuery" type="search" placeholder="Filter item, monster, or area…" />
+          <select v-model="farmingRarity" aria-label="Rarity">
+            <option value="all">All tracked rarities</option>
+            <option value="mi">Monster Infrequents</option>
+            <option value="epic">Epics</option>
+            <option value="legendary">Legendaries</option>
+          </select>
+        </div>
+        <div class="farm-list">
+          <article v-for="(target, index) in farmTargets" :key="target.key">
+            <span class="farm-rank">{{ index + 1 }}</span>
+            <div>
+              <h3>{{ target.name }} <small>{{ contentPackShortLabel(target.contentPack) }}</small></h3>
+              <p>{{ target.items.length }} missing base{{ target.items.length === 1 ? '' : 's' }} · earliest item Lv{{ target.minimumLevel }}</p>
+              <div class="farm-items">
+                <button v-for="item in target.items.slice(0, 12)" :key="item.record" type="button" @mouseenter="queueTooltip(item, $event)" @mouseleave="scheduleTooltipHide" @click="openItem(item)">
+                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
+                  <span>{{ item.name }}</span>
+                </button>
+                <small v-if="target.items.length > 12">+{{ target.items.length - 12 }} more</small>
+              </div>
+            </div>
+          </article>
+          <p v-if="farmTargets.length === 0" class="skill-empty">No missing items have indexed locations under this filter.</p>
+        </div>
+      </section>
+
       <section v-else-if="activeView === 'settings'" class="settings-workspace" aria-label="Cairn Codex settings">
         <header class="settings-heading">
           <div>
@@ -3283,7 +3568,17 @@ function formatPercentile(value: number | null | undefined): string {
             <small>Ctrl + mouse wheel works anywhere in Cairn.</small>
           </article>
 
-          <article class="settings-card source-settings">
+          <article class="settings-card">
+            <p class="section-label">Legacy tools</p>
+            <h3>Stash Scanner</h3>
+            <label class="settings-toggle">
+              <input type="checkbox" :checked="showLegacyScanner" @change="setLegacyScannerVisible(($event.target as HTMLInputElement).checked)" />
+              <span><strong>Show legacy stash scanner</strong><small>Expose physical-stash source controls and the diagnostic Stash Scanner collection mode.</small></span>
+            </label>
+            <small>The Codex Archive remains the default and recommended collection source.</small>
+          </article>
+
+          <article v-if="showLegacyScanner" class="settings-card source-settings">
             <header>
               <div><p class="section-label">Stash Scanner</p><h3>Physical copy sources</h3></div>
               <div class="source-presets">
@@ -3406,7 +3701,7 @@ function formatPercentile(value: number | null | undefined): string {
         <p v-if="vaultError" class="vault-notice error">{{ vaultError }}</p>
         <p v-if="vaultMessage" class="vault-notice success">{{ vaultMessage }}</p>
 
-        <article class="vault-panel reusable-supplies-panel">
+        <article v-if="false" class="vault-panel reusable-supplies-panel">
           <header>
             <div>
               <p>Stored supplies</p>
@@ -3875,9 +4170,10 @@ function formatPercentile(value: number | null | undefined): string {
             <button type="button" :aria-pressed="tooltipPinned" @click.stop="toggleTooltipPinned">
               {{ tooltipPinned ? 'Unpin' : 'Pin' }}
             </button>
-            <button type="button" aria-label="Close tooltip" @click.stop="hideTooltip">×</button>
+            <button type="button" class="tooltip-close" aria-label="Close tooltip" @click.stop="hideTooltip">×</button>
           </div>
         </header>
+        <small class="tooltip-hotkey">{{ tooltipPinned ? 'Pinned · Esc or × to close' : 'Hold Ctrl to keep this tooltip open' }}</small>
 
         <template v-if="tooltipItem.presentation">
           <section

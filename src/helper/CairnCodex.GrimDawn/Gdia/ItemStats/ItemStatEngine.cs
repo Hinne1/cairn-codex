@@ -108,6 +108,7 @@ public static class ItemStatEngine
         ("offensiveSlowTotalSpeed", true), ("offensiveSlowAttackSpeed", true),
         ("offensiveSlowSpellCastSpeed", true), ("offensiveSlowRunSpeed", true),
         ("offensiveSlowOffensiveAbility", false), ("offensiveSlowDefensiveAbility", false),
+        ("offensiveFumble", false),
     };
 
     // Damage %-modifiers. Each offensiveSlow{Type}Modifier is drawn as a consecutive (value,
@@ -336,6 +337,9 @@ public static class ItemStatEngine
     private static bool IsFixed(string f)
     {
         if (Fixed.Contains(f)) return true;
+        if (f.StartsWith("defensive", StringComparison.Ordinal) &&
+            (f.EndsWith("MaxResist", StringComparison.Ordinal) ||
+             f.EndsWith("ResistanceChance", StringComparison.Ordinal))) return true;
         if (f.StartsWith("character", StringComparison.Ordinal) && f.EndsWith("ReqReduction", StringComparison.Ordinal)) return true;
         // weapon base damage: 0 draws, shown at base range.
         if (f.StartsWith("offensiveBase", StringComparison.Ordinal) && (f.EndsWith("Min", StringComparison.Ordinal) || f.EndsWith("Max", StringComparison.Ordinal))) return true;

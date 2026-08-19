@@ -277,7 +277,8 @@ internal sealed record ItemRollAnalysis(
     double? SuffixEstimatedPercentile,
     IReadOnlyList<RolledStat> Stats,
     IReadOnlyList<string> UnmodeledFields,
-    IReadOnlyList<RolledProcLine> ProcLines)
+    IReadOnlyList<RolledProcLine> ProcLines,
+    int ModelVersion = 2)
 {
     public static ItemRollAnalysis Unsupported(ItemRollInput item, string reason) =>
         new(

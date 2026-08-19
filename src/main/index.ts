@@ -25,7 +25,8 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
-const CATALOG_PRESENTATION_VERSION = 18
+const CATALOG_PRESENTATION_VERSION = 19
+const ROLL_ANALYSIS_VERSION = 2
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
 interface IngestCommand {
@@ -404,6 +405,10 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
         messages: []
       }
     }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.approveLiveGameBuild,
+    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('approve-live-game-build')
   )
   ipcMain.handle(
     IPC_CHANNELS.startLiveGame,
@@ -996,6 +1001,7 @@ async function presentCollection(
     .filter(
       ({ item }) =>
         item.rollAnalysis === null ||
+        item.rollAnalysis.modelVersion !== ROLL_ANALYSIS_VERSION ||
         item.rollAnalysis.baseEstimatedPercentile === undefined ||
         item.rollAnalysis.prefixEstimatedPercentile === undefined ||
         item.rollAnalysis.suffixEstimatedPercentile === undefined

@@ -40,6 +40,7 @@ while ((line = Console.ReadLine()) is not null)
             "scan-transfer-stash" => ScanTransferStash(request),
             "inspect-write-safety" => HelperResponse.Success(request.Id, WriteSafetyGate.Inspect()),
             "inspect-live-game" => HelperResponse.Success(request.Id, liveGame.Inspect()),
+            "approve-live-game-build" => HelperResponse.Success(request.Id, liveGame.ApproveCurrentBuild()),
             "start-live-game" => HelperResponse.Success(request.Id, liveGame.Start()),
             "stop-live-game" => HelperResponse.Success(request.Id, liveGame.Stop()),
             "poll-live-incoming" => HelperResponse.Success(request.Id, liveGame.PollIncoming()),

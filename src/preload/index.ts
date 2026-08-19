@@ -50,6 +50,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.retrieveVaultItems, { path, vaultItemIds }) as Promise<RetrievalResult>,
   inspectLiveGame: () =>
     ipcRenderer.invoke(IPC_CHANNELS.inspectLiveGame) as Promise<LiveGameStatus>,
+  approveLiveGameBuild: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.approveLiveGameBuild) as Promise<LiveGameStatus>,
   startLiveGame: () =>
     ipcRenderer.invoke(IPC_CHANNELS.startLiveGame) as Promise<LiveGameStatus>,
   stopLiveGame: () =>

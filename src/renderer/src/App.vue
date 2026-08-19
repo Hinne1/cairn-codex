@@ -100,7 +100,7 @@ const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('recent')
 const sortDirection = ref<SortDirection>('desc')
-const trackerCollapsed = ref(readStoredBoolean('cairn-codex-tracker-collapsed', false))
+const trackerCollapsed = ref(readStoredTrackerCollapsed())
 const showLegacyScanner = ref(readStoredBoolean('cairn-codex-show-legacy-scanner', false))
 const setProgressFilter = ref<SetProgressFilter>('all')
 const selectedSkill = ref(localStorage.getItem('cairn-codex-skill') ?? 'Wendigo Totem')
@@ -176,6 +176,9 @@ let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
+let vaultErrorTimer: ReturnType<typeof setTimeout> | null = null
+let vaultMessageTimer: ReturnType<typeof setTimeout> | null = null
+let scanErrorTimer: ReturnType<typeof setTimeout> | null = null
 const pageSize = 48
 
 const archiveModeCount = computed(() =>
@@ -1138,13 +1141,32 @@ watch(selectedStashPath, async (path) => {
 })
 
 watch(activeView, async (view) => {
+  await nextTick()
+  window.scrollTo({ top: 0, behavior: 'auto' })
   if (view === 'vault') {
     await refreshVault()
     await pollLiveLifecycle()
   }
 })
 
+watch(vaultError, (message) => {
+  if (vaultErrorTimer) clearTimeout(vaultErrorTimer)
+  if (message) vaultErrorTimer = setTimeout(() => { vaultError.value = null }, 12_000)
+})
+
+watch(vaultMessage, (message) => {
+  if (vaultMessageTimer) clearTimeout(vaultMessageTimer)
+  if (message) vaultMessageTimer = setTimeout(() => { vaultMessage.value = null }, 7_000)
+})
+
+watch(scanError, (message) => {
+  if (scanErrorTimer) clearTimeout(scanErrorTimer)
+  if (message) scanErrorTimer = setTimeout(() => { scanError.value = null }, 12_000)
+})
+
 onMounted(async () => {
+  if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual'
+  window.scrollTo(0, 0)
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
@@ -1179,6 +1201,8 @@ onMounted(async () => {
     await scanCollection()
   }
   await refreshVault()
+  await nextTick()
+  window.scrollTo({ top: 0, behavior: 'auto' })
 })
 
 onBeforeUnmount(() => {
@@ -1188,6 +1212,9 @@ onBeforeUnmount(() => {
   cancelTooltipHide()
   if (liveSyncTimer) clearInterval(liveSyncTimer)
   if (liveLifecycleTimer) clearInterval(liveLifecycleTimer)
+  if (vaultErrorTimer) clearTimeout(vaultErrorTimer)
+  if (vaultMessageTimer) clearTimeout(vaultMessageTimer)
+  if (scanErrorTimer) clearTimeout(scanErrorTimer)
 })
 
 async function scanCollection(): Promise<void> {
@@ -1476,6 +1503,16 @@ function readStoredZoomFactor(): number {
 function readStoredBoolean(key: string, fallback: boolean): boolean {
   const stored = localStorage.getItem(key)
   return stored === null ? fallback : stored === 'true'
+}
+
+function readStoredTrackerCollapsed(): boolean {
+  const versionKey = 'cairn-codex-tracker-layout-version'
+  if (localStorage.getItem(versionKey) !== '2') {
+    localStorage.setItem(versionKey, '2')
+    localStorage.setItem('cairn-codex-tracker-collapsed', 'false')
+    return false
+  }
+  return readStoredBoolean('cairn-codex-tracker-collapsed', false)
 }
 
 function setAutoLiveConnect(enabled: boolean): void {
@@ -2667,6 +2704,21 @@ function formatPercentile(value: number | null | undefined): string {
       </div>
     </header>
 
+    <aside class="growl-stack" aria-live="polite" aria-label="Notifications">
+      <article v-if="vaultError" class="growl error">
+        <span><strong>Transfer problem</strong>{{ vaultError }}</span>
+        <button type="button" aria-label="Dismiss notification" @click="vaultError = null">×</button>
+      </article>
+      <article v-if="scanError" class="growl error">
+        <span><strong>Collection scan</strong>{{ scanError }}</span>
+        <button type="button" aria-label="Dismiss notification" @click="scanError = null">×</button>
+      </article>
+      <article v-if="vaultMessage" class="growl success">
+        <span><strong>Done</strong>{{ vaultMessage }}</span>
+        <button type="button" aria-label="Dismiss notification" @click="vaultMessage = null">×</button>
+      </article>
+    </aside>
+
     <div v-if="todoOpen" class="todo-backdrop" @click.self="todoOpen = false">
       <section class="todo-dialog" role="dialog" aria-modal="true" aria-labelledby="todo-title">
         <header>
@@ -2723,9 +2775,6 @@ function formatPercentile(value: number | null | undefined): string {
           <small v-else>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
         </div>
       </section>
-      <p v-if="activeView !== 'vault' && vaultError" class="operation-banner error">{{ vaultError }}</p>
-      <p v-if="activeView !== 'vault' && vaultMessage" class="operation-banner success">{{ vaultMessage }}</p>
-      <template>
       <section v-if="activeView !== 'vault' && activeView !== 'settings'" class="hero">
         <div>
           <p class="section-label">{{ collectionBasisLabel }}</p>
@@ -2741,7 +2790,6 @@ function formatPercentile(value: number | null | undefined): string {
               Locating Grim Dawn, its item database, and transfer stashes.
             </template>
           </p>
-          <p v-if="scanError" class="scan-error">{{ scanError }}</p>
         </div>
         <button class="primary-action" type="button" :disabled="scanning" @click="scanCollection">
           {{ scanning ? 'Reading the archives…' : 'Refresh collection' }}
@@ -2861,8 +2909,6 @@ function formatPercentile(value: number | null | undefined): string {
           <small>A live inventory of physical copies currently present in the selected Grim Dawn stash files.</small>
         </button>
       </section>
-      </template>
-
       <nav class="workspace-tabs" aria-label="Cairn Codex workspace">
         <button type="button" :class="{ active: activeView === 'collection' }" @click="activeView = 'collection'">
           <span>Collection</span><small>Items and copies</small>
@@ -3697,9 +3743,6 @@ function formatPercentile(value: number | null | undefined): string {
             <em :class="{ ready: writeSafety?.permitted }">{{ writeSafety?.permitted ? 'Ready' : 'Locked' }}</em>
           </button>
         </nav>
-
-        <p v-if="vaultError" class="vault-notice error">{{ vaultError }}</p>
-        <p v-if="vaultMessage" class="vault-notice success">{{ vaultMessage }}</p>
 
         <article v-if="false" class="vault-panel reusable-supplies-panel">
           <header>

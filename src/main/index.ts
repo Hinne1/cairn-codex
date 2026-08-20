@@ -26,6 +26,16 @@ import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import { CollectionDatabase } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
+// Packaged GUI launches do not always have a durable console attached. Electron's
+// child processes can outlive a terminal or diagnostic launcher and inherit its
+// now-closed pipe; without an error listener, a later console.warn/error turns a
+// harmless logging failure into a main-process EPIPE crash dialog.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', () => {
+    // Application logging is best-effort. Runtime errors are surfaced in the UI.
+  })
+}
+
 const CATALOG_PRESENTATION_VERSION = 19
 const ROLL_ANALYSIS_VERSION = 2
 const collectionRarities = ['epic', 'legendary', 'mi'] as const

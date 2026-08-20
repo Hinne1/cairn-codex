@@ -416,13 +416,18 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .supply-status .state-connecting { color: #dfb864; }
 .supply-status .state-offline { color: #c97e6c; }
 .supply-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 8px; margin: 16px 0; }
-.supply-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; min-height: 66px; padding: 12px; border: 1px solid #39352d; border-radius: 6px; background: rgba(25,24,20,.82); cursor: pointer; }
+.supply-card { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 11px; min-height: 66px; padding: 12px; border: 1px solid #39352d; border-radius: 6px; background: rgba(25,24,20,.82); cursor: pointer; }
 .supply-card:has(input:checked) { border-color: #8a6d39; background: #2b261d; box-shadow: inset 3px 0 #bf9144; }
 .supply-card.locked { opacity: .48; cursor: not-allowed; }
-.supply-card span { display: grid; gap: 3px; }
+.supply-card > input { margin-top: 3px; accent-color: #bd9043; }
+.supply-card-copy { display: grid; gap: 3px; min-width: 0; }
 .supply-card strong { color: #dacba9; font-size: 11px; }
 .supply-card small { color: #756e62; font-size: 9px; text-transform: capitalize; }
-.supply-card b { color: #d2aa57; font: 600 19px Georgia, serif; }
+.supply-effects { display: grid; gap: 3px; margin: 7px 0 0; padding: 7px 0 0; border-top: 1px solid #37342c; color: #c2a660; font: 10px Georgia, serif; list-style: none; }
+.supply-effects li { overflow-wrap: anywhere; }
+.supply-effects li.more { color: #777064; font: 8px Inter, sans-serif; text-transform: uppercase; }
+.supply-no-effects { margin-top: 6px; color: #69645a !important; font-style: italic; text-transform: none !important; }
+.supply-card b { align-self: start; color: #d2aa57; font: 600 19px Georgia, serif; }
 .supply-dispense { width: 100%; margin-top: 6px; }
 .farm-list { display: grid; gap: 9px; }
 .farm-list > article { display: grid; grid-template-columns: 42px 1fr; gap: 14px; padding: 17px; border: 1px solid #38342b; border-radius: 7px; background: rgba(24,23,20,.78); }

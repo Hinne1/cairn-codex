@@ -108,6 +108,9 @@ interface SupplyOption {
   eligible: boolean
   detail: string
   source: 'archive' | 'faction'
+  catalogItem: CollectionItem | null
+  effects: string[]
+  effectCount: number
 }
 
 const discovery = ref<GrimDawnDiscovery | null>(null)
@@ -306,6 +309,9 @@ const supplyAccessSummary = computed(() => activeCharacter.value
   ? `${eligibleFactionAugmentCount.value} augments available to ${activeCharacter.value.name}`
   : `${factionAugmentCount.value} augments indexed · connect a character to check access`
 )
+const supplyCatalogByRecord = computed(() => new Map(
+  (snapshot.value?.supplies ?? []).map((item) => [item.record.toLocaleLowerCase(), item])
+))
 const supplyVaultItems = computed<SupplyOption[]>(() => {
   const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
   if (supplyCategory.value === 'augments') {
@@ -314,6 +320,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
       .map((item): SupplyOption => {
         const requirements = item.acquisition?.factions ?? []
         const eligible = requirements.some((requirement) => characterMeetsReputation(requirement.faction, requirement.reputation))
+        const effects = supplyEffectLines(item)
         return {
           id: `augment:${item.record}`,
           record: item.record,
@@ -327,7 +334,10 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
             : requirements.length
               ? `Requires ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' or ')}`
               : 'Faction requirement is not indexed',
-          source: 'faction'
+          source: 'faction',
+          catalogItem: item,
+          effects: effects.slice(0, 5),
+          effectCount: effects.length
         }
       })
     const archivedRunes = vaultItems.value
@@ -335,6 +345,8 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
       .map((item): SupplyOption => {
         const eligible = activeTransferHardcore.value !== undefined &&
           item.isHardcore === activeTransferHardcore.value
+        const catalogItem = supplyCatalogByRecord.value.get(item.baseRecord.toLocaleLowerCase()) ?? null
+        const effects = catalogItem ? supplyEffectLines(catalogItem) : []
         return {
           id: item.id,
           record: item.baseRecord,
@@ -344,11 +356,17 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
           reusable: item.reusable,
           eligible,
           detail: `${item.isHardcore ? 'HC' : 'SC'} · archived movement rune${eligible ? '' : ' · select a matching character or stash'}`,
-          source: 'archive'
+          source: 'archive',
+          catalogItem,
+          effects: effects.slice(0, 5),
+          effectCount: effects.length
         }
       })
     return [...factionAugments, ...archivedRunes]
-      .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) || item.detail.toLocaleLowerCase().includes(needle))
+      .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) ||
+        item.detail.toLocaleLowerCase().includes(needle) ||
+        item.effects.some((effect) => effect.toLocaleLowerCase().includes(needle)) ||
+        Boolean(item.catalogItem && matchesSearch(item.catalogItem, needle)))
       .sort((left, right) => Number(right.eligible) - Number(left.eligible) || left.name.localeCompare(right.name))
   }
   const unique = new Map<string, VaultListItem>()
@@ -371,6 +389,8 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
     .map((item): SupplyOption => {
       const eligible = activeTransferHardcore.value !== undefined &&
         item.isHardcore === activeTransferHardcore.value
+      const catalogItem = supplyCatalogByRecord.value.get(item.baseRecord.toLocaleLowerCase()) ?? null
+      const effects = catalogItem ? supplyEffectLines(catalogItem) : []
       return {
         id: item.id,
         record: item.baseRecord,
@@ -380,7 +400,10 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
         reusable: item.reusable,
         eligible,
         detail: `${item.isHardcore ? 'HC' : 'SC'} · archived ${item.slot}${eligible ? '' : ' · select a matching character or stash'}`,
-        source: 'archive'
+        source: 'archive',
+        catalogItem,
+        effects: effects.slice(0, 5),
+        effectCount: effects.length
       }
     })
 })
@@ -701,7 +724,11 @@ const orderedTodos = computed(() => [...todos.value].sort((left, right) =>
 ))
 
 const tooltipItem = computed(() =>
-  plannerCatalogItems.value.find((item) => item.record === tooltipRecord.value) ?? null
+  [
+    ...(snapshot.value?.supplies ?? []),
+    ...(snapshot.value?.materials ?? []),
+    ...plannerCatalogItems.value
+  ].find((item) => item.record === tooltipRecord.value) ?? null
 )
 
 const allOwnedCopies = computed(() => {
@@ -2820,7 +2847,8 @@ function itemTypeLabel(item: CollectionItem): string {
     head: 'Head armor', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Hands',
     legs: 'Leg armor', feet: 'Feet', waist: 'Waist', ring: 'Ring', amulet: 'Amulet',
     medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon',
-    component: 'Component', material: 'Crafting material', 'potion-formula': 'Potion formula'
+    component: 'Component', material: 'Crafting material', 'potion-formula': 'Potion formula',
+    augment: 'Augment', rune: 'Movement rune', writ: 'Faction writ', mandate: 'Faction mandate'
   }
   return labels[item.slot] ?? item.slot
 }
@@ -3058,6 +3086,23 @@ function formatPresentationLine(line: ItemPresentationLine): string {
   const maximum = line.maximum === null ? '' : formatRollValue(line.maximum)
   const range = maximum ? `${minimum}${line.unit} - ${maximum}${line.unit}` : `${minimum}${line.unit}`
   return `${line.prefix}${range}${range ? ' ' : ''}${line.label}${line.suffix}`
+}
+
+function supplyEffectLines(item: CollectionItem): string[] {
+  const direct = (item.presentation?.sections ?? [])
+    .flatMap((section) => section.lines)
+    .map(formatPresentationLine)
+  const granted = item.presentation?.grantedSkill
+  if (!granted) return direct
+  return [
+    ...direct,
+    `Grants ${granted.name}${granted.trigger ? ` (${granted.trigger})` : ''}`,
+    ...granted.lines.map(formatPresentationLine)
+  ]
+}
+
+function queueSupplyTooltip(item: SupplyOption, event: MouseEvent | FocusEvent): void {
+  if (item.catalogItem) queueTooltip(item.catalogItem, event)
 }
 
 async function pinCopy(copy: ObservedStashItem): Promise<void> {
@@ -4258,9 +4303,28 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
         </div>
         <div v-if="supplyVaultItems.length" class="supply-grid">
-          <label v-for="item in supplyVaultItems" :key="item.id" class="supply-card" :class="{ locked: !item.eligible }">
+          <label
+            v-for="item in supplyVaultItems"
+            :key="item.id"
+            class="supply-card"
+            :class="{ locked: !item.eligible }"
+            :title="item.catalogItem ? 'Hover for the full in-game tooltip' : undefined"
+            @mouseenter="queueSupplyTooltip(item, $event)"
+            @mousemove="moveTooltip"
+            @mouseleave="scheduleTooltipHide"
+            @focusin="queueSupplyTooltip(item, $event)"
+            @focusout="scheduleTooltipHide"
+          >
             <input type="checkbox" :checked="selectedSupplyIds.includes(item.id)" :disabled="vaultBusy || !item.eligible" @change="toggleSupply(item.id)" />
-            <span><strong>{{ item.name }}</strong><small>{{ item.detail }}</small></span>
+            <span class="supply-card-copy">
+              <strong>{{ item.name }}</strong>
+              <small>{{ item.detail }}</small>
+              <ul v-if="item.effects.length" class="supply-effects">
+                <li v-for="(effect, index) in item.effects" :key="`${item.record}:${index}`">{{ effect }}</li>
+                <li v-if="item.effectCount > item.effects.length" class="more">+{{ item.effectCount - item.effects.length }} more in tooltip</li>
+              </ul>
+              <small v-else class="supply-no-effects">No visible stat effect is indexed.</small>
+            </span>
             <b>{{ item.reusable ? '∞' : '1' }}</b>
           </label>
         </div>

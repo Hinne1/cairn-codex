@@ -48,9 +48,9 @@ internal static class ItemRollAnalyzer
         var baseStats = ToInputStats(baseRecord.Record).ToArray();
         var prefixStats = prefix is null ? null : ToInputStats(prefix.Record).ToArray();
         var suffixStats = suffix is null ? null : ToInputStats(suffix.Record).ToArray();
-        var basePetStats = ResolvePetStats(gameData, baseRecord);
-        var prefixPetStats = ResolvePetStats(gameData, prefix);
-        var suffixPetStats = ResolvePetStats(gameData, suffix);
+        var basePetStats = ResolvePetStats(gameData, baseRecord, false);
+        var prefixPetStats = ResolvePetStats(gameData, prefix, true);
+        var suffixPetStats = ResolvePetStats(gameData, suffix, true);
         var result = ItemStatEngine.Compute(
             baseStats,
             item.Seed,
@@ -296,7 +296,8 @@ internal static class ItemRollAnalyzer
 
     private static ItemStatEngine.InputStat[]? ResolvePetStats(
         ItemCatalogData gameData,
-        CatalogSourceRecord? source)
+        CatalogSourceRecord? source,
+        bool inheritAffixRollParameters)
     {
         var petRecord = source?.Record.Text("petBonusName");
         if (string.IsNullOrWhiteSpace(petRecord) ||
@@ -304,7 +305,13 @@ internal static class ItemRollAnalyzer
         {
             return null;
         }
-        return ToInputStats(resolved.Record).ToArray();
+        var stats = ToInputStats(resolved.Record).ToList();
+        if (inheritAffixRollParameters && source is not null)
+        {
+            stats.AddRange(ToInputStats(source.Record).Where(stat =>
+                stat.Stat is "lootRandomizerJitter" or "lootRandomizerScale"));
+        }
+        return stats.ToArray();
     }
 
     private static IEnumerable<ItemStatEngine.InputStat> ToInputStats(
@@ -370,7 +377,7 @@ internal sealed record ItemRollAnalysis(
     IReadOnlyList<RolledStat> PetStats,
     IReadOnlyList<string> UnmodeledFields,
     IReadOnlyList<RolledProcLine> ProcLines,
-    int ModelVersion = 3)
+    int ModelVersion = 4)
 {
     public static ItemRollAnalysis Unsupported(ItemRollInput item, string reason) =>
         new(

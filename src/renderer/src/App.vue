@@ -2945,9 +2945,9 @@ function copySourceLabel(copy: ObservedStashItem): string {
   return name ? `Currently in ${name}` : 'Currently scanned copy'
 }
 
-function presentRolledStats(source: RolledStat[] | undefined) {
+function presentRolledStats(source: RolledStat[] | undefined, includeFixed = false) {
   const stats = (source ?? [])
-    .filter((stat) => stat.estimatedPercentile !== null)
+    .filter((stat) => includeFixed || stat.estimatedPercentile !== null)
   const byField = new Map(stats.map((stat) => [stat.field, stat]))
   const consumed = new Set<string>()
   return stats
@@ -2956,7 +2956,7 @@ function presentRolledStats(source: RolledStat[] | undefined) {
       if (stat.field.endsWith('Min')) {
         const root = stat.field.slice(0, -3)
         const maximum = byField.get(root + 'Max')
-        if (maximum?.estimatedPercentile !== null && maximum?.estimatedPercentile !== undefined) {
+        if (maximum && (includeFixed || maximum.estimatedPercentile !== null)) {
           consumed.add(maximum.field)
           const valueLabel =
             stat.value === maximum.value
@@ -2967,7 +2967,9 @@ function presentRolledStats(source: RolledStat[] | undefined) {
               key: root,
               label: humanStatName(root),
               valueLabel,
-              percentile: (stat.estimatedPercentile! + maximum.estimatedPercentile) / 2,
+              percentile: stat.estimatedPercentile === null || maximum.estimatedPercentile === null
+                ? null
+                : (stat.estimatedPercentile + maximum.estimatedPercentile) / 2,
               rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(maximum.observedMaximum ?? maximum.value)}`
             }
           ]
@@ -2991,7 +2993,7 @@ function rollableStats(copy: ObservedStashItem) {
 }
 
 function petRollableStats(copy: ObservedStashItem) {
-  return presentRolledStats(copy.rollAnalysis?.petStats)
+  return presentRolledStats(copy.rollAnalysis?.petStats, true)
 }
 
 function humanStatName(field: string): string {
@@ -2999,9 +3001,12 @@ function humanStatName(field: string): string {
     characterAttackSpeedModifier: 'Attack speed',
     characterSpellCastSpeedModifier: 'Cast speed',
     characterIntelligence: 'Spirit',
+    characterLifeModifier: 'Health',
     characterDefensiveAbility: 'Defensive ability',
     characterOffensiveAbility: 'Offensive ability',
+    characterOffensiveAbilityModifier: 'Offensive ability',
     conversionPercentage: 'Damage conversion',
+    offensiveTotalDamageModifier: 'All damage',
     offensiveFireModifier: 'Fire damage',
     offensiveSlowFire: 'Burn damage',
     offensiveSlowFireModifier: 'Burn damage bonus'
@@ -4927,10 +4932,10 @@ function formatPercentile(value: number | null | undefined): string {
                   <div v-for="stat in rollableStats(copy)" :key="stat.key" class="stat-row">
                     <div class="stat-heading">
                       <span>{{ stat.label }}</span>
-                      <strong>{{ stat.valueLabel }} · {{ stat.percentile.toFixed(0) }}%</strong>
+                      <strong>{{ stat.valueLabel }}<template v-if="stat.percentile !== null"> · {{ stat.percentile.toFixed(0) }}%</template><template v-else> · fixed</template></strong>
                     </div>
-                    <div class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
-                    <small>{{ stat.rangeLabel }} sampled range</small>
+                    <div v-if="stat.percentile !== null" class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
+                    <small>{{ stat.percentile === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
                   </div>
                 </div>
               </section>
@@ -4940,10 +4945,10 @@ function formatPercentile(value: number | null | undefined): string {
                   <div v-for="stat in petRollableStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row">
                     <div class="stat-heading">
                       <span>{{ stat.label }}</span>
-                      <strong>{{ stat.valueLabel }} · {{ stat.percentile.toFixed(0) }}%</strong>
+                      <strong>{{ stat.valueLabel }}<template v-if="stat.percentile !== null"> · {{ stat.percentile.toFixed(0) }}%</template><template v-else> · fixed</template></strong>
                     </div>
-                    <div class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
-                    <small>{{ stat.rangeLabel }} sampled range</small>
+                    <div v-if="stat.percentile !== null" class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
+                    <small>{{ stat.percentile === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
                   </div>
                 </div>
               </section>

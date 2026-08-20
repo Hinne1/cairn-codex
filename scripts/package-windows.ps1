@@ -19,6 +19,20 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Grim Dawn helper publish failed.' }
 
   if (Test-Path -LiteralPath $packageRoot) {
+    $packagedHook = Join-Path $packageRoot 'resources\helper\native\ItemAssistantHook_x64.dll'
+    if (Test-Path -LiteralPath $packagedHook) {
+      try {
+        $lockProbe = [System.IO.File]::Open(
+          $packagedHook,
+          [System.IO.FileMode]::Open,
+          [System.IO.FileAccess]::ReadWrite,
+          [System.IO.FileShare]::None
+        )
+        $lockProbe.Dispose()
+      } catch {
+        throw 'The packaged live hook is still loaded by Grim Dawn. Close Grim Dawn before replacing the distributable; the existing package was left untouched.'
+      }
+    }
     Remove-Item -LiteralPath $packageRoot -Recurse -Force
   }
   New-Item -ItemType Directory -Path $packageRoot | Out-Null

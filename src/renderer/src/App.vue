@@ -229,6 +229,48 @@ const availableVaultItems = computed(() =>
       item.isHardcore === activeTransferHardcore.value
   )
 )
+const reusableSupplyUnlocks = computed(() => {
+  const unique = new Map<string, VaultListItem>()
+  for (const item of vaultItems.value) {
+    if (
+      item.rarity !== 'supply' ||
+      item.state !== 'ingested' ||
+      !['writ', 'mandate', 'rune'].includes(item.slot)
+    ) continue
+    const key = item.baseRecord.toLocaleLowerCase()
+    if (!unique.has(key)) unique.set(key, item)
+  }
+  return [...unique.values()]
+})
+const reusableSupplySummary = computed<CollectionRaritySummary>(() => {
+  const catalogRecords = new Set(
+    (snapshot.value?.supplies ?? [])
+      .filter((item) => ['writ', 'mandate', 'rune'].includes(item.slot))
+      .map((item) => item.record.toLocaleLowerCase())
+  )
+  return {
+    rarity: 'supply',
+    total: catalogRecords.size,
+    collected: reusableSupplyUnlocks.value.filter(
+      (item) => catalogRecords.has(item.baseRecord.toLocaleLowerCase())
+    ).length,
+    availableCopies: reusableSupplyUnlocks.value.length
+  }
+})
+const eligibleFactionAugmentCount = computed(() =>
+  (snapshot.value?.supplies ?? [])
+    .filter((item) => item.slot === 'augment')
+    .filter((item) => (item.acquisition?.factions ?? []).some(
+      (requirement) => characterMeetsReputation(requirement.faction, requirement.reputation)
+    )).length
+)
+const factionAugmentCount = computed(() =>
+  (snapshot.value?.supplies ?? []).filter((item) => item.slot === 'augment').length
+)
+const supplyAccessSummary = computed(() => activeCharacter.value
+  ? `${eligibleFactionAugmentCount.value} augments available to ${activeCharacter.value.name}`
+  : `${factionAugmentCount.value} augments indexed · connect a character to check access`
+)
 const supplyVaultItems = computed<SupplyOption[]>(() => {
   const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
   if (supplyCategory.value === 'augments') {
@@ -254,25 +296,29 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
         }
       })
     const archivedRunes = vaultItems.value
-      .filter((item) => item.rarity === 'supply' && item.slot === 'rune' && item.state === 'ingested' && item.isHardcore === activeTransferHardcore.value)
-      .map((item): SupplyOption => ({
-        id: item.id,
-        record: item.baseRecord,
-        name: item.name,
-        slot: item.slot,
-        isHardcore: item.isHardcore,
-        reusable: item.reusable,
-        eligible: true,
-        detail: `${item.isHardcore ? 'HC' : 'SC'} · archived movement rune`,
-        source: 'archive'
-      }))
+      .filter((item) => item.rarity === 'supply' && item.slot === 'rune' && item.state === 'ingested')
+      .map((item): SupplyOption => {
+        const eligible = activeTransferHardcore.value !== undefined &&
+          item.isHardcore === activeTransferHardcore.value
+        return {
+          id: item.id,
+          record: item.baseRecord,
+          name: item.name,
+          slot: item.slot,
+          isHardcore: item.isHardcore,
+          reusable: item.reusable,
+          eligible,
+          detail: `${item.isHardcore ? 'HC' : 'SC'} · archived movement rune${eligible ? '' : ' · select a matching character or stash'}`,
+          source: 'archive'
+        }
+      })
     return [...factionAugments, ...archivedRunes]
       .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) || item.detail.toLocaleLowerCase().includes(needle))
       .sort((left, right) => Number(right.eligible) - Number(left.eligible) || left.name.localeCompare(right.name))
   }
   const unique = new Map<string, VaultListItem>()
   for (const item of vaultItems.value) {
-    if (item.rarity !== 'supply' || item.state !== 'ingested' || item.isHardcore !== activeTransferHardcore.value) continue
+    if (item.rarity !== 'supply' || item.state !== 'ingested') continue
     const key = `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
     if (!unique.has(key)) unique.set(key, item)
   }
@@ -287,17 +333,21 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
         Boolean(catalog && matchesSearch(catalog, needle))
     })
     .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
-    .map((item): SupplyOption => ({
-      id: item.id,
-      record: item.baseRecord,
-      name: item.name,
-      slot: item.slot,
-      isHardcore: item.isHardcore,
-      reusable: item.reusable,
-      eligible: true,
-      detail: `${item.isHardcore ? 'HC' : 'SC'} · archived ${item.slot}`,
-      source: 'archive'
-    }))
+    .map((item): SupplyOption => {
+      const eligible = activeTransferHardcore.value !== undefined &&
+        item.isHardcore === activeTransferHardcore.value
+      return {
+        id: item.id,
+        record: item.baseRecord,
+        name: item.name,
+        slot: item.slot,
+        isHardcore: item.isHardcore,
+        reusable: item.reusable,
+        eligible,
+        detail: `${item.isHardcore ? 'HC' : 'SC'} · archived ${item.slot}${eligible ? '' : ' · select a matching character or stash'}`,
+        source: 'archive'
+      }
+    })
 })
 const quarantinedVaultItems = computed(() =>
   vaultItems.value.filter(
@@ -1216,7 +1266,7 @@ watch(selectedStashPath, async (path) => {
 watch(activeView, async (view) => {
   await nextTick()
   window.scrollTo({ top: 0, behavior: 'auto' })
-  if (view === 'vault') {
+  if (view === 'vault' || view === 'supplies') {
     await refreshVault()
     await pollLiveLifecycle()
   }
@@ -1766,6 +1816,7 @@ function openAffixWorkshop(): void {
 function openSupplies(): void {
   activeView.value = 'supplies'
   reusableSupplyQuery.value = ''
+  void refreshVault()
 }
 
 function selectAllVisibleSupplies(): void {
@@ -1838,24 +1889,30 @@ function preferredStashPath(value: CollectionSnapshot): string {
 }
 
 async function refreshVault(): Promise<void> {
-  if (!selectedStashPath.value) return
   vaultError.value = null
   try {
-    const [items, safety, live] = await Promise.all([
-      window.cairnCodex.listVaultItems(),
-      window.cairnCodex.inspectWriteSafety(),
-      window.cairnCodex.inspectLiveGame()
-    ])
+    // Archive browsing must not depend on a legacy transfer-stash selection or on
+    // the optional write-safety probe. In particular, live-ingested reusable
+    // supplies should appear even when offline staging is not configured.
+    const items = await window.cairnCodex.listVaultItems()
     vaultItems.value = items
-    writeSafety.value = safety
-    liveStatus.value = live
     selectedVaultIds.value = selectedVaultIds.value.filter((id) =>
       items.some((item) => item.id === id && item.state === 'ingested')
     )
     selectedSupplyIds.value = selectedSupplyIds.value.filter((id) =>
+      id.startsWith('augment:') ||
       items.some((item) => item.id === id && item.state === 'ingested' && item.rarity === 'supply')
     )
-    await refreshStaging()
+    const [safety, live] = await Promise.allSettled([
+      window.cairnCodex.inspectWriteSafety(),
+      window.cairnCodex.inspectLiveGame()
+    ])
+    if (safety.status === 'fulfilled') writeSafety.value = safety.value
+    else console.warn('Offline write safety could not be refreshed.', safety.reason)
+    if (live.status === 'fulfilled') liveStatus.value = live.value
+    else console.warn('Live-game status could not be refreshed.', live.reason)
+    if (selectedStashPath.value) await refreshStaging()
+    else staging.value = null
   } catch (error) {
     vaultError.value = readableError(error)
   }
@@ -2989,10 +3046,10 @@ function formatPercentile(value: number | null | undefined): string {
         >
           <div class="metric-heading">
             <span>Supplies</span>
-            <strong>{{ snapshot?.supplySummary?.collected ?? 0 }} / {{ snapshot?.supplySummary?.total ?? '—' }}</strong>
+            <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }}</strong>
           </div>
-          <div class="meter supply"><span :style="{ width: percentage(snapshot?.supplySummary) }" /></div>
-          <small>{{ percentage(snapshot?.supplySummary) }} unlocked · {{ snapshot?.supplySummary?.availableCopies ?? 0 }} stored</small>
+          <div class="meter supply"><span :style="{ width: percentage(reusableSupplySummary) }" /></div>
+          <small>{{ percentage(reusableSupplySummary) }} reusable unlocks · {{ supplyAccessSummary }}</small>
         </button>
         <button
           type="button"
@@ -3046,7 +3103,7 @@ function formatPercentile(value: number | null | undefined): string {
           <span>MI Workshop</span><small>{{ miWorkshopRows.length }} affix combinations</small>
         </button>
         <button type="button" :class="{ active: activeView === 'supplies' }" @click="openSupplies">
-          <span>Supplies</span><small>{{ snapshot?.supplySummary?.collected ?? 0 }} reusable unlocks</small>
+          <span>Supplies</span><small>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</small>
         </button>
         <button type="button" :class="{ active: activeView === 'farming' }" @click="activeView = 'farming'">
           <span>Collection Farming</span><small>{{ farmTargets.length }} useful areas</small>
@@ -3622,7 +3679,10 @@ function formatPercentile(value: number | null | undefined): string {
             <h2>Supplies</h2>
             <p>Archived writs and runes are reusable. Soulbound augments unlock per character from that character's faction reputation.</p>
           </div>
-          <strong>{{ snapshot?.supplySummary?.collected ?? 0 }} / {{ snapshot?.supplySummary?.total ?? '—' }}</strong>
+          <div class="tool-heading-summary">
+            <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</strong>
+            <small>{{ supplyAccessSummary }}</small>
+          </div>
         </header>
         <div class="supply-toolbar">
           <div class="segmented-control" aria-label="Supply category">

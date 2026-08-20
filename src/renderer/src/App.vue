@@ -1393,6 +1393,7 @@ async function scanCollection(): Promise<void> {
     })
     if (requestedKey === currentKey) {
       applySnapshot(result)
+      if (liveStatus.value?.state !== 'ready') void hydrateArchiveRolls()
     } else {
       const current = await window.cairnCodex.getCachedCollection(
         [...enabledStashPaths.value],

@@ -338,7 +338,11 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       })
       const snapshot = await collectionScan
       const projected = projectCollectionSources(snapshot, input.sourcePaths)
-      return presentCollection(helper, database, projected, input.basis)
+      // A catalog refresh must resolve as soon as the browsable snapshot is ready.
+      // Re-analyzing older archived rolls can take minutes after a game-data/schema
+      // change; keeping it inside this foreground promise left the renderer on a
+      // zero-item loading screen even though the completed cache was already on disk.
+      return presentCollection(helper, database, projected, input.basis, false)
     }
   )
   ipcMain.handle(

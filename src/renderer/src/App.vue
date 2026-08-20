@@ -32,6 +32,21 @@ type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
 type SupplyCategory = 'writs' | 'augments'
 type MaterialCategory = 'all' | 'component' | 'material' | 'potion-formula'
+type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `item:${string}` | `pet:${string}`
+
+interface AppHistoryState {
+  cairnCodex: true
+  index: number
+  view: ActiveView
+  selectedRecord: string | null
+  activeCategory: string
+  query: string
+  ownership: OwnershipFilter
+  rarityFilter: RarityFilter
+  miWorkshopQuery: string
+  miComparisonMetric: MiMetricKey
+  miComparisonDirection: SortDirection
+}
 
 interface PlannerProfile {
   id: string
@@ -189,6 +204,11 @@ const todoInput = ref<HTMLInputElement | null>(null)
 const todos = ref<TodoItem[]>(readStoredTodos())
 const manualDisconnectProcessId = ref<number | null>(null)
 const showMiReserves = ref(false)
+const miWorkshopQuery = ref('')
+const miComparisonMetric = ref<MiMetricKey>('overall')
+const miComparisonDirection = ref<SortDirection>('desc')
+const canNavigateBack = ref(false)
+const canNavigateForward = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
 const tooltipRecord = ref<string | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
@@ -202,6 +222,10 @@ let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 let vaultErrorTimer: ReturnType<typeof setTimeout> | null = null
 let vaultMessageTimer: ReturnType<typeof setTimeout> | null = null
 let scanErrorTimer: ReturnType<typeof setTimeout> | null = null
+let appHistoryReady = false
+let restoringAppHistory = false
+let appHistoryIndex = 0
+let appHistoryMaximum = 0
 const pageSize = 48
 
 const archiveModeCount = computed(() =>
@@ -680,11 +704,8 @@ const tooltipItem = computed(() =>
   plannerCatalogItems.value.find((item) => item.record === tooltipRecord.value) ?? null
 )
 
-const selectedCopies = computed(() => {
-  if (!snapshot.value || !selectedRecord.value) return []
-  const pinned = selectedItem.value?.pinnedInstanceKey
-  const copies = snapshot.value.observedItems
-    .filter((item) => item.baseRecord === selectedRecord.value && item.instanceKey)
+const allOwnedCopies = computed(() => {
+  const copies = [...(snapshot.value?.observedItems ?? [])]
   const observedVaultIds = new Set(
     copies
       .filter((copy) => copy.sourcePath.startsWith('vault://'))
@@ -695,43 +716,25 @@ const selectedCopies = computed(() => {
       observedVaultIds.has(item.id) ||
       !item.catalogued ||
       item.state !== 'ingested' ||
-      item.baseRecord.toLocaleLowerCase() !== selectedRecord.value.toLocaleLowerCase() ||
-      (snapshot.value.isHardcore !== undefined && item.isHardcore !== snapshot.value.isHardcore)
+      (snapshot.value?.isHardcore !== undefined && item.isHardcore !== snapshot.value.isHardcore)
     ) continue
-    copies.push({
-      sourcePath: `vault://${item.id}`,
-      tabIndex: -1,
-      itemIndex: copies.length,
-      baseRecord: item.baseRecord,
-      prefixRecord: item.prefixRecord,
-      suffixRecord: item.suffixRecord,
-      modifierRecord: '',
-      transmuteRecord: '',
-      seed: item.seed,
-      materiaRecord: '',
-      relicCompletionBonusRecord: '',
-      relicSeed: 0,
-      enchantmentRecord: '',
-      ascendantRecord: '',
-      ascendantRecord2H: '',
-      enchantmentSeed: 0,
-      materiaCombines: 0,
-      stackCount: 1,
-      rerolls: 0,
-      affixRerolls: 0,
-      rollAnalysis: item.rollAnalysis,
-      instanceKey: item.instanceKey
-    })
+    copies.push(vaultItemAsObserved(item, copies.length))
   }
+  return copies
+})
+
+const selectedCopies = computed(() => {
+  if (!snapshot.value || !selectedRecord.value) return []
+  const pinned = selectedItem.value?.pinnedInstanceKey
+  const copies = allOwnedCopies.value
+    .filter((item) => item.baseRecord === selectedRecord.value && item.instanceKey)
   return copies
     .sort((left, right) => {
       if ((left.instanceKey === pinned) !== (right.instanceKey === pinned)) {
         return left.instanceKey === pinned ? -1 : 1
       }
-      return (
-        (right.rollAnalysis?.overallEstimatedPercentile ?? -1) -
-        (left.rollAnalysis?.overallEstimatedPercentile ?? -1)
-      )
+      const metric = selectedItem.value?.rarity === 'mi' ? miComparisonMetric.value : 'overall'
+      return compareCopiesByMiMetric(left, right, metric, miComparisonDirection.value)
     })
 })
 
@@ -1000,6 +1003,44 @@ const activeCopyAffix = computed(() =>
     : null
 )
 
+const miMetricOptions = computed(() => {
+  const itemFields = new Set<string>()
+  const petFields = new Set<string>()
+  for (const copy of allOwnedCopies.value) {
+    for (const stat of copy.rollAnalysis?.stats ?? []) itemFields.add(stat.field)
+    for (const stat of copy.rollAnalysis?.petStats ?? []) petFields.add(stat.field)
+  }
+  const byLabel = (left: string, right: string) =>
+    humanStatName(left).localeCompare(humanStatName(right)) || left.localeCompare(right)
+  return {
+    quality: [
+      { key: 'overall' as MiMetricKey, label: 'Overall roll quality' },
+      { key: 'base' as MiMetricKey, label: 'Base roll quality' },
+      { key: 'prefix' as MiMetricKey, label: 'Prefix roll quality' },
+      { key: 'suffix' as MiMetricKey, label: 'Suffix roll quality' }
+    ],
+    item: [...itemFields].sort(byLabel).map((field) => ({
+      key: `item:${field}` as MiMetricKey,
+      label: humanStatName(field)
+    })),
+    pet: [...petFields].sort(byLabel).map((field) => ({
+      key: `pet:${field}` as MiMetricKey,
+      label: humanStatName(field)
+    }))
+  }
+})
+
+const selectedMiMetricLabel = computed(() => {
+  const options = [
+    ...miMetricOptions.value.quality,
+    ...miMetricOptions.value.item,
+    ...miMetricOptions.value.pet
+  ]
+  const option = options.find((candidate) => candidate.key === miComparisonMetric.value)
+  if (!option) return 'Overall roll quality'
+  return miComparisonMetric.value.startsWith('pet:') ? `Pet · ${option.label}` : option.label
+})
+
 const miWorkshopRows = computed(() => {
   if (!snapshot.value) return []
   const bases = new Map(
@@ -1015,7 +1056,7 @@ const miWorkshopRows = computed(() => {
     suffixRarity: 'magical' | 'rare' | null
     copies: ObservedStashItem[]
   }>()
-  for (const copy of snapshot.value.observedItems) {
+  for (const copy of allOwnedCopies.value) {
     const base = bases.get(copy.baseRecord.toLocaleLowerCase())
     if (!base) continue
     const prefix = affixByRecord.value.get(copy.prefixRecord.toLocaleLowerCase())
@@ -1036,26 +1077,47 @@ const miWorkshopRows = computed(() => {
       })
     }
   }
+  const needle = normalizeLoose(miWorkshopQuery.value)
+  const direction = miComparisonDirection.value === 'asc' ? 1 : -1
   return [...grouped.values()]
     .map((group) => {
-      const copies = group.copies.sort(
-        (left, right) =>
-          (right.rollAnalysis?.overallEstimatedPercentile ?? -1) -
-          (left.rollAnalysis?.overallEstimatedPercentile ?? -1)
+      const copies = group.copies.sort((left, right) =>
+        compareCopiesByMiMetric(left, right, miComparisonMetric.value, miComparisonDirection.value)
       )
       return {
         ...group,
         copies,
         leader: copies[0]!,
-        bestScore: copies[0]?.rollAnalysis?.overallEstimatedPercentile ?? -1
+        selectedMetric: miMetricResult(copies[0]!, miComparisonMetric.value)
       }
     })
+    .filter((group) => !needle || normalizeLoose([
+      group.base.name,
+      group.base.record,
+      group.base.slot,
+      group.base.levelRequirement,
+      group.prefix,
+      group.suffix,
+      presentationSearchText(group.base.presentation),
+      ...group.copies.flatMap((copy) => [
+        presentationSearchText(affixByRecord.value.get(copy.prefixRecord.toLocaleLowerCase())?.presentation),
+        presentationSearchText(affixByRecord.value.get(copy.suffixRecord.toLocaleLowerCase())?.presentation)
+      ])
+    ].join(' ')).includes(needle))
     .sort(
-      (left, right) =>
-        left.base.name.localeCompare(right.base.name) ||
+      (left, right) => {
+        const leftValue = left.selectedMetric.value
+        const rightValue = right.selectedMetric.value
+        if (leftValue !== null || rightValue !== null) {
+          if (leftValue === null) return 1
+          if (rightValue === null) return -1
+          if (leftValue !== rightValue) return (leftValue - rightValue) * direction
+        }
+        return left.base.name.localeCompare(right.base.name) ||
         left.base.levelRequirement - right.base.levelRequirement ||
         left.prefix.localeCompare(right.prefix) ||
         left.suffix.localeCompare(right.suffix)
+      }
     )
 })
 
@@ -1334,6 +1396,50 @@ function handleSkillPickerFocusOut(event: FocusEvent): void {
   skillPickerOpen.value = false
 }
 
+function currentAppHistoryState(index = appHistoryIndex): AppHistoryState {
+  return {
+    cairnCodex: true,
+    index,
+    view: activeView.value,
+    selectedRecord: selectedRecord.value,
+    activeCategory: activeCategory.value,
+    query: query.value,
+    ownership: ownership.value,
+    rarityFilter: rarityFilter.value,
+    miWorkshopQuery: miWorkshopQuery.value,
+    miComparisonMetric: miComparisonMetric.value,
+    miComparisonDirection: miComparisonDirection.value
+  }
+}
+
+function updateHistoryButtons(): void {
+  canNavigateBack.value = appHistoryIndex > 0
+  canNavigateForward.value = appHistoryIndex < appHistoryMaximum
+}
+
+function handleAppHistory(event: PopStateEvent): void {
+  const state = event.state as AppHistoryState | null
+  if (!state?.cairnCodex) return
+  restoringAppHistory = true
+  appHistoryIndex = state.index
+  activeView.value = state.view
+  selectedRecord.value = state.selectedRecord
+  activeCategory.value = state.activeCategory
+  query.value = state.query
+  ownership.value = state.ownership
+  rarityFilter.value = state.rarityFilter
+  miWorkshopQuery.value = state.miWorkshopQuery
+  miComparisonMetric.value = state.miComparisonMetric
+  miComparisonDirection.value = state.miComparisonDirection
+  updateHistoryButtons()
+  void nextTick(() => { restoringAppHistory = false })
+}
+
+function navigateAppHistory(direction: 'back' | 'forward'): void {
+  if (direction === 'back' && canNavigateBack.value) window.history.back()
+  if (direction === 'forward' && canNavigateForward.value) window.history.forward()
+}
+
 watch(
   [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, materialCategory],
   () => {
@@ -1350,6 +1456,21 @@ watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', sco
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
 })
+watch([activeView, selectedRecord], () => {
+  if (!appHistoryReady || restoringAppHistory) return
+  appHistoryIndex += 1
+  appHistoryMaximum = appHistoryIndex
+  window.history.pushState(currentAppHistoryState(), '')
+  updateHistoryButtons()
+}, { flush: 'post' })
+watch(
+  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miComparisonMetric, miComparisonDirection],
+  () => {
+    if (!appHistoryReady || restoringAppHistory) return
+    window.history.replaceState(currentAppHistoryState(), '')
+  },
+  { flush: 'post' }
+)
 watch(plannerSkills, (skills) => {
   localStorage.setItem('cairn-codex-planner-skills', JSON.stringify(skills))
 }, { deep: true })
@@ -1437,6 +1558,12 @@ watch(scanError, (message) => {
 onMounted(async () => {
   if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual'
   window.scrollTo(0, 0)
+  appHistoryIndex = 0
+  appHistoryMaximum = 0
+  window.history.replaceState(currentAppHistoryState(0), '')
+  appHistoryReady = true
+  updateHistoryButtons()
+  window.addEventListener('popstate', handleAppHistory)
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
@@ -1476,6 +1603,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('popstate', handleAppHistory)
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
@@ -1553,6 +1681,33 @@ function applySnapshot(value: CollectionSnapshot): void {
     )
   ) {
     selectedStashPath.value = preferredStashPath(value)
+  }
+}
+
+function vaultItemAsObserved(item: VaultListItem, itemIndex: number): ObservedStashItem {
+  return {
+    sourcePath: `vault://${item.id}`,
+    tabIndex: -1,
+    itemIndex,
+    baseRecord: item.baseRecord,
+    prefixRecord: item.prefixRecord,
+    suffixRecord: item.suffixRecord,
+    modifierRecord: '',
+    transmuteRecord: '',
+    seed: item.seed,
+    materiaRecord: '',
+    relicCompletionBonusRecord: '',
+    relicSeed: 0,
+    enchantmentRecord: '',
+    ascendantRecord: '',
+    ascendantRecord2H: '',
+    enchantmentSeed: 0,
+    materiaCombines: 0,
+    stackCount: 1,
+    rerolls: 0,
+    affixRerolls: 0,
+    rollAnalysis: item.rollAnalysis,
+    instanceKey: item.instanceKey
   }
 }
 
@@ -2603,6 +2758,13 @@ function openItem(item: CollectionItem): void {
   selectedRecord.value = item.record
 }
 
+function openSelectedMiInWorkshop(): void {
+  if (!selectedItem.value || selectedItem.value.rarity !== 'mi') return
+  miWorkshopQuery.value = selectedItem.value.name
+  activeView.value = 'mi-workshop'
+  selectedRecord.value = null
+}
+
 function itemIconUrl(item: CollectionItem): string | null {
   return item.iconKey ? `cairn-icon://asset/${item.iconKey}.png` : null
 }
@@ -2854,6 +3016,16 @@ function hideTooltip(): void {
 }
 
 function handleEscape(event: KeyboardEvent): void {
+  if (event.altKey && event.key === 'ArrowLeft') {
+    event.preventDefault()
+    navigateAppHistory('back')
+    return
+  }
+  if (event.altKey && event.key === 'ArrowRight') {
+    event.preventDefault()
+    navigateAppHistory('forward')
+    return
+  }
   if (event.ctrlKey && event.key === '0') {
     event.preventDefault()
     void setZoom(1)
@@ -3018,6 +3190,64 @@ function formatRollValue(value: number): string {
   return Number.isInteger(value) ? value.toString() : value.toFixed(1)
 }
 
+function miMetricResult(copy: ObservedStashItem, metric: MiMetricKey): {
+  value: number | null
+  percentile: number | null
+  display: string
+} {
+  const analysis = copy.rollAnalysis
+  if (!analysis) return { value: null, percentile: null, display: '—' }
+  const qualityValues: Record<'overall' | 'base' | 'prefix' | 'suffix', number | null> = {
+    overall: analysis.overallEstimatedPercentile,
+    base: analysis.baseEstimatedPercentile,
+    prefix: analysis.prefixEstimatedPercentile,
+    suffix: analysis.suffixEstimatedPercentile
+  }
+  if (metric === 'overall' || metric === 'base' || metric === 'prefix' || metric === 'suffix') {
+    const value = qualityValues[metric]
+    return { value, percentile: value, display: formatPercentile(value) }
+  }
+  const pet = metric.startsWith('pet:')
+  const field = metric.slice(metric.indexOf(':') + 1)
+  const stat = (pet ? analysis.petStats : analysis.stats)?.find((candidate) => candidate.field === field)
+  if (!stat) return { value: null, percentile: null, display: '—' }
+  return {
+    value: stat.value,
+    percentile: stat.estimatedPercentile,
+    display: `${formatRollValue(stat.value)}${stat.estimatedPercentile === null ? '' : ` · ${stat.estimatedPercentile.toFixed(0)}%`}`
+  }
+}
+
+function compareCopiesByMiMetric(
+  left: ObservedStashItem,
+  right: ObservedStashItem,
+  metric: MiMetricKey,
+  direction: SortDirection
+): number {
+  const leftMetric = miMetricResult(left, metric)
+  const rightMetric = miMetricResult(right, metric)
+  if (leftMetric.value === null && rightMetric.value !== null) return 1
+  if (leftMetric.value !== null && rightMetric.value === null) return -1
+  if (leftMetric.value !== null && rightMetric.value !== null && leftMetric.value !== rightMetric.value) {
+    return direction === 'asc'
+      ? leftMetric.value - rightMetric.value
+      : rightMetric.value - leftMetric.value
+  }
+  return (
+    (right.rollAnalysis?.overallEstimatedPercentile ?? -1) -
+    (left.rollAnalysis?.overallEstimatedPercentile ?? -1)
+  )
+}
+
+function presentationSearchText(presentation: ItemPresentation | undefined): string {
+  return (presentation?.sections ?? [])
+    .flatMap((section) => [
+      section.heading ?? '',
+      ...section.lines.map((line) => `${line.prefix} ${line.label} ${line.suffix}`)
+    ])
+    .join(' ')
+}
+
 function formatPercentile(value: number | null | undefined): string {
   return value == null ? '—' : `${value.toFixed(1)}%`
 }
@@ -3027,6 +3257,10 @@ function formatPercentile(value: number | null | undefined): string {
   <div class="app-shell" :data-cache-issue="cacheIssue">
     <header class="topbar">
       <div class="brand-lockup">
+        <nav class="history-nav" aria-label="View history">
+          <button type="button" aria-label="Go back" title="Back (Alt+Left)" :disabled="!canNavigateBack" @click="navigateAppHistory('back')">←</button>
+          <button type="button" aria-label="Go forward" title="Forward (Alt+Right)" :disabled="!canNavigateForward" @click="navigateAppHistory('forward')">→</button>
+        </nav>
         <p class="eyebrow">Grim Dawn collection atlas</p>
         <h1>Cairn Codex</h1>
       </div>
@@ -3921,6 +4155,34 @@ function formatPercentile(value: number | null | undefined): string {
           <span><strong>{{ snapshot?.affixSummary.collected ?? 0 }}</strong> affixes discovered</span>
           <span><strong>{{ miWorkshopRows.length }}</strong> combinations retained</span>
         </div>
+        <div class="mi-workshop-controls">
+          <label class="mi-workshop-search">
+            <span>Search workshop</span>
+            <input v-model="miWorkshopQuery" type="search" placeholder="Base, affix, stat, skill…" />
+            <button v-if="miWorkshopQuery" type="button" aria-label="Clear Workshop search" @click="miWorkshopQuery = ''">×</button>
+          </label>
+          <label>
+            <span>Compare copies by</span>
+            <select v-model="miComparisonMetric">
+              <optgroup label="Roll quality">
+                <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
+              </optgroup>
+              <optgroup label="Item stats">
+                <option v-for="option in miMetricOptions.item" :key="option.key" :value="option.key">{{ option.label }}</option>
+              </optgroup>
+              <optgroup label="Bonus to All Pets">
+                <option v-for="option in miMetricOptions.pet" :key="option.key" :value="option.key">{{ option.label }}</option>
+              </optgroup>
+            </select>
+          </label>
+          <label>
+            <span>Order</span>
+            <select v-model="miComparisonDirection">
+              <option value="desc">Highest first</option>
+              <option value="asc">Lowest first</option>
+            </select>
+          </label>
+        </div>
         <div class="mi-table-wrap">
           <table class="mi-table">
             <thead>
@@ -3929,7 +4191,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <th>Level</th>
                 <th>Prefix</th>
                 <th>Suffix</th>
-                <th>Leader roll quality</th>
+                <th>{{ selectedMiMetricLabel }}</th>
                 <th>Stored</th>
               </tr>
             </thead>
@@ -3945,6 +4207,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <td :class="['affix-name', row.prefixRarity]">{{ row.prefix }}</td>
                 <td :class="['affix-name', row.suffixRarity]">{{ row.suffix }}</td>
                 <td class="mi-score-breakdown">
+                  <span class="mi-selected-score"><small>Selected</small><strong>{{ row.selectedMetric.display }}</strong></span>
                   <span><small>Overall</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.overallEstimatedPercentile) }}</strong></span>
                   <span><small>Base</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.baseEstimatedPercentile) }}</strong></span>
                   <span><small>Prefix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.prefixEstimatedPercentile) }}</strong></span>
@@ -3954,12 +4217,12 @@ function formatPercentile(value: number | null | undefined): string {
                   <strong>{{ row.copies.length }}</strong>
                   <small v-if="row.copies.length > 1">1 leader · {{ row.copies.length - 1 }} archived</small>
                   <span v-if="showMiReserves && row.copies.length > 1" class="reserve-scores">
-                    {{ row.copies.slice(1).map((copy) => copy.rollAnalysis?.overallEstimatedPercentile == null ? 'unscored' : `${copy.rollAnalysis.overallEstimatedPercentile.toFixed(1)}%`).join(' · ') }}
+                    {{ row.copies.slice(1).map((copy) => miMetricResult(copy, miComparisonMetric).display).join(' · ') }}
                   </span>
                 </td>
               </tr>
               <tr v-if="miWorkshopRows.length === 0">
-                <td colspan="6" class="skill-empty">Archive a Monster Infrequent to start building the Workshop.</td>
+                <td colspan="6" class="skill-empty">{{ miWorkshopQuery ? `No stored MI matches “${miWorkshopQuery}”.` : 'Archive a Monster Infrequent to start building the Workshop.' }}</td>
               </tr>
             </tbody>
           </table>
@@ -4831,6 +5094,30 @@ function formatPercentile(value: number | null | undefined): string {
         <p class="drawer-intro">
           Auto-best averages the estimated percentile of each variable stat line. Pin whichever copy you actually prefer.
         </p>
+        <section v-if="selectedItem.rarity === 'mi'" class="drawer-mi-tools">
+          <button type="button" @click="openSelectedMiInWorkshop">Open in MI Workshop</button>
+          <label>
+            <span>Compare these copies by</span>
+            <select v-model="miComparisonMetric">
+              <optgroup label="Roll quality">
+                <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
+              </optgroup>
+              <optgroup label="Item stats">
+                <option v-for="option in miMetricOptions.item" :key="option.key" :value="option.key">{{ option.label }}</option>
+              </optgroup>
+              <optgroup label="Bonus to All Pets">
+                <option v-for="option in miMetricOptions.pet" :key="option.key" :value="option.key">{{ option.label }}</option>
+              </optgroup>
+            </select>
+          </label>
+          <label>
+            <span>Order</span>
+            <select v-model="miComparisonDirection">
+              <option value="desc">Highest first</option>
+              <option value="asc">Lowest first</option>
+            </select>
+          </label>
+        </section>
         <section v-if="selectedStoredCopies.length" class="drawer-stored-copies">
           <header>
             <div>
@@ -4868,6 +5155,10 @@ function formatPercentile(value: number | null | undefined): string {
                   <strong v-else class="unscored">Unscored</strong>
                   <small>overall roll quality</small>
                 </div>
+                <p v-if="selectedItem.rarity === 'mi'" class="copy-selected-metric">
+                  <span>{{ selectedMiMetricLabel }}</span>
+                  <strong>{{ miMetricResult(copy, miComparisonMetric).display }}</strong>
+                </p>
                 <div class="copy-affixes">
                   <button
                     type="button"

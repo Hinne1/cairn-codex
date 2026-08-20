@@ -7,11 +7,13 @@ import type {
   CollectionRaritySummary,
   CollectionSnapshot,
   GrimDawnDiscovery,
+  ItemPresentation,
   ItemPresentationLine,
   ItemRollAnalysis,
   LiveGameStatus,
   MapRegionLocation,
   ObservedStashItem,
+  RolledStat,
   StagingTabInspection,
   VaultListItem,
   WriteSafetyStatus
@@ -66,6 +68,11 @@ interface CollectionSet {
   items: CollectionItem[]
   collected: number
   availableCopies: number
+}
+
+interface RollTrackerSummary {
+  median: number | null
+  scored: number
 }
 
 interface FarmTarget {
@@ -152,6 +159,7 @@ const selectedAtlasRegion = ref<string | null>(null)
 const transferMode = ref<TransferMode>('live')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
+const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
 const pinning = ref(false)
 const vaultItems = ref<VaultListItem[]>([])
 const staging = ref<StagingTabInspection | null>(null)
@@ -445,6 +453,51 @@ const allItemSummary = computed(() => {
     collected: summaries.reduce((sum, value) => sum + value.collected, 0),
     availableCopies: summaries.reduce((sum, value) => sum + value.availableCopies, 0)
   }
+})
+function medianSummary(values: Array<number | null | undefined>): RollTrackerSummary {
+  const scored = values
+    .filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value))
+    .sort((left, right) => left - right)
+  if (scored.length === 0) return { median: null, scored: 0 }
+  const middle = Math.floor(scored.length / 2)
+  return {
+    median: scored.length % 2 === 0
+      ? (scored[middle - 1]! + scored[middle]!) / 2
+      : scored[middle]!,
+    scored: scored.length
+  }
+}
+function itemRollSummary(rarity?: 'epic' | 'legendary' | 'mi'): RollTrackerSummary {
+  const items = (snapshot.value?.items ?? []).filter((item) =>
+    ['epic', 'legendary', 'mi'].includes(item.rarity) && (!rarity || item.rarity === rarity)
+  )
+  return medianSummary(items.map((item) => item.bestRollPercentile))
+}
+const allItemRollSummary = computed(() => itemRollSummary())
+const legendaryRollSummary = computed(() => itemRollSummary('legendary'))
+const epicRollSummary = computed(() => itemRollSummary('epic'))
+const miRollSummary = computed(() => itemRollSummary('mi'))
+const setRollSummary = computed(() => medianSummary(
+  collectionSets.value.flatMap((set) => set.items.map((item) => item.bestRollPercentile))
+))
+const affixRollSummary = computed(() => {
+  const recordKeys = new Map<string, string>()
+  for (const affix of snapshot.value?.affixes ?? []) {
+    for (const record of affix.records) recordKeys.set(record.toLocaleLowerCase(), affix.key)
+  }
+  const best = new Map<string, number>()
+  for (const copy of snapshot.value?.observedItems ?? []) {
+    for (const [record, score] of [
+      [copy.prefixRecord, copy.rollAnalysis?.prefixEstimatedPercentile],
+      [copy.suffixRecord, copy.rollAnalysis?.suffixEstimatedPercentile]
+    ] as const) {
+      if (!record || score === null || score === undefined) continue
+      const key = recordKeys.get(record.toLocaleLowerCase())
+      if (!key) continue
+      best.set(key, Math.max(best.get(key) ?? -1, score))
+    }
+  }
+  return medianSummary([...best.values()])
 })
 const setSummary = computed(() => ({
   total: collectionSets.value.length,
@@ -922,18 +975,30 @@ const selectedAtlasItems = computed(() =>
 )
 
 const affixByRecord = computed(() => {
-  const byRecord = new Map<string, { name: string; kind: 'prefix' | 'suffix'; rarity: 'magical' | 'rare' }>()
+  const byRecord = new Map<string, {
+    name: string
+    kind: 'prefix' | 'suffix'
+    rarity: 'magical' | 'rare'
+    presentation?: ItemPresentation
+  }>()
   for (const affix of snapshot.value?.affixes ?? []) {
     for (const record of affix.records) {
       byRecord.set(record.toLocaleLowerCase(), {
         name: affix.name,
         kind: affix.kind,
-        rarity: affix.rarity
+        rarity: affix.rarity,
+        presentation: affix.presentations?.[record]
       })
     }
   }
   return byRecord
 })
+
+const activeCopyAffix = computed(() =>
+  activeCopyAffixTarget.value
+    ? affixByRecord.value.get(activeCopyAffixTarget.value.record.toLocaleLowerCase()) ?? null
+    : null
+)
 
 const miWorkshopRows = computed(() => {
   if (!snapshot.value) return []
@@ -1282,6 +1347,9 @@ watch(sortMode, (mode) => {
 
 watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
 watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
+watch(selectedRecord, () => {
+  activeCopyAffixTarget.value = null
+})
 watch(plannerSkills, (skills) => {
   localStorage.setItem('cairn-codex-planner-skills', JSON.stringify(skills))
 }, { deep: true })
@@ -2855,14 +2923,30 @@ function copyAffixName(record: string, emptyLabel: string): string {
     record.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.dbr$/i, '') ?? record
 }
 
+function copyAffixKey(copy: ObservedStashItem, record: string): string {
+  return `${copy.instanceKey ?? `${copy.sourcePath}:${copy.tabIndex}:${copy.itemIndex}`}|${record}`
+}
+
+function copyAffixIsOpen(copy: ObservedStashItem, record: string): boolean {
+  return Boolean(record) && activeCopyAffixTarget.value?.copyKey === copyAffixKey(copy, record)
+}
+
+function toggleCopyAffix(copy: ObservedStashItem, record: string): void {
+  if (!record) return
+  const copyKey = copyAffixKey(copy, record)
+  activeCopyAffixTarget.value = activeCopyAffixTarget.value?.copyKey === copyKey
+    ? null
+    : { copyKey, record }
+}
+
 function copySourceLabel(copy: ObservedStashItem): string {
   if (vaultCopyForObserved(copy)) return 'Stored in Codex Archive'
   const name = copy.sourcePath.replaceAll('\\', '/').split('/').at(-1)
   return name ? `Currently in ${name}` : 'Currently scanned copy'
 }
 
-function rollableStats(copy: ObservedStashItem) {
-  const stats = (copy.rollAnalysis?.stats ?? [])
+function presentRolledStats(source: RolledStat[] | undefined) {
+  const stats = (source ?? [])
     .filter((stat) => stat.estimatedPercentile !== null)
   const byField = new Map(stats.map((stat) => [stat.field, stat]))
   const consumed = new Set<string>()
@@ -2900,6 +2984,14 @@ function rollableStats(copy: ObservedStashItem) {
       ]
     })
     .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function rollableStats(copy: ObservedStashItem) {
+  return presentRolledStats(copy.rollAnalysis?.stats)
+}
+
+function petRollableStats(copy: ObservedStashItem) {
+  return presentRolledStats(copy.rollAnalysis?.petStats)
 }
 
 function humanStatName(field: string): string {
@@ -3123,7 +3215,10 @@ function formatPercentile(value: number | null | undefined): string {
             <strong>{{ allItemSummary.collected }} / {{ allItemSummary.total || '—' }}</strong>
           </div>
           <div class="meter all"><span :style="{ width: percentage(allItemSummary) }" /></div>
-          <small>{{ percentage(allItemSummary) }} discovered · Epic, Legendary, and MI bases</small>
+          <small>
+            {{ percentage(allItemSummary) }} discovered · Epic, Legendary, and MI bases
+            <template v-if="allItemRollSummary.median !== null"> · median best {{ allItemRollSummary.median.toFixed(1) }}% ({{ allItemRollSummary.scored }} scored)</template>
+          </small>
         </button>
         <button
           type="button"
@@ -3135,7 +3230,10 @@ function formatPercentile(value: number | null | undefined): string {
             <strong>{{ rarity('legendary')?.collected ?? 0 }} / {{ rarity('legendary')?.total ?? '—' }}</strong>
           </div>
           <div class="meter"><span :style="{ width: percentage(rarity('legendary')) }" /></div>
-          <small>{{ percentage(rarity('legendary')) }} discovered · {{ rarity('legendary')?.availableCopies ?? 0 }} copies available</small>
+          <small>
+            {{ percentage(rarity('legendary')) }} discovered · {{ rarity('legendary')?.availableCopies ?? 0 }} copies available
+            <template v-if="legendaryRollSummary.median !== null"> · median best {{ legendaryRollSummary.median.toFixed(1) }}% ({{ legendaryRollSummary.scored }} scored)</template>
+          </small>
         </button>
         <button
           type="button"
@@ -3147,7 +3245,10 @@ function formatPercentile(value: number | null | undefined): string {
             <strong>{{ rarity('epic')?.collected ?? 0 }} / {{ rarity('epic')?.total ?? '—' }}</strong>
           </div>
           <div class="meter epic"><span :style="{ width: percentage(rarity('epic')) }" /></div>
-          <small>{{ percentage(rarity('epic')) }} discovered · {{ rarity('epic')?.availableCopies ?? 0 }} copies available</small>
+          <small>
+            {{ percentage(rarity('epic')) }} discovered · {{ rarity('epic')?.availableCopies ?? 0 }} copies available
+            <template v-if="epicRollSummary.median !== null"> · median best {{ epicRollSummary.median.toFixed(1) }}% ({{ epicRollSummary.scored }} scored)</template>
+          </small>
         </button>
         <button
           type="button"
@@ -3159,7 +3260,10 @@ function formatPercentile(value: number | null | undefined): string {
             <strong>{{ rarity('mi')?.collected ?? 0 }} / {{ rarity('mi')?.total ?? '—' }}</strong>
           </div>
           <div class="meter mi"><span :style="{ width: percentage(rarity('mi')) }" /></div>
-          <small>{{ percentage(rarity('mi')) }} discovered · level tiers tracked separately</small>
+          <small>
+            {{ percentage(rarity('mi')) }} discovered · level tiers tracked separately
+            <template v-if="miRollSummary.median !== null"> · median best {{ miRollSummary.median.toFixed(1) }}% ({{ miRollSummary.scored }} scored)</template>
+          </small>
         </button>
         <button
           type="button"
@@ -3171,7 +3275,10 @@ function formatPercentile(value: number | null | undefined): string {
             <strong>{{ snapshot?.affixSummary.collected ?? 0 }} / {{ snapshot?.affixSummary.total ?? '—' }}</strong>
           </div>
           <div class="meter affix"><span :style="{ width: affixPercentage() }" /></div>
-          <small>{{ affixPercentage() }} discovered · prefixes and suffixes</small>
+          <small>
+            {{ affixPercentage() }} discovered · prefixes and suffixes
+            <template v-if="affixRollSummary.median !== null"> · median best {{ affixRollSummary.median.toFixed(1) }}% ({{ affixRollSummary.scored }} scored)</template>
+          </small>
         </button>
         <button
           type="button"
@@ -3183,7 +3290,10 @@ function formatPercentile(value: number | null | undefined): string {
             <strong>{{ setSummary.collected }} / {{ setSummary.total || '—' }}</strong>
           </div>
           <div class="meter set"><span :style="{ width: percentage(setSummary) }" /></div>
-          <small>{{ percentage(setSummary) }} complete · {{ setSummary.availableCopies }} ready to equip</small>
+          <small>
+            {{ percentage(setSummary) }} complete · {{ setSummary.availableCopies }} ready to equip
+            <template v-if="setRollSummary.median !== null"> · median best piece {{ setRollSummary.median.toFixed(1) }}% ({{ setRollSummary.scored }} scored)</template>
+          </small>
         </button>
         <button
           type="button"
@@ -4754,9 +4864,40 @@ function formatPercentile(value: number | null | undefined): string {
                   <small>overall roll quality</small>
                 </div>
                 <div class="copy-affixes">
-                  <span><small>Prefix</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong></span>
-                  <span><small>Suffix</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong></span>
+                  <button
+                    type="button"
+                    :disabled="!copy.prefixRecord"
+                    :class="{ active: copyAffixIsOpen(copy, copy.prefixRecord) }"
+                    :title="copy.prefixRecord ? 'Show this prefix’s bonuses' : 'This copy has no prefix'"
+                    @click="toggleCopyAffix(copy, copy.prefixRecord)"
+                  ><small>Prefix</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong></button>
+                  <button
+                    type="button"
+                    :disabled="!copy.suffixRecord"
+                    :class="{ active: copyAffixIsOpen(copy, copy.suffixRecord) }"
+                    :title="copy.suffixRecord ? 'Show this suffix’s bonuses' : 'This copy has no suffix'"
+                    @click="toggleCopyAffix(copy, copy.suffixRecord)"
+                  ><small>Suffix</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong></button>
                 </div>
+                <section
+                  v-if="activeCopyAffix && activeCopyAffixTarget && [copy.prefixRecord, copy.suffixRecord].includes(activeCopyAffixTarget.record) && copyAffixIsOpen(copy, activeCopyAffixTarget.record)"
+                  class="copy-affix-detail"
+                  :class="activeCopyAffix.rarity"
+                >
+                  <header>
+                    <span><small>{{ activeCopyAffix.kind }}</small><strong>{{ activeCopyAffix.name }}</strong></span>
+                    <button type="button" aria-label="Close affix details" @click="activeCopyAffixTarget = null">×</button>
+                  </header>
+                  <template v-if="activeCopyAffix.presentation?.sections.some((section) => section.lines.length)">
+                    <div v-for="section in activeCopyAffix.presentation?.sections ?? []" :key="`${activeCopyAffixTarget.record}:${section.kind}:${section.heading}`" class="copy-affix-section">
+                      <h4 v-if="section.heading">{{ section.heading }}</h4>
+                      <p v-for="line in section.lines" :key="`${line.label}:${line.minimum}:${line.maximum}`" :class="`tone-${line.tone}`">
+                        {{ formatPresentationLine(line) }}
+                      </p>
+                    </div>
+                  </template>
+                  <p v-else class="copy-affix-empty">This affix changes non-rollable item rules rather than visible stats.</p>
+                </section>
                 <p class="copy-provenance">{{ copySourceLabel(copy) }} · Seed {{ copy.seed }}</p>
               </div>
               <div class="copy-actions">
@@ -4779,15 +4920,33 @@ function formatPercentile(value: number | null | undefined): string {
             <p v-if="copy.rollAnalysis && !copy.rollAnalysis.trusted" class="withheld-note">
               {{ copy.rollAnalysis.reason }}
             </p>
-            <div v-else-if="copy.rollAnalysis && rollableStats(copy).length" class="stat-list">
-              <div v-for="stat in rollableStats(copy)" :key="stat.key" class="stat-row">
-                <div class="stat-heading">
-                  <span>{{ stat.label }}</span>
-                  <strong>{{ stat.valueLabel }} · {{ stat.percentile.toFixed(0) }}%</strong>
+            <div v-else-if="copy.rollAnalysis && (rollableStats(copy).length || petRollableStats(copy).length)" class="copy-roll-sections">
+              <section v-if="rollableStats(copy).length">
+                <h3>Item rolls</h3>
+                <div class="stat-list">
+                  <div v-for="stat in rollableStats(copy)" :key="stat.key" class="stat-row">
+                    <div class="stat-heading">
+                      <span>{{ stat.label }}</span>
+                      <strong>{{ stat.valueLabel }} · {{ stat.percentile.toFixed(0) }}%</strong>
+                    </div>
+                    <div class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
+                    <small>{{ stat.rangeLabel }} sampled range</small>
+                  </div>
                 </div>
-                <div class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
-                <small>{{ stat.rangeLabel }} sampled range</small>
-              </div>
+              </section>
+              <section v-if="petRollableStats(copy).length" class="pet-roll-section">
+                <h3>Bonus to All Pets</h3>
+                <div class="stat-list">
+                  <div v-for="stat in petRollableStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row">
+                    <div class="stat-heading">
+                      <span>{{ stat.label }}</span>
+                      <strong>{{ stat.valueLabel }} · {{ stat.percentile.toFixed(0) }}%</strong>
+                    </div>
+                    <div class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
+                    <small>{{ stat.rangeLabel }} sampled range</small>
+                  </div>
+                </div>
+              </section>
             </div>
             <p v-else class="withheld-note">
               Roll analysis is pending. This copy remains safe and retrievable; its score will appear without reopening the drawer.

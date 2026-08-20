@@ -48,35 +48,56 @@ internal static class ItemRollAnalyzer
         var baseStats = ToInputStats(baseRecord.Record).ToArray();
         var prefixStats = prefix is null ? null : ToInputStats(prefix.Record).ToArray();
         var suffixStats = suffix is null ? null : ToInputStats(suffix.Record).ToArray();
+        var basePetStats = ResolvePetStats(gameData, baseRecord);
+        var prefixPetStats = ResolvePetStats(gameData, prefix);
+        var suffixPetStats = ResolvePetStats(gameData, suffix);
         var result = ItemStatEngine.Compute(
             baseStats,
             item.Seed,
             prefixStats: prefixStats,
             suffixStats: suffixStats);
-        var trusted = result.UnmodeledFields.Count == 0;
+        var hasPetStats = basePetStats is not null || prefixPetStats is not null || suffixPetStats is not null;
+        var petResult = hasPetStats
+            ? ItemStatEngine.Compute(
+                basePetStats ?? [],
+                item.Seed,
+                prefixStats: prefixPetStats,
+                suffixStats: suffixPetStats)
+            : null;
+        var trusted = result.UnmodeledFields.Count == 0 &&
+            (petResult is null || petResult.UnmodeledFields.Count == 0);
         RollDistribution? distribution = null;
         if (trusted)
         {
             var key = new RollTemplateKey(item.BaseRecord, item.PrefixRecord, item.SuffixRecord);
             if (distributionCache is null || !distributionCache.TryGetValue(key, out distribution))
             {
-                distribution = BuildDistribution(baseStats, prefixStats, suffixStats);
+                distribution = BuildDistribution(
+                    baseStats,
+                    prefixStats,
+                    suffixStats,
+                    basePetStats,
+                    prefixPetStats,
+                    suffixPetStats);
                 distributionCache?.Add(key, distribution);
             }
         }
 
         var stats = result.Stats
             .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-            .Select(pair => Score(pair.Key, pair.Value, distribution))
+            .Select(pair => Score(pair.Key, pair.Value, distribution?.Values))
             .ToArray();
-        var scored = stats.Where(stat => stat.EstimatedPercentile.HasValue).ToArray();
-        var groupedPercentiles = scored
-            .GroupBy(stat => GetScoreGroup(stat.Field, scored), StringComparer.Ordinal)
-            .Select(group => group.Average(stat => stat.EstimatedPercentile!.Value))
+        var petStats = (petResult?.Stats ?? new Dictionary<string, double>())
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => Score(pair.Key, pair.Value, distribution?.PetValues))
             .ToArray();
-        var basePercentile = SourcePercentile(stats, baseStats);
-        var prefixPercentile = SourcePercentile(stats, prefixStats);
-        var suffixPercentile = SourcePercentile(stats, suffixStats);
+        var groupedPercentiles = ScoreGroups(stats).Concat(ScoreGroups(petStats)).ToArray();
+        var basePercentile = SourcePercentile(stats, baseStats, petStats, basePetStats);
+        var prefixPercentile = SourcePercentile(stats, prefixStats, petStats, prefixPetStats);
+        var suffixPercentile = SourcePercentile(stats, suffixStats, petStats, suffixPetStats);
+        var unmodeledFields = result.UnmodeledFields
+            .Concat((petResult?.UnmodeledFields ?? []).Select(field => $"pet:{field}"))
+            .ToArray();
         return new ItemRollAnalysis(
             item.BaseRecord,
             item.PrefixRecord,
@@ -91,7 +112,8 @@ internal static class ItemRollAnalyzer
             prefixPercentile,
             suffixPercentile,
             stats,
-            result.UnmodeledFields,
+            petStats,
+            unmodeledFields,
             result.ProcLines?.Select(line => new RolledProcLine(
                 line.Field,
                 line.Min,
@@ -102,26 +124,44 @@ internal static class ItemRollAnalyzer
 
     private static double? SourcePercentile(
         IReadOnlyList<RolledStat> stats,
-        ItemStatEngine.InputStat[]? source)
+        ItemStatEngine.InputStat[]? source,
+        IReadOnlyList<RolledStat> petStats,
+        ItemStatEngine.InputStat[]? petSource)
     {
-        if (source is null) return null;
-        var fields = source.Select(stat => stat.Stat).ToHashSet(StringComparer.Ordinal);
-        var scored = stats
-            .Where(stat => stat.EstimatedPercentile.HasValue && fields.Contains(stat.Field))
-            .ToArray();
-        var grouped = scored
-            .GroupBy(stat => GetScoreGroup(stat.Field, scored), StringComparer.Ordinal)
-            .Select(group => group.Average(stat => stat.EstimatedPercentile!.Value))
+        var grouped = SourceScoreGroups(stats, source)
+            .Concat(SourceScoreGroups(petStats, petSource))
             .ToArray();
         return grouped.Length == 0 ? null : grouped.Average();
+    }
+
+    private static IEnumerable<double> SourceScoreGroups(
+        IReadOnlyList<RolledStat> stats,
+        ItemStatEngine.InputStat[]? source)
+    {
+        if (source is null) return [];
+        var fields = source.Select(stat => stat.Stat).ToHashSet(StringComparer.Ordinal);
+        return ScoreGroups(stats.Where(stat => fields.Contains(stat.Field)).ToArray());
+    }
+
+    private static IEnumerable<double> ScoreGroups(IReadOnlyList<RolledStat> stats)
+    {
+        var scored = stats.Where(stat => stat.EstimatedPercentile.HasValue).ToArray();
+        return scored
+            .GroupBy(stat => GetScoreGroup(stat.Field, scored), StringComparer.Ordinal)
+            .Select(group => group.Average(stat => stat.EstimatedPercentile!.Value));
     }
 
     private static RollDistribution BuildDistribution(
         ItemStatEngine.InputStat[] baseStats,
         ItemStatEngine.InputStat[]? prefixStats,
-        ItemStatEngine.InputStat[]? suffixStats)
+        ItemStatEngine.InputStat[]? suffixStats,
+        ItemStatEngine.InputStat[]? basePetStats,
+        ItemStatEngine.InputStat[]? prefixPetStats,
+        ItemStatEngine.InputStat[]? suffixPetStats)
     {
         var values = new Dictionary<string, List<double>>(StringComparer.Ordinal);
+        var petValues = new Dictionary<string, List<double>>(StringComparer.Ordinal);
+        var hasPetStats = basePetStats is not null || prefixPetStats is not null || suffixPetStats is not null;
         for (var index = 0; index < PercentileSampleSize; index++)
         {
             var seed = unchecked(0x9E3779B9u * checked((uint)(index + 1)));
@@ -145,9 +185,43 @@ internal static class ItemRollAnalyzer
                 }
                 samples.Add(pair.Value);
             }
+            if (hasPetStats)
+            {
+                var petSample = ItemStatEngine.Compute(
+                    basePetStats ?? [],
+                    seed,
+                    prefixStats: prefixPetStats,
+                    suffixStats: suffixPetStats);
+                if (petSample.UnmodeledFields.Count > 0)
+                {
+                    throw new InvalidDataException(
+                        "A trusted pet-bonus template became untrusted during percentile sampling.");
+                }
+                AddSamples(petValues, petSample.Stats);
+            }
         }
 
-        return new RollDistribution(values.ToDictionary(
+        return new RollDistribution(ToSortedSamples(values), ToSortedSamples(petValues));
+    }
+
+    private static void AddSamples(
+        IDictionary<string, List<double>> values,
+        IReadOnlyDictionary<string, double> sample)
+    {
+        foreach (var pair in sample)
+        {
+            if (!values.TryGetValue(pair.Key, out var samples))
+            {
+                samples = new List<double>(PercentileSampleSize);
+                values[pair.Key] = samples;
+            }
+            samples.Add(pair.Value);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, double[]> ToSortedSamples(
+        IReadOnlyDictionary<string, List<double>> values) =>
+        values.ToDictionary(
             pair => pair.Key,
             pair =>
             {
@@ -155,13 +229,15 @@ internal static class ItemRollAnalyzer
                 Array.Sort(samples);
                 return samples;
             },
-            StringComparer.Ordinal));
-    }
+            StringComparer.Ordinal);
 
-    private static RolledStat Score(string field, double value, RollDistribution? distribution)
+    private static RolledStat Score(
+        string field,
+        double value,
+        IReadOnlyDictionary<string, double[]>? distribution)
     {
         if (distribution is null ||
-            !distribution.Values.TryGetValue(field, out var samples) ||
+            !distribution.TryGetValue(field, out var samples) ||
             samples.Length == 0)
         {
             return new RolledStat(field, value, false, null, null, null);
@@ -218,6 +294,19 @@ internal static class ItemRollAnalyzer
         return true;
     }
 
+    private static ItemStatEngine.InputStat[]? ResolvePetStats(
+        ItemCatalogData gameData,
+        CatalogSourceRecord? source)
+    {
+        var petRecord = source?.Record.Text("petBonusName");
+        if (string.IsNullOrWhiteSpace(petRecord) ||
+            !gameData.Records.TryGetValue(petRecord, out var resolved))
+        {
+            return null;
+        }
+        return ToInputStats(resolved.Record).ToArray();
+    }
+
     private static IEnumerable<ItemStatEngine.InputStat> ToInputStats(
         CairnCodex.GrimDawn.Gdia.GameData.ArzRecord record)
     {
@@ -246,7 +335,9 @@ internal readonly record struct RollTemplateKey(
     string PrefixRecord,
     string SuffixRecord);
 
-internal sealed record RollDistribution(IReadOnlyDictionary<string, double[]> Values);
+internal sealed record RollDistribution(
+    IReadOnlyDictionary<string, double[]> Values,
+    IReadOnlyDictionary<string, double[]> PetValues);
 
 internal sealed record AnalyzeItemRollsRequest(
     string InstallationPath,
@@ -276,9 +367,10 @@ internal sealed record ItemRollAnalysis(
     double? PrefixEstimatedPercentile,
     double? SuffixEstimatedPercentile,
     IReadOnlyList<RolledStat> Stats,
+    IReadOnlyList<RolledStat> PetStats,
     IReadOnlyList<string> UnmodeledFields,
     IReadOnlyList<RolledProcLine> ProcLines,
-    int ModelVersion = 2)
+    int ModelVersion = 3)
 {
     public static ItemRollAnalysis Unsupported(ItemRollInput item, string reason) =>
         new(
@@ -294,6 +386,7 @@ internal sealed record ItemRollAnalysis(
             null,
             null,
             null,
+            [],
             [],
             [],
             []);

@@ -197,7 +197,8 @@ internal static class CollectionSnapshotBuilder
                 affix.Kind,
                 affix.Rarity,
                 affix.Records,
-                affix.Records.Sum(record => availableByAffixRecord.GetValueOrDefault(record))))
+                affix.Records.Sum(record => availableByAffixRecord.GetValueOrDefault(record)),
+                affix.Presentations))
             .ToArray();
         var affixSummary = new CollectionAffixSummary(
             affixes.Length,
@@ -296,7 +297,8 @@ internal sealed record CollectionAffix(
     string Kind,
     string Rarity,
     IReadOnlyList<string> Records,
-    int AvailableCount);
+    int AvailableCount,
+    IReadOnlyDictionary<string, ItemPresentation> Presentations);
 
 internal sealed record CollectionCatalogItem(
     string Record,

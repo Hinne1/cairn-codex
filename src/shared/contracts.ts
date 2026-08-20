@@ -334,6 +334,7 @@ export interface CollectionAffix {
   rarity: 'magical' | 'rare'
   records: string[]
   availableCount: number
+  presentations?: Record<string, ItemPresentation>
 }
 
 export interface CollectionItem {
@@ -476,6 +477,7 @@ export interface ItemRollAnalysis {
   prefixEstimatedPercentile: number | null
   suffixEstimatedPercentile: number | null
   stats: RolledStat[]
+  petStats?: RolledStat[]
   unmodeledFields: string[]
 }
 

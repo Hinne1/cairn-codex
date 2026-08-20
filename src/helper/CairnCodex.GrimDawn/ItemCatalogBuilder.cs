@@ -129,7 +129,7 @@ internal static class ItemCatalogBuilder
             .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var affixes = data.Records.Values
-            .Select(source => ProjectAffix(source, data.Tags))
+            .Select(source => ProjectAffix(source, data.Tags, presentationSource))
             .Where(affix => affix is not null)
             .Cast<CatalogAffixRecord>()
             .GroupBy(
@@ -146,7 +146,11 @@ internal static class ItemCatalogBuilder
                     group.Select(affix => affix.Record)
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .OrderBy(record => record, StringComparer.OrdinalIgnoreCase)
-                        .ToArray());
+                        .ToArray(),
+                    group.ToDictionary(
+                        affix => affix.Record,
+                        affix => affix.Presentation,
+                        StringComparer.OrdinalIgnoreCase));
             })
             .OrderBy(affix => affix.Kind, StringComparer.OrdinalIgnoreCase)
             .ThenBy(affix => affix.Name, StringComparer.OrdinalIgnoreCase)
@@ -388,7 +392,8 @@ internal static class ItemCatalogBuilder
 
     private static CatalogAffixRecord? ProjectAffix(
         CatalogSourceRecord source,
-        IReadOnlyDictionary<string, string> tags)
+        IReadOnlyDictionary<string, string> tags,
+        ItemPresentationSource presentationSource)
     {
         var path = source.Record.Name.Replace('\\', '/');
         var kind = path.Contains("/lootaffixes/prefix/", StringComparison.OrdinalIgnoreCase)
@@ -412,7 +417,12 @@ internal static class ItemCatalogBuilder
             return null;
         }
 
-        return new CatalogAffixRecord(source.Record.Name, name, kind, rarity);
+        return new CatalogAffixRecord(
+            source.Record.Name,
+            name,
+            kind,
+            rarity,
+            ItemPresentationBuilder.Build(source.Record, presentationSource));
     }
 
     private static bool IsCategoryTemplate(string recordName)
@@ -775,9 +785,15 @@ internal sealed record CatalogAffix(
     string Name,
     string Kind,
     string Rarity,
-    IReadOnlyList<string> Records);
+    IReadOnlyList<string> Records,
+    IReadOnlyDictionary<string, ItemPresentation> Presentations);
 
-internal sealed record CatalogAffixRecord(string Record, string Name, string Kind, string Rarity);
+internal sealed record CatalogAffixRecord(
+    string Record,
+    string Name,
+    string Kind,
+    string Rarity,
+    ItemPresentation Presentation);
 
 internal sealed record AcquisitionReference(string Record, string Type, string Field);
 internal sealed record ItemAcquisitionPresentation(

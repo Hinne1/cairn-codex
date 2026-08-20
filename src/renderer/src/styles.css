@@ -457,21 +457,42 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .copy-score small { color: #777064; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
 .stored-badge { display: inline-flex; margin-left: 5px; padding: 3px 6px; border: 1px solid #59603b; border-radius: 999px; color: #b8ca74; background: #25291c; font-size: 8px; letter-spacing: .08em; vertical-align: middle; }
 .copy-affixes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.copy-affixes > span { display: grid; gap: 3px; padding: 8px 10px; border: 1px solid #363229; border-radius: 5px; background: #171613; }
+.copy-affixes > button { display: grid; gap: 3px; padding: 8px 10px; border: 1px solid #363229; border-radius: 5px; background: #171613; cursor: pointer; text-align: left; }
+.copy-affixes > button:hover:not(:disabled), .copy-affixes > button.active { border-color: #796038; background: #292116; }
+.copy-affixes > button:disabled { cursor: default; opacity: .7; }
 .copy-affixes small { color: #6e675b; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
 .copy-affixes strong { overflow: hidden; color: #c9b78f !important; font: 500 11px Inter, sans-serif !important; text-overflow: ellipsis; white-space: nowrap; }
+.copy-affix-detail { display: grid; gap: 9px; padding: 12px; border: 1px solid #57503e; border-radius: 6px; background: #0e0e0c; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+.copy-affix-detail.rare { border-color: #77722d; }
+.copy-affix-detail > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.copy-affix-detail > header span { display: grid; gap: 2px; }
+.copy-affix-detail > header small { color: #6d665a; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
+.copy-affix-detail > header strong { color: #e3db83 !important; font: 500 15px Georgia, serif !important; }
+.copy-affix-detail > header button { padding: 0 4px; border: 0; color: #796f60; background: transparent; cursor: pointer; font-size: 16px; }
+.copy-affix-section { display: grid; gap: 2px; padding-top: 7px; border-top: 1px solid #29261f; }
+.copy-affix-section h4 { margin: 0 0 3px; color: #d4b55e; font: 500 11px Georgia, serif; }
+.copy-affix-section p, .copy-affix-empty { margin: 0; color: #c5a75f; font: 11px Georgia, serif; line-height: 1.35; }
+.copy-affix-section p.tone-skill, .copy-affix-section p.tone-mastery { color: #6bb8ff; }
+.copy-affix-section p.tone-pet { color: #d6bf6a; }
 .copy-card > header .copy-provenance { margin: 0; color: #82796a; font-size: 9px; letter-spacing: 0; text-transform: none; }
 .copy-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 126px; }
 .copy-actions button { padding: 8px 10px; border: 1px solid #5b4b31; border-radius: 5px; color: #d5bc83; background: #30281c; cursor: pointer; font-size: 11px; }
 .copy-actions .retrieve-copy { border-color: #7d6538; color: #f0d28d; background: #47371f; }
 .copy-actions button:disabled { opacity: 0.5; }
 .auto-badge { padding: 5px 8px; border: 1px solid #5e522e; border-radius: 999px; color: #d8b65f; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+.copy-roll-sections { display: grid; gap: 18px; }
+.copy-roll-sections > section { display: grid; gap: 10px; }
+.copy-roll-sections h3 { margin: 0; color: #8d8575; font: 500 11px Inter, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+.copy-roll-sections .pet-roll-section { padding-top: 15px; border-top: 1px solid #3b352a; }
+.copy-roll-sections .pet-roll-section h3 { color: #d5b75f; }
 .stat-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px 20px; }
 .stat-heading { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; font-size: 11px; }
 .stat-heading span { color: #aaa18d; }
 .stat-heading strong { color: #c9ad70; }
 .stat-meter { height: 4px; overflow: hidden; border-radius: 5px; background: #10100e; }
 .stat-meter span { display: block; height: 100%; background: linear-gradient(90deg, #775c2e, #d0a34f); }
+.pet-stat-row .stat-heading span { color: #d0bc83; }
+.pet-stat-row .stat-meter span { background: linear-gradient(90deg, #67692f, #c5ad4a); }
 .stat-row small { display: block; margin-top: 5px; color: #5f5b52; font-size: 9px; }
 
 .vault-workspace { padding-top: 26px; }

@@ -100,6 +100,8 @@ export interface LiveGameSyncResult {
     suffixRecord: string
     name: string
     seed: number
+    instanceKey: string
+    rollAnalysis: ItemRollAnalysis | null
   }>
   issues: string[]
 }
@@ -153,6 +155,10 @@ export interface VaultListItem {
   isHardcore: boolean
   state: VaultItemState
   seed: number
+  prefixRecord: string
+  suffixRecord: string
+  instanceKey: string
+  rollAnalysis: ItemRollAnalysis | null
   ingestedAtUtc: string
   retrievedAtUtc: string | null
 }

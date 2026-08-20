@@ -503,6 +503,7 @@ export class CollectionDatabase {
           vault_item.retrieved_at_utc,
           vault_item.is_hardcore,
           vault_item.reusable,
+          vault_item.roll_json,
           catalog_item.name,
           catalog_item.rarity,
           catalog_item.slot,
@@ -525,11 +526,14 @@ export class CollectionDatabase {
       content_pack: string
       is_hardcore: number
       reusable: number
+      roll_json: string | null
     }>
 
     return rows.map((row) => {
       const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as {
         seed?: number
+        prefixRecord?: string
+        suffixRecord?: string
       }
       return {
         id: row.id,
@@ -542,6 +546,10 @@ export class CollectionDatabase {
         isHardcore: row.is_hardcore === 1,
         state: row.state,
         seed: payload.seed ?? 0,
+        prefixRecord: payload.prefixRecord ?? '',
+        suffixRecord: payload.suffixRecord ?? '',
+        instanceKey: vaultPayloadFingerprint(payload),
+        rollAnalysis: row.roll_json ? JSON.parse(row.roll_json) as ItemRollAnalysis : null,
         ingestedAtUtc: row.ingested_at_utc,
         retrievedAtUtc: row.retrieved_at_utc
       }

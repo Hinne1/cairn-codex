@@ -8,6 +8,7 @@ import type {
   CollectionSnapshot,
   GrimDawnDiscovery,
   ItemPresentationLine,
+  ItemRollAnalysis,
   LiveGameStatus,
   MapRegionLocation,
   ObservedStashItem,
@@ -629,8 +630,47 @@ const tooltipItem = computed(() =>
 const selectedCopies = computed(() => {
   if (!snapshot.value || !selectedRecord.value) return []
   const pinned = selectedItem.value?.pinnedInstanceKey
-  return snapshot.value.observedItems
+  const copies = snapshot.value.observedItems
     .filter((item) => item.baseRecord === selectedRecord.value && item.instanceKey)
+  const observedVaultIds = new Set(
+    copies
+      .filter((copy) => copy.sourcePath.startsWith('vault://'))
+      .map((copy) => copy.sourcePath.slice('vault://'.length))
+  )
+  for (const item of vaultItems.value) {
+    if (
+      observedVaultIds.has(item.id) ||
+      !item.catalogued ||
+      item.state !== 'ingested' ||
+      item.baseRecord.toLocaleLowerCase() !== selectedRecord.value.toLocaleLowerCase() ||
+      (snapshot.value.isHardcore !== undefined && item.isHardcore !== snapshot.value.isHardcore)
+    ) continue
+    copies.push({
+      sourcePath: `vault://${item.id}`,
+      tabIndex: -1,
+      itemIndex: copies.length,
+      baseRecord: item.baseRecord,
+      prefixRecord: item.prefixRecord,
+      suffixRecord: item.suffixRecord,
+      modifierRecord: '',
+      transmuteRecord: '',
+      seed: item.seed,
+      materiaRecord: '',
+      relicCompletionBonusRecord: '',
+      relicSeed: 0,
+      enchantmentRecord: '',
+      ascendantRecord: '',
+      ascendantRecord2H: '',
+      enchantmentSeed: 0,
+      materiaCombines: 0,
+      stackCount: 1,
+      rerolls: 0,
+      affixRerolls: 0,
+      rollAnalysis: item.rollAnalysis,
+      instanceKey: item.instanceKey
+    })
+  }
+  return copies
     .sort((left, right) => {
       if ((left.instanceKey === pinned) !== (right.instanceKey === pinned)) {
         return left.instanceKey === pinned ? -1 : 1
@@ -656,7 +696,11 @@ const selectedStoredCopies = computed(() => {
       const observed = snapshot.value?.observedItems.find(
         (copy) => copy.sourcePath === `vault://${item.id}`
       )
-      return { item, score: observed?.rollAnalysis?.overallEstimatedPercentile ?? null }
+      return {
+        item,
+        score: observed?.rollAnalysis?.overallEstimatedPercentile ??
+          item.rollAnalysis?.overallEstimatedPercentile ?? null
+      }
     })
     .sort((left, right) => (right.score ?? -1) - (left.score ?? -1))
 })
@@ -2161,6 +2205,8 @@ function applyLiveIngests(
     suffixRecord: string
     name: string
     seed: number
+    instanceKey: string
+    rollAnalysis: ItemRollAnalysis | null
   }>
 ): void {
   if (!snapshot.value) return
@@ -2179,12 +2225,25 @@ function applyLiveIngests(
   const items = snapshot.value.items.map((item) => {
     const added = counts.get(item.record.toLocaleLowerCase()) ?? 0
     if (added === 0) return item
+    const scored = equipmentIngested
+      .filter((copy) => copy.baseRecord.toLocaleLowerCase() === item.record.toLocaleLowerCase())
+      .map((copy) => copy.rollAnalysis)
+      .filter((analysis): analysis is ItemRollAnalysis =>
+        analysis?.trusted === true && analysis.overallEstimatedPercentile !== null
+      )
+    const incomingBest = scored.length
+      ? Math.max(...scored.map((analysis) => analysis.overallEstimatedPercentile!))
+      : null
     return {
       ...item,
       discovered: true,
       firstDiscoveredAt: item.firstDiscoveredAt ?? discoveredAt,
       availableCount:
-        collectionBasis.value === 'archive' ? item.availableCount + added : item.availableCount
+        collectionBasis.value === 'archive' ? item.availableCount + added : item.availableCount,
+      bestRollPercentile: incomingBest === null
+        ? item.bestRollPercentile
+        : Math.max(item.bestRollPercentile ?? -1, incomingBest),
+      analyzedCopyCount: item.analyzedCopyCount + scored.length
     }
   })
   const supplies = (snapshot.value.supplies ?? []).map((item) => {
@@ -2222,8 +2281,8 @@ function applyLiveIngests(
           stackCount: 1,
           rerolls: 0,
           affixRerolls: 0,
-          rollAnalysis: null,
-          instanceKey: `vault-live-${item.vaultItemId}`
+          rollAnalysis: item.rollAnalysis,
+          instanceKey: item.instanceKey
         }))
       ]
     : snapshot.value.observedItems
@@ -2778,6 +2837,24 @@ function isAutoBest(copy: ObservedStashItem): boolean {
   const score = copy.rollAnalysis?.overallEstimatedPercentile
   const best = selectedItem.value?.bestRollPercentile
   return score !== null && score !== undefined && best !== null && best !== undefined && Math.abs(score - best) < 0.0000001
+}
+
+function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
+  if (!copy.sourcePath.startsWith('vault://')) return null
+  const id = copy.sourcePath.slice('vault://'.length)
+  return vaultItems.value.find((item) => item.id === id && item.state === 'ingested') ?? null
+}
+
+function copyAffixName(record: string, emptyLabel: string): string {
+  if (!record) return emptyLabel
+  return affixByRecord.value.get(record.toLocaleLowerCase())?.name ??
+    record.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.dbr$/i, '') ?? record
+}
+
+function copySourceLabel(copy: ObservedStashItem): string {
+  if (vaultCopyForObserved(copy)) return 'Stored in Codex Archive'
+  const name = copy.sourcePath.replaceAll('\\', '/').split('/').at(-1)
+  return name ? `Currently in ${name}` : 'Currently scanned copy'
 }
 
 function rollableStats(copy: ObservedStashItem) {
@@ -4643,17 +4720,7 @@ function formatPercentile(value: number | null | undefined): string {
             </div>
             <small>Returns land in the {{ liveStatus?.depositTabDescription ?? 'configured retrieval tab' }}.</small>
           </header>
-          <div class="drawer-stored-actions">
-            <button
-              v-for="copy in selectedStoredCopies"
-              :key="copy.item.id"
-              type="button"
-              :disabled="vaultBusy || liveStatus?.state !== 'ready'"
-              @click="retrieveArchivedCopyLive(copy.item.id)"
-            >
-              Retrieve seed {{ copy.item.seed }}<span v-if="copy.score !== null"> · {{ copy.score.toFixed(1) }}%</span>
-            </button>
-          </div>
+          <p>Select the exact copy below. Roll, affixes, seed, pin state, and retrieval now stay together.</p>
         </section>
         <p
           v-if="selectedItem.pinnedInstanceKey && !selectedCopies.some((copy) => copy.instanceKey === selectedItem?.pinnedInstanceKey)"
@@ -4673,15 +4740,32 @@ function formatPercentile(value: number | null | undefined): string {
             :class="{ pinned: copy.instanceKey === selectedItem.pinnedInstanceKey }"
           >
             <header>
-              <div>
-                <p>Copy {{ index + 1 }} · seed {{ copy.seed }}</p>
-                <strong v-if="copy.rollAnalysis?.overallEstimatedPercentile !== null">
-                  {{ copy.rollAnalysis?.overallEstimatedPercentile?.toFixed(1) }}%
-                </strong>
-                <strong v-else>Score withheld</strong>
+              <div class="copy-identity">
+                <p>Copy {{ index + 1 }} <span v-if="vaultCopyForObserved(copy)" class="stored-badge">Stored</span></p>
+                <div class="copy-score">
+                  <strong v-if="copy.rollAnalysis?.overallEstimatedPercentile != null">
+                    {{ copy.rollAnalysis.overallEstimatedPercentile.toFixed(1) }}%
+                  </strong>
+                  <strong v-else class="unscored">Unscored</strong>
+                  <small>overall roll quality</small>
+                </div>
+                <div class="copy-affixes">
+                  <span><small>Prefix</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong></span>
+                  <span><small>Suffix</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong></span>
+                </div>
+                <p class="copy-provenance">{{ copySourceLabel(copy) }} · Seed {{ copy.seed }}</p>
               </div>
               <div class="copy-actions">
                 <span v-if="isAutoBest(copy)" class="auto-badge">Auto-best</span>
+                <button
+                  v-if="vaultCopyForObserved(copy)"
+                  class="retrieve-copy"
+                  type="button"
+                  :disabled="vaultBusy || liveStatus?.state !== 'ready'"
+                  @click="retrieveArchivedCopyLive(vaultCopyForObserved(copy)!.id)"
+                >
+                  Retrieve this copy
+                </button>
                 <button type="button" :disabled="pinning" @click="pinCopy(copy)">
                   {{ copy.instanceKey === selectedItem.pinnedInstanceKey ? 'Unpin' : 'Pin this copy' }}
                 </button>
@@ -4691,7 +4775,7 @@ function formatPercentile(value: number | null | undefined): string {
             <p v-if="copy.rollAnalysis && !copy.rollAnalysis.trusted" class="withheld-note">
               {{ copy.rollAnalysis.reason }}
             </p>
-            <div v-else class="stat-list">
+            <div v-else-if="copy.rollAnalysis && rollableStats(copy).length" class="stat-list">
               <div v-for="stat in rollableStats(copy)" :key="stat.key" class="stat-row">
                 <div class="stat-heading">
                   <span>{{ stat.label }}</span>
@@ -4701,6 +4785,9 @@ function formatPercentile(value: number | null | undefined): string {
                 <small>{{ stat.rangeLabel }} sampled range</small>
               </div>
             </div>
+            <p v-else class="withheld-note">
+              Roll analysis is pending. This copy remains safe and retrievable; its score will appear without reopening the drawer.
+            </p>
           </article>
         </div>
       </aside>

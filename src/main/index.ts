@@ -440,7 +440,14 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
   ipcMain.handle(
     IPC_CHANNELS.syncLiveGame,
-    (): Promise<LiveGameSyncResult> => runExclusive(() => syncLiveIncoming(helper, database))
+    async (): Promise<LiveGameSyncResult> => {
+      latestCollection ??= await readCollectionCache(collectionCachePath)
+      return runExclusive(() => syncLiveIncoming(
+        helper,
+        database,
+        latestCollection?.discovery.installations[0]?.path
+      ))
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.retrieveLiveVaultItems,
@@ -460,12 +467,14 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
 
 async function syncLiveIncoming(
   helper: GrimDawnHelperClient,
-  database: CollectionDatabase
+  database: CollectionDatabase,
+  installationPath?: string
 ): Promise<LiveGameSyncResult> {
   const status = await helper.request<LiveGameStatus>('inspect-live-game')
   if (status.state !== 'ready') return { status, ingested: [], issues: [] }
   const incoming = await helper.request<LiveIncomingItem[]>('poll-live-incoming')
   const ingested: LiveGameSyncResult['ingested'] = []
+  const analysisInputs: Array<{ vaultItemId: string; item: LiveVaultPayload }> = []
   const issues: string[] = []
   for (const source of incoming) {
     const catalogName = database.getCatalogNames([source.item.baseRecord]).get(
@@ -527,8 +536,11 @@ async function syncLiveIncoming(
         prefixRecord: source.item.prefixRecord,
         suffixRecord: source.item.suffixRecord,
         name,
-        seed: source.item.seed
+        seed: source.item.seed,
+        instanceKey: createVaultInstanceKey(source.item),
+        rollAnalysis: null
       })
+      analysisInputs.push({ vaultItemId, item: source.item })
       if (!catalogName) {
         issues.push(
           `${name} was safely stored outside the Epic/Legendary/MI collection. ` +
@@ -538,6 +550,29 @@ async function syncLiveIncoming(
     } catch (error) {
       if (prepared && !committed) database.failIngestOperation(operationId, error)
       issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (installationPath && analysisInputs.length > 0) {
+    try {
+      const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
+        installationPath,
+        items: analysisInputs.map(({ item }) => ({
+          baseRecord: item.baseRecord,
+          prefixRecord: item.prefixRecord,
+          suffixRecord: item.suffixRecord,
+          seed: item.seed
+        }))
+      })
+      const updates = analysisInputs.flatMap(({ vaultItemId }, index) => {
+        const rollAnalysis = analyzed.items[index]
+        const result = ingested.find((item) => item.vaultItemId === vaultItemId)
+        if (!rollAnalysis || !result) return []
+        result.rollAnalysis = rollAnalysis
+        return [{ id: vaultItemId, rollAnalysis }]
+      })
+      database.setVaultRollAnalyses(updates)
+    } catch (error) {
+      issues.push(`Roll analysis will retry in the background: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   return {

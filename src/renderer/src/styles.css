@@ -176,6 +176,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .meter.mi span { background: #66a84f; }
 .meter.affix span { background: #ca7f45; }
 .meter.supply span { background: #5fa8a4; }
+.meter.set span { background: #d2aa50; }
+.meter.component span { background: #c78945; }
+.meter.consumable span { background: #71a6b8; }
 .metrics small { display: block; margin-top: 11px; color: #777164; }
 
 .workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
@@ -260,6 +263,8 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-card.legendary { border-color: #6d3b82; }
 .item-card.epic { border-color: #315a79; }
 .item-card.mi, .item-card.rare { border-color: #3d7434; }
+.item-card.component { border-color: #7b6638; }
+.item-card.consumable { border-color: #3f6874; }
 .item-card.missing { border-color: #302e29; filter: saturate(0.3); opacity: 0.63; }
 .item-mark {
   display: grid;
@@ -275,10 +280,14 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-card.epic .item-mark { border-color: #3d759e; box-shadow: inset 0 0 14px rgba(53, 117, 164, 0.16); }
 .item-card.legendary .item-mark { border-color: #8a48a7; box-shadow: inset 0 0 14px rgba(139, 68, 171, 0.18); }
 .item-card.mi .item-mark, .item-card.rare .item-mark { border-color: #569448; box-shadow: inset 0 0 14px rgba(76, 143, 60, 0.18); }
+.item-card.component .item-mark { border-color: #9d7c3d; box-shadow: inset 0 0 14px rgba(176, 127, 47, 0.18); }
+.item-card.consumable .item-mark { border-color: #508294; box-shadow: inset 0 0 14px rgba(60, 132, 151, 0.18); }
 .item-card.missing .item-mark img { filter: grayscale(1) brightness(0.34) opacity(0.75); }
 .item-card.epic .item-copy h3 { color: #58a9dd; }
 .item-card.legendary .item-copy h3 { color: #c05cf0; }
 .item-card.mi .item-copy h3, .item-card.rare .item-copy h3 { color: #72d05e; }
+.item-card.component .item-copy h3 { color: #e0b866; }
+.item-card.consumable .item-copy h3 { color: #82c4d5; }
 .item-copy h3 { margin: 0 0 5px; color: #e7dec9; font-size: 18px; font-weight: 600; line-height: 1.15; }
 .item-copy p { margin: 0 0 4px; color: #8e8269; font-size: 9px; letter-spacing: 0.09em; text-transform: capitalize; }
 .item-copy small { color: #746e63; font-size: 10px; }

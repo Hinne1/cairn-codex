@@ -69,6 +69,26 @@ namespace IAGrim.Parser.Stash {
         }
 
         public bool Read(GDCryptoDataBuffer pCrypto) {
+            if (this.Version == 1u) {
+                this.Seed = 0u;
+                this.RelicSeed = 0u;
+                if (!Block.ReadStart(out var accountItemBlock, pCrypto) || accountItemBlock.Result != 0u) {
+                    return false;
+                }
+                if (!pCrypto.ReadCryptoString(out this.BaseRecord)) {
+                    return false;
+                }
+                this.StackCount = 1u;
+                if (pCrypto.Cursor < accountItemBlock.End &&
+                    !pCrypto.ReadCryptoUInt(out this.StackCount)) {
+                    return false;
+                }
+                if (!accountItemBlock.ReadEnd(pCrypto)) {
+                    return false;
+                }
+                return true;
+            }
+
             bool flag;
             if (this.Version >= 8u) {
                 flag = !pCrypto.ReadCryptoString(out this.BaseRecord) || !pCrypto.ReadCryptoString(out this.PrefixRecord)

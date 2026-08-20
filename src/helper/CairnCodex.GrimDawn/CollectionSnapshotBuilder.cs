@@ -13,6 +13,7 @@ internal static class CollectionSnapshotBuilder
         var availableByRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var availableByAffixRecord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var scannedStashes = new List<ScannedStash>();
+        var accountStores = new List<ScannedAccountStore>();
         var observedItems = new List<ObservedStashItem>();
         var warnings = new List<CollectionScanWarning>();
         var eligibleRecords = catalog.Items
@@ -94,6 +95,52 @@ internal static class CollectionSnapshotBuilder
             }
         }
 
+        foreach (var saveLocation in discovery.SaveLocations)
+        {
+            foreach (var directory in new[] { saveLocation.Path }.Concat(Directory.EnumerateDirectories(saveLocation.Path)))
+            {
+                foreach (var fileName in new[] { "reagents.gst", "reagents.gsh", "potions.gst", "potions.gsh" })
+                {
+                    var path = Path.Combine(directory, fileName);
+                    if (!File.Exists(path)) continue;
+                    try
+                    {
+                        var store = TransferStashScanner.Scan(path);
+                        var entries = store.Tabs.SelectMany(tab => tab.Items)
+                            .Select(item => new AccountStoreEntry(item.BaseRecord, checked((int)item.StackCount)))
+                            .ToArray();
+                        accountStores.Add(new ScannedAccountStore(
+                            store.Path,
+                            fileName.StartsWith("reagents", StringComparison.OrdinalIgnoreCase) ? "reagents" : "potions",
+                            store.IsHardcore,
+                            store.ItemCount,
+                            store.LastWriteUtc,
+                            store.Sha256,
+                            entries));
+                    }
+                    catch (Exception exception) when (
+                        exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException)
+                    {
+                        warnings.Add(new CollectionScanWarning(path, exception.Message));
+                    }
+                }
+            }
+        }
+
+        // Local and Steam Cloud saves may both expose the same account store. The
+        // newest file is the authoritative copy; adding both would double every
+        // component quantity and turn synchronization into fake collection progress.
+        foreach (var store in accountStores
+                     .GroupBy(store => $"{store.Kind}:{store.IsHardcore}", StringComparer.OrdinalIgnoreCase)
+                     .Select(group => group.MaxBy(store => store.LastWriteUtc)!))
+        {
+            foreach (var entry in store.Entries)
+            {
+                availableByRecord[entry.Record] =
+                    availableByRecord.GetValueOrDefault(entry.Record) + entry.Quantity;
+            }
+        }
+
         var rollSummary = observedItems
             .Where(item => item.RollAnalysis?.Trusted == true &&
                            item.RollAnalysis.OverallEstimatedPercentile.HasValue)
@@ -136,6 +183,13 @@ internal static class CollectionSnapshotBuilder
                 null,
                 0))
             .ToArray();
+        var materials = catalog.Materials
+            .Select(item => new CollectionCatalogItem(
+                item,
+                availableByRecord.GetValueOrDefault(item.Record),
+                null,
+                0))
+            .ToArray();
         var affixes = catalog.Affixes
             .Select(affix => new CollectionAffix(
                 affix.Key,
@@ -162,7 +216,9 @@ internal static class CollectionSnapshotBuilder
             affixSummary,
             affixes,
             plannerItems,
-            supplies);
+            supplies,
+            materials,
+            accountStores);
     }
 }
 
@@ -178,7 +234,20 @@ internal sealed record CollectionSnapshot(
     CollectionAffixSummary AffixSummary,
     IReadOnlyList<CollectionAffix> Affixes,
     IReadOnlyList<CollectionCatalogItem> PlannerItems,
-    IReadOnlyList<CollectionCatalogItem> Supplies);
+    IReadOnlyList<CollectionCatalogItem> Supplies,
+    IReadOnlyList<CollectionCatalogItem> Materials,
+    IReadOnlyList<ScannedAccountStore> AccountStores);
+
+internal sealed record ScannedAccountStore(
+    string Path,
+    string Kind,
+    bool IsHardcore,
+    int ItemCount,
+    DateTime LastWriteUtc,
+    string Sha256,
+    IReadOnlyList<AccountStoreEntry> Entries);
+
+internal sealed record AccountStoreEntry(string Record, int Quantity);
 
 internal sealed record ScannedStash(
     string Path,

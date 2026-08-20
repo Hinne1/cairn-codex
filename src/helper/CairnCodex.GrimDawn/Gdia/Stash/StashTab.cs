@@ -126,6 +126,22 @@ namespace IAGrim.Parser.Stash {
             return result;
         }
 
+        public bool ReadAccountEntries(GDCryptoDataBuffer pCrypto, uint entryCount) {
+            LastError = null;
+            Width = 1;
+            Height = Math.Max(1u, entryCount);
+            Items = new List<Item>();
+            for (uint index = 0; index < entryCount; index++) {
+                var item = new Item(this.Version);
+                if (!item.Read(pCrypto)) {
+                    LastError = $"Account entry {index} failed at offset {pCrypto.Cursor}.";
+                    return false;
+                }
+                Items.Add(item);
+            }
+            return true;
+        }
+
         public void Write(DataBuffer pBuffer) {
             this._block.WriteStart(0, pBuffer);
             pBuffer.WriteUInt(this.Width);

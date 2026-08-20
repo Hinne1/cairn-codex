@@ -36,7 +36,7 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 19
+const CATALOG_PRESENTATION_VERSION = 20
 const ROLL_ANALYSIS_VERSION = 2
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
@@ -853,7 +853,7 @@ async function attachItemIcons(
   if (!installation) return snapshot
   const bitmaps = [
     ...new Set(
-      [...snapshot.items, ...(snapshot.plannerItems ?? [])]
+      [...snapshot.items, ...(snapshot.plannerItems ?? []), ...(snapshot.supplies ?? []), ...(snapshot.materials ?? [])]
         .map((item) => item.bitmap)
         .filter((bitmap): bitmap is string => Boolean(bitmap))
     )
@@ -878,6 +878,14 @@ async function attachItemIcons(
     plannerItems: (snapshot.plannerItems ?? []).map((item) => ({
       ...item,
       iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
+    })),
+    supplies: (snapshot.supplies ?? []).map((item) => ({
+      ...item,
+      iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
+    })),
+    materials: (snapshot.materials ?? []).map((item) => ({
+      ...item,
+      iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
     }))
   }
 }
@@ -890,6 +898,8 @@ async function readCollectionCache(path: string): Promise<CollectionSnapshot | n
       !Array.isArray(parsed.items) ||
       !Array.isArray(parsed.plannerItems) ||
       !Array.isArray(parsed.supplies) ||
+      !Array.isArray(parsed.materials) ||
+      !Array.isArray(parsed.accountStores) ||
       !Array.isArray(parsed.observedItems) ||
       !Array.isArray(parsed.scannedStashes)
     ) {
@@ -956,7 +966,10 @@ async function mapLocationIndexIsFresh(index: MapLocationIndex): Promise<boolean
 }
 
 async function collectionStashesAreFresh(snapshot: CollectionSnapshot): Promise<boolean> {
-  const stashes = snapshot.availableStashes ?? snapshot.scannedStashes
+  const stashes = [
+    ...(snapshot.availableStashes ?? snapshot.scannedStashes),
+    ...(snapshot.accountStores ?? [])
+  ]
   try {
     for (const stash of stashes) {
       const current = await stat(stash.path)
@@ -1076,6 +1089,31 @@ function projectCollectionSources(
     ...item,
     availableCount: copiesByRecord.get(item.record.toLocaleLowerCase())?.length ?? 0
   }))
+  const projectedMode =
+    scannedStashes.length > 0 &&
+    scannedStashes.every((stash) => stash.isHardcore === scannedStashes[0]!.isHardcore)
+      ? scannedStashes[0]!.isHardcore
+      : undefined
+  const accountCounts = new Map<string, number>()
+  const accountStores = (snapshot.accountStores ?? [])
+    .filter((store) => projectedMode === undefined || store.isHardcore === projectedMode)
+    .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))
+    .filter((store, index, all) =>
+      all.findIndex((candidate) =>
+        candidate.kind === store.kind && candidate.isHardcore === store.isHardcore
+      ) === index
+    )
+  for (const store of accountStores) {
+    for (const entry of store.entries) {
+      const record = entry.record.toLocaleLowerCase()
+      accountCounts.set(record, (accountCounts.get(record) ?? 0) + entry.quantity)
+    }
+  }
+  const materials = (snapshot.materials ?? []).map((item) => ({
+    ...item,
+    availableCount: accountCounts.get(item.record.toLocaleLowerCase()) ?? 0,
+    discovered: (accountCounts.get(item.record.toLocaleLowerCase()) ?? 0) > 0
+  }))
   const warnings = snapshot.warnings.filter((warning) => {
     if (paths.has(warning.path.toLocaleLowerCase())) return true
     return scannedStashes.some(
@@ -1093,18 +1131,15 @@ function projectCollectionSources(
   })
   return withProjectedAffixes({
     ...snapshot,
-    isHardcore:
-      scannedStashes.length > 0 &&
-      scannedStashes.every((stash) => stash.isHardcore === scannedStashes[0]!.isHardcore)
-        ? scannedStashes[0]!.isHardcore
-        : undefined,
+    isHardcore: projectedMode,
     availableStashes,
     scannedStashes,
     observedItems,
     warnings,
     rarities,
     items,
-    supplies
+    supplies,
+    materials
   }, observedItems)
 }
 
@@ -1246,7 +1281,8 @@ function withRecipeCollection(
   }
   const items = snapshot.items.map(decorate)
   const plannerItems = (snapshot.plannerItems ?? []).map(decorate)
-  const recipeItems = [...items, ...plannerItems].filter(
+  const materials = (snapshot.materials ?? []).map(decorate)
+  const recipeItems = [...items, ...plannerItems, ...materials].filter(
     (item, index, all) =>
       Boolean(item.acquisition?.crafting) &&
       all.findIndex((candidate) => candidate.record.toLowerCase() === item.record.toLowerCase()) === index
@@ -1265,6 +1301,7 @@ function withRecipeCollection(
     ...snapshot,
     items,
     plannerItems,
+    materials,
     rarities,
     recipeSummary: {
       total: recipeItems.length,
@@ -1358,6 +1395,7 @@ async function runSmokeTest(
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
     const supplies = helperSnapshot.supplies ?? []
+    const materials = helperSnapshot.materials ?? []
     const writ = supplies.find((item) => item.slot === 'writ')
     const mandate = supplies.find((item) => item.slot === 'mandate')
     const augment = supplies.find((item) => item.slot === 'augment')
@@ -1371,6 +1409,13 @@ async function runSmokeTest(
       !movementRune
     ) {
       throw new Error('Reusable supply catalog did not include writs, mandates, augments, and movement runes.')
+    }
+    if (
+      materials.filter((item) => item.rarity === 'component').length < 40 ||
+      !materials.some((item) => item.record.toLocaleLowerCase().endsWith('/quest_dynamite.dbr')) ||
+      !materials.some((item) => item.slot === 'potion-formula')
+    ) {
+      throw new Error('Component and consumable account stores were not indexed.')
     }
     const characterProfiles = await helper.request<CharacterSaveProfile[]>('list-characters', {
       installationPath: helperSnapshot.discovery.installations[0]?.path

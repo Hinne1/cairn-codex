@@ -20,7 +20,7 @@ type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare' | 'recipe'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
-type ActiveView = 'collection' | 'sets' | 'skills' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
+type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
@@ -28,6 +28,7 @@ type TransferMode = 'live' | 'offline'
 type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
 type SupplyCategory = 'writs' | 'augments'
+type MaterialCategory = 'all' | 'component' | 'material' | 'potion-formula'
 
 interface PlannerProfile {
   id: string
@@ -159,6 +160,7 @@ const selectedVaultIds = ref<string[]>([])
 const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
+const materialCategory = ref<MaterialCategory>('all')
 const farmingQuery = ref('')
 const farmingRarity = ref<RarityFilter>('all')
 const infiniteSupplies = ref(true)
@@ -443,6 +445,31 @@ const allItemSummary = computed(() => {
     availableCopies: summaries.reduce((sum, value) => sum + value.availableCopies, 0)
   }
 })
+const setSummary = computed(() => ({
+  total: collectionSets.value.length,
+  collected: collectionSets.value.filter((set) => set.collected === set.items.length).length,
+  availableCopies: collectionSets.value.filter((set) =>
+    set.items.every((item) => item.availableCount > 0)
+  ).length
+}))
+const componentSummary = computed<CollectionRaritySummary>(() => {
+  const items = (snapshot.value?.materials ?? []).filter((item) => item.rarity === 'component')
+  return {
+    rarity: 'component',
+    total: items.length,
+    collected: items.filter((item) => item.discovered).length,
+    availableCopies: items.reduce((count, item) => count + item.availableCount, 0)
+  }
+})
+const consumableSummary = computed<CollectionRaritySummary>(() => {
+  const items = (snapshot.value?.materials ?? []).filter((item) => item.rarity === 'consumable')
+  return {
+    rarity: 'consumable',
+    total: items.length,
+    collected: items.filter((item) => item.discovered).length,
+    availableCopies: items.reduce((count, item) => count + item.availableCount, 0)
+  }
+})
 const stagingHasUnsupported = computed(() => staging.value?.items.some((item) => !item.supported) ?? false)
 const ingestBlockedReason = computed(() => {
   if (vaultBusy.value) return 'A Vault operation is already running.'
@@ -457,9 +484,17 @@ const ingestBlockedReason = computed(() => {
 const filteredItems = computed(() => {
   if (!snapshot.value) return []
   const needle = query.value.trim().toLocaleLowerCase()
-  return snapshot.value.items
-    .filter((item) => matchesCategory(item, activeCategory.value))
+  const sourceItems = activeView.value === 'materials'
+    ? (snapshot.value.materials ?? [])
+    : snapshot.value.items
+  return sourceItems
+    .filter((item) => activeView.value === 'materials' || matchesCategory(item, activeCategory.value))
+    .filter((item) => activeView.value !== 'materials' || materialCategory.value === 'all' ||
+      (materialCategory.value === 'component'
+        ? item.rarity === 'component'
+        : item.slot === materialCategory.value))
     .filter((item) =>
+      activeView.value === 'materials' ||
       rarityFilter.value === 'all' ||
       (rarityFilter.value === 'recipe'
         ? Boolean(item.acquisition?.crafting)
@@ -1191,7 +1226,7 @@ function handleSkillPickerFocusOut(event: FocusEvent): void {
 }
 
 watch(
-  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter],
+  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, materialCategory],
   () => {
     currentPage.value = 1
   }
@@ -1811,6 +1846,20 @@ function openAffixWorkshop(): void {
   activeView.value = 'mi-workshop'
   activeCategory.value = 'All'
   rarityFilter.value = 'all'
+}
+
+function openSets(): void {
+  activeView.value = 'sets'
+  query.value = ''
+  rarityFilter.value = 'all'
+  setProgressFilter.value = 'all'
+}
+
+function openMaterials(category: MaterialCategory = 'all'): void {
+  activeView.value = 'materials'
+  materialCategory.value = category
+  query.value = ''
+  ownership.value = 'all'
 }
 
 function openSupplies(): void {
@@ -2476,7 +2525,8 @@ function itemTypeLabel(item: CollectionItem): string {
   const labels: Record<string, string> = {
     head: 'Head armor', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Hands',
     legs: 'Leg armor', feet: 'Feet', waist: 'Waist', ring: 'Ring', amulet: 'Amulet',
-    medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon'
+    medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon',
+    component: 'Component', material: 'Crafting material', 'potion-formula': 'Potion formula'
   }
   return labels[item.slot] ?? item.slot
 }
@@ -2485,6 +2535,8 @@ function rarityLabel(item: CollectionItem): string {
   if (item.rarity === 'mi') return 'Monster Infrequent'
   if (item.rarity === 'rare') return 'Rare'
   if (item.rarity === 'faction') return 'Faction Rare'
+  if (item.rarity === 'component') return 'Component'
+  if (item.rarity === 'consumable') return item.slot === 'potion-formula' ? 'Learned formula' : 'Consumable'
   return item.rarity.charAt(0).toLocaleUpperCase() + item.rarity.slice(1)
 }
 
@@ -3041,6 +3093,42 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
+          :aria-pressed="activeView === 'sets'"
+          @click="openSets"
+        >
+          <div class="metric-heading">
+            <span>Sets</span>
+            <strong>{{ setSummary.collected }} / {{ setSummary.total || '—' }}</strong>
+          </div>
+          <div class="meter set"><span :style="{ width: percentage(setSummary) }" /></div>
+          <small>{{ percentage(setSummary) }} complete · {{ setSummary.availableCopies }} ready to equip</small>
+        </button>
+        <button
+          type="button"
+          :aria-pressed="activeView === 'materials' && materialCategory === 'component'"
+          @click="openMaterials('component')"
+        >
+          <div class="metric-heading">
+            <span>Components</span>
+            <strong>{{ componentSummary.collected }} / {{ componentSummary.total || '—' }}</strong>
+          </div>
+          <div class="meter component"><span :style="{ width: percentage(componentSummary) }" /></div>
+          <small>{{ percentage(componentSummary) }} held or recipe-unlocked · {{ componentSummary.availableCopies.toLocaleString() }} in storage</small>
+        </button>
+        <button
+          type="button"
+          :aria-pressed="activeView === 'materials' && materialCategory !== 'component'"
+          @click="openMaterials('all')"
+        >
+          <div class="metric-heading">
+            <span>Consumables</span>
+            <strong>{{ consumableSummary.collected }} / {{ consumableSummary.total || '—' }}</strong>
+          </div>
+          <div class="meter consumable"><span :style="{ width: percentage(consumableSummary) }" /></div>
+          <small>{{ percentage(consumableSummary) }} tracked · materials, Dynamite, and potion formulas</small>
+        </button>
+        <button
+          type="button"
           aria-pressed="false"
           @click="openSupplies"
         >
@@ -3093,6 +3181,9 @@ function formatPercentile(value: number | null | undefined): string {
         <button type="button" :class="{ active: activeView === 'sets' }" @click="activeView = 'sets'">
           <span>Sets</span><small>{{ collectionSets.length }} catalogued</small>
         </button>
+        <button type="button" :class="{ active: activeView === 'materials' }" @click="openMaterials()">
+          <span>Components & Consumables</span><small>{{ componentSummary.collected + consumableSummary.collected }} discovered</small>
+        </button>
         <button type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
           <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
         </button>
@@ -3126,7 +3217,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
       </nav>
 
-      <section v-if="activeView === 'collection' || activeView === 'sets'" class="filter-bar" aria-label="Collection filters">
+      <section v-if="activeView === 'collection' || activeView === 'sets' || activeView === 'materials'" class="filter-bar" aria-label="Collection filters">
         <label class="search-field">
           <span class="sr-only">Search collection</span>
           <input
@@ -3135,7 +3226,7 @@ function formatPercentile(value: number | null | undefined): string {
             placeholder="Search names, stats, skills…  (try skill:wendigo)"
           />
         </label>
-        <div v-if="activeView === 'collection'" class="segmented-control" aria-label="Collection status filter">
+        <div v-if="activeView === 'collection' || activeView === 'materials'" class="segmented-control" aria-label="Collection status filter">
           <button
             v-for="option in (['all', 'owned', 'missing'] as OwnershipFilter[])"
             :key="option"
@@ -3146,7 +3237,7 @@ function formatPercentile(value: number | null | undefined): string {
             {{ option === 'all' ? 'All' : option === 'owned' ? 'Collected' : 'Missing' }}
           </button>
         </div>
-        <div v-else class="segmented-control set-progress-filter" aria-label="Set completion filter">
+        <div v-else-if="activeView === 'sets'" class="segmented-control set-progress-filter" aria-label="Set completion filter">
           <button
             v-for="option in (['all', 'complete', 'progress', 'unstarted'] as SetProgressFilter[])"
             :key="option"
@@ -3157,7 +3248,13 @@ function formatPercentile(value: number | null | undefined): string {
             {{ option === 'all' ? 'All sets' : option === 'progress' ? 'In progress' : option === 'unstarted' ? 'Unstarted' : 'Complete' }}
           </button>
         </div>
-        <select v-model="rarityFilter" aria-label="Rarity">
+        <div v-if="activeView === 'materials'" class="segmented-control" aria-label="Material category">
+          <button type="button" :class="{ active: materialCategory === 'all' }" @click="materialCategory = 'all'">All</button>
+          <button type="button" :class="{ active: materialCategory === 'component' }" @click="materialCategory = 'component'">Components</button>
+          <button type="button" :class="{ active: materialCategory === 'material' }" @click="materialCategory = 'material'">Materials</button>
+          <button type="button" :class="{ active: materialCategory === 'potion-formula' }" @click="materialCategory = 'potion-formula'">Potion formulas</button>
+        </div>
+        <select v-if="activeView !== 'materials'" v-model="rarityFilter" aria-label="Rarity">
           <option value="all">All rarities</option>
           <option value="legendary">Legendary</option>
           <option value="epic">Epic</option>
@@ -3165,14 +3262,14 @@ function formatPercentile(value: number | null | undefined): string {
           <option value="rare">Rare recipe item</option>
           <option value="recipe">Craftable from recipe</option>
         </select>
-        <select v-if="activeView === 'collection'" v-model="sortMode" aria-label="Sort collection">
+        <select v-if="activeView === 'collection' || activeView === 'materials'" v-model="sortMode" aria-label="Sort collection">
           <option value="recent">Recently collected</option>
           <option value="completion">Collected status</option>
           <option value="name">Name</option>
           <option value="level">Level</option>
           <option value="roll">Best roll</option>
         </select>
-        <select v-if="activeView === 'collection'" v-model="sortDirection" class="sort-direction" aria-label="Sort direction">
+        <select v-if="activeView === 'collection' || activeView === 'materials'" v-model="sortDirection" class="sort-direction" aria-label="Sort direction">
           <option value="asc">↑ Ascending</option>
           <option value="desc">↓ Descending</option>
         </select>
@@ -4315,7 +4412,7 @@ function formatPercentile(value: number | null | undefined): string {
             v-for="item in visibleItems"
             :key="item.record"
             class="item-card"
-            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare' }"
+            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare', component: item.rarity === 'component', consumable: item.rarity === 'consumable' }"
             role="button"
             tabindex="0"
             aria-describedby="item-tooltip"
@@ -4337,12 +4434,12 @@ function formatPercentile(value: number | null | undefined): string {
               <small v-if="item.setName">{{ item.setName }}</small>
             </div>
             <div class="card-result">
-              <strong v-if="item.bestRollPercentile !== null" class="roll-score">
+              <strong v-if="activeView !== 'materials' && item.bestRollPercentile !== null" class="roll-score">
                 ★ {{ item.bestRollPercentile.toFixed(1) }}%
               </strong>
-              <span v-else class="roll-score dim">★ —</span>
+              <span v-else-if="activeView !== 'materials'" class="roll-score dim">★ —</span>
               <strong v-if="item.availableCount > 0">
-                {{ item.availableCount }} {{ item.availableCount === 1 ? 'copy' : 'copies' }}
+                {{ item.availableCount }} {{ activeView === 'materials' ? (item.slot === 'potion-formula' ? 'learned' : 'stored') : item.availableCount === 1 ? 'copy' : 'copies' }}
               </strong>
               <strong v-else-if="item.recipeUnlocked">Recipe unlocked · no stored copy</strong>
               <strong v-else-if="item.discovered">Discovered · no copies</strong>

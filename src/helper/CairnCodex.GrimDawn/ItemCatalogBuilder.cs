@@ -114,6 +114,20 @@ internal static class ItemCatalogBuilder
             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var materials = data.Records.Values
+            .Select(source => ProjectMaterial(
+                source,
+                data.Tags,
+                data.Records,
+                presentationSource,
+                acquisitionReferences,
+                knownFormulas))
+            .Where(item => item is not null)
+            .Cast<CatalogItem>()
+            .OrderBy(item => item.Slot, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var affixes = data.Records.Values
             .Select(source => ProjectAffix(source, data.Tags))
             .Where(affix => affix is not null)
@@ -146,7 +160,52 @@ internal static class ItemCatalogBuilder
             items,
             plannerItems,
             supplies,
+            materials,
             affixes);
+    }
+
+    private static CatalogItem? ProjectMaterial(
+        CatalogSourceRecord source,
+        IReadOnlyDictionary<string, string> tags,
+        IReadOnlyDictionary<string, CatalogSourceRecord> records,
+        ItemPresentationSource presentationSource,
+        IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> acquisitionReferences,
+        KnownFormulaIndex? knownFormulas)
+    {
+        var record = source.Record;
+        var path = record.Name.Replace('\\', '/');
+        var isComponent = record.Type == "ItemRelic" &&
+            path.Contains("/items/materia/", StringComparison.OrdinalIgnoreCase);
+        var isCraftingMaterial = path.Contains("/items/crafting/materials/", StringComparison.OrdinalIgnoreCase);
+        var isAccountConsumable = path.EndsWith("/items/questitems/quest_dynamite.dbr", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith("/items/questitems/scrapmetal.dbr", StringComparison.OrdinalIgnoreCase);
+        var isPotionFormula = record.Type == "OneShot_SkillUnlock" &&
+            path.Contains("/items/crafting/blueprints/potions/", StringComparison.OrdinalIgnoreCase);
+        if ((!isComponent && !isCraftingMaterial && !isAccountConsumable && !isPotionFormula) ||
+            path.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
+            IsCategoryTemplate(record.Name))
+        {
+            return null;
+        }
+
+        var name = Resolve(record.Text("itemNameTag") ?? record.Text("description"), tags)?.Trim();
+        if (!IsUsefulSourceName(name)) return null;
+
+        return new CatalogItem(
+            record.Name,
+            name!,
+            isComponent ? "component" : "consumable",
+            record.Text("Class") ?? record.Type,
+            isComponent ? "component" : isPotionFormula ? "potion-formula" : "material",
+            checked((int)Math.Round(record.Number("levelRequirement") ?? 0)),
+            checked((int)Math.Round(record.Number("itemLevel") ?? 0)),
+            null,
+            null,
+            ItemBitmap(record),
+            source.ContentPack,
+            null,
+            BuildAcquisition(record.Name, acquisitionReferences, records, tags, knownFormulas),
+            ItemPresentationBuilder.Build(record, presentationSource));
     }
 
     private static CatalogItem? ProjectSupply(
@@ -690,6 +749,7 @@ internal sealed record ItemCatalogResult(
     IReadOnlyList<CatalogItem> Items,
     IReadOnlyList<CatalogItem> PlannerItems,
     IReadOnlyList<CatalogItem> Supplies,
+    IReadOnlyList<CatalogItem> Materials,
     IReadOnlyList<CatalogAffix> Affixes);
 
 internal sealed record CatalogContentPack(string Id, string DatabasePath, string TagsPath);

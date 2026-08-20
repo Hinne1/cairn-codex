@@ -48,6 +48,9 @@ namespace IAGrim.StashFile {
         }
 
         public void Write(DataBuffer pBuffer) {
+            if (this.Version == 1u || this.Unknown1 != 2u || this.Block.Result is 20u or 21u) {
+                throw new InvalidOperationException("Account component and potion stores are read-only in Cairn Codex.");
+            }
             pBuffer.WriteUInt(0x55555555);
             pBuffer.WriteUInt(this.Unknown1);
             this.Block.WriteStart(0x12, pBuffer);
@@ -75,16 +78,21 @@ namespace IAGrim.StashFile {
                 return false;
 
             bool result;
-            if (!pCrypto.ReadCryptoUInt(out this.Unknown1) || this.Unknown1 != 2u) {
-                LastError = $"Expected transfer stash marker 2, got {this.Unknown1}.";
+            if (!pCrypto.ReadCryptoUInt(out this.Unknown1) || (this.Unknown1 != 1u && this.Unknown1 != 2u)) {
+                LastError = $"Expected stash marker 1 or 2, got {this.Unknown1}.";
                 return false;
             }
 
-            if (!Block.ReadStart(out this.Block, pCrypto) || this.Block.Result != 18u) {
+            if (!Block.ReadStart(out this.Block, pCrypto)) {
+                LastError = $"Could not read stash block header at offset {pCrypto.Cursor}.";
+                return false;
+            }
+            if (this.Block.Result != 18u && this.Block.Result != 20u && this.Block.Result != 21u) {
+                LastError = $"Expected stash block marker 18, 20, or 21; got {this.Block.Result} at offset {pCrypto.Cursor}.";
                 return false;
             }
 
-            if (!pCrypto.ReadCryptoUInt(out this.Version) || (this.Version != 5u && this.Version != 4u && this.Version != 8u && this.Version != 9u && this.Version != 11u)) {
+            if (!pCrypto.ReadCryptoUInt(out this.Version) || (this.Version != 1u && this.Version != 5u && this.Version != 4u && this.Version != 8u && this.Version != 9u && this.Version != 11u)) {
                 LastError = $"Unsupported transfer stash version {this.Version}.";
                 return false;
             }
@@ -106,6 +114,23 @@ namespace IAGrim.StashFile {
             uint numStashTabs = 0u;
             if (!pCrypto.ReadCryptoUInt(out numStashTabs) || numStashTabs > 100)
                 return false;
+
+            if (this.Version == 1u)
+            {
+                var accountTab = new StashTab(this.Version);
+                if (!accountTab.ReadAccountEntries(pCrypto, numStashTabs))
+                {
+                    LastError = accountTab.LastError ?? $"Could not parse account entries at offset {pCrypto.Cursor}.";
+                    return false;
+                }
+                this.Tabs = [accountTab];
+                if (!this.Block.ReadEnd(pCrypto))
+                {
+                    LastError = $"Account stash block ended at offset {pCrypto.Cursor}, expected {this.Block.End}.";
+                    return false;
+                }
+                return true;
+            }
 
 
             this.Tabs = new List<StashTab>();

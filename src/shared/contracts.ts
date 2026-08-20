@@ -260,6 +260,23 @@ export interface CollectionSnapshot {
   affixes: CollectionAffix[]
   plannerItems?: CollectionItem[]
   supplies?: CollectionItem[]
+  materials?: CollectionItem[]
+  accountStores?: ScannedAccountStore[]
+}
+
+export interface ScannedAccountStore {
+  path: string
+  kind: 'reagents' | 'potions'
+  isHardcore: boolean
+  itemCount: number
+  lastWriteUtc: string
+  sha256: string
+  entries: AccountStoreEntry[]
+}
+
+export interface AccountStoreEntry {
+  record: string
+  quantity: number
 }
 
 export interface CatalogContentPack {
@@ -289,7 +306,7 @@ export interface CollectionRaritySummary {
   availableCopies: number
 }
 
-export type CollectionItemRarity = 'epic' | 'legendary' | 'mi' | 'rare' | 'faction' | 'supply'
+export type CollectionItemRarity = 'epic' | 'legendary' | 'mi' | 'rare' | 'faction' | 'supply' | 'component' | 'consumable'
 
 export interface CollectionAffixSummary {
   total: number

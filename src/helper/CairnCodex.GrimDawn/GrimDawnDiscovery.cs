@@ -16,6 +16,10 @@ internal static partial class GrimDawnDiscovery
         "transfer.dst",
         "transfer.dsh"
     ];
+    private static readonly string[] AccountStoreFileNames =
+    [
+        "reagents.gst", "reagents.gsh", "potions.gst", "potions.gsh"
+    ];
 
     public static GrimDawnDiscoveryResult Discover()
     {
@@ -151,7 +155,9 @@ internal static partial class GrimDawnDiscovery
             }
         }
 
-        if (candidates.Count == 0)
+        if (candidates.Count == 0 && !new[] { path }
+                .Concat(Directory.EnumerateDirectories(path))
+                .Any(directory => AccountStoreFileNames.Any(fileName => File.Exists(Path.Combine(directory, fileName)))))
         {
             return false;
         }

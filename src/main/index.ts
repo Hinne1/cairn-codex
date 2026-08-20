@@ -301,7 +301,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       latestCollection ??= await readCollectionCache(collectionCachePath)
       if (!latestCollection) return null
       const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return presentCollection(helper, database, projected, 'archive', true)
+      return presentCollection(helper, database, projected, 'archive', true, 24)
     }
   )
   ipcMain.handle(
@@ -1222,7 +1222,8 @@ async function presentCollection(
   database: CollectionDatabase,
   snapshot: CollectionSnapshot,
   basis: CollectionBasis,
-  analyzeMissing = true
+  analyzeMissing = true,
+  analysisLimit = Number.POSITIVE_INFINITY
 ): Promise<CollectionSnapshot> {
   const mode = lifetimeMode(snapshot)
   if (basis !== 'archive') {
@@ -1248,10 +1249,11 @@ async function presentCollection(
         item.rollAnalysis.prefixEstimatedPercentile === undefined ||
         item.rollAnalysis.suffixEstimatedPercentile === undefined
     )
-  if (analyzeMissing && missingAnalysis.length > 0) {
+  const analysisBatch = missingAnalysis.slice(0, analysisLimit)
+  if (analyzeMissing && analysisBatch.length > 0) {
     const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
       installationPath: installation.path,
-      items: missingAnalysis.map(({ payload }) => ({
+      items: analysisBatch.map(({ payload }) => ({
         baseRecord: payload.baseRecord,
         prefixRecord: payload.prefixRecord,
         suffixRecord: payload.suffixRecord,
@@ -1259,12 +1261,12 @@ async function presentCollection(
       }))
     })
     database.setVaultRollAnalyses(
-      missingAnalysis.map(({ item }, index) => ({
+      analysisBatch.map(({ item }, index) => ({
         id: item.id,
         rollAnalysis: analyzed.items[index]!
       }))
     )
-    for (const [index, entry] of missingAnalysis.entries()) {
+    for (const [index, entry] of analysisBatch.entries()) {
       entry.item.rollAnalysis = analyzed.items[index] ?? null
     }
   }
@@ -1295,7 +1297,12 @@ async function presentCollection(
       instanceKey: createVaultInstanceKey(payload)
     }
   })
-  return withRecipeCollection(database.presentArchiveSnapshot(snapshot, observedItems, mode), mode)
+  return {
+    ...withRecipeCollection(database.presentArchiveSnapshot(snapshot, observedItems, mode), mode),
+    rollHydrationPending: analyzeMissing
+      ? Math.max(0, missingAnalysis.length - analysisBatch.length)
+      : missingAnalysis.length
+  }
 }
 
 function withRecipeCollection(

@@ -249,6 +249,7 @@ export interface TransferStashCandidate {
 export interface CollectionSnapshot {
   catalogPresentationVersion?: number
   cacheNeedsRefresh?: boolean
+  rollHydrationPending?: number
   basis?: CollectionBasis
   isHardcore?: boolean
   availableStashes?: ScannedStash[]

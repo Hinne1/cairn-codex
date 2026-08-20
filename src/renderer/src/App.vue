@@ -1845,13 +1845,17 @@ async function hydrateArchiveRolls(): Promise<void> {
   archiveRollHydrating.value = true
   const requestedSources = [...enabledStashPaths.value]
   try {
-    const hydrated = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
-    if (
-      hydrated &&
-      collectionBasis.value === 'archive' &&
-      JSON.stringify([...enabledStashPaths.value].sort()) === JSON.stringify(requestedSources.sort())
-    ) {
+    let pending = 1
+    while (pending > 0 && collectionBasis.value === 'archive' && liveStatus.value?.state !== 'ready') {
+      const hydrated = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
+      if (
+        !hydrated ||
+        collectionBasis.value !== 'archive' ||
+        JSON.stringify([...enabledStashPaths.value].sort()) !== JSON.stringify(requestedSources.sort())
+      ) break
       applySnapshot(hydrated)
+      pending = hydrated.rollHydrationPending ?? 0
+      if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
     }
   } catch (error) {
     console.warn('Archived item rolls could not be hydrated in the background.', error)

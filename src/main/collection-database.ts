@@ -212,7 +212,7 @@ export class CollectionDatabase {
           AND catalog_item.content_pack != 'cairn-quarantine'
           AND catalog_item.rarity != 'supply'
           ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
-        ORDER BY ingested_at_utc, id
+        ORDER BY ingested_at_utc DESC, id DESC
       `)
       .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
       id: string

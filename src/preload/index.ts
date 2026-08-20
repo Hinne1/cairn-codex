@@ -10,6 +10,7 @@ import {
   type LiveGameStatus,
   type LiveGameSyncResult,
   type LiveRetrievalResult,
+  type LiveSupplyDispenseResult,
   type RetrievalResult,
   type StagingTabInspection,
   type VaultListItem,
@@ -59,7 +60,9 @@ const api: CairnCodexApi = {
   syncLiveGame: () =>
     ipcRenderer.invoke(IPC_CHANNELS.syncLiveGame) as Promise<LiveGameSyncResult>,
   retrieveLiveVaultItems: (vaultItemIds) =>
-    ipcRenderer.invoke(IPC_CHANNELS.retrieveLiveVaultItems, { vaultItemIds }) as Promise<LiveRetrievalResult>
+    ipcRenderer.invoke(IPC_CHANNELS.retrieveLiveVaultItems, { vaultItemIds }) as Promise<LiveRetrievalResult>,
+  dispenseLiveAugments: (records) =>
+    ipcRenderer.invoke(IPC_CHANNELS.dispenseLiveAugments, { records }) as Promise<LiveSupplyDispenseResult>
 }
 
 contextBridge.exposeInMainWorld('cairnCodex', api)

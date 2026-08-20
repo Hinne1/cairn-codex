@@ -402,6 +402,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .supply-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 8px; margin: 16px 0; }
 .supply-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; min-height: 66px; padding: 12px; border: 1px solid #39352d; border-radius: 6px; background: rgba(25,24,20,.82); cursor: pointer; }
 .supply-card:has(input:checked) { border-color: #8a6d39; background: #2b261d; box-shadow: inset 3px 0 #bf9144; }
+.supply-card.locked { opacity: .48; cursor: not-allowed; }
 .supply-card span { display: grid; gap: 3px; }
 .supply-card strong { color: #dacba9; font-size: 11px; }
 .supply-card small { color: #756e62; font-size: 9px; text-transform: capitalize; }

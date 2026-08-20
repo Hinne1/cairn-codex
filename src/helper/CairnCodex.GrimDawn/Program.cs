@@ -123,7 +123,11 @@ HelperResponse EnqueueLiveRetrieval(HelperRequest request)
         ?? throw new JsonException("enqueue-live-retrieval requires operationId, isHardcore, and item.");
     return HelperResponse.Success(
         request.Id,
-        liveGame.EnqueueRetrieval(parameters.OperationId, parameters.IsHardcore, parameters.Item));
+        liveGame.EnqueueRetrieval(
+            parameters.OperationId,
+            parameters.IsHardcore,
+            parameters.Item,
+            parameters.Destination));
 }
 
 HelperResponse InspectLiveRetrieval(HelperRequest request)
@@ -364,7 +368,8 @@ internal sealed record AcknowledgeLiveIncomingRequest(
 internal sealed record EnqueueLiveRetrievalRequest(
     string OperationId,
     bool IsHardcore,
-    VaultItemPayload Item);
+    VaultItemPayload Item,
+    string Destination = "shared-stash");
 internal sealed record InspectLiveRetrievalRequest(LiveRetrievalQueue Queue);
 
 internal sealed record HelperRequest(string Id, string Method, JsonElement? Params);

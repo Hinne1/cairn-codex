@@ -15,11 +15,12 @@ internal sealed class LiveGameAdapter : IDisposable
     private const int TypeHardcore = 20;
     private const int TypeHardcoreViaInit = 47;
     private const int TypeInjectionCancelled = 8100;
+    private const int TypeActiveCharacter = 8201;
     private const string WindowClassName = "GDIAWindowClass";
     private const string CrashingRetailHookSha256 =
         "14e57644d5403819aebfb856053f28afbc40dcdc2d95d0d9a8c71eafdf707891";
     private const string VerifiedRetailHookSha256 =
-        "3280adfefa5a041e1b6bcb8bb4730ca1928b603ebaf811bef5fc653eeb2e6df7";
+        "a4af98f66c755eb4a88581f4f1fc7df7145575566a5fcba5b77eb37918e8134f";
     private const string VerifiedInjectorSha256 =
         "569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c";
     private static readonly IReadOnlyDictionary<string, string> VerifiedRetailGameDlls =
@@ -45,6 +46,7 @@ internal sealed class LiveGameAdapter : IDisposable
     private string? queueDirectory;
     private int? gameProcessId;
     private bool? isHardcore;
+    private string? activeCharacterName;
     private int? compatibilityProcessId;
     private string? compatibilityHookPath;
     private LiveHookCompatibility? cachedCompatibility;
@@ -134,6 +136,7 @@ internal sealed class LiveGameAdapter : IDisposable
                     hook is null || !File.Exists(hook) ? null : FileVersionInfo.GetVersionInfo(hook).FileVersion,
                     gameProcessId,
                     isHardcore,
+                    activeCharacterName,
                     queueSettings.LootFrom,
                     queueSettings.DepositTo,
                     queueSettings.LootDescription,
@@ -399,7 +402,8 @@ internal sealed class LiveGameAdapter : IDisposable
     public LiveRetrievalQueue EnqueueRetrieval(
         string operationId,
         bool isHardcore,
-        VaultItemPayload item)
+        VaultItemPayload item,
+        string destination = "shared-stash")
     {
         lock (sync)
         {
@@ -420,7 +424,13 @@ internal sealed class LiveGameAdapter : IDisposable
             var semanticHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             var baselineDeleted = MatchingFiles(deleted, semanticHash);
             var baselineIncoming = MatchingFiles(incoming, semanticHash);
-            var filename = $"cairn-{operationId}.csv";
+            var prefix = destination switch
+            {
+                "shared-stash" => "cairn-",
+                "character-inventory" => "cairn-personal-",
+                _ => throw new ArgumentException($"Unsupported live retrieval destination: {destination}")
+            };
+            var filename = $"{prefix}{operationId}.csv";
             var target = Path.Combine(outgoing, filename);
             var temporary = target + ".tmp";
             File.WriteAllBytes(temporary, bytes);
@@ -660,6 +670,10 @@ internal sealed class LiveGameAdapter : IDisposable
                 if ((type == TypeHardcore || type == TypeHardcoreViaInit) && data.Length > 0)
                 {
                     isHardcore = data[0] != 0;
+                }
+                if (type == TypeActiveCharacter && data.Length > 0)
+                {
+                    activeCharacterName = Encoding.Unicode.GetString(data).TrimEnd('\0');
                 }
                 if (type == TypeWorkerLaunched)
                 {
@@ -905,6 +919,7 @@ internal sealed class LiveGameAdapter : IDisposable
             queueDirectory = null;
             gameProcessId = null;
             isHardcore = null;
+            activeCharacterName = null;
             state = "unavailable";
             detail = "Live mode is disconnected.";
             injectorOutput = null;
@@ -1037,6 +1052,7 @@ internal sealed record LiveGameStatus(
     string? HookVersion,
     int? ConnectedProcessId,
     bool? IsHardcore,
+    string? ActiveCharacterName,
     int IngestTabSetting,
     int DepositTabSetting,
     string IngestTabDescription,

@@ -20,7 +20,8 @@ export const IPC_CHANNELS = {
   startLiveGame: 'live:start',
   stopLiveGame: 'live:stop',
   syncLiveGame: 'live:sync',
-  retrieveLiveVaultItems: 'live:retrieve-items'
+  retrieveLiveVaultItems: 'live:retrieve-items',
+  dispenseLiveAugments: 'live:dispense-augments'
 } as const
 
 export type CollectionBasis = 'stashes' | 'archive'
@@ -54,6 +55,7 @@ export interface CairnCodexApi {
   stopLiveGame: () => Promise<LiveGameStatus>
   syncLiveGame: () => Promise<LiveGameSyncResult>
   retrieveLiveVaultItems: (vaultItemIds: string[]) => Promise<LiveRetrievalResult>
+  dispenseLiveAugments: (records: string[]) => Promise<LiveSupplyDispenseResult>
 }
 
 export interface WriteSafetyStatus {
@@ -73,6 +75,7 @@ export interface LiveGameStatus {
   hookVersion: string | null
   connectedProcessId: number | null
   isHardcore: boolean | null
+  activeCharacterName: string | null
   ingestTabSetting: number
   depositTabSetting: number
   ingestTabDescription: string
@@ -105,6 +108,15 @@ export interface LiveRetrievalResult {
   operationId: string
   status: 'committed'
   retrieved: Array<{ vaultItemId: string; baseRecord: string; seed: number }>
+  receiptPaths: string[]
+  issues: string[]
+}
+
+export interface LiveSupplyDispenseResult {
+  operationId: string
+  status: 'committed'
+  activeCharacter: string
+  dispensed: Array<{ record: string; name: string }>
   receiptPaths: string[]
   issues: string[]
 }
@@ -183,9 +195,18 @@ export interface CharacterSaveProfile {
   isHardcore: boolean
   classRecord: string
   className: string
+  factions: CharacterSaveFaction[]
   skills: CharacterSaveSkill[]
   lastWriteUtc: string
   error: string | null
+}
+
+export interface CharacterSaveFaction {
+  index: number
+  name: string
+  isUnlocked: boolean
+  value: number
+  rank: 'Hostile' | 'Tolerated' | 'Friendly' | 'Respected' | 'Honored' | 'Revered' | string
 }
 
 export interface CharacterSaveSkill {

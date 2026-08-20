@@ -39,16 +39,20 @@ Build inputs:
 - Boost: `1.78.0`
 - Boost source SHA-256:
   `090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c`
-- Hook version: `1.5.9719.17000`
+- Hook version: `1.5.9728.04731`
 - Hook SHA-256:
-  `3280adfefa5a041e1b6bcb8bb4730ca1928b603ebaf811bef5fc653eeb2e6df7`
+  `a4af98f66c755eb4a88581f4f1fc7df7145575566a5fcba5b77eb37918e8134f`
 - Injector SHA-256:
   `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
 
-The only additional hook source change redirects `GetIagdFolder()` from GDIA's
-local-app-data directory to `%APPDATA%\cairn-codex\live-adapter`. This isolates
-Cairn's settings, queues, replicas, and hook log from any existing or removed
-Item Assistant installation.
+The hook redirects `GetIagdFolder()` from GDIA's local-app-data directory to
+`%APPDATA%\cairn-codex\live-adapter`. It also reports the exact active character
+name and recognizes an explicit `cairn-personal-` queue prefix. Those personal
+deliveries use the game's own inventory-space check and `GiveItemToCharacter`
+path; a full inventory returns the untouched queue record to Cairn's incoming
+folder. Ordinary equipment, writs, and runes continue to use the shared-stash
+path. This isolates Cairn's data and keeps soulbound augments out of the shared
+stash entirely.
 
 Allowlisted targets:
 

@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomInt, randomUUID } from 'node:crypto'
 import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
 import {
@@ -14,6 +14,7 @@ import {
   type LiveGameStatus,
   type LiveGameSyncResult,
   type LiveRetrievalResult,
+  type LiveSupplyDispenseResult,
   type MapRegionLocation,
   type RetrievalResult,
   type ObservedStashItem,
@@ -432,6 +433,15 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> =>
       runExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds))
   )
+  ipcMain.handle(
+    IPC_CHANNELS.dispenseLiveAugments,
+    (_event, input: { records: string[] }): Promise<LiveSupplyDispenseResult> =>
+      runExclusive(async () => {
+        latestCollection ??= await readCollectionCache(collectionCachePath)
+        if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
+        return executeLiveAugmentDispense(helper, latestCollection, input.records)
+      })
+  )
 }
 
 async function syncLiveIncoming(
@@ -563,6 +573,154 @@ async function executeLiveRetrieval(
     operationId: randomUUID(),
     status: 'committed',
     retrieved,
+    receiptPaths,
+    issues
+  }
+}
+
+const reputationThresholds: Record<string, number> = {
+  tolerated: 0,
+  friendly: 1_500,
+  respected: 5_000,
+  honored: 10_000,
+  revered: 25_000
+}
+
+function normalizedFactionName(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .replaceAll('’', "'")
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function createSupplyPayload(baseRecord: string): LiveVaultPayload {
+  return {
+    stashVersion: 11,
+    sourceTabIndex: -1,
+    sourceItemIndex: -1,
+    baseRecord,
+    prefixRecord: '',
+    suffixRecord: '',
+    modifierRecord: '',
+    transmuteRecord: '',
+    seed: randomInt(1, 0xffff_ffff),
+    materiaRecord: '',
+    relicCompletionBonusRecord: '',
+    relicSeed: 0,
+    enchantmentRecord: '',
+    ascendantRecord: '',
+    ascendantRecord2H: '',
+    unknown: 0,
+    enchantmentSeed: 0,
+    materiaCombines: 0,
+    stackCount: 1,
+    rerolls: 0,
+    affixRerolls: 0,
+    xOffset: 0,
+    yOffset: 0
+  }
+}
+
+async function executeLiveAugmentDispense(
+  helper: GrimDawnHelperClient,
+  collection: CollectionSnapshot,
+  records: string[]
+): Promise<LiveSupplyDispenseResult> {
+  const uniqueRecords = [...new Set(records.map((record) => record.toLocaleLowerCase()))]
+  if (uniqueRecords.length === 0) throw new Error('Select at least one augment to dispense.')
+
+  const status = await helper.request<LiveGameStatus>('inspect-live-game')
+  if (status.state !== 'ready') throw new Error(status.detail)
+  if (!status.activeCharacterName) {
+    throw new Error('Cairn is waiting for Grim Dawn to report the active character. Retry in a moment.')
+  }
+  if (status.isHardcore === null) {
+    throw new Error('Cairn has not resolved whether the active character is Hardcore or Softcore yet.')
+  }
+
+  const installationPath = collection.discovery.installations[0]?.path
+  if (!installationPath) throw new Error('No Grim Dawn installation is available.')
+  const profiles = await helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
+  const activeCharacter = profiles
+    .filter((profile) => !profile.error)
+    .filter((profile) => profile.isHardcore === status.isHardcore)
+    .filter((profile) => profile.name.localeCompare(status.activeCharacterName!, undefined, { sensitivity: 'base' }) === 0)
+    .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))[0]
+  if (!activeCharacter) {
+    throw new Error(`The active character “${status.activeCharacterName}” was not found in the parsed saves.`)
+  }
+
+  const catalog = new Map(
+    (collection.supplies ?? [])
+      .filter((item) => item.slot === 'augment')
+      .map((item) => [item.record.toLocaleLowerCase(), item])
+  )
+  const selected = uniqueRecords.map((record) => {
+    const item = catalog.get(record)
+    if (!item) throw new Error(`The selected record is not a catalogued faction augment: ${record}`)
+    const requirements = item.acquisition?.factions ?? []
+    if (requirements.length === 0) {
+      throw new Error(`${item.name} has no verified faction-vendor requirement and cannot be injected.`)
+    }
+    const authorized = requirements.some((requirement) => {
+      const threshold = reputationThresholds[requirement.reputation.toLocaleLowerCase()]
+      if (threshold === undefined) return false
+      const faction = activeCharacter.factions.find(
+        (candidate) => normalizedFactionName(candidate.name) === normalizedFactionName(requirement.faction)
+      )
+      return Boolean(faction?.isUnlocked && faction.value >= threshold)
+    })
+    if (!authorized) {
+      const needed = requirements.map((requirement) => `${requirement.faction} ${requirement.reputation}`).join(' or ')
+      throw new Error(`${activeCharacter.name} cannot buy ${item.name}; requires ${needed}.`)
+    }
+    return item
+  })
+
+  const operationId = randomUUID()
+  const receiptPaths: string[] = []
+  const dispensed: typeof selected = []
+  const issues: string[] = []
+  for (const [index, item] of selected.entries()) {
+    try {
+      const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
+        operationId: `${operationId}-${index}`,
+        isHardcore: status.isHardcore,
+        destination: 'character-inventory',
+        item: createSupplyPayload(item.record)
+      })
+      const deadline = Date.now() + 30_000
+      let receiptPath: string | null = null
+      while (Date.now() < deadline && !receiptPath) {
+        const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
+        if (result.state === 'rejected') {
+          if (result.receiptPath) {
+            await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+              path: result.receiptPath,
+              expectedSha256: queue.semanticSha256,
+              receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-personal-deliveries')
+            })
+          }
+          throw new Error(`${activeCharacter.name}'s personal inventory is full. No rejected augment was lost.`)
+        }
+        if (result.state === 'deposited' && result.receiptPath) receiptPath = result.receiptPath
+        if (!receiptPath) await new Promise((resolve) => setTimeout(resolve, 200))
+      }
+      if (!receiptPath) throw new Error('Timed out waiting for Grim Dawn to acknowledge the personal-inventory delivery.')
+      receiptPaths.push(receiptPath)
+      dispensed.push(item)
+    } catch (error) {
+      if (dispensed.length === 0) throw error
+      issues.push(error instanceof Error ? error.message : String(error))
+      break
+    }
+  }
+
+  return {
+    operationId,
+    status: 'committed',
+    activeCharacter: activeCharacter.name,
+    dispensed: dispensed.map((item) => ({ record: item.record, name: item.name })),
     receiptPaths,
     issues
   }
@@ -1211,7 +1369,8 @@ async function runSmokeTest(
     if (
       characterProfiles.length === 0 ||
       characterProfiles.some((profile) => profile.error) ||
-      !sanya?.skills.some((skill) => skill.name === 'Devouring Swarm' && skill.level > 0)
+      !sanya?.skills.some((skill) => skill.name === 'Devouring Swarm' && skill.level > 0) ||
+      !sanya.factions.some((faction) => faction.name === 'Devil\'s Crossing')
     ) {
       throw new Error('Read-only character import did not validate current local and cloud saves.')
     }

@@ -74,6 +74,18 @@ interface FarmTarget {
   minimumLevel: number
 }
 
+interface SupplyOption {
+  id: string
+  record: string
+  name: string
+  slot: string
+  isHardcore: boolean
+  reusable: boolean
+  eligible: boolean
+  detail: string
+  source: 'archive' | 'faction'
+}
+
 const discovery = ref<GrimDawnDiscovery | null>(null)
 const snapshot = ref<CollectionSnapshot | null>(null)
 const indexStashPaths = ref<string[]>(readStoredSourcePaths('stashes'))
@@ -217,18 +229,55 @@ const availableVaultItems = computed(() =>
       item.isHardcore === activeTransferHardcore.value
   )
 )
-const supplyVaultItems = computed(() => {
+const supplyVaultItems = computed<SupplyOption[]>(() => {
+  const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
+  if (supplyCategory.value === 'augments') {
+    const factionAugments = (snapshot.value?.supplies ?? [])
+      .filter((item) => item.slot === 'augment')
+      .map((item): SupplyOption => {
+        const requirements = item.acquisition?.factions ?? []
+        const eligible = requirements.some((requirement) => characterMeetsReputation(requirement.faction, requirement.reputation))
+        return {
+          id: `augment:${item.record}`,
+          record: item.record,
+          name: item.name,
+          slot: item.slot,
+          isHardcore: activeCharacter.value?.isHardcore ?? Boolean(activeTransferHardcore.value),
+          reusable: true,
+          eligible,
+          detail: eligible
+            ? `Available to ${activeCharacter.value?.name ?? 'active character'} · ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' / ')}`
+            : requirements.length
+              ? `Requires ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' or ')}`
+              : 'Faction requirement is not indexed',
+          source: 'faction'
+        }
+      })
+    const archivedRunes = vaultItems.value
+      .filter((item) => item.rarity === 'supply' && item.slot === 'rune' && item.state === 'ingested' && item.isHardcore === activeTransferHardcore.value)
+      .map((item): SupplyOption => ({
+        id: item.id,
+        record: item.baseRecord,
+        name: item.name,
+        slot: item.slot,
+        isHardcore: item.isHardcore,
+        reusable: item.reusable,
+        eligible: true,
+        detail: `${item.isHardcore ? 'HC' : 'SC'} · archived movement rune`,
+        source: 'archive'
+      }))
+    return [...factionAugments, ...archivedRunes]
+      .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) || item.detail.toLocaleLowerCase().includes(needle))
+      .sort((left, right) => Number(right.eligible) - Number(left.eligible) || left.name.localeCompare(right.name))
+  }
   const unique = new Map<string, VaultListItem>()
   for (const item of vaultItems.value) {
     if (item.rarity !== 'supply' || item.state !== 'ingested' || item.isHardcore !== activeTransferHardcore.value) continue
     const key = `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
     if (!unique.has(key)) unique.set(key, item)
   }
-  const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
   return [...unique.values()]
-    .filter((item) => supplyCategory.value === 'writs'
-      ? item.slot === 'writ' || item.slot === 'mandate'
-      : item.slot === 'augment' || item.slot === 'rune')
+    .filter((item) => item.slot === 'writ' || item.slot === 'mandate')
     .filter((item) => {
       if (!needle) return true
       const catalog = snapshot.value?.supplies?.find((entry) =>
@@ -238,6 +287,17 @@ const supplyVaultItems = computed(() => {
         Boolean(catalog && matchesSearch(catalog, needle))
     })
     .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
+    .map((item): SupplyOption => ({
+      id: item.id,
+      record: item.baseRecord,
+      name: item.name,
+      slot: item.slot,
+      isHardcore: item.isHardcore,
+      reusable: item.reusable,
+      eligible: true,
+      detail: `${item.isHardcore ? 'HC' : 'SC'} · archived ${item.slot}`,
+      source: 'archive'
+    }))
 })
 const quarantinedVaultItems = computed(() =>
   vaultItems.value.filter(
@@ -279,6 +339,8 @@ const activeCharacter = computed(() => {
   const matching = headerCharacters.value
     .filter((character) => !character.error)
     .filter((character) => liveStatus.value?.isHardcore == null || character.isHardcore === liveStatus.value.isHardcore)
+    .filter((character) => !liveStatus.value?.activeCharacterName ||
+      character.name.localeCompare(liveStatus.value.activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
     .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))
   return matching[0] ?? null
 })
@@ -1707,7 +1769,7 @@ function openSupplies(): void {
 }
 
 function selectAllVisibleSupplies(): void {
-  selectedSupplyIds.value = supplyVaultItems.value.map((item) => item.id)
+  selectedSupplyIds.value = supplyVaultItems.value.filter((item) => item.eligible).map((item) => item.id)
 }
 
 async function dispenseAllWrits(): Promise<void> {
@@ -1720,6 +1782,21 @@ async function dispenseAllWrits(): Promise<void> {
 function percentage(summary: Pick<CollectionRaritySummary, 'total' | 'collected'> | undefined): string {
   if (!summary || summary.total === 0) return '0%'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
+}
+
+function characterMeetsReputation(factionName: string, requiredRank: string): boolean {
+  const thresholds: Record<string, number> = {
+    tolerated: 0,
+    friendly: 1_500,
+    respected: 5_000,
+    honored: 10_000,
+    revered: 25_000
+  }
+  const threshold = thresholds[requiredRank.toLocaleLowerCase()]
+  if (threshold === undefined || !activeCharacter.value) return false
+  const normalize = (value: string): string => value.toLocaleLowerCase().replaceAll('’', "'").replace(/[^a-z0-9]/g, '')
+  const faction = activeCharacter.value.factions.find((entry) => normalize(entry.name) === normalize(factionName))
+  return Boolean(faction?.isUnlocked && faction.value >= threshold)
 }
 
 function affixPercentage(): string {
@@ -1926,9 +2003,41 @@ async function retrieveSelectedLive(): Promise<void> {
 
 async function retrieveSupplies(): Promise<void> {
   if (selectedSupplyIds.value.length === 0 || vaultBusy.value) return
-  selectedVaultIds.value = [...selectedSupplyIds.value]
-  if (transferMode.value === 'live') await retrieveSelectedLive()
-  else await retrieveSelected()
+  const selected = supplyVaultItems.value.filter((item) => selectedSupplyIds.value.includes(item.id))
+  const factionAugments = selected.filter((item) => item.source === 'faction')
+  const archived = selected.filter((item) => item.source === 'archive')
+  if (factionAugments.length > 0 && transferMode.value !== 'live') {
+    vaultError.value = 'Soulbound augments require a live Grim Dawn connection and are delivered to the active character.'
+    return
+  }
+  if (factionAugments.length > 0) {
+    const names = factionAugments.map((item) => item.name)
+    const confirmed = window.confirm(
+      `Dispense ${names.length} faction augment${names.length === 1 ? '' : 's'} directly to ${activeCharacter.value?.name ?? 'the active character'}? Cairn will re-check that character's current reputation first.`
+    )
+    if (!confirmed) return
+    vaultBusy.value = true
+    vaultError.value = null
+    vaultMessage.value = null
+    try {
+      const result = await window.cairnCodex.dispenseLiveAugments(factionAugments.map((item) => item.record))
+      const delivered = new Set(result.dispensed.map((item) => `augment:${item.record}`))
+      selectedSupplyIds.value = selectedSupplyIds.value.filter((id) => !delivered.has(id))
+      vaultMessage.value = result.issues.length
+        ? `Delivered ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} to ${result.activeCharacter}; stopped safely: ${result.issues[0]}`
+        : `Delivered ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} directly to ${result.activeCharacter}.`
+    } catch (error) {
+      vaultError.value = readableError(error)
+      return
+    } finally {
+      vaultBusy.value = false
+    }
+  }
+  if (archived.length > 0) {
+    selectedVaultIds.value = archived.map((item) => item.id)
+    if (transferMode.value === 'live') await retrieveSelectedLive()
+    else await retrieveSelected()
+  }
   selectedSupplyIds.value = []
 }
 
@@ -3511,7 +3620,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div>
             <p class="section-label">Reusable collection</p>
             <h2>Supplies</h2>
-            <p>Unlock a writ, mandate, augment, or movement rune once, then dispense it whenever a character needs one.</p>
+            <p>Archived writs and runes are reusable. Soulbound augments unlock per character from that character's faction reputation.</p>
           </div>
           <strong>{{ snapshot?.supplySummary?.collected ?? 0 }} / {{ snapshot?.supplySummary?.total ?? '—' }}</strong>
         </header>
@@ -3532,9 +3641,9 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
         </div>
         <div v-if="supplyVaultItems.length" class="supply-grid">
-          <label v-for="item in supplyVaultItems" :key="item.id" class="supply-card">
-            <input type="checkbox" :checked="selectedSupplyIds.includes(item.id)" :disabled="vaultBusy" @change="toggleSupply(item.id)" />
-            <span><strong>{{ item.name }}</strong><small>{{ item.slot === 'rune' ? 'Movement rune' : item.slot }} · {{ item.isHardcore ? 'HC' : 'SC' }}</small></span>
+          <label v-for="item in supplyVaultItems" :key="item.id" class="supply-card" :class="{ locked: !item.eligible }">
+            <input type="checkbox" :checked="selectedSupplyIds.includes(item.id)" :disabled="vaultBusy || !item.eligible" @change="toggleSupply(item.id)" />
+            <span><strong>{{ item.name }}</strong><small>{{ item.detail }}</small></span>
             <b>{{ item.reusable ? '∞' : '1' }}</b>
           </label>
         </div>
@@ -3542,7 +3651,7 @@ function formatPercentile(value: number | null | undefined): string {
         <button
           class="supply-dispense"
           type="button"
-          :disabled="vaultBusy || selectedSupplyIds.length === 0 || (transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
+          :disabled="vaultBusy || selectedSupplyIds.length === 0 || (supplyCategory === 'augments' && selectedSupplyIds.some((id) => id.startsWith('augment:')) ? liveStatus?.state !== 'ready' : transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
           @click="retrieveSupplies"
         >{{ vaultBusy ? 'Verifying…' : (infiniteSupplies ? 'Dispense ' : 'Return ') + selectedSupplyIds.length + ' selected' }}</button>
       </section>

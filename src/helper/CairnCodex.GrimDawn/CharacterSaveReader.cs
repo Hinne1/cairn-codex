@@ -4,6 +4,13 @@ namespace CairnCodex.GrimDawn;
 
 internal sealed record CharacterSkill(string Record, string Name, int Level, bool Enabled);
 
+internal sealed record CharacterFaction(
+    int Index,
+    string Name,
+    bool IsUnlocked,
+    float Value,
+    string Rank);
+
 internal sealed record CharacterSaveProfile(
     string Path,
     string Name,
@@ -11,6 +18,7 @@ internal sealed record CharacterSaveProfile(
     bool IsHardcore,
     string ClassRecord,
     string ClassName,
+    CharacterFaction[] Factions,
     CharacterSkill[] Skills,
     DateTime LastWriteUtc,
     string? Error);
@@ -55,6 +63,7 @@ internal static class CharacterSaveReader
                 string.Empty,
                 string.Empty,
                 [],
+                [],
                 File.GetLastWriteTimeUtc(path),
                 exception.Message);
         }
@@ -83,6 +92,7 @@ internal static class CharacterSaveReader
             $"Unsupported character data version {dataVersion}; no partial profile was imported.");
         SkipEncrypted(crypto, 16);
 
+        var factions = Array.Empty<CharacterFaction>();
         var skills = Array.Empty<CharacterSkill>();
         while (crypto.Remaining > 0)
         {
@@ -103,6 +113,10 @@ internal static class CharacterSaveReader
             {
                 skills = ReadSkills(crypto, data);
             }
+            else if (blockId == 13)
+            {
+                factions = ReadFactions(crypto);
+            }
             SkipEncrypted(crypto, end - crypto.Cursor);
             Require(crypto.Cursor == end, $"Character block {blockId} did not end at its declared boundary.");
             VerifyChecksum(crypto, $"block {blockId}");
@@ -115,6 +129,7 @@ internal static class CharacterSaveReader
             hardcore,
             classRecord,
             ResolveClassName(classRecord, data),
+            factions,
             skills,
             lastWriteUtc,
             null);
@@ -243,6 +258,70 @@ internal static class CharacterSaveReader
             .OrderBy(skill => skill.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    private static CharacterFaction[] ReadFactions(GDCryptoDataBuffer crypto)
+    {
+        Require(crypto.ReadCryptoInt(out var version) && version == 5,
+            "Unsupported character faction-block version.");
+        Require(crypto.ReadCryptoInt(out _), "Character selected faction is truncated.");
+        Require(crypto.ReadCryptoInt(out var count) && count is >= 0 and <= 256,
+            "Character faction count is invalid.");
+        var result = new List<CharacterFaction>(count);
+        for (var index = 0; index < count; index++)
+        {
+            Require(crypto.ReadCryptoBool(out _), "Character faction changed flag is truncated.");
+            Require(crypto.ReadCryptoBool(out var unlocked), "Character faction unlocked flag is truncated.");
+            Require(crypto.ReadCryptoFloat(out var value), "Character faction value is truncated.");
+            Require(crypto.ReadCryptoFloat(out _), "Character faction positive boost is truncated.");
+            Require(crypto.ReadCryptoFloat(out _), "Character faction negative boost is truncated.");
+            if (FactionName(index) is { } name)
+            {
+                result.Add(new CharacterFaction(index, name, unlocked, value, ReputationRank(value)));
+            }
+        }
+        return result.ToArray();
+    }
+
+    private static string ReputationRank(float value) => value switch
+    {
+        >= 25_000 => "Revered",
+        >= 10_000 => "Honored",
+        >= 5_000 => "Respected",
+        >= 1_500 => "Friendly",
+        >= 0 => "Tolerated",
+        _ => "Hostile"
+    };
+
+    private static string? FactionName(int index) => index switch
+    {
+        1 => "Devil's Crossing",
+        2 => "Aetherials",
+        3 => "Ch'thonians",
+        4 => "Cronley's Gang",
+        5 => "Beasts",
+        6 => "Rovers",
+        8 => "Homestead",
+        10 => "The Outcast",
+        11 => "Order of Death's Vigil",
+        12 => "Arkovian Undead",
+        13 => "Black Legion",
+        14 => "Kymon's Chosen",
+        15 => "Coven of Ugdenbog",
+        16 => "Barrowholm",
+        17 => "Malmouth Resistance",
+        18 => "Aetherial Vanguard",
+        19 => "Cult of Bysmiel",
+        20 => "Cult of Dreeg",
+        21 => "Cult of Solael",
+        22 => "Eldritch Horrors",
+        23 => "Kurn",
+        24 => "Bloodbound",
+        25 => "Traps",
+        26 => "Dread",
+        27 => "Noktukari",
+        28 => "Asterkarn Dead",
+        _ => null
+    };
 
     private static string ResolveSkillName(string path, ItemCatalogData data)
     {

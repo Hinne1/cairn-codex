@@ -6,13 +6,13 @@ and validating character saves does not delay app startup.
 
 The parser reuses the MIT-derived GDIA cipher implementation already isolated
 under `Gdia/Stash`. It reads the GDCX header, inventory/personal-stash framing,
-and Block 8 character skills. The current supported data versions are 6, 7, and
-8; skill-block versions 5 through 8 and inventory/stash versions through 11 are
-validated. Every outer and nested checksum and declared block boundary must
-match. The source file's size and modification timestamp are checked before and
-after reading. On any unknown structure, checksum mismatch, concurrent save, or
-truncation, the character is returned as unreadable and no partial profile is
-created.
+Block 8 character skills, and Block 13 faction standings. The current supported
+data versions are 6, 7, and 8; skill-block versions 5 through 8, faction-block
+version 5, and inventory/stash versions through 11 are validated. Every outer
+and nested checksum and declared block boundary must match. The source file's
+size and modification timestamp are checked before and after reading. On any
+unknown structure, checksum mismatch, concurrent save, or truncation, the
+character is returned as unreadable and no partial profile is created.
 
 The implementation does not open character files for writing. Allocated skill
 record paths are resolved through the user's installed ARZ and localization
@@ -25,6 +25,8 @@ Format cross-checks used during implementation:
 - GDIA (MIT) cipher and block primitives: <https://github.com/marius00/iagd>
 - Current read-only v1.3 parser research, including Block 8 skill layout:
   <https://github.com/kotoba-lab/grimdawnrep/blob/master/src/grim_dawn_lab/gdc.py>
+- Current block-13 faction layout cross-check:
+  <https://codeberg.org/alex-ilchukov/gdcx>
 - Older header-only C# parser (MIT), useful as an independent GDCX header check:
   <https://github.com/ChrisElison/GDParser>
 

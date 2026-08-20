@@ -88,10 +88,11 @@ Consequences for Cairn Codex:
 ## Additional imported boundary
 
 Live-game integration now bundles the upstream `HookDll` and injector. The hook
-has the Grim Dawn 1.3 `ItemReplicaInfo` layout correction and redirects only its
-data root to Cairn's isolated app-data directory. Exact source, build inputs,
-binary fingerprints, crash evidence, and allowlisted game target are recorded in
-`docs/live-hook-compatibility.md`.
+has the Grim Dawn 1.3 `ItemReplicaInfo` layout correction, uses Cairn's isolated
+app-data directory, reports the active character, and adds a narrowly-scoped
+personal-inventory queue for soulbound faction augments. Exact source changes,
+build inputs, binary fingerprints, crash evidence, and allowlisted game targets
+are recorded in `docs/live-hook-compatibility.md`.
 
 The one-time GDIA migration reads `PlayerItem` from a hash-verified database
 backup and also preserves/imports orphaned incoming queue receipts. Import is

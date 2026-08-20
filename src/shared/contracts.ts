@@ -182,6 +182,7 @@ export interface CharacterSaveProfile {
   level: number
   isHardcore: boolean
   classRecord: string
+  className: string
   skills: CharacterSaveSkill[]
   lastWriteUtc: string
   error: string | null

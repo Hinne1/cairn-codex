@@ -10,6 +10,7 @@ internal sealed record CharacterSaveProfile(
     int Level,
     bool IsHardcore,
     string ClassRecord,
+    string ClassName,
     CharacterSkill[] Skills,
     DateTime LastWriteUtc,
     string? Error);
@@ -51,6 +52,7 @@ internal static class CharacterSaveReader
                 CharacterFolderName(path),
                 0,
                 false,
+                string.Empty,
                 string.Empty,
                 [],
                 File.GetLastWriteTimeUtc(path),
@@ -112,6 +114,7 @@ internal static class CharacterSaveReader
             level,
             hardcore,
             classRecord,
+            ResolveClassName(classRecord, data),
             skills,
             lastWriteUtc,
             null);
@@ -257,6 +260,17 @@ internal static class CharacterSaveReader
         }
         var file = System.IO.Path.GetFileNameWithoutExtension(path.Replace('\\', '/'));
         return string.IsNullOrWhiteSpace(file) ? path : file.Replace('_', ' ');
+    }
+
+    private static string ResolveClassName(string classTag, ItemCatalogData data)
+    {
+        if (!string.IsNullOrWhiteSpace(classTag) &&
+            data.Tags.TryGetValue(classTag, out var resolved) &&
+            !string.IsNullOrWhiteSpace(resolved))
+        {
+            return resolved;
+        }
+        return classTag.StartsWith("tag", StringComparison.OrdinalIgnoreCase) ? string.Empty : classTag;
     }
 
     private static IEnumerable<string> FindCharacterFiles()

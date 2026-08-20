@@ -288,7 +288,11 @@ const activeCharacterClass = computed(() => {
   const allocated = character.skills
     .map((skill) => skill.name)
     .filter((name) => name && !name.toLocaleLowerCase().includes('mastery'))
-  return character.classRecord?.trim() || allocated.slice(0, 2).join(' · ') || 'Unknown class'
+  const storedClass = character.classRecord?.trim() ?? ''
+  return character.className?.trim() ||
+    (!storedClass.toLocaleLowerCase().startsWith('tag') ? storedClass : '') ||
+    allocated.slice(0, 2).join(' · ') ||
+    'Unknown class'
 })
 const headerConnectionAction = computed(() => {
   if (liveStatus.value?.state === 'ready' || liveStatus.value?.state === 'connecting' || liveStatus.value?.hostWindowReady) {

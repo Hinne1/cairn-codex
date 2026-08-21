@@ -2425,7 +2425,10 @@ async function retrieveSupplies(): Promise<void> {
     vaultError.value = null
     vaultMessage.value = null
     try {
-      const result = await window.cairnCodex.dispenseLiveAugments(factionAugments.map((item) => item.record))
+      const result = await window.cairnCodex.dispenseLiveAugments(
+        factionAugments.map((item) => item.record),
+        activeCharacter.value?.name
+      )
       const delivered = new Set(result.dispensed.map((item) => `augment:${item.record}`))
       selectedSupplyIds.value = selectedSupplyIds.value.filter((id) => !delivered.has(id))
       vaultMessage.value = result.issues.length

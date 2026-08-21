@@ -61,8 +61,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.syncLiveGame) as Promise<LiveGameSyncResult>,
   retrieveLiveVaultItems: (vaultItemIds) =>
     ipcRenderer.invoke(IPC_CHANNELS.retrieveLiveVaultItems, { vaultItemIds }) as Promise<LiveRetrievalResult>,
-  dispenseLiveAugments: (records) =>
-    ipcRenderer.invoke(IPC_CHANNELS.dispenseLiveAugments, { records }) as Promise<LiveSupplyDispenseResult>
+  dispenseLiveAugments: (records, expectedCharacterName) =>
+    ipcRenderer.invoke(IPC_CHANNELS.dispenseLiveAugments, { records, expectedCharacterName }) as Promise<LiveSupplyDispenseResult>
 }
 
 contextBridge.exposeInMainWorld('cairnCodex', api)

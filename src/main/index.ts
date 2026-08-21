@@ -456,11 +456,16 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
   ipcMain.handle(
     IPC_CHANNELS.dispenseLiveAugments,
-    (_event, input: { records: string[] }): Promise<LiveSupplyDispenseResult> =>
+    (_event, input: { records: string[]; expectedCharacterName?: string }): Promise<LiveSupplyDispenseResult> =>
       runExclusive(async () => {
         latestCollection ??= await readCollectionCache(collectionCachePath)
         if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
-        return executeLiveAugmentDispense(helper, latestCollection, input.records)
+        return executeLiveAugmentDispense(
+          helper,
+          latestCollection,
+          input.records,
+          input.expectedCharacterName
+        )
       })
   )
 }
@@ -673,18 +678,36 @@ function createSupplyPayload(baseRecord: string): LiveVaultPayload {
 async function executeLiveAugmentDispense(
   helper: GrimDawnHelperClient,
   collection: CollectionSnapshot,
-  records: string[]
+  records: string[],
+  expectedCharacterName?: string
 ): Promise<LiveSupplyDispenseResult> {
   const uniqueRecords = [...new Set(records.map((record) => record.toLocaleLowerCase()))]
   if (uniqueRecords.length === 0) throw new Error('Select at least one augment to dispense.')
 
-  const status = await helper.request<LiveGameStatus>('inspect-live-game')
+  let status = await helper.request<LiveGameStatus>('inspect-live-game')
   if (status.state !== 'ready') throw new Error(status.detail)
-  if (!status.activeCharacterName) {
-    throw new Error('Cairn is waiting for Grim Dawn to report the active character. Retry in a moment.')
+  for (let attempt = 0; attempt < 5 && !status.activeCharacterName; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    status = await helper.request<LiveGameStatus>('inspect-live-game')
+    if (status.state !== 'ready') throw new Error(status.detail)
   }
   if (status.isHardcore === null) {
     throw new Error('Cairn has not resolved whether the active character is Hardcore or Softcore yet.')
+  }
+
+  const confirmedCharacterName = expectedCharacterName?.trim() || null
+  if (
+    status.activeCharacterName &&
+    confirmedCharacterName &&
+    status.activeCharacterName.localeCompare(confirmedCharacterName, undefined, { sensitivity: 'base' }) !== 0
+  ) {
+    throw new Error(
+      `The active character changed from “${confirmedCharacterName}” to “${status.activeCharacterName}”. Review the character and try again.`
+    )
+  }
+  const activeCharacterName = status.activeCharacterName ?? confirmedCharacterName
+  if (!activeCharacterName) {
+    throw new Error('Cairn could not identify the active character. Reopen the Supplies view and try again.')
   }
 
   const installationPath = collection.discovery.installations[0]?.path
@@ -693,10 +716,10 @@ async function executeLiveAugmentDispense(
   const activeCharacter = profiles
     .filter((profile) => !profile.error)
     .filter((profile) => profile.isHardcore === status.isHardcore)
-    .filter((profile) => profile.name.localeCompare(status.activeCharacterName!, undefined, { sensitivity: 'base' }) === 0)
+    .filter((profile) => profile.name.localeCompare(activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
     .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))[0]
   if (!activeCharacter) {
-    throw new Error(`The active character “${status.activeCharacterName}” was not found in the parsed saves.`)
+    throw new Error(`The active character “${activeCharacterName}” was not found in the parsed saves.`)
   }
 
   const catalog = new Map(

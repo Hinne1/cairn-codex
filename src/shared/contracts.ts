@@ -55,7 +55,7 @@ export interface CairnCodexApi {
   stopLiveGame: () => Promise<LiveGameStatus>
   syncLiveGame: () => Promise<LiveGameSyncResult>
   retrieveLiveVaultItems: (vaultItemIds: string[]) => Promise<LiveRetrievalResult>
-  dispenseLiveAugments: (records: string[]) => Promise<LiveSupplyDispenseResult>
+  dispenseLiveAugments: (records: string[], expectedCharacterName?: string) => Promise<LiveSupplyDispenseResult>
 }
 
 export interface WriteSafetyStatus {

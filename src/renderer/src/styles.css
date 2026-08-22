@@ -475,6 +475,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
   .oracle-evidence > div { grid-template-columns: 1fr; }
 }
 .supply-toolbar, .farming-toolbar, .supply-status { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; padding: 10px; border: 1px solid #353128; border-radius: 7px; background: #171714; }
+.supply-toolbar { flex-wrap: wrap; }
 .supply-toolbar > input, .farming-toolbar > input { flex: 1; min-width: 220px; padding: 10px 12px; border: 1px solid #454034; border-radius: 5px; color: #ded4bf; background: #11110f; }
 .supply-toolbar > button, .supply-dispense, .farming-toolbar select { padding: 9px 12px; border: 1px solid #55472f; border-radius: 5px; color: #d5ba7b; background: #2a241b; cursor: pointer; }
 .supply-toolbar > button:disabled, .supply-dispense:disabled { opacity: .4; cursor: default; }

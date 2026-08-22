@@ -36,6 +36,7 @@ type TransferMode = 'live' | 'offline'
 type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
 type SupplyCategory = 'writs' | 'augments'
+type SupplySlotFilter = 'all' | 'weapon' | 'armor' | 'jewelry'
 type MaterialCategory = 'all' | 'component' | 'material' | 'potion-formula'
 type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `item:${string}` | `pet:${string}`
 
@@ -108,6 +109,7 @@ interface SupplyOption {
   record: string
   name: string
   slot: string
+  slotFamilies: Array<Exclude<SupplySlotFilter, 'all'>>
   isHardcore: boolean
   reusable: boolean
   eligible: boolean
@@ -199,6 +201,7 @@ const selectedVaultIds = ref<string[]>([])
 const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
+const supplySlotFilter = ref<SupplySlotFilter>('all')
 const materialCategory = ref<MaterialCategory>('all')
 const farmingQuery = ref('')
 const farmingRarity = ref<RarityFilter>('all')
@@ -338,11 +341,14 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
           record: item.record,
           name: item.name,
           slot: item.slot,
+          slotFamilies: item.supplySlotFamilies ?? [],
           isHardcore: activeCharacter.value?.isHardcore ?? Boolean(activeTransferHardcore.value),
           reusable: true,
           eligible,
           detail: eligible
             ? `Available to ${activeCharacter.value?.name ?? 'active character'} · ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' / ')}`
+            : !activeCharacter.value && liveStatus.value?.state === 'ready'
+              ? 'Waiting for active character save metadata · rechecking automatically'
             : requirements.length
               ? `Requires ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' or ')}`
               : 'Faction requirement is not indexed',
@@ -364,6 +370,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
           record: item.baseRecord,
           name: item.name,
           slot: item.slot,
+          slotFamilies: catalogItem?.supplySlotFamilies ?? [],
           isHardcore: item.isHardcore,
           reusable: item.reusable,
           eligible,
@@ -375,6 +382,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
         }
       })
     return [...factionAugments, ...archivedRunes]
+      .filter((item) => supplySlotFilter.value === 'all' || item.slotFamilies.includes(supplySlotFilter.value))
       .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) ||
         item.detail.toLocaleLowerCase().includes(needle) ||
         item.effects.some((effect) => effect.toLocaleLowerCase().includes(needle)) ||
@@ -408,6 +416,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
         record: item.baseRecord,
         name: item.name,
         slot: item.slot,
+        slotFamilies: catalogItem?.supplySlotFamilies ?? [],
         isHardcore: item.isHardcore,
         reusable: item.reusable,
         eligible,
@@ -1611,6 +1620,9 @@ watch(transferMode, () => {
   vaultError.value = null
   vaultMessage.value = null
 })
+watch(supplySlotFilter, () => {
+  selectedSupplyIds.value = []
+})
 
 watch(selectedStashPath, async (path) => {
   if (path) {
@@ -2271,10 +2283,13 @@ function oracleStyleLabel(style: Exclude<OracleStyle, 'all'>): string {
   return 'Caster build'
 }
 
-function openSupplies(): void {
+async function openSupplies(): Promise<void> {
   activeView.value = 'supplies'
   reusableSupplyQuery.value = ''
-  void refreshVault()
+  supplySlotFilter.value = 'all'
+  await refreshVault()
+  await pollLiveLifecycle()
+  if (liveStatus.value?.state === 'ready') await refreshHeaderCharacters()
 }
 
 function selectAllVisibleSupplies(): void {
@@ -2444,7 +2459,16 @@ async function pollLiveLifecycle(): Promise<void> {
       }
     }
     liveStatus.value = current
-    if (current.state === 'ready' && previousState !== 'ready') void refreshHeaderCharacters()
+    const currentCharacterResolved = Boolean(
+      current.activeCharacterName && headerCharacters.value.some((character) =>
+        !character.error &&
+        character.name.localeCompare(current.activeCharacterName!, undefined, { sensitivity: 'base' }) === 0 &&
+        (current.isHardcore == null || character.isHardcore === current.isHardcore)
+      )
+    )
+    if (current.state === 'ready' && (previousState !== 'ready' || !currentCharacterResolved)) {
+      await refreshHeaderCharacters()
+    }
     if (!current.grimDawnProcessIds.length) headerCharacters.value = []
     if (previousState === 'ready' && current.state === 'unavailable' && !scanning.value) {
       void scanCollection()
@@ -4540,8 +4564,14 @@ function formatPercentile(value: number | null | undefined): string {
         </header>
         <div class="supply-toolbar">
           <div class="segmented-control" aria-label="Supply category">
-            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; selectedSupplyIds = []">Writs, warrants & mandates</button>
+            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; supplySlotFilter = 'all'; selectedSupplyIds = []">Writs, warrants & mandates</button>
             <button type="button" :class="{ active: supplyCategory === 'augments' }" @click="supplyCategory = 'augments'; selectedSupplyIds = []">Augments & runes</button>
+          </div>
+          <div v-if="supplyCategory === 'augments'" class="segmented-control supply-slot-filter" aria-label="Compatible equipment slot">
+            <button type="button" :class="{ active: supplySlotFilter === 'all' }" @click="supplySlotFilter = 'all'">All slots</button>
+            <button type="button" :class="{ active: supplySlotFilter === 'weapon' }" @click="supplySlotFilter = 'weapon'">Weapons</button>
+            <button type="button" :class="{ active: supplySlotFilter === 'armor' }" @click="supplySlotFilter = 'armor'">Armor</button>
+            <button type="button" :class="{ active: supplySlotFilter === 'jewelry' }" @click="supplySlotFilter = 'jewelry'">Jewelry</button>
           </div>
           <input v-model="reusableSupplyQuery" type="search" placeholder="Filter names, effects, factions…" />
           <button type="button" :disabled="!supplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>

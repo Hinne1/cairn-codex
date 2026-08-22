@@ -36,7 +36,7 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 24
+const CATALOG_PRESENTATION_VERSION = 25
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
@@ -686,7 +686,7 @@ async function executeLiveAugmentDispense(
 
   let status = await helper.request<LiveGameStatus>('inspect-live-game')
   if (status.state !== 'ready') throw new Error(status.detail)
-  for (let attempt = 0; attempt < 5 && !status.activeCharacterName; attempt += 1) {
+  for (let attempt = 0; attempt < 25 && !status.activeCharacterName; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 200))
     status = await helper.request<LiveGameStatus>('inspect-live-game')
     if (status.state !== 'ready') throw new Error(status.detail)
@@ -712,12 +712,16 @@ async function executeLiveAugmentDispense(
 
   const installationPath = collection.discovery.installations[0]?.path
   if (!installationPath) throw new Error('No Grim Dawn installation is available.')
-  const profiles = await helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
-  const activeCharacter = profiles
-    .filter((profile) => !profile.error)
-    .filter((profile) => profile.isHardcore === status.isHardcore)
-    .filter((profile) => profile.name.localeCompare(activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
-    .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))[0]
+  let activeCharacter: CharacterSaveProfile | undefined
+  for (let attempt = 0; attempt < 2 && !activeCharacter; attempt += 1) {
+    const profiles = await helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
+    activeCharacter = profiles
+      .filter((profile) => !profile.error)
+      .filter((profile) => profile.isHardcore === status.isHardcore)
+      .filter((profile) => profile.name.localeCompare(activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
+      .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))[0]
+    if (!activeCharacter) await new Promise((resolve) => setTimeout(resolve, 500))
+  }
   if (!activeCharacter) {
     throw new Error(`The active character “${activeCharacterName}” was not found in the parsed saves.`)
   }

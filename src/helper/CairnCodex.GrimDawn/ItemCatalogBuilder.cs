@@ -341,8 +341,32 @@ internal static class ItemCatalogBuilder
             source.ContentPack,
             null,
             BuildAcquisition(record.Name, acquisitionReferences, records, tags, null),
-            ItemPresentationBuilder.Build(record, presentationSource));
+            ItemPresentationBuilder.Build(record, presentationSource),
+            BuildSupplySlotFamilies(record));
     }
+
+    private static IReadOnlyList<string> BuildSupplySlotFamilies(ArzRecord record)
+    {
+        var families = new List<string>();
+        if (HasAnyEnabledSlot(record,
+                "axe", "axe2h", "dagger", "focus", "mace", "mace2h", "pistol", "rifle",
+                "scepter", "shield", "spear", "spear2h", "staff", "sword", "sword2h"))
+        {
+            families.Add("weapon");
+        }
+        if (HasAnyEnabledSlot(record, "head", "chest", "shoulders", "hands", "legs", "feet", "waist"))
+        {
+            families.Add("armor");
+        }
+        if (HasAnyEnabledSlot(record, "amulet", "bracelet", "medal", "ring"))
+        {
+            families.Add("jewelry");
+        }
+        return families;
+    }
+
+    private static bool HasAnyEnabledSlot(ArzRecord record, params string[] fields) =>
+        fields.Any(field => (record.Number(field) ?? 0) > 0.5);
 
     private static CatalogItem? Project(
         CatalogSourceRecord source,
@@ -866,7 +890,8 @@ internal sealed record CatalogItem(
     string ContentPack,
     ItemSetPresentation? SetPresentation,
     ItemAcquisitionPresentation Acquisition,
-    ItemPresentation Presentation);
+    ItemPresentation Presentation,
+    IReadOnlyList<string>? SupplySlotFamilies = null);
 
 internal sealed record CatalogAffix(
     string Key,

@@ -319,6 +319,7 @@ internal sealed record CollectionCatalogItem(
     ItemSetPresentation? SetPresentation,
     ItemAcquisitionPresentation Acquisition,
     ItemPresentation Presentation,
+    IReadOnlyList<string>? SupplySlotFamilies,
     int AvailableCount,
     double? BestRollPercentile,
     int AnalyzedCopyCount)
@@ -343,6 +344,7 @@ internal sealed record CollectionCatalogItem(
             item.SetPresentation,
             item.Acquisition,
             item.Presentation,
+            item.SupplySlotFamilies,
             availableCount,
             bestRollPercentile,
             analyzedCopyCount)

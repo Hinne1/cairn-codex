@@ -355,6 +355,7 @@ export interface CollectionItem {
   setPresentation?: ItemSetPresentation | null
   acquisition?: ItemAcquisitionPresentation
   presentation?: ItemPresentation
+  supplySlotFamilies?: Array<'weapon' | 'armor' | 'jewelry'> | null
   availableCount: number
   bestRollPercentile: number | null
   analyzedCopyCount: number

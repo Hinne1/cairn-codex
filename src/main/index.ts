@@ -234,19 +234,18 @@ function createHelperClient(): GrimDawnHelperClient {
 }
 
 function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionDatabase): void {
-  let writeInProgress = false
+  let writeQueue: Promise<void> = Promise.resolve()
   let latestCollection: CollectionSnapshot | null = null
   let collectionScan: Promise<CollectionSnapshot> | null = null
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
-  const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
-    if (writeInProgress) throw new Error('Another vault write is already in progress.')
-    writeInProgress = true
-    try {
-      return await operation()
-    } finally {
-      writeInProgress = false
-    }
+  const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = writeQueue.then(operation, operation)
+    writeQueue = result.then(
+      () => undefined,
+      () => undefined
+    )
+    return result
   }
 
   ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {

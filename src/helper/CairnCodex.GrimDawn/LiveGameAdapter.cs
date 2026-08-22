@@ -20,7 +20,7 @@ internal sealed class LiveGameAdapter : IDisposable
     private const string CrashingRetailHookSha256 =
         "14e57644d5403819aebfb856053f28afbc40dcdc2d95d0d9a8c71eafdf707891";
     private const string VerifiedRetailHookSha256 =
-        "a4af98f66c755eb4a88581f4f1fc7df7145575566a5fcba5b77eb37918e8134f";
+        "05db7fee0d7e22db13e4b9b8ce84f6cae8a4af439ae7730f2b961777f1954c07";
     private const string VerifiedInjectorSha256 =
         "569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c";
     private static readonly IReadOnlyDictionary<string, string> VerifiedRetailGameDlls =

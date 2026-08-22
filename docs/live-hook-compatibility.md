@@ -39,9 +39,9 @@ Build inputs:
 - Boost: `1.78.0`
 - Boost source SHA-256:
   `090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c`
-- Hook version: `1.5.9728.04731`
+- Hook version: `1.5.9730.27067`
 - Hook SHA-256:
-  `a4af98f66c755eb4a88581f4f1fc7df7145575566a5fcba5b77eb37918e8134f`
+  `05db7fee0d7e22db13e4b9b8ce84f6cae8a4af439ae7730f2b961777f1954c07`
 - Injector SHA-256:
   `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
 
@@ -53,6 +53,16 @@ path; a full inventory returns the untouched queue record to Cairn's incoming
 folder. Ordinary equipment, writs, and runes continue to use the shared-stash
 path. This isolates Cairn's data and keeps soulbound augments out of the shared
 stash entirely.
+
+Grim Dawn `1.3.0.7` changed the exported `Player::GiveItemToCharacter` ABI from
+one boolean argument to two. Hook `1.5.9728.04731` still requested the old
+decorated export, logged that it was missing, and called the resulting null
+pointer when Cairn first queued a personal delivery. At `2026-08-22 14:53:36`
+this crashed the game immediately after the hook discovered the untouched
+69-byte queue record; no delivery receipt was produced. Hook `1.5.9730.27067`
+uses the current two-boolean export and refuses personal delivery if any required
+game API is unresolved. The unconsumed record was moved intact to Cairn's crash
+quarantine before the replacement hook was deployed.
 
 Allowlisted targets:
 
@@ -76,8 +86,11 @@ deployed on 2026-08-19 without a public Crate changelog found at verification
 time. On 2026-08-20, the bundled hook and injector fingerprints, compatibility
 inspection, injection, worker handshake, repeated ready-state inspection,
 clean disconnect, and game-process survival were verified against its exact
-`Game.dll`. Its first item round trip also remains a release follow-up. Live
-mode remains explicitly opt-in because it mutates the running game process.
+`Game.dll`. Its first personal-inventory delivery exposed the changed native
+ABI on 2026-08-22. Hook `1.5.9730.27067` contains the ABI correction and safe
+queue rollback, but still requires a live delivery round trip before personal
+delivery on this build is considered fully verified. Live mode remains
+explicitly opt-in because it mutates the running game process.
 
 ## Planned local compatibility approval
 

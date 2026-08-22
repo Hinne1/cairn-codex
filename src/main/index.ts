@@ -691,10 +691,6 @@ async function executeLiveAugmentDispense(
     status = await helper.request<LiveGameStatus>('inspect-live-game')
     if (status.state !== 'ready') throw new Error(status.detail)
   }
-  if (status.isHardcore === null) {
-    throw new Error('Cairn has not resolved whether the active character is Hardcore or Softcore yet.')
-  }
-
   const confirmedCharacterName = expectedCharacterName?.trim() || null
   if (
     status.activeCharacterName &&
@@ -713,17 +709,36 @@ async function executeLiveAugmentDispense(
   const installationPath = collection.discovery.installations[0]?.path
   if (!installationPath) throw new Error('No Grim Dawn installation is available.')
   let activeCharacter: CharacterSaveProfile | undefined
+  let activeIsHardcore = status.isHardcore
   for (let attempt = 0; attempt < 2 && !activeCharacter; attempt += 1) {
     const profiles = await helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
-    activeCharacter = profiles
+    const matchingProfiles = profiles
       .filter((profile) => !profile.error)
-      .filter((profile) => profile.isHardcore === status.isHardcore)
       .filter((profile) => profile.name.localeCompare(activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
-      .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))[0]
+
+    if (activeIsHardcore === null) {
+      const matchingModes = [...new Set(matchingProfiles.map((profile) => profile.isHardcore))]
+      if (matchingModes.length > 1) {
+        throw new Error(
+          `Cairn found both Hardcore and Softcore saves named “${activeCharacterName}”. Wait for the game-mode handshake or rename one before dispensing.`
+        )
+      }
+      activeIsHardcore = matchingModes[0] ?? null
+    }
+
+    if (activeIsHardcore !== null) {
+      const expectedMode = activeIsHardcore
+      activeCharacter = matchingProfiles
+        .filter((profile) => profile.isHardcore === expectedMode)
+        .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))[0]
+    }
     if (!activeCharacter) await new Promise((resolve) => setTimeout(resolve, 500))
   }
   if (!activeCharacter) {
     throw new Error(`The active character “${activeCharacterName}” was not found in the parsed saves.`)
+  }
+  if (activeIsHardcore === null) {
+    throw new Error(`Cairn could not resolve whether “${activeCharacterName}” is Hardcore or Softcore.`)
   }
 
   const catalog = new Map(
@@ -761,7 +776,7 @@ async function executeLiveAugmentDispense(
     try {
       const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
         operationId: `${operationId}-${index}`,
-        isHardcore: status.isHardcore,
+        isHardcore: activeIsHardcore,
         destination: 'character-inventory',
         item: createSupplyPayload(item.record)
       })

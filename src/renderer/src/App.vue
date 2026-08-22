@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  buildStashOracle,
+  oracleMasteries,
+  type OracleReadiness,
+  type OracleStyle
+} from './stash-oracle'
 import type {
   CharacterSaveProfile,
   CollectionBasis,
@@ -23,7 +29,7 @@ type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare' | 'recipe'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
-type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
+type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'oracle' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
@@ -168,6 +174,13 @@ const plannerOwnership = ref<OwnershipFilter>('all')
 const plannerIgnoredRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-ignored-records'))
 const plannerFavoriteRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-favorite-records'))
 const plannerShowIgnored = ref(false)
+const oracleMastery = ref(localStorage.getItem('cairn-codex-oracle-mastery') ?? 'all')
+const oracleStyle = ref<OracleStyle>(readStoredOracleStyle())
+const oracleReadiness = ref<'all' | OracleReadiness>('all')
+const oracleMinimumLevel = ref(readStoredNumber('cairn-codex-oracle-minimum-level', 65, 1, 100))
+const oracleMaximumLevel = ref(readStoredNumber('cairn-codex-oracle-maximum-level', 100, 1, 100))
+const oracleQuery = ref('')
+const oracleVisibleCount = ref(12)
 const discoveredCharacters = ref<CharacterSaveProfile[]>([])
 const characterImportOpen = ref(false)
 const characterImportLoading = ref(false)
@@ -800,6 +813,40 @@ const skillNames = computed(() => {
   }
   return [...names].sort((left, right) => left.localeCompare(right))
 })
+
+const oracleMasteryOptions = computed(() => oracleMasteries(plannerCatalogItems.value))
+const oracleCandidates = computed(() => buildStashOracle(
+  plannerCatalogItems.value,
+  isArchivedItem,
+  {
+    minimumLevel: Math.min(oracleMinimumLevel.value, oracleMaximumLevel.value),
+    maximumLevel: Math.max(oracleMinimumLevel.value, oracleMaximumLevel.value),
+    mastery: oracleMastery.value,
+    style: oracleStyle.value
+  }
+))
+const filteredOracleCandidates = computed(() => {
+  const needle = normalizeLoose(oracleQuery.value)
+  return oracleCandidates.value.filter((candidate) => {
+    if (oracleReadiness.value !== 'all' && candidate.readiness !== oracleReadiness.value) return false
+    if (!needle) return true
+    return normalizeLoose([
+      candidate.title,
+      candidate.skill,
+      candidate.damageType,
+      candidate.style,
+      ...candidate.masteries,
+      ...candidate.relatedSkills,
+      ...candidate.evidence.flatMap((evidence) => [evidence.item.name, ...evidence.reasons])
+    ].join(' ')).includes(needle)
+  })
+})
+const visibleOracleCandidates = computed(() => filteredOracleCandidates.value.slice(0, oracleVisibleCount.value))
+const oracleReadinessCounts = computed(() => ({
+  ready: oracleCandidates.value.filter((candidate) => candidate.readiness === 'ready').length,
+  near: oracleCandidates.value.filter((candidate) => candidate.readiness === 'near').length,
+  wildcard: oracleCandidates.value.filter((candidate) => candidate.readiness === 'wildcard').length
+}))
 
 const skillSuggestions = computed(() => {
   const query = selectedSkill.value.trim().toLocaleLowerCase()
@@ -1480,6 +1527,13 @@ watch(sortMode, (mode) => {
 
 watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
 watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
+watch(oracleMastery, (mastery) => localStorage.setItem('cairn-codex-oracle-mastery', mastery))
+watch(oracleStyle, (style) => localStorage.setItem('cairn-codex-oracle-style', style))
+watch(oracleMinimumLevel, (level) => localStorage.setItem('cairn-codex-oracle-minimum-level', String(level)))
+watch(oracleMaximumLevel, (level) => localStorage.setItem('cairn-codex-oracle-maximum-level', String(level)))
+watch([oracleMastery, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleQuery], () => {
+  oracleVisibleCount.value = 12
+})
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
 })
@@ -1861,6 +1915,13 @@ function readStoredPlannerDisplay(): PlannerDisplay {
   return stored === 'grid' || stored === 'map' ? stored : 'list'
 }
 
+function readStoredOracleStyle(): OracleStyle {
+  const stored = localStorage.getItem('cairn-codex-oracle-style')
+  return stored === 'pets' || stored === 'retaliation' || stored === 'weapon' || stored === 'caster'
+    ? stored
+    : 'all'
+}
+
 function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number): number {
   const stored = localStorage.getItem(key)
   if (stored === null) return fallback
@@ -2159,6 +2220,43 @@ function openMaterials(category: MaterialCategory = 'all'): void {
   materialCategory.value = category
   query.value = ''
   ownership.value = 'all'
+}
+
+function openStashOracle(): void {
+  activeView.value = 'oracle'
+  oracleVisibleCount.value = 12
+}
+
+function surpriseMeWithOracle(): void {
+  oracleMastery.value = 'all'
+  oracleStyle.value = 'all'
+  oracleReadiness.value = 'all'
+  oracleQuery.value = ''
+  oracleVisibleCount.value = 12
+}
+
+function sendOracleCandidateToPlanner(candidate: (typeof oracleCandidates.value)[number]): void {
+  plannerSkills.value = [...new Set([candidate.skill, ...candidate.relatedSkills])]
+  plannerMinimumLevelDraft.value = Math.min(plannerMinimumLevel.value, oracleMinimumLevel.value)
+  plannerLevelCapDraft.value = Math.max(plannerLevelCap.value, oracleMaximumLevel.value)
+  plannerMinimumLevel.value = plannerMinimumLevelDraft.value
+  plannerLevelCap.value = plannerLevelCapDraft.value
+  plannerQuery.value = ''
+  plannerOwnership.value = 'all'
+  activeView.value = 'planner'
+}
+
+function oracleReadinessLabel(readiness: OracleReadiness): string {
+  if (readiness === 'ready') return 'Ready now'
+  if (readiness === 'near') return 'Nearly there'
+  return 'Wild card'
+}
+
+function oracleStyleLabel(style: Exclude<OracleStyle, 'all'>): string {
+  if (style === 'pets') return 'Pet build'
+  if (style === 'retaliation') return 'Retaliation'
+  if (style === 'weapon') return 'Weapon build'
+  return 'Caster build'
 }
 
 function openSupplies(): void {
@@ -3672,6 +3770,9 @@ function formatPercentile(value: number | null | undefined): string {
         <button type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
           <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
         </button>
+        <button type="button" :class="{ active: activeView === 'oracle' }" @click="openStashOracle">
+          <span>Stash Oracle</span><small>{{ oracleReadinessCounts.ready }} builds ready now</small>
+        </button>
         <button type="button" :class="{ active: activeView === 'planner' }" @click="activeView = 'planner'">
           <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · Lv{{ plannerMinimumLevel }}–{{ plannerLevelCap }}</small>
         </button>
@@ -3871,6 +3972,128 @@ function formatPercentile(value: number | null | undefined): string {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section v-else-if="activeView === 'oracle'" class="stash-oracle" aria-label="Stash Oracle build recommendations">
+        <header class="tool-heading oracle-heading">
+          <div>
+            <p class="section-label">Archetype assembler</p>
+            <h2>What build is your stash trying to make you play?</h2>
+            <p>Cairn follows the mechanical evidence: archived skill modifiers, conversions, set progress, high-level MIs, and the slots those items need. Every recommendation shows its work.</p>
+          </div>
+          <button type="button" class="oracle-surprise" @click="surpriseMeWithOracle">Surprise me</button>
+        </header>
+
+        <div class="oracle-controls">
+          <label>
+            <span>Mastery</span>
+            <select v-model="oracleMastery">
+              <option value="all">Any mastery</option>
+              <option v-for="mastery in oracleMasteryOptions" :key="mastery" :value="mastery">{{ mastery }}</option>
+            </select>
+          </label>
+          <label>
+            <span>Build style</span>
+            <select v-model="oracleStyle">
+              <option value="all">Any style</option>
+              <option value="pets">Pets</option>
+              <option value="caster">Caster</option>
+              <option value="weapon">Weapon</option>
+              <option value="retaliation">Retaliation</option>
+            </select>
+          </label>
+          <label class="oracle-level-control">
+            <span>Item level</span>
+            <span><input v-model.number="oracleMinimumLevel" type="number" min="1" :max="oracleMaximumLevel" aria-label="Minimum item level" /><b>to</b><input v-model.number="oracleMaximumLevel" type="number" :min="oracleMinimumLevel" max="100" aria-label="Maximum item level" /></span>
+          </label>
+          <label class="oracle-search">
+            <span>Find an archetype</span>
+            <input v-model="oracleQuery" type="search" placeholder="Skill, damage type, set, item…" />
+          </label>
+        </div>
+
+        <div class="oracle-readiness-bar">
+          <div class="segmented-control" aria-label="Build readiness">
+            <button type="button" :class="{ active: oracleReadiness === 'all' }" @click="oracleReadiness = 'all'">All <small>{{ oracleCandidates.length }}</small></button>
+            <button type="button" :class="{ active: oracleReadiness === 'ready' }" @click="oracleReadiness = 'ready'">Ready now <small>{{ oracleReadinessCounts.ready }}</small></button>
+            <button type="button" :class="{ active: oracleReadiness === 'near' }" @click="oracleReadiness = 'near'">Nearly there <small>{{ oracleReadinessCounts.near }}</small></button>
+            <button type="button" :class="{ active: oracleReadiness === 'wildcard' }" @click="oracleReadiness = 'wildcard'">Wild cards <small>{{ oracleReadinessCounts.wildcard }}</small></button>
+          </div>
+          <p>Scores measure archived mechanical support and equipability—not whether a build is fashionable.</p>
+        </div>
+
+        <div v-if="visibleOracleCandidates.length" class="oracle-grid">
+          <article
+            v-for="candidate in visibleOracleCandidates"
+            :key="candidate.key"
+            class="oracle-card"
+            :class="`readiness-${candidate.readiness}`"
+          >
+            <header>
+              <div>
+                <span class="oracle-readiness">{{ oracleReadinessLabel(candidate.readiness) }}</span>
+                <h3>{{ candidate.title }}</h3>
+                <p>
+                  <span>{{ oracleStyleLabel(candidate.style) }}</span>
+                  <span v-for="mastery in candidate.masteries" :key="mastery">{{ mastery }}</span>
+                </p>
+              </div>
+              <div class="oracle-score" :title="candidate.summary"><strong>{{ candidate.score }}</strong><small>stash fit</small></div>
+            </header>
+            <p class="oracle-summary">{{ candidate.summary }}</p>
+
+            <div v-if="candidate.sets.length" class="oracle-set-progress">
+              <span v-for="set in candidate.sets" :key="set.name" :class="{ complete: set.owned === set.total }">
+                <strong>{{ set.name }}</strong><small>{{ set.owned }}/{{ set.total }}</small>
+              </span>
+            </div>
+
+            <div class="oracle-evidence">
+              <p><span>Strongest evidence</span><small>{{ candidate.ownedCore }}/{{ candidate.coreSize }} core signals archived</small></p>
+              <div>
+                <button
+                  v-for="evidence in candidate.evidence.slice(0, 7)"
+                  :key="evidence.item.record"
+                  type="button"
+                  :class="{ owned: evidence.owned, missing: !evidence.owned }"
+                  :title="evidence.reasons.join(' · ')"
+                  @mouseenter="queueTooltip(evidence.item, $event)"
+                  @mousemove="moveTooltip"
+                  @mouseleave="scheduleTooltipHide"
+                  @focus="queueTooltip(evidence.item, $event)"
+                  @blur="scheduleTooltipHide"
+                  @click="openItem(evidence.item)"
+                >
+                  <img v-if="itemIconUrl(evidence.item)" :src="itemIconUrl(evidence.item)!" alt="" />
+                  <span><strong>{{ evidence.item.name }}</strong><small>{{ evidence.owned ? 'Archived' : 'Missing' }} · {{ evidence.reasons.slice(0, 2).join(' · ') }}</small></span>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="candidate.conflicts.length" class="oracle-conflicts">
+              <strong>Choices required</strong>
+              <span v-for="conflict in candidate.conflicts" :key="conflict">{{ conflict }}</span>
+            </div>
+            <div v-if="candidate.relatedSkills.length" class="oracle-related">
+              <small>Also supported</small><span v-for="skill in candidate.relatedSkills" :key="skill">{{ skill }}</span>
+            </div>
+            <footer>
+              <button type="button" @click="sendOracleCandidateToPlanner(candidate)">Build a shopping list</button>
+              <button type="button" @click="selectedSkill = candidate.skill; activeView = 'skills'">Inspect {{ candidate.skill }}</button>
+            </footer>
+          </article>
+        </div>
+        <div v-else class="oracle-empty">
+          <strong>The Oracle found no coherent signal with these filters.</strong>
+          <p>Try a lower item-level floor, another mastery, or “Surprise me.” One archived supporting item is enough to seed a wild card.</p>
+          <button type="button" @click="surpriseMeWithOracle">Clear filters</button>
+        </div>
+        <button
+          v-if="filteredOracleCandidates.length > visibleOracleCandidates.length"
+          type="button"
+          class="oracle-more"
+          @click="oracleVisibleCount += 12"
+        >Show 12 more</button>
       </section>
 
       <section v-else-if="activeView === 'planner'" class="leveling-planner" aria-label="Character leveling shopping list">

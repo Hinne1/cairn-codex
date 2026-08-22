@@ -771,6 +771,7 @@ async function executeLiveAugmentDispense(
   const receiptPaths: string[] = []
   const dispensed: typeof selected = []
   const issues: string[] = []
+  const queued: Array<{ item: (typeof selected)[number]; queue: LiveRetrievalQueue }> = []
   for (const [index, item] of selected.entries()) {
     try {
       const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
@@ -779,32 +780,46 @@ async function executeLiveAugmentDispense(
         destination: 'character-inventory',
         item: createSupplyPayload(item.record)
       })
-      const deadline = Date.now() + 30_000
-      let receiptPath: string | null = null
-      while (Date.now() < deadline && !receiptPath) {
-        const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
-        if (result.state === 'rejected') {
-          if (result.receiptPath) {
-            await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-              path: result.receiptPath,
-              expectedSha256: queue.semanticSha256,
-              receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-personal-deliveries')
-            })
-          }
-          throw new Error(`${activeCharacter.name}'s personal inventory is full. No rejected augment was lost.`)
-        }
-        if (result.state === 'deposited' && result.receiptPath) receiptPath = result.receiptPath
-        if (!receiptPath) await new Promise((resolve) => setTimeout(resolve, 200))
-      }
-      if (!receiptPath) throw new Error('Timed out waiting for Grim Dawn to acknowledge the personal-inventory delivery.')
-      receiptPaths.push(receiptPath)
-      dispensed.push(item)
+      queued.push({ item, queue })
     } catch (error) {
-      if (dispensed.length === 0) throw error
       issues.push(error instanceof Error ? error.message : String(error))
       break
     }
   }
+  if (queued.length === 0) throw new Error(issues[0] ?? 'No augments could be queued for delivery.')
+
+  const pending = new Map(queued.map((entry) => [entry.queue.operationId, entry]))
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline && pending.size > 0) {
+    for (const [pendingId, entry] of [...pending.entries()]) {
+      try {
+        const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue: entry.queue })
+        if (result.state === 'rejected') {
+          if (result.receiptPath) {
+            await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+              path: result.receiptPath,
+              expectedSha256: entry.queue.semanticSha256,
+              receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-personal-deliveries')
+            })
+          }
+          issues.push(`${activeCharacter.name}'s personal inventory is full. No rejected augment was lost.`)
+          pending.delete(pendingId)
+        } else if (result.state === 'deposited' && result.receiptPath) {
+          receiptPaths.push(result.receiptPath)
+          dispensed.push(entry.item)
+          pending.delete(pendingId)
+        }
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : String(error))
+        pending.delete(pendingId)
+      }
+    }
+    if (pending.size > 0) await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  if (pending.size > 0) {
+    issues.push(`Timed out waiting for Grim Dawn to acknowledge ${pending.size} personal-inventory ${pending.size === 1 ? 'delivery' : 'deliveries'}. Do not retry until Cairn resolves the pending queue.`)
+  }
+  if (dispensed.length === 0 && issues.length > 0) throw new Error(issues[0])
 
   return {
     operationId,

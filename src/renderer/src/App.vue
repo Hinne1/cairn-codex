@@ -2551,8 +2551,9 @@ async function retrieveSupplies(): Promise<void> {
   }
   if (factionAugments.length > 0) {
     const names = factionAugments.map((item) => item.name)
+    const manifest = names.map((name) => `• ${name}`).join('\n')
     const confirmed = window.confirm(
-      `Dispense ${names.length} faction augment${names.length === 1 ? '' : 's'} directly to ${activeCharacter.value?.name ?? 'the active character'}? Cairn will re-check that character's current reputation first.`
+      `Dispense exactly ${names.length} faction augment${names.length === 1 ? '' : 's'} directly to ${activeCharacter.value?.name ?? 'the active character'}?\n\n${manifest}\n\nCairn will re-check that character's current reputation first.`
     )
     if (!confirmed) return
     vaultBusy.value = true
@@ -2565,9 +2566,10 @@ async function retrieveSupplies(): Promise<void> {
       )
       const delivered = new Set(result.dispensed.map((item) => `augment:${item.record}`))
       selectedSupplyIds.value = selectedSupplyIds.value.filter((id) => !delivered.has(id))
+      const deliveredNames = result.dispensed.map((item) => item.name).join(', ')
       vaultMessage.value = result.issues.length
-        ? `Delivered ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} to ${result.activeCharacter}; stopped safely: ${result.issues[0]}`
-        : `Delivered ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} directly to ${result.activeCharacter}.`
+        ? `Delivered ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} to ${result.activeCharacter} (${deliveredNames}); stopped safely: ${result.issues[0]}`
+        : `Delivered exactly ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} directly to ${result.activeCharacter}: ${deliveredNames}.`
     } catch (error) {
       vaultError.value = readableError(error)
       return

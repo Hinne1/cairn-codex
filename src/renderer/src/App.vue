@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   buildStashOracle,
-  oracleMasteries,
   type OracleReadiness,
   type OracleStyle
 } from './stash-oracle'
@@ -174,7 +173,7 @@ const plannerOwnership = ref<OwnershipFilter>('all')
 const plannerIgnoredRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-ignored-records'))
 const plannerFavoriteRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-favorite-records'))
 const plannerShowIgnored = ref(false)
-const oracleMastery = ref(localStorage.getItem('cairn-codex-oracle-mastery') ?? 'all')
+const oracleClass = ref(localStorage.getItem('cairn-codex-oracle-class') ?? 'all')
 const oracleStyle = ref<OracleStyle>(readStoredOracleStyle())
 const oracleReadiness = ref<'all' | OracleReadiness>('all')
 const oracleMinimumLevel = ref(readStoredNumber('cairn-codex-oracle-minimum-level', 65, 1, 100))
@@ -814,19 +813,23 @@ const skillNames = computed(() => {
   return [...names].sort((left, right) => left.localeCompare(right))
 })
 
-const oracleMasteryOptions = computed(() => oracleMasteries(plannerCatalogItems.value))
-const oracleCandidates = computed(() => buildStashOracle(
+const allOracleCandidates = computed(() => buildStashOracle(
   plannerCatalogItems.value,
   isArchivedItem,
   {
     minimumLevel: Math.min(oracleMinimumLevel.value, oracleMaximumLevel.value),
     maximumLevel: Math.max(oracleMinimumLevel.value, oracleMaximumLevel.value),
-    mastery: oracleMastery.value,
+    mastery: 'all',
     style: oracleStyle.value,
     skillMasteries: snapshot.value?.skillMasteries,
     skillClassNames: snapshot.value?.skillClassNames
   }
 ))
+const oracleClassOptions = computed(() => [...new Set(allOracleCandidates.value.map((candidate) => candidate.className))]
+  .sort((left, right) => left.localeCompare(right)))
+const oracleCandidates = computed(() => oracleClass.value === 'all'
+  ? allOracleCandidates.value
+  : allOracleCandidates.value.filter((candidate) => normalizeLoose(candidate.className) === normalizeLoose(oracleClass.value)))
 const filteredOracleCandidates = computed(() => {
   const needle = normalizeLoose(oracleQuery.value)
   return oracleCandidates.value.filter((candidate) => {
@@ -1531,11 +1534,11 @@ watch(sortMode, (mode) => {
 
 watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
 watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
-watch(oracleMastery, (mastery) => localStorage.setItem('cairn-codex-oracle-mastery', mastery))
+watch(oracleClass, (className) => localStorage.setItem('cairn-codex-oracle-class', className))
 watch(oracleStyle, (style) => localStorage.setItem('cairn-codex-oracle-style', style))
 watch(oracleMinimumLevel, (level) => localStorage.setItem('cairn-codex-oracle-minimum-level', String(level)))
 watch(oracleMaximumLevel, (level) => localStorage.setItem('cairn-codex-oracle-maximum-level', String(level)))
-watch([oracleMastery, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleQuery], () => {
+watch([oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleQuery], () => {
   oracleVisibleCount.value = 12
 })
 watch(selectedRecord, () => {
@@ -2237,7 +2240,7 @@ function openStashOracle(): void {
 }
 
 function surpriseMeWithOracle(): void {
-  oracleMastery.value = 'all'
+  oracleClass.value = 'all'
   oracleStyle.value = 'all'
   oracleReadiness.value = 'all'
   oracleQuery.value = ''
@@ -3995,10 +3998,10 @@ function formatPercentile(value: number | null | undefined): string {
 
         <div class="oracle-controls">
           <label>
-            <span>Mastery</span>
-            <select v-model="oracleMastery">
-              <option value="all">Any mastery</option>
-              <option v-for="mastery in oracleMasteryOptions" :key="mastery" :value="mastery">{{ mastery }}</option>
+            <span>Class</span>
+            <select v-model="oracleClass">
+              <option value="all">Any class</option>
+              <option v-for="className in oracleClassOptions" :key="className" :value="className">{{ className }}</option>
             </select>
           </label>
           <label>

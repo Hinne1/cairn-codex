@@ -223,9 +223,11 @@ internal static class ItemCatalogBuilder
         var normalizedPath = record.Name.Replace('\\', '/');
         var isFactionBooster = record.Type == "ItemFactionBooster" &&
             normalizedPath.Contains("/items/faction/booster/", StringComparison.OrdinalIgnoreCase);
+        var isFactionWarrant = record.Type == "ItemFactionWarrant" &&
+            normalizedPath.Contains("/items/faction/booster/", StringComparison.OrdinalIgnoreCase);
         var isAugment = record.Type == "ItemEnchantment" &&
             normalizedPath.Contains("/items/enchants/", StringComparison.OrdinalIgnoreCase);
-        if ((!isFactionBooster && !isAugment) ||
+        if ((!isFactionBooster && !isFactionWarrant && !isAugment) ||
             normalizedPath.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
             IsCategoryTemplate(record.Name))
         {
@@ -238,7 +240,9 @@ internal static class ItemCatalogBuilder
             return null;
         }
 
-        var slot = isAugment
+        var slot = isFactionWarrant
+            ? "warrant"
+            : isAugment
             ? normalizedPath.Contains("/runes/", StringComparison.OrdinalIgnoreCase) ? "rune" : "augment"
             : name!.StartsWith("Mandate", StringComparison.OrdinalIgnoreCase) ? "mandate" : "writ";
         return new CatalogItem(

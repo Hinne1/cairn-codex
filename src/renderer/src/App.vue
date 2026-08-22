@@ -273,7 +273,7 @@ const reusableSupplyUnlocks = computed(() => {
     if (
       item.rarity !== 'supply' ||
       item.state !== 'ingested' ||
-      !['writ', 'mandate', 'rune'].includes(item.slot)
+      !['writ', 'mandate', 'warrant', 'rune'].includes(item.slot)
     ) continue
     const key = item.baseRecord.toLocaleLowerCase()
     if (!unique.has(key)) unique.set(key, item)
@@ -283,7 +283,7 @@ const reusableSupplyUnlocks = computed(() => {
 const reusableSupplySummary = computed<CollectionRaritySummary>(() => {
   const catalogRecords = new Set(
     (snapshot.value?.supplies ?? [])
-      .filter((item) => ['writ', 'mandate', 'rune'].includes(item.slot))
+      .filter((item) => ['writ', 'mandate', 'warrant', 'rune'].includes(item.slot))
       .map((item) => item.record.toLocaleLowerCase())
   )
   return {
@@ -376,7 +376,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
     if (!unique.has(key)) unique.set(key, item)
   }
   return [...unique.values()]
-    .filter((item) => item.slot === 'writ' || item.slot === 'mandate')
+    .filter((item) => ['writ', 'mandate', 'warrant'].includes(item.slot))
     .filter((item) => {
       if (!needle) return true
       const catalog = snapshot.value?.supplies?.find((entry) =>
@@ -2851,7 +2851,8 @@ function itemTypeLabel(item: CollectionItem): string {
     legs: 'Leg armor', feet: 'Feet', waist: 'Waist', ring: 'Ring', amulet: 'Amulet',
     medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon',
     component: 'Component', material: 'Crafting material', 'potion-formula': 'Potion formula',
-    augment: 'Augment', rune: 'Movement rune', writ: 'Faction writ', mandate: 'Faction mandate'
+    augment: 'Augment', rune: 'Movement rune', writ: 'Faction writ', mandate: 'Faction mandate',
+    warrant: 'Nemesis warrant'
   }
   return labels[item.slot] ?? item.slot
 }
@@ -3095,12 +3096,14 @@ function formatPresentationLine(line: ItemPresentationLine): string {
 }
 
 function supplyEffectLines(item: CollectionItem): string[] {
+  const flavor = item.presentation?.flavorText ? [item.presentation.flavorText] : []
   const direct = (item.presentation?.sections ?? [])
     .flatMap((section) => section.lines)
     .map(formatPresentationLine)
   const granted = item.presentation?.grantedSkill
-  if (!granted) return direct
+  if (!granted) return [...flavor, ...direct]
   return [
+    ...flavor,
     ...direct,
     `Grants ${granted.name}${granted.trigger ? ` (${granted.trigger})` : ''}`,
     ...granted.lines.map(formatPresentationLine)
@@ -4285,7 +4288,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div>
             <p class="section-label">Reusable collection</p>
             <h2>Supplies</h2>
-            <p>Archived writs and runes are reusable. Soulbound augments unlock per character from that character's faction reputation.</p>
+            <p>Archived writs, mandates, Nemesis warrants, and runes are reusable. Soulbound augments unlock per character from that character's faction reputation.</p>
           </div>
           <div class="tool-heading-summary">
             <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</strong>
@@ -4294,12 +4297,12 @@ function formatPercentile(value: number | null | undefined): string {
         </header>
         <div class="supply-toolbar">
           <div class="segmented-control" aria-label="Supply category">
-            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; selectedSupplyIds = []">Writs & mandates</button>
+            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; selectedSupplyIds = []">Writs, warrants & mandates</button>
             <button type="button" :class="{ active: supplyCategory === 'augments' }" @click="supplyCategory = 'augments'; selectedSupplyIds = []">Augments & runes</button>
           </div>
           <input v-model="reusableSupplyQuery" type="search" placeholder="Filter names, effects, factions…" />
           <button type="button" :disabled="!supplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>
-          <button v-if="supplyCategory === 'writs'" type="button" :disabled="vaultBusy || !supplyVaultItems.length" @click="dispenseAllWrits">Dispense all unlocked writs</button>
+          <button v-if="supplyCategory === 'writs'" type="button" :disabled="vaultBusy || !supplyVaultItems.length" @click="dispenseAllWrits">Dispense all unlocked faction boosts</button>
         </div>
         <div class="supply-status">
           <span :class="'state-' + connectionColorState">{{ transferMode === 'live' ? gameConnectionLabel : writeSafety?.permitted ? 'Offline staging ready' : 'Offline staging locked' }}</span>
@@ -4322,6 +4325,9 @@ function formatPercentile(value: number | null | undefined): string {
             @focusout="scheduleTooltipHide"
           >
             <input type="checkbox" :checked="selectedSupplyIds.includes(item.id)" :disabled="vaultBusy || !item.eligible" @change="toggleSupply(item.id)" />
+            <span class="supply-icon">
+              <img v-if="item.catalogItem && itemIconUrl(item.catalogItem)" :src="itemIconUrl(item.catalogItem)!" alt="" />
+            </span>
             <span class="supply-card-copy">
               <strong>{{ item.name }}</strong>
               <small>{{ item.detail }}</small>
@@ -4506,7 +4512,7 @@ function formatPercentile(value: number | null | undefined): string {
               />
               <span>
                 <strong>Infinite supplies</strong>
-                <small>Keep an unlocked writ, mandate, augment, or movement rune after dispensing one copy.</small>
+                <small>Keep an unlocked writ, mandate, Nemesis warrant, augment, or movement rune after dispensing one copy.</small>
               </span>
             </label>
             <small v-if="infiniteSupplies">Each return emits one unit; the archived unlock remains available.</small>
@@ -4555,7 +4561,7 @@ function formatPercentile(value: number | null | undefined): string {
           <header>
             <div>
               <p>Stored supplies</p>
-              <h3>Writs, mandates, augments, and runes</h3>
+              <h3>Writs, mandates, Nemesis warrants, augments, and runes</h3>
             </div>
             <strong>{{ supplyVaultItems.length }}</strong>
           </header>
@@ -4637,7 +4643,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div v-if="liveStatus?.state === 'ready'" class="live-ready-instructions">
             <strong>{{ liveSyncing ? 'Checking queue…' : `Watching the ${liveStatus.ingestTabDescription}` }}</strong>
             <small>Retrieval target: {{ liveStatus.depositTabDescription }}.</small>
-              <small>Place equipment, writs, mandates, augments, or movement runes in the watched tab.</small>
+              <small>Place equipment, writs, mandates, Nemesis warrants, augments, or movement runes in the watched tab.</small>
           </div>
         </section>
         <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>

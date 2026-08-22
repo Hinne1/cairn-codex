@@ -36,7 +36,7 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 21
+const CATALOG_PRESENTATION_VERSION = 22
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
@@ -1457,7 +1457,7 @@ async function runSmokeTest(
     if (
       !liveQueue.passed ||
       liveQueue.fields !== 17 ||
-      liveQueue.hookSha256 !== '3280adfefa5a041e1b6bcb8bb4730ca1928b603ebaf811bef5fc653eeb2e6df7' ||
+      liveQueue.hookSha256 !== 'a4af98f66c755eb4a88581f4f1fc7df7145575566a5fcba5b77eb37918e8134f' ||
       liveQueue.injectorSha256 !== '569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c'
     ) {
       throw new Error('Live queue serializer self-test failed.')
@@ -1467,6 +1467,7 @@ async function runSmokeTest(
     const materials = helperSnapshot.materials ?? []
     const writ = supplies.find((item) => item.slot === 'writ')
     const mandate = supplies.find((item) => item.slot === 'mandate')
+    const warrant = supplies.find((item) => item.slot === 'warrant')
     const augment = supplies.find((item) => item.slot === 'augment')
     const movementRune = supplies.find((item) => item.slot === 'rune')
     if (
@@ -1474,10 +1475,11 @@ async function runSmokeTest(
       supplies.some((item) => item.rarity !== 'supply') ||
       !writ ||
       !mandate ||
+      !warrant ||
       !augment ||
       !movementRune
     ) {
-      throw new Error('Reusable supply catalog did not include writs, mandates, augments, and movement runes.')
+      throw new Error('Reusable supply catalog did not include writs, mandates, warrants, augments, and movement runes.')
     }
     if (
       materials.filter((item) => item.rarity === 'component').length < 40 ||
@@ -1588,8 +1590,14 @@ async function runSmokeTest(
     )) {
       throw new Error('Map location index did not resolve scripted nemesis and summoned-boss campaign sources.')
     }
-    if (mapIndex.miTierCount - mapIndex.locatedMiTierCount > 32) {
-      throw new Error('Map location index lost an unexpected number of green item tiers.')
+    const shatteredRealmLocations = Object.values(mapIndex.sourceLocations)
+      .flat()
+      .filter((location) => location.levelFile.includes('/EndlessDungeon/'))
+    if (
+      mapIndex.miTierCount - mapIndex.locatedMiTierCount > 128 ||
+      shatteredRealmLocations.length > 0
+    ) {
+      throw new Error('Map location index retained Shattered Realm proxies or lost too many campaign item tiers.')
     }
     const flamebrand = helperSnapshot.items.find((item) => item.name === 'Flamebrand')
     const flamebrandFire = flamebrand?.presentation?.sections
@@ -1888,8 +1896,8 @@ async function runSmokeTest(
       items: [
         {
           vaultItemId: reusableVaultItemId,
-          baseRecord: augment.record,
-          payload: { baseRecord: augment.record, seed: 42, stackCount: 99 }
+          baseRecord: warrant.record,
+          payload: { baseRecord: warrant.record, seed: 42, stackCount: 99 }
         }
       ],
       detail: { phase: 'prepared', smokeTest: true, reusable: true }
@@ -1932,7 +1940,7 @@ async function runSmokeTest(
       !reusableAfterRetrieval.reusable ||
       listedReusable?.state !== 'ingested' ||
       !listedReusable.reusable ||
-      listedReusable.slot !== 'augment'
+      listedReusable.slot !== 'warrant'
     ) {
       throw new Error('Dispensing a reusable supply consumed its stored unlock.')
     }

@@ -822,7 +822,8 @@ const oracleCandidates = computed(() => buildStashOracle(
     minimumLevel: Math.min(oracleMinimumLevel.value, oracleMaximumLevel.value),
     maximumLevel: Math.max(oracleMinimumLevel.value, oracleMaximumLevel.value),
     mastery: oracleMastery.value,
-    style: oracleStyle.value
+    style: oracleStyle.value,
+    skillMasteries: snapshot.value?.skillMasteries
   }
 ))
 const filteredOracleCandidates = computed(() => {
@@ -837,6 +838,7 @@ const filteredOracleCandidates = computed(() => {
       candidate.style,
       ...candidate.masteries,
       ...candidate.relatedSkills,
+      ...candidate.sets.map((set) => set.name),
       ...candidate.evidence.flatMap((evidence) => [evidence.item.name, ...evidence.reasons])
     ].join(' ')).includes(needle)
   })
@@ -2213,6 +2215,11 @@ function openSets(): void {
   query.value = ''
   rarityFilter.value = 'all'
   setProgressFilter.value = 'all'
+}
+
+function openOracleSet(name: string): void {
+  openSets()
+  query.value = name
 }
 
 function openMaterials(category: MaterialCategory = 'all'): void {
@@ -4043,9 +4050,17 @@ function formatPercentile(value: number | null | undefined): string {
             <p class="oracle-summary">{{ candidate.summary }}</p>
 
             <div v-if="candidate.sets.length" class="oracle-set-progress">
-              <span v-for="set in candidate.sets" :key="set.name" :class="{ complete: set.owned === set.total }">
-                <strong>{{ set.name }}</strong><small>{{ set.owned }}/{{ set.total }}</small>
-              </span>
+              <button
+                v-for="set in candidate.sets"
+                :key="set.name"
+                type="button"
+                :class="{ complete: set.owned === set.total }"
+                :title="`Open ${set.name} and inspect every set bonus`"
+                @click="openOracleSet(set.name)"
+              >
+                <strong>{{ set.name }}</strong>
+                <small>{{ set.owned }}/{{ set.total }}<template v-if="!set.capstoneUnlocked"> · capstone {{ set.capstonePieces }}</template></small>
+              </button>
             </div>
 
             <div class="oracle-evidence">

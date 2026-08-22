@@ -437,8 +437,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .oracle-score small { margin-top: 3px; color: #7f725c; font-size: 7px; letter-spacing: .06em; text-transform: uppercase; }
 .oracle-summary { min-height: 31px; margin: 11px 0; color: #8c8374; font-size: 10px; line-height: 1.5; }
 .oracle-set-progress { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
-.oracle-set-progress > span { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #4c422f; border-radius: 5px; background: rgba(53,43,27,.52); }
-.oracle-set-progress > span.complete { border-color: #786238; background: rgba(91,68,28,.4); }
+.oracle-set-progress > button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #4c422f; border-radius: 5px; background: rgba(53,43,27,.52); cursor: pointer; }
+.oracle-set-progress > button:hover { border-color: #8b7040; background: rgba(78,60,31,.6); }
+.oracle-set-progress > button.complete { border-color: #786238; background: rgba(91,68,28,.4); }
 .oracle-set-progress strong { color: #c7b083; font-size: 9px; }
 .oracle-set-progress small { color: #deb858; font-size: 8px; }
 .oracle-evidence { margin-top: 2px; }

@@ -155,6 +155,7 @@ internal static class ItemCatalogBuilder
             .OrderBy(affix => affix.Kind, StringComparer.OrdinalIgnoreCase)
             .ThenBy(affix => affix.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var skillMasteries = BuildSkillMasteries(data);
 
         return new ItemCatalogResult(
             data.InstallationPath,
@@ -165,8 +166,51 @@ internal static class ItemCatalogBuilder
             plannerItems,
             supplies,
             materials,
-            affixes);
+            affixes,
+            skillMasteries);
     }
+
+    private static IReadOnlyDictionary<string, string> BuildSkillMasteries(ItemCatalogData data)
+    {
+        var masteryByDirectory = data.Records.Values
+            .Where(source => source.Record.Type == "Skill_Mastery")
+            .Select(source => new
+            {
+                Directory = Path.GetDirectoryName(source.Record.Name.Replace('\\', '/'))?.Replace('\\', '/'),
+                Name = ResolveTag(source.Record.Text("skillDisplayName"), data.Tags)
+            })
+            .Where(value => !string.IsNullOrWhiteSpace(value.Directory) && !string.IsNullOrWhiteSpace(value.Name))
+            .ToDictionary(value => value.Directory!, value => value.Name!, StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in data.Records.Values)
+        {
+            var path = source.Record.Name.Replace('\\', '/');
+            var mastery = masteryByDirectory.FirstOrDefault(pair =>
+                path.StartsWith(pair.Key + "/", StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(mastery.Key)) continue;
+            var displayName = ResolveDisplaySkillName(source.Record.Name, data);
+            if (!string.IsNullOrWhiteSpace(displayName)) result.TryAdd(displayName, mastery.Value);
+        }
+        return result;
+    }
+
+    private static string? ResolveDisplaySkillName(string path, ItemCatalogData data)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (seen.Add(path) && data.Records.TryGetValue(path, out var source))
+        {
+            var resolved = ResolveTag(source.Record.Text("skillDisplayName"), data.Tags);
+            if (!string.IsNullOrWhiteSpace(resolved)) return resolved;
+            path = source.Record.Text("buffSkillName") ?? source.Record.Text("petSkillName") ?? string.Empty;
+            if (path.Length == 0) break;
+        }
+        return null;
+    }
+
+    private static string? ResolveTag(string? tag, IReadOnlyDictionary<string, string> tags) =>
+        tag is not null && tags.TryGetValue(tag, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
 
     private static CatalogItem? ProjectMaterial(
         CatalogSourceRecord source,
@@ -764,7 +808,8 @@ internal sealed record ItemCatalogResult(
     IReadOnlyList<CatalogItem> PlannerItems,
     IReadOnlyList<CatalogItem> Supplies,
     IReadOnlyList<CatalogItem> Materials,
-    IReadOnlyList<CatalogAffix> Affixes);
+    IReadOnlyList<CatalogAffix> Affixes,
+    IReadOnlyDictionary<string, string> SkillMasteries);
 
 internal sealed record CatalogContentPack(string Id, string DatabasePath, string TagsPath);
 

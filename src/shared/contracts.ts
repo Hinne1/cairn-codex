@@ -269,6 +269,7 @@ export interface CollectionSnapshot {
   supplies?: CollectionItem[]
   materials?: CollectionItem[]
   accountStores?: ScannedAccountStore[]
+  skillMasteries?: Record<string, string>
 }
 
 export interface ScannedAccountStore {

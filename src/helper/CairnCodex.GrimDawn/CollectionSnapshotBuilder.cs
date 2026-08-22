@@ -220,7 +220,8 @@ internal static class CollectionSnapshotBuilder
             supplies,
             materials,
             accountStores,
-            catalog.SkillMasteries);
+            catalog.SkillMasteries,
+            catalog.SkillClassNames);
     }
 }
 
@@ -239,7 +240,8 @@ internal sealed record CollectionSnapshot(
     IReadOnlyList<CollectionCatalogItem> Supplies,
     IReadOnlyList<CollectionCatalogItem> Materials,
     IReadOnlyList<ScannedAccountStore> AccountStores,
-    IReadOnlyDictionary<string, string> SkillMasteries);
+    IReadOnlyDictionary<string, string> SkillMasteries,
+    IReadOnlyDictionary<string, string> SkillClassNames);
 
 internal sealed record ScannedAccountStore(
     string Path,

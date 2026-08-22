@@ -156,6 +156,7 @@ internal static class ItemCatalogBuilder
             .ThenBy(affix => affix.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var skillMasteries = BuildSkillMasteries(data);
+        var skillClassNames = BuildSkillClassNames(data);
 
         return new ItemCatalogResult(
             data.InstallationPath,
@@ -167,7 +168,44 @@ internal static class ItemCatalogBuilder
             supplies,
             materials,
             affixes,
-            skillMasteries);
+            skillMasteries,
+            skillClassNames);
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildSkillClassNames(ItemCatalogData data)
+    {
+        var masteriesByNumber = data.Tags
+            .Where(pair => System.Text.RegularExpressions.Regex.IsMatch(
+                pair.Key,
+                "^tagSkillClassName\\d{2}$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            .ToDictionary(
+                pair => pair.Key[^2..],
+                pair => NormalizeClassName(pair.Value),
+                StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in data.Tags)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                pair.Key,
+                "^tagSkillClassName(\\d{2})(\\d{2})$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!match.Success ||
+                !masteriesByNumber.TryGetValue(match.Groups[1].Value, out var left) ||
+                !masteriesByNumber.TryGetValue(match.Groups[2].Value, out var right)) continue;
+            var key = string.Join("|", new[] { left, right }.OrderBy(value => value, StringComparer.OrdinalIgnoreCase));
+            result[key] = NormalizeClassName(pair.Value);
+        }
+        return result;
+    }
+
+    private static string NormalizeClassName(string value)
+    {
+        var gendered = System.Text.RegularExpressions.Regex.Match(
+            value,
+            "\\[ms\\](.*?)\\[fs\\]",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return (gendered.Success ? gendered.Groups[1].Value : value).Trim();
     }
 
     private static IReadOnlyDictionary<string, string> BuildSkillMasteries(ItemCatalogData data)
@@ -809,7 +847,8 @@ internal sealed record ItemCatalogResult(
     IReadOnlyList<CatalogItem> Supplies,
     IReadOnlyList<CatalogItem> Materials,
     IReadOnlyList<CatalogAffix> Affixes,
-    IReadOnlyDictionary<string, string> SkillMasteries);
+    IReadOnlyDictionary<string, string> SkillMasteries,
+    IReadOnlyDictionary<string, string> SkillClassNames);
 
 internal sealed record CatalogContentPack(string Id, string DatabasePath, string TagsPath);
 

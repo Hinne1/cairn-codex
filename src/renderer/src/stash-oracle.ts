@@ -9,6 +9,7 @@ export interface OracleOptions {
   mastery: string
   style: OracleStyle
   skillMasteries?: Record<string, string>
+  skillClassNames?: Record<string, string>
 }
 
 export interface OracleEvidence {
@@ -38,6 +39,7 @@ export interface OracleCandidate {
   ownedCore: number
   coreSize: number
   masteries: string[]
+  className: string
   relatedSkills: string[]
   evidence: OracleEvidence[]
   sets: OracleSetEvidence[]
@@ -50,6 +52,18 @@ interface SkillSignal {
   strength: number
   reasons: string[]
   modifierLines: ItemPresentationLine[]
+}
+
+interface OracleRow {
+  item: CollectionItem
+  signal: SkillSignal
+}
+
+interface MasteryVariant {
+  masteries: string[]
+  className: string
+  rows: OracleRow[]
+  affinities: Map<string, number>
 }
 
 const DAMAGE_TYPES = [
@@ -99,6 +113,9 @@ export function buildStashOracle(
   const exactSkillMasteries = new Map(
     Object.entries(options.skillMasteries ?? {}).map(([skill, mastery]) => [skill.toLocaleLowerCase(), mastery])
   )
+  const exactClassNames = new Map(
+    Object.entries(options.skillClassNames ?? {}).map(([pair, className]) => [normalizeMasteryPairKey(pair.split('|')), className])
+  )
   const candidates: OracleCandidate[] = []
   for (const [skill, allRows] of bySkill) {
     if (allRows.length < 2 && !allRows.some((row) => isOwned(row.item))) continue
@@ -121,13 +138,22 @@ export function buildStashOracle(
     ].filter((group) => group.rows.some((row) => isOwned(row.item)))
 
     for (const { anchorSet, rows } of rowGroups) {
-      const damageScores = scoreDamageTypes(rows, isOwned, anchorSet)
+      const masteryGroups = candidateMasteryVariants(
+        skill,
+        rows,
+        exactSkillMasteries,
+        exactClassNames,
+        isOwned,
+        anchorSet
+      )
+      for (const masteryGroup of masteryGroups) {
+      const damageScores = scoreDamageTypes(masteryGroup.rows, isOwned, anchorSet)
       const selectedDamageVariants = selectDamageVariants(damageScores)
       const damageVariants = anchorSet && selectedDamageVariants.length > 1
         ? [selectedDamageVariants.join(' / ')]
         : selectedDamageVariants
       for (const damageType of damageVariants) {
-        const evidence = rows
+        const evidence = masteryGroup.rows
         .map(({ item, signal }) => {
           const owned = isOwned(item)
           const affinity = damageAffinity(item, signal, damageType, anchorSet)
@@ -140,7 +166,8 @@ export function buildStashOracle(
           return {
             item,
             owned,
-            strength: signal.strength + affinity + (set?.owned ?? 0) * 0.8,
+            strength: signal.strength + affinity + (set?.owned ?? 0) * 0.8 +
+              (masteryGroup.affinities.get(item.record) ?? 0),
             reasons: [...new Set(reasons)],
             damageTypes: signalDamageTypes(item, signal, anchorSet)
           }
@@ -160,8 +187,8 @@ export function buildStashOracle(
         )
         if (evidence.length === 0) continue
 
-        const style = inferStyle(skill, rows.map((row) => row.signal))
-        const masteries = candidateMasteries(skill, evidence.map((row) => row.item), exactSkillMasteries, anchorSet)
+        const style = inferStyle(skill, masteryGroup.rows.map((row) => row.signal))
+        const masteries = masteryGroup.masteries
         if (options.mastery !== 'all' && !masteries.some((value) => sameText(value, options.mastery))) continue
         if (options.style !== 'all' && style !== options.style) continue
 
@@ -193,7 +220,7 @@ export function buildStashOracle(
         const summary = candidateSummary({ skill, damageType, style, ownedCore, coreSize: core.length, candidateSets, conflicts })
 
         candidates.push({
-          key: `${skill}|${damageType}|${style}|${anchorSet ?? 'loose'}`.toLocaleLowerCase(),
+          key: `${skill}|${damageType}|${style}|${anchorSet ?? 'loose'}|${masteryGroup.className}`.toLocaleLowerCase(),
           title: `${damageType === 'General' ? '' : `${damageType} `}${skill}`.trim(),
           skill,
           damageType,
@@ -204,12 +231,14 @@ export function buildStashOracle(
           ownedCore,
           coreSize: core.length,
           masteries,
+          className: masteryGroup.className,
           relatedSkills,
           evidence: evidence.slice(0, 10),
           sets: candidateSets,
           conflicts,
           summary
         })
+      }
       }
     }
   }
@@ -329,31 +358,90 @@ function itemMasteries(item: CollectionItem): string[] {
   return [...result]
 }
 
-function candidateMasteries(
+function candidateMasteryVariants(
   skill: string,
-  items: CollectionItem[],
+  rows: OracleRow[],
   skillMasteries: Map<string, string>,
+  classNames: Map<string, string>,
+  isOwned: (item: CollectionItem) => boolean,
   anchorSet: string | null
-): string[] {
+): MasteryVariant[] {
   const primary = skillMasteries.get(skill.toLocaleLowerCase())
-  const secondaryScores = new Map<string, number>()
-  for (const item of items) {
+  if (!primary) return [{ masteries: [], className: 'Unresolved class', rows, affinities: new Map() }]
+
+  const itemScores = new Map<string, Map<string, number>>()
+  const aggregateScores = new Map<string, number>()
+  for (const { item } of rows) {
+    const secondaryScores = new Map<string, number>()
     for (const mastery of itemMasteries(item)) {
-      secondaryScores.set(mastery, (secondaryScores.get(mastery) ?? 0) + (item.setName === anchorSet ? 12 : 2))
+      if (!sameText(mastery, primary)) {
+        secondaryScores.set(mastery, (secondaryScores.get(mastery) ?? 0) + (item.setName === anchorSet ? 12 : 3))
+      }
     }
     for (const signal of itemSkillSignals(item)) {
       if (sameText(signal.skill, skill)) continue
       const mastery = skillMasteries.get(signal.skill.toLocaleLowerCase())
-      if (mastery) {
-        secondaryScores.set(mastery, (secondaryScores.get(mastery) ?? 0) + signal.strength)
+      if (mastery && !sameText(mastery, primary)) {
+        const directBonus = signal.modifierLines.length > 0 ? 8 : 0
+        secondaryScores.set(mastery, (secondaryScores.get(mastery) ?? 0) + signal.strength + directBonus)
       }
     }
+    itemScores.set(item.record, secondaryScores)
+    const ownershipWeight = isOwned(item) ? 1.8 : 1
+    const anchorWeight = anchorSet && item.setName === anchorSet ? 1.5 : 1
+    for (const [mastery, score] of secondaryScores) {
+      aggregateScores.set(mastery, (aggregateScores.get(mastery) ?? 0) + score * ownershipWeight * anchorWeight)
+    }
   }
-  if (primary) secondaryScores.delete(primary)
-  const secondary = [...secondaryScores.keys()].sort((left, right) =>
-    (secondaryScores.get(right) ?? 0) - (secondaryScores.get(left) ?? 0) || left.localeCompare(right)
-  )[0]
-  return [primary, secondary].filter((value): value is string => Boolean(value))
+
+  const ordered = [...aggregateScores].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+  const bestScore = ordered[0]?.[1] ?? 0
+  const broadSecondaries = ordered
+    .filter(([, score]) => score >= Math.max(4, bestScore * 0.34))
+    .slice(0, 3)
+    .map(([mastery]) => mastery)
+  const ownedExplicitSecondaries = rows
+    .filter(({ item }) => isOwned(item))
+    .flatMap(({ item }) => itemMasteries(item))
+    .filter((mastery) => !sameText(mastery, primary))
+  const secondaries = [...new Set([...broadSecondaries, ...ownedExplicitSecondaries])]
+    .sort((left, right) =>
+      (aggregateScores.get(right) ?? 0) - (aggregateScores.get(left) ?? 0) || left.localeCompare(right)
+    )
+    .slice(0, 6)
+  if (secondaries.length === 0) {
+    return [{ masteries: [primary], className: primary, rows, affinities: new Map() }]
+  }
+
+  return secondaries.map((secondary) => {
+    const compatibleRows = rows.filter(({ item }) => {
+      const scores = itemScores.get(item.record) ?? new Map()
+      if (scores.size === 0) return true
+      const itemBest = Math.max(...scores.values())
+      // A cross-mastery item belongs to the class whose skills it actually modifies.
+      // Generic +all-skills lines may keep a tie alive, but must not make a strongly
+      // Soldier-shaped item such as Guardian of Death's Gates look Cabalist-shaped.
+      return (scores.get(secondary) ?? 0) >= itemBest * 0.72
+    })
+    const affinities = new Map<string, number>()
+    for (const { item } of compatibleRows) {
+      const scores = itemScores.get(item.record) ?? new Map()
+      const itemBest = Math.max(1, ...scores.values())
+      affinities.set(item.record, Math.min(8, ((scores.get(secondary) ?? 0) / itemBest) * 8))
+    }
+    const masteries = [primary, secondary]
+    const className = classNames.get(normalizeMasteryPairKey(masteries)) ?? `${primary} + ${secondary}`
+    return { masteries, className, rows: compatibleRows, affinities }
+  }).filter((variant) => variant.rows.some((row) => isOwned(row.item)))
+}
+
+function normalizeMasteryPairKey(masteries: string[]): string {
+  return masteries
+    .map((mastery) => mastery.trim())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right))
+    .join('|')
+    .toLocaleLowerCase()
 }
 
 function scoreDamageTypes(

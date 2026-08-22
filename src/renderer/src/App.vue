@@ -823,7 +823,8 @@ const oracleCandidates = computed(() => buildStashOracle(
     maximumLevel: Math.max(oracleMinimumLevel.value, oracleMaximumLevel.value),
     mastery: oracleMastery.value,
     style: oracleStyle.value,
-    skillMasteries: snapshot.value?.skillMasteries
+    skillMasteries: snapshot.value?.skillMasteries,
+    skillClassNames: snapshot.value?.skillClassNames
   }
 ))
 const filteredOracleCandidates = computed(() => {
@@ -836,6 +837,7 @@ const filteredOracleCandidates = computed(() => {
       candidate.skill,
       candidate.damageType,
       candidate.style,
+      candidate.className,
       ...candidate.masteries,
       ...candidate.relatedSkills,
       ...candidate.sets.map((set) => set.name),
@@ -4042,7 +4044,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <h3>{{ candidate.title }}</h3>
                 <p>
                   <span>{{ oracleStyleLabel(candidate.style) }}</span>
-                  <span v-for="mastery in candidate.masteries" :key="mastery">{{ mastery }}</span>
+                  <span :title="candidate.masteries.join(' + ')">{{ candidate.className }}</span>
                 </p>
               </div>
               <div class="oracle-score" :title="candidate.summary"><strong>{{ candidate.score }}</strong><small>stash fit</small></div>

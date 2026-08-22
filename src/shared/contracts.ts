@@ -270,6 +270,7 @@ export interface CollectionSnapshot {
   materials?: CollectionItem[]
   accountStores?: ScannedAccountStore[]
   skillMasteries?: Record<string, string>
+  skillClassNames?: Record<string, string>
 }
 
 export interface ScannedAccountStore {

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Text.RegularExpressions;
 using CairnCodex.GrimDawn.Gdia.GameData;
 
 namespace CairnCodex.GrimDawn;
@@ -31,6 +32,7 @@ internal static class MapLocationIndexer
                     }
                     locations.Add(new MapRegionLocation(
                         region.Name,
+                        region.RouteName,
                         region.ZoneRecord,
                         region.LevelFile,
                         region.ContentPack,
@@ -74,7 +76,7 @@ internal static class MapLocationIndexer
             })
             .ToArray();
         return new MapLocationIndexResult(
-            7,
+            8,
             DateTimeOffset.UtcNow,
             fingerprints,
             scannedRegions,
@@ -111,7 +113,7 @@ internal static class MapLocationIndexer
             {
                 if (sourceLocations.ContainsKey(sourceRecord)) continue;
                 sourceLocations[sourceRecord] =
-                [new MapRegionLocation(name, "", "", item.ContentPack, 0, 0)];
+                [new MapRegionLocation(name, "", "", "", item.ContentPack, 0, 0)];
             }
         }
     }
@@ -123,14 +125,21 @@ internal static class MapLocationIndexer
     {
         var result = new HashSet<MapRegionLocation>();
         AddScriptedNemesisLocations(monsterRecord, placements, result);
+        if (result.Count > 0) return SortLocations(result);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { monsterRecord };
         var queue = new Queue<(string Record, int Depth)>();
         queue.Enqueue((monsterRecord, 0));
+        var nearestPlacementDepth = int.MaxValue;
         while (queue.Count > 0 && visited.Count <= 1_000)
         {
             var (target, depth) = queue.Dequeue();
-            if (placements.TryGetValue(target, out var direct)) result.UnionWith(direct);
-            if (depth >= 8) continue;
+            if (depth > nearestPlacementDepth) break;
+            if (placements.TryGetValue(target, out var direct))
+            {
+                result.UnionWith(direct.Where(IsCampaignFarmLocation));
+                if (result.Count > 0) nearestPlacementDepth = depth;
+            }
+            if (depth >= 8 || depth >= nearestPlacementDepth) continue;
             foreach (var source in reverse.GetValueOrDefault(target) ?? [])
             {
                 if (!IsPlacementBridge(source) || !visited.Add(source))
@@ -138,6 +147,15 @@ internal static class MapLocationIndexer
                 queue.Enqueue((source, depth + 1));
             }
         }
+        return SortLocations(result);
+    }
+
+    private static bool IsCampaignFarmLocation(MapRegionLocation location) =>
+        !location.LevelFile.Contains("/EndlessDungeon/", StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<MapRegionLocation> SortLocations(IEnumerable<MapRegionLocation> locations)
+    {
+        var result = locations.ToArray();
         var presentable = result
             .Where(location => !string.IsNullOrWhiteSpace(location.ZoneRecord))
             .ToArray();
@@ -266,8 +284,10 @@ internal static class MapLocationIndexer
             var levelFile = ReadSizedString(reader);
             var levelOffset = reader.ReadUInt32();
             var levelLength = reader.ReadUInt32();
+            var routeName = ResolveRouteName(zoneRecord, levelFile, data);
             result.Add(new MapRegion(
-                ResolveRegionName(zoneRecord, levelFile, data),
+                ResolveRegionName(levelFile, routeName),
+                routeName,
                 zoneRecord,
                 levelFile,
                 ResolveRegionContentPack(zoneRecord, levelFile, contentPack),
@@ -303,7 +323,7 @@ internal static class MapLocationIndexer
         return fallback;
     }
 
-    private static string ResolveRegionName(string zoneRecord, string levelFile, ItemCatalogData data)
+    private static string ResolveRouteName(string zoneRecord, string levelFile, ItemCatalogData data)
     {
         if (data.Records.TryGetValue(zoneRecord, out var source))
         {
@@ -316,6 +336,38 @@ internal static class MapLocationIndexer
         }
         var file = Path.GetFileNameWithoutExtension(levelFile).Replace('_', ' ').Trim();
         return file.Length > 0 ? file : "Unknown region";
+    }
+
+    private static string ResolveRegionName(string levelFile, string routeName)
+    {
+        var normalized = levelFile.Replace('\\', '/');
+        if (!normalized.Contains("/Undergrounds", StringComparison.OrdinalIgnoreCase) &&
+            !normalized.Contains("/Void/", StringComparison.OrdinalIgnoreCase) &&
+            !normalized.Contains("/SideAreas/", StringComparison.OrdinalIgnoreCase))
+            return routeName;
+
+        var stem = Path.GetFileNameWithoutExtension(normalized);
+        var lower = stem.ToLowerInvariant();
+        if (lower.StartsWith("regionug_beastrl_a", StringComparison.Ordinal)) return "Ancient Grove";
+        if (lower.StartsWith("regionug_beastrl_b", StringComparison.Ordinal)) return "Feral Thicket";
+        if (lower.StartsWith("regionug_beastrl_c", StringComparison.Ordinal)) return "Tainted Wood";
+        if (lower.StartsWith("regionug_lostoasis_rl", StringComparison.Ordinal)) return "Tomb of the Heretic";
+        if (lower.StartsWith("regionug_final_lavatomb", StringComparison.Ordinal)) return "Tomb of the Eldritch Sun";
+        if (lower.StartsWith("regionug_labratory", StringComparison.Ordinal)) return "Warden's Laboratory";
+
+        // Rift records in world001.map are route anchors, not region labels. A single
+        // anchor is shared by many caves, dungeons, and challenge-area chunks. When
+        // the game does not expose a localized area tag, a cleaned level-family name
+        // is less polished but truthful; RouteName remains available as navigation help.
+        stem = Regex.Replace(stem, @"_[A-Z]\d{2,3}$", "", RegexOptions.IgnoreCase);
+        stem = Regex.Replace(stem,
+            @"^(RegionUG_|RegionVoid_|UG_|Region_|SideArea_)",
+            "",
+            RegexOptions.IgnoreCase);
+        stem = stem.Replace('_', ' ');
+        stem = Regex.Replace(stem, @"(?<=[a-z0-9])(?=[A-Z])", " ");
+        stem = Regex.Replace(stem, @"\s+", " ").Trim();
+        return stem.Length > 0 ? stem : routeName;
     }
 
     private static IReadOnlySet<string> ScanPlacedRecords(Stream map, MapRegion region)
@@ -392,6 +444,7 @@ internal static class MapLocationIndexer
     private sealed record LevelArchive(string ContentPack, string Path);
     private sealed record MapRegion(
         string Name,
+        string RouteName,
         string ZoneRecord,
         string LevelFile,
         string ContentPack,
@@ -416,6 +469,7 @@ internal sealed record MapArchiveFingerprint(string Path, long Length, DateTime 
 
 internal sealed record MapRegionLocation(
     string Name,
+    string RouteName,
     string ZoneRecord,
     string LevelFile,
     string ContentPack,

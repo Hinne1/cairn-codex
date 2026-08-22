@@ -997,7 +997,7 @@ async function readMapLocationIndex(path: string): Promise<MapLocationIndex | nu
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as MapLocationIndex
     if (
-      parsed.version !== 7 ||
+      parsed.version !== 8 ||
       !Array.isArray(parsed.archives) ||
       !parsed.sourceLocations ||
       typeof parsed.sourceLocations !== 'object'
@@ -1063,7 +1063,7 @@ function attachMapLocations(
       )
       const unique = new Map<string, MapRegionLocation>()
       for (const location of locations) {
-        const key = location.name.toLocaleLowerCase()
+        const key = `${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
         if (!unique.has(key)) unique.set(key, location)
       }
       const distinctLocations = [...unique.values()]

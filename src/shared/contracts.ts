@@ -430,6 +430,7 @@ export interface ItemFactionRequirement {
 
 export interface MapRegionLocation {
   name: string
+  routeName?: string
   zoneRecord: string
   levelFile: string
   contentPack: string

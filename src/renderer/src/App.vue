@@ -859,7 +859,7 @@ const farmTargets = computed<FarmTarget[]>(() => {
     if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
     if (query && !matchesSearch(item, query)) continue
     for (const location of item.acquisition?.locations ?? []) {
-      const key = `${location.contentPack}:${location.zoneRecord || location.name}`.toLocaleLowerCase()
+      const key = `${location.contentPack}:${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
       const existing = grouped.get(key)
       if (existing) {
         if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
@@ -938,7 +938,7 @@ const atlasRegions = computed(() => {
   }>()
   for (const item of plannerMiItems.value) {
     for (const location of item.acquisition?.locations ?? []) {
-      const key = `${location.contentPack}:${location.name}`.toLocaleLowerCase()
+      const key = `${location.contentPack}:${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
       const existing = regions.get(key)
       if (existing) {
         if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
@@ -2874,8 +2874,11 @@ function contentPackShortLabel(contentPack: string): string {
     ?? contentPack.toLocaleUpperCase()
 }
 
-function locationDisplayName(location: Pick<MapRegionLocation, 'name' | 'contentPack'>): string {
-  return `${location.name} (${contentPackShortLabel(location.contentPack)})`
+function locationDisplayName(location: Pick<MapRegionLocation, 'name' | 'routeName' | 'contentPack'>): string {
+  const route = location.routeName && location.routeName.toLocaleLowerCase() !== location.name.toLocaleLowerCase()
+    ? ` · via ${location.routeName}`
+    : ''
+  return `${location.name} (${contentPackShortLabel(location.contentPack)})${route}`
 }
 
 function tooltipSources(item: CollectionItem): string[] {

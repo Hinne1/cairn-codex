@@ -228,6 +228,76 @@ export class CollectionDatabase {
     }))
   }
 
+  listQuarantineCatalogRecords(): string[] {
+    const rows = this.database
+      .prepare(`
+        SELECT record
+        FROM catalog_item
+        WHERE content_pack = 'cairn-quarantine'
+          AND name LIKE 'Quarantined item (%'
+        ORDER BY record
+      `)
+      .all() as Array<{ record: string }>
+    return rows.map((row) => row.record)
+  }
+
+  resolveQuarantineCatalogItems(items: ResolvedArchiveCatalogItem[]): {
+    releasedRecords: number
+    recoveryRecords: number
+    missingRecords: number
+  } {
+    if (items.length === 0) {
+      return { releasedRecords: 0, recoveryRecords: 0, missingRecords: 0 }
+    }
+    const update = this.database.prepare(`
+      UPDATE catalog_item
+      SET name = ?,
+          rarity = 'rare',
+          item_class = ?,
+          slot = ?,
+          level_requirement = ?,
+          item_level = ?,
+          bitmap = ?,
+          content_pack = ?,
+          updated_at_utc = ?
+      WHERE record = ?
+        AND content_pack = 'cairn-quarantine'
+    `)
+    let releasedRecords = 0
+    let recoveryRecords = 0
+    let missingRecords = 0
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const now = new Date().toISOString()
+      for (const item of items) {
+        if (!item.found) {
+          missingRecords += 1
+          continue
+        }
+        const contentPack = item.catalogEligible ? item.contentPack : 'cairn-quarantine'
+        const result = update.run(
+          item.name,
+          item.itemClass,
+          item.slot,
+          item.levelRequirement,
+          item.itemLevel,
+          item.bitmap,
+          contentPack,
+          now,
+          item.record
+        )
+        if (Number(result.changes) === 0) continue
+        if (item.catalogEligible) releasedRecords += 1
+        else recoveryRecords += 1
+      }
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+    return { releasedRecords, recoveryRecords, missingRecords }
+  }
+
   setVaultRollAnalyses(items: Array<{ id: string; rollAnalysis: ItemRollAnalysis }>): void {
     if (items.length === 0) return
     this.database.exec('BEGIN IMMEDIATE')
@@ -1384,6 +1454,21 @@ export interface ArchiveVaultItem {
   baseRecord: string
   payload: unknown
   rollAnalysis: ItemRollAnalysis | null
+}
+
+export interface ResolvedArchiveCatalogItem {
+  record: string
+  found: boolean
+  name: string
+  baseClassification: string
+  itemClass: string
+  slot: string
+  levelRequirement: number
+  itemLevel: number
+  bitmap: string | null
+  contentPack: string
+  catalogEligible: boolean
+  reason: string
 }
 
 export interface VaultImport {

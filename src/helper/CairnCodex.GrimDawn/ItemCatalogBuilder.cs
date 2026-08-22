@@ -12,6 +12,18 @@ internal static class ItemCatalogBuilder
 
     public static ItemCatalogResult Build(string installationPath) => Build(Load(installationPath));
 
+    public static ResolvedArchiveItem[] ResolveArchiveItems(
+        string installationPath,
+        IReadOnlyCollection<string> requestedRecords)
+    {
+        var data = Load(installationPath);
+        return requestedRecords
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(recordName => ResolveArchiveItem(data, recordName))
+            .OrderBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public static ItemCatalogData Load(string installationPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installationPath);
@@ -488,6 +500,71 @@ internal static class ItemCatalogBuilder
         record.Text("itemBitmap") ??
         record.Text("shardBitmap");
 
+    private static ResolvedArchiveItem ResolveArchiveItem(ItemCatalogData data, string recordName)
+    {
+        if (!data.Records.TryGetValue(recordName, out var source))
+        {
+            return new ResolvedArchiveItem(
+                recordName,
+                false,
+                Path.GetFileNameWithoutExtension(recordName),
+                "unknown",
+                string.Empty,
+                "unknown",
+                0,
+                0,
+                null,
+                "unknown",
+                false,
+                "The base record is not present in the installed game databases.");
+        }
+
+        var record = source.Record;
+        var classification = record.Text("itemClassification")?.ToLowerInvariant() ?? "unknown";
+        var itemClass = record.Text("Class") ?? record.Type;
+        var slot = NormalizeSlot(itemClass);
+        var nameParts = new[]
+        {
+            Resolve(record.Text("itemStyleTag"), data.Tags),
+            Resolve(record.Text("itemNameTag") ?? record.Text("description"), data.Tags),
+            Resolve(record.Text("itemQualityTag"), data.Tags)
+        }.Where(value => !string.IsNullOrWhiteSpace(value));
+        var name = string.Join(' ', nameParts).Trim();
+        if (name.Length == 0 ||
+            name.StartsWith("tag", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("records/", StringComparison.OrdinalIgnoreCase))
+        {
+            name = Path.GetFileNameWithoutExtension(record.Name);
+        }
+
+        var normalizedPath = record.Name.Replace('\\', '/');
+        var eligible = classification == "rare" &&
+            CollectionSlots.Contains(slot) &&
+            !normalizedPath.Contains("/enemygear/", StringComparison.OrdinalIgnoreCase) &&
+            !normalizedPath.Contains("/npcgear/", StringComparison.OrdinalIgnoreCase) &&
+            !normalizedPath.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) &&
+            !IsCategoryTemplate(record.Name);
+        var reason = eligible
+            ? "Valid Rare equipment base; archive storage is supported."
+            : classification == "common"
+                ? "Ordinary Common equipment base with affixes; retained in recovery to avoid generic-Rare archive clutter."
+                : $"The {classification} base is outside Cairn's supported archive categories.";
+
+        return new ResolvedArchiveItem(
+            record.Name,
+            true,
+            name,
+            classification,
+            itemClass,
+            slot,
+            checked((int)Math.Round(record.Number("levelRequirement") ?? 0)),
+            checked((int)Math.Round(record.Number("itemLevel") ?? 0)),
+            ItemBitmap(record),
+            source.ContentPack,
+            eligible,
+            reason);
+    }
+
     private static bool IsMonsterInfrequent(ArzRecord record) =>
         record.Values
             .Where(field => field.Key.StartsWith("augmentSkillName", StringComparison.OrdinalIgnoreCase))
@@ -875,6 +952,20 @@ internal sealed record ItemCatalogResult(
     IReadOnlyDictionary<string, string> SkillClassNames);
 
 internal sealed record CatalogContentPack(string Id, string DatabasePath, string TagsPath);
+
+internal sealed record ResolvedArchiveItem(
+    string Record,
+    bool Found,
+    string Name,
+    string BaseClassification,
+    string ItemClass,
+    string Slot,
+    int LevelRequirement,
+    int ItemLevel,
+    string? Bitmap,
+    string ContentPack,
+    bool CatalogEligible,
+    string Reason);
 
 internal sealed record CatalogItem(
     string Record,

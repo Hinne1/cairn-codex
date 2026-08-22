@@ -23,7 +23,10 @@ import {
   type WriteSafetyStatus
 } from '@shared/contracts'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
-import { CollectionDatabase } from './collection-database'
+import {
+  CollectionDatabase,
+  type ResolvedArchiveCatalogItem
+} from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 
 // Packaged GUI launches do not always have a durable console attached. Electron's
@@ -1281,6 +1284,7 @@ async function presentCollection(
   analyzeMissing = true,
   analysisLimit = Number.POSITIVE_INFINITY
 ): Promise<CollectionSnapshot> {
+  await resolveQuarantinedArchiveItems(helper, database, snapshot)
   const mode = lifetimeMode(snapshot)
   if (basis !== 'archive') {
     return withRecipeCollection(
@@ -1358,6 +1362,30 @@ async function presentCollection(
     rollHydrationPending: analyzeMissing
       ? Math.max(0, missingAnalysis.length - analysisBatch.length)
       : missingAnalysis.length
+  }
+}
+
+async function resolveQuarantinedArchiveItems(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  snapshot: CollectionSnapshot
+): Promise<void> {
+  const records = database.listQuarantineCatalogRecords()
+  const installationPath = snapshot.discovery.installations[0]?.path
+  if (records.length === 0 || !installationPath) return
+  try {
+    const resolved = await helper.request<ResolvedArchiveCatalogItem[]>('resolve-archive-items', {
+      installationPath,
+      records
+    })
+    const result = database.resolveQuarantineCatalogItems(resolved)
+    console.log(
+      `[quarantine-audit] released ${result.releasedRecords} valid Rare records; ` +
+      `retained ${result.recoveryRecords} generic records with resolved metadata; ` +
+      `${result.missingRecords} records were absent from the installed databases.`
+    )
+  } catch (error) {
+    console.warn('[quarantine-audit] Installed-data resolution failed; originals remain untouched.', error)
   }
 }
 
@@ -1490,12 +1518,38 @@ async function runSmokeTest(
     if (
       !liveQueue.passed ||
       liveQueue.fields !== 17 ||
-      liveQueue.hookSha256 !== 'a4af98f66c755eb4a88581f4f1fc7df7145575566a5fcba5b77eb37918e8134f' ||
+      liveQueue.hookSha256 !== '05db7fee0d7e22db13e4b9b8ce84f6cae8a4af439ae7730f2b961777f1954c07' ||
       liveQueue.injectorSha256 !== '569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c'
     ) {
       throw new Error('Live queue serializer self-test failed.')
     }
     const helperSnapshot = await helper.request<CollectionSnapshot>('scan-collection')
+    const installationPath = helperSnapshot.discovery.installations[0]?.path
+    if (!installationPath) throw new Error('Grim Dawn installation was not discovered.')
+    const quarantineResolution = await helper.request<ResolvedArchiveCatalogItem[]>(
+      'resolve-archive-items',
+      {
+        installationPath,
+        records: [
+          'records/items/gearaccessories/medals/b204a_medal.dbr',
+          'records/items/gearshoulders/a09_shoulder02.dbr'
+        ]
+      }
+    )
+    const rareResolution = quarantineResolution.find((item) =>
+      item.record.endsWith('/b204a_medal.dbr')
+    )
+    const genericResolution = quarantineResolution.find((item) =>
+      item.record.endsWith('/a09_shoulder02.dbr')
+    )
+    if (
+      rareResolution?.name !== "Brawler's Distinction" ||
+      !rareResolution.catalogEligible ||
+      genericResolution?.name !== 'Exalted Shoulderplates' ||
+      genericResolution.catalogEligible
+    ) {
+      throw new Error('Installed-data quarantine classification did not preserve archive boundaries.')
+    }
     const supplies = helperSnapshot.supplies ?? []
     const materials = helperSnapshot.materials ?? []
     const writ = supplies.find((item) => item.slot === 'writ')

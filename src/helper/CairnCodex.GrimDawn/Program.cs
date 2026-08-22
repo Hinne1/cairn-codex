@@ -31,6 +31,7 @@ while ((line = Console.ReadLine()) is not null)
             "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
             "list-characters" => ListCharacters(request),
             "build-item-catalog" => BuildItemCatalog(request),
+            "resolve-archive-items" => ResolveArchiveItems(request),
             "inspect-game-record" => InspectGameRecord(request),
             "inspect-game-records" => InspectGameRecords(request),
             "inspect-archive-text" => InspectArchiveText(request),
@@ -142,6 +143,15 @@ HelperResponse BuildItemCatalog(HelperRequest request)
     var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
         ?? throw new JsonException("build-item-catalog requires an installationPath parameter.");
     return HelperResponse.Success(request.Id, ItemCatalogBuilder.Build(parameters.InstallationPath));
+}
+
+HelperResponse ResolveArchiveItems(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<ResolveArchiveItemsRequest>(jsonOptions)
+        ?? throw new JsonException("resolve-archive-items requires installationPath and records parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        ItemCatalogBuilder.ResolveArchiveItems(parameters.InstallationPath, parameters.Records));
 }
 
 HelperResponse ListCharacters(HelperRequest request)
@@ -345,6 +355,7 @@ HelperResponse AnalyzeItemRolls(HelperRequest request)
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);
+internal sealed record ResolveArchiveItemsRequest(string InstallationPath, string[] Records);
 internal sealed record InspectGameRecordRequest(string InstallationPath, string Record);
 internal sealed record InspectArchiveTextRequest(
     string ArchivePath,

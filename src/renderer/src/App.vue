@@ -3242,8 +3242,10 @@ function formatPresentationLine(line: ItemPresentationLine): string {
 function supplyEffectLines(item: CollectionItem): string[] {
   const flavor = item.presentation?.flavorText ? [item.presentation.flavorText] : []
   const direct = (item.presentation?.sections ?? [])
-    .flatMap((section) => section.lines)
-    .map(formatPresentationLine)
+    .flatMap((section) => section.lines.map((line) => {
+      const formatted = formatPresentationLine(line)
+      return section.kind === 'pet' ? `Pets · ${formatted}` : formatted
+    }))
   const granted = item.presentation?.grantedSkill
   if (!granted) return [...flavor, ...direct]
   return [

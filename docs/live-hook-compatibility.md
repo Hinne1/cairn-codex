@@ -39,9 +39,9 @@ Build inputs:
 - Boost: `1.78.0`
 - Boost source SHA-256:
   `090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c`
-- Hook version: `1.5.9730.27067`
+- Hook version: `1.5.9731.18480`
 - Hook SHA-256:
-  `05db7fee0d7e22db13e4b9b8ce84f6cae8a4af439ae7730f2b961777f1954c07`
+  `6bceb80cd16b42a8c24fd787999dc9963a3c87a0cbccb8d040c9430c5dafd5f6`
 - Injector SHA-256:
   `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
 
@@ -53,6 +53,20 @@ path; a full inventory returns the untouched queue record to Cairn's incoming
 folder. Ordinary equipment, writs, and runes continue to use the shared-stash
 path. This isolates Cairn's data and keeps soulbound augments out of the shared
 stash entirely.
+
+The app-owned hook also replaces GDIA's blanket rejection of
+`records/items/misc/` with an exact allowlist for the four transferable
+difficulty merits. Champion's, Savior's, Challenger's, and Gladiator's Merits
+therefore enter Cairn's durable incoming queue, while unrelated special items
+remain untouched in the stash. Native archive and retrieval notifications are
+branded as Cairn Codex rather than Item Assistant.
+
+The only `misc` records admitted by that exception are:
+
+- `records/items/misc/difficultyunlock_elite.dbr`
+- `records/items/misc/difficultyunlock_ultimate.dbr`
+- `records/items/misc/dlc_crucible_epicunlock.dbr`
+- `records/items/misc/dlc_crucible_legendaryunlock.dbr`
 
 Grim Dawn `1.3.0.7` changed the exported `Player::GiveItemToCharacter` ABI from
 one boolean argument to two. Hook `1.5.9728.04731` still requested the old
@@ -87,7 +101,7 @@ time. On 2026-08-20, the bundled hook and injector fingerprints, compatibility
 inspection, injection, worker handshake, repeated ready-state inspection,
 clean disconnect, and game-process survival were verified against its exact
 `Game.dll`. Its first personal-inventory delivery exposed the changed native
-ABI on 2026-08-22. Hook `1.5.9730.27067` contains the ABI correction and safe
+ABI on 2026-08-22. Hook `1.5.9731.18480` contains the ABI correction and safe
 queue rollback, but still requires a live delivery round trip before personal
 delivery on this build is considered fully verified. Live mode remains
 explicitly opt-in because it mutates the running game process.

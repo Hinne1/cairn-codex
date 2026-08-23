@@ -20,7 +20,7 @@ internal sealed class LiveGameAdapter : IDisposable
     private const string CrashingRetailHookSha256 =
         "14e57644d5403819aebfb856053f28afbc40dcdc2d95d0d9a8c71eafdf707891";
     private const string VerifiedRetailHookSha256 =
-        "6bceb80cd16b42a8c24fd787999dc9963a3c87a0cbccb8d040c9430c5dafd5f6";
+        "556763606e341ce06c579d53bfba6c93d2e10ea6752fc3778f211ee4799af1d2";
     private const string VerifiedInjectorSha256 =
         "569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c";
     private static readonly IReadOnlyDictionary<string, string> VerifiedRetailGameDlls =
@@ -69,6 +69,26 @@ internal sealed class LiveGameAdapter : IDisposable
         if (!parsed.IsHardcore || parsed.Item != sample || serialized != stable || serialized.Split(';').Length != 17)
         {
             throw new InvalidDataException("The GDIA live queue serializer failed its round trip.");
+        }
+        var receiptPath = Path.Combine(Path.GetTempPath(), $"cairn-live-receipt-{Guid.NewGuid():N}.csv");
+        try
+        {
+            var receiptBytes = Encoding.UTF8.GetBytes(serialized);
+            var semanticHash = Convert.ToHexStringLower(SHA256.HashData(receiptBytes));
+            File.WriteAllBytes(receiptPath, receiptBytes);
+            if (!FileMatchesSemanticHash(receiptPath, semanticHash))
+            {
+                throw new InvalidDataException("The Cairn live receipt did not match its operation payload.");
+            }
+            File.WriteAllText(receiptPath, serialized.Replace("records/items/test.dbr", "records/items/other.dbr"));
+            if (FileMatchesSemanticHash(receiptPath, semanticHash))
+            {
+                throw new InvalidDataException("The Cairn live receipt accepted a different operation payload.");
+            }
+        }
+        finally
+        {
+            File.Delete(receiptPath);
         }
         var adapter = ResolveAdapterDirectory()
             ?? throw new FileNotFoundException("The bundled Cairn live adapter is incomplete.");
@@ -455,7 +475,11 @@ internal sealed class LiveGameAdapter : IDisposable
                 return new LiveRetrievalStatus("pending", null);
             }
             var deleted = Path.Combine(queueDirectory!, "deleted", queue.IsHardcore ? "hc" : "sc");
-            var deposited = MatchingFiles(deleted, queue.SemanticSha256)
+            var queueName = Path.GetFileName(queue.OutgoingPath);
+            var exactDeposited = Path.Combine(deleted, queueName);
+            var deposited = FileMatchesSemanticHash(exactDeposited, queue.SemanticSha256)
+                ? exactDeposited
+                : MatchingFiles(deleted, queue.SemanticSha256)
                 .Except(queue.BaselineDeleted, StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
@@ -464,13 +488,32 @@ internal sealed class LiveGameAdapter : IDisposable
                 return new LiveRetrievalStatus("deposited", deposited);
             }
             var incoming = Path.Combine(queueDirectory!, "ingoing");
-            var rejected = MatchingFiles(incoming, queue.SemanticSha256)
+            var exactRejected = Path.Combine(incoming, queueName);
+            var rejected = FileMatchesSemanticHash(exactRejected, queue.SemanticSha256)
+                ? exactRejected
+                : MatchingFiles(incoming, queue.SemanticSha256)
                 .Except(queue.BaselineIncoming, StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
             return rejected is null
                 ? new LiveRetrievalStatus("unknown", null)
                 : new LiveRetrievalStatus("rejected", rejected);
+        }
+    }
+
+    private static bool FileMatchesSemanticHash(string path, string semanticHash)
+    {
+        if (!File.Exists(path)) return false;
+        try
+        {
+            var payload = ParseCsv(ReadStable(path));
+            var bytes = Encoding.UTF8.GetBytes(SerializeCsv(payload.IsHardcore, payload.Item));
+            return Convert.ToHexStringLower(SHA256.HashData(bytes))
+                .Equals(semanticHash, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 

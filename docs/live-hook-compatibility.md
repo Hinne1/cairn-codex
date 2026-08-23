@@ -39,9 +39,9 @@ Build inputs:
 - Boost: `1.78.0`
 - Boost source SHA-256:
   `090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c`
-- Hook version: `1.5.9731.18480`
+- Hook version: `1.5.9731.18898`
 - Hook SHA-256:
-  `6bceb80cd16b42a8c24fd787999dc9963a3c87a0cbccb8d040c9430c5dafd5f6`
+  `556763606e341ce06c579d53bfba6c93d2e10ea6752fc3778f211ee4799af1d2`
 - Injector SHA-256:
   `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
 
@@ -60,6 +60,11 @@ difficulty merits. Champion's, Savior's, Challenger's, and Gladiator's Merits
 therefore enter Cairn's durable incoming queue, while unrelated special items
 remain untouched in the stash. Native archive and retrieval notifications are
 branded as Cairn Codex rather than Item Assistant.
+
+Personal-inventory delivery receipts retain Cairn's unique operation filename
+when the hook moves them to the completed or rejected queue. The helper verifies
+that exact receipt and its semantic item hash in constant time; payload matching
+remains only as recovery support for receipts created by older hooks.
 
 The only `misc` records admitted by that exception are:
 
@@ -101,7 +106,7 @@ time. On 2026-08-20, the bundled hook and injector fingerprints, compatibility
 inspection, injection, worker handshake, repeated ready-state inspection,
 clean disconnect, and game-process survival were verified against its exact
 `Game.dll`. Its first personal-inventory delivery exposed the changed native
-ABI on 2026-08-22. Hook `1.5.9731.18480` contains the ABI correction and safe
+ABI on 2026-08-22. Hook `1.5.9731.18898` contains the ABI correction and safe
 queue rollback, but still requires a live delivery round trip before personal
 delivery on this build is considered fully verified. Live mode remains
 explicitly opt-in because it mutates the running game process.

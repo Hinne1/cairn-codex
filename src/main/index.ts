@@ -1518,7 +1518,7 @@ async function runSmokeTest(
     if (
       !liveQueue.passed ||
       liveQueue.fields !== 17 ||
-      liveQueue.hookSha256 !== '6bceb80cd16b42a8c24fd787999dc9963a3c87a0cbccb8d040c9430c5dafd5f6' ||
+      liveQueue.hookSha256 !== '556763606e341ce06c579d53bfba6c93d2e10ea6752fc3778f211ee4799af1d2' ||
       liveQueue.injectorSha256 !== '569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c'
     ) {
       throw new Error('Live queue serializer self-test failed.')

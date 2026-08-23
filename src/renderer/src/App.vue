@@ -288,7 +288,7 @@ const reusableSupplyUnlocks = computed(() => {
     if (
       item.rarity !== 'supply' ||
       item.state !== 'ingested' ||
-      !['writ', 'mandate', 'warrant', 'rune'].includes(item.slot)
+      !['writ', 'mandate', 'warrant', 'merit', 'rune'].includes(item.slot)
     ) continue
     const key = item.baseRecord.toLocaleLowerCase()
     if (!unique.has(key)) unique.set(key, item)
@@ -298,7 +298,7 @@ const reusableSupplyUnlocks = computed(() => {
 const reusableSupplySummary = computed<CollectionRaritySummary>(() => {
   const catalogRecords = new Set(
     (snapshot.value?.supplies ?? [])
-      .filter((item) => ['writ', 'mandate', 'warrant', 'rune'].includes(item.slot))
+      .filter((item) => ['writ', 'mandate', 'warrant', 'merit', 'rune'].includes(item.slot))
       .map((item) => item.record.toLocaleLowerCase())
   )
   return {
@@ -396,7 +396,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
     if (!unique.has(key)) unique.set(key, item)
   }
   return [...unique.values()]
-    .filter((item) => ['writ', 'mandate', 'warrant'].includes(item.slot))
+    .filter((item) => ['writ', 'mandate', 'warrant', 'merit'].includes(item.slot))
     .filter((item) => {
       if (!needle) return true
       const catalog = snapshot.value?.supplies?.find((entry) =>
@@ -2299,7 +2299,9 @@ function selectAllVisibleSupplies(): void {
 async function dispenseAllWrits(): Promise<void> {
   supplyCategory.value = 'writs'
   await nextTick()
-  selectedSupplyIds.value = supplyVaultItems.value.map((item) => item.id)
+  selectedSupplyIds.value = supplyVaultItems.value
+    .filter((item) => ['writ', 'mandate', 'warrant'].includes(item.slot))
+    .map((item) => item.id)
   await retrieveSupplies()
 }
 
@@ -2988,7 +2990,7 @@ function itemTypeLabel(item: CollectionItem): string {
     medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon',
     component: 'Component', material: 'Crafting material', 'potion-formula': 'Potion formula',
     augment: 'Augment', rune: 'Movement rune', writ: 'Faction writ', mandate: 'Faction mandate',
-    warrant: 'Nemesis warrant'
+    warrant: 'Nemesis warrant', merit: 'Difficulty merit'
   }
   return labels[item.slot] ?? item.slot
 }
@@ -4557,7 +4559,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div>
             <p class="section-label">Reusable collection</p>
             <h2>Supplies</h2>
-            <p>Archived writs, mandates, Nemesis warrants, and runes are reusable. Soulbound augments unlock per character from that character's faction reputation.</p>
+            <p>Archived faction boosts, difficulty merits, Nemesis warrants, and runes are reusable. Soulbound augments unlock per character from that character's faction reputation.</p>
           </div>
           <div class="tool-heading-summary">
             <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</strong>
@@ -4566,7 +4568,7 @@ function formatPercentile(value: number | null | undefined): string {
         </header>
         <div class="supply-toolbar">
           <div class="segmented-control" aria-label="Supply category">
-            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; supplySlotFilter = 'all'; selectedSupplyIds = []">Writs, warrants & mandates</button>
+            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; supplySlotFilter = 'all'; selectedSupplyIds = []">Boosts, warrants & merits</button>
             <button type="button" :class="{ active: supplyCategory === 'augments' }" @click="supplyCategory = 'augments'; selectedSupplyIds = []">Augments & runes</button>
           </div>
           <div v-if="supplyCategory === 'augments'" class="segmented-control supply-slot-filter" aria-label="Compatible equipment slot">
@@ -4787,7 +4789,7 @@ function formatPercentile(value: number | null | undefined): string {
               />
               <span>
                 <strong>Infinite supplies</strong>
-                <small>Keep an unlocked writ, mandate, Nemesis warrant, augment, or movement rune after dispensing one copy.</small>
+                <small>Keep an unlocked faction boost, difficulty merit, Nemesis warrant, augment, or movement rune after dispensing one copy.</small>
               </span>
             </label>
             <small v-if="infiniteSupplies">Each return emits one unit; the archived unlock remains available.</small>
@@ -4836,7 +4838,7 @@ function formatPercentile(value: number | null | undefined): string {
           <header>
             <div>
               <p>Stored supplies</p>
-              <h3>Writs, mandates, Nemesis warrants, augments, and runes</h3>
+              <h3>Faction boosts, difficulty merits, Nemesis warrants, augments, and runes</h3>
             </div>
             <strong>{{ supplyVaultItems.length }}</strong>
           </header>
@@ -4918,7 +4920,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div v-if="liveStatus?.state === 'ready'" class="live-ready-instructions">
             <strong>{{ liveSyncing ? 'Checking queue…' : `Watching the ${liveStatus.ingestTabDescription}` }}</strong>
             <small>Retrieval target: {{ liveStatus.depositTabDescription }}.</small>
-              <small>Place equipment, writs, mandates, Nemesis warrants, augments, or movement runes in the watched tab.</small>
+              <small>Place equipment, faction boosts, difficulty merits, Nemesis warrants, augments, or movement runes in the watched tab.</small>
           </div>
         </section>
         <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>

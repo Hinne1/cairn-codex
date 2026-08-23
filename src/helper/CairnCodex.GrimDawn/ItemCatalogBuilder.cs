@@ -321,7 +321,9 @@ internal static class ItemCatalogBuilder
             normalizedPath.Contains("/items/faction/booster/", StringComparison.OrdinalIgnoreCase);
         var isAugment = record.Type == "ItemEnchantment" &&
             normalizedPath.Contains("/items/enchants/", StringComparison.OrdinalIgnoreCase);
-        if ((!isFactionBooster && !isFactionWarrant && !isAugment) ||
+        var isDifficultyMerit = record.Type == "ItemDifficultyUnlock" &&
+            normalizedPath.Contains("/items/misc/", StringComparison.OrdinalIgnoreCase);
+        if ((!isFactionBooster && !isFactionWarrant && !isAugment && !isDifficultyMerit) ||
             normalizedPath.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
             IsCategoryTemplate(record.Name))
         {
@@ -334,7 +336,9 @@ internal static class ItemCatalogBuilder
             return null;
         }
 
-        var slot = isFactionWarrant
+        var slot = isDifficultyMerit
+            ? "merit"
+            : isFactionWarrant
             ? "warrant"
             : isAugment
             ? normalizedPath.Contains("/runes/", StringComparison.OrdinalIgnoreCase) ? "rune" : "augment"

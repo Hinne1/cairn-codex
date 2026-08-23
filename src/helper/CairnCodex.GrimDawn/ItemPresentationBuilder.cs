@@ -149,6 +149,7 @@ internal static partial class ItemPresentationBuilder
         AddSimpleStats(record, baseLines, "standard");
         AddConversions(record, baseLines);
         AddSkillBonuses(record, data, baseLines);
+        AddDifficultyUnlockEffects(record, baseLines);
 
         var sections = new List<ItemPresentationSection>();
         if (baseLines.Count > 0) sections.Add(new ItemPresentationSection("base", null, baseLines));
@@ -281,6 +282,30 @@ internal static partial class ItemPresentationBuilder
         }
         if (record.Number("blockRecoveryTime") is { } recovery && Math.Abs(recovery) > 0.001)
             lines.Add(Line("Block Recovery", recovery, null, "s"));
+    }
+
+    private static void AddDifficultyUnlockEffects(
+        ArzRecord record,
+        List<ItemPresentationLine> lines)
+    {
+        if (record.Type != "ItemDifficultyUnlock") return;
+        var difficulty = record.Text("difficultyUnlocked");
+        if (string.IsNullOrWhiteSpace(difficulty)) return;
+        var isCrucible = string.Equals(
+            record.Text("gameMode"),
+            "Survival",
+            StringComparison.OrdinalIgnoreCase);
+        lines.Add(Line(
+            isCrucible
+                ? $"Unlocks {difficulty} Crucible difficulty"
+                : $"Unlocks {difficulty} difficulty",
+            null,
+            null));
+        if (isCrucible) return;
+        if ((record.Values.GetValueOrDefault("statQuests")?.Count ?? 0) > 0)
+            lines.Add(Line("Unlocks Attribute/Skill rewards from quests on lower difficulties", null, null));
+        lines.Add(Line("Unlocks Riftgates on lower difficulties", null, null));
+        lines.Add(Line("Unlocks all inventory bags", null, null));
     }
 
     private static void AddFlatDamage(

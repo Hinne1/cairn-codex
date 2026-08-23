@@ -39,7 +39,7 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 25
+const CATALOG_PRESENTATION_VERSION = 26
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
@@ -1555,6 +1555,8 @@ async function runSmokeTest(
     const writ = supplies.find((item) => item.slot === 'writ')
     const mandate = supplies.find((item) => item.slot === 'mandate')
     const warrant = supplies.find((item) => item.slot === 'warrant')
+    const merits = supplies.filter((item) => item.slot === 'merit')
+    const saviorsMerit = merits.find((item) => item.name === "Savior's Merit")
     const augment = supplies.find((item) => item.slot === 'augment')
     const movementRune = supplies.find((item) => item.slot === 'rune')
     if (
@@ -1563,10 +1565,15 @@ async function runSmokeTest(
       !writ ||
       !mandate ||
       !warrant ||
+      merits.length !== 4 ||
+      !saviorsMerit?.bitmap?.endsWith('/difficulty_legendaryunlock.tex') ||
+      !saviorsMerit.presentation?.sections.some((section) =>
+        section.lines.some((line) => line.label === 'Unlocks Ultimate difficulty')
+      ) ||
       !augment ||
       !movementRune
     ) {
-      throw new Error('Reusable supply catalog did not include writs, mandates, warrants, augments, and movement runes.')
+      throw new Error('Reusable supply catalog did not include faction boosts, merits, augments, and movement runes.')
     }
     if (
       materials.filter((item) => item.rarity === 'component').length < 40 ||

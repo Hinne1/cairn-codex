@@ -155,6 +155,7 @@ export interface VaultListItem {
   isHardcore: boolean
   state: VaultItemState
   seed: number
+  stackCount: number
   prefixRecord: string
   suffixRecord: string
   instanceKey: string

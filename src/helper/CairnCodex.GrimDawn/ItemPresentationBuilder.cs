@@ -40,6 +40,7 @@ internal static partial class ItemPresentationBuilder
             ["characterDodgePercent"] = new("Chance to Avoid Melee Attacks", "%"),
             ["characterDeflectProjectile"] = new("Chance to Avoid Projectiles", "%"),
             ["characterEnergyAbsorptionPercent"] = new("Energy Absorption from Enemy Spells", "%"),
+            ["characterIncreasedExperience"] = new("Experience Gained", "%"),
             ["offensiveCritDamageModifier"] = new("Critical Damage", "%"),
             ["offensiveTotalDamageModifier"] = new("All Damage", "%"),
             ["offensivePhysicalModifier"] = new("Physical Damage", "%"),
@@ -534,7 +535,7 @@ internal static partial class ItemPresentationBuilder
         ArzRecord item,
         ItemPresentationSource data)
     {
-        var skillPath = item.Text("itemSkillName");
+        var skillPath = item.Text("itemSkillName") ?? item.Text("skillName");
         if (skillPath is null || !TryResolveDisplaySkill(skillPath, data, out var skill)) return null;
         var name = Resolve(skill.Text("skillDisplayName"), data.Tags) ?? "Granted Skill";
         var description = Resolve(skill.Text("skillBaseDescription"), data.Tags);

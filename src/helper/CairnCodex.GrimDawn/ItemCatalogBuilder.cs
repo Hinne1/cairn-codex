@@ -323,14 +323,17 @@ internal static class ItemCatalogBuilder
             normalizedPath.Contains("/items/enchants/", StringComparison.OrdinalIgnoreCase);
         var isDifficultyMerit = record.Type == "ItemDifficultyUnlock" &&
             normalizedPath.Contains("/items/misc/", StringComparison.OrdinalIgnoreCase);
-        if ((!isFactionBooster && !isFactionWarrant && !isAugment && !isDifficultyMerit) ||
+        var isClarityPotion = normalizedPath.EndsWith(
+            "/items/crafting/consumables/xppotion_malmouth.dbr",
+            StringComparison.OrdinalIgnoreCase);
+        var name = Resolve(record.Text("itemNameTag") ?? record.Text("description"), tags)?.Trim();
+        if ((!isFactionBooster && !isFactionWarrant && !isAugment && !isDifficultyMerit && !isClarityPotion) ||
             normalizedPath.Contains("/sandbox/", StringComparison.OrdinalIgnoreCase) ||
             IsCategoryTemplate(record.Name))
         {
             return null;
         }
 
-        var name = Resolve(record.Text("itemNameTag") ?? record.Text("description"), tags)?.Trim();
         if (!IsUsefulSourceName(name))
         {
             return null;
@@ -338,6 +341,8 @@ internal static class ItemCatalogBuilder
 
         var slot = isDifficultyMerit
             ? "merit"
+            : isClarityPotion
+            ? "potion"
             : isFactionWarrant
             ? "warrant"
             : isAugment

@@ -112,6 +112,7 @@ interface SupplyOption {
   slotFamilies: Array<Exclude<SupplySlotFilter, 'all'>>
   isHardcore: boolean
   reusable: boolean
+  stackCount: number
   eligible: boolean
   detail: string
   source: 'archive' | 'faction'
@@ -344,6 +345,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
           slotFamilies: item.supplySlotFamilies ?? [],
           isHardcore: activeCharacter.value?.isHardcore ?? Boolean(activeTransferHardcore.value),
           reusable: true,
+          stackCount: 1,
           eligible,
           detail: eligible
             ? `Available to ${activeCharacter.value?.name ?? 'active character'} · ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' / ')}`
@@ -373,6 +375,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
           slotFamilies: catalogItem?.supplySlotFamilies ?? [],
           isHardcore: item.isHardcore,
           reusable: item.reusable,
+          stackCount: item.stackCount,
           eligible,
           detail: `${item.isHardcore ? 'HC' : 'SC'} · archived movement rune${eligible ? '' : ' · select a matching character or stash'}`,
           source: 'archive',
@@ -392,11 +395,13 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
   const unique = new Map<string, VaultListItem>()
   for (const item of vaultItems.value) {
     if (item.rarity !== 'supply' || item.state !== 'ingested') continue
-    const key = `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
+    const key = item.slot === 'potion'
+      ? `${item.isHardcore ? 'hc' : 'sc'}:potion:${item.id}`
+      : `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
     if (!unique.has(key)) unique.set(key, item)
   }
   return [...unique.values()]
-    .filter((item) => ['writ', 'mandate', 'warrant', 'merit'].includes(item.slot))
+    .filter((item) => ['writ', 'mandate', 'warrant', 'merit', 'potion'].includes(item.slot))
     .filter((item) => {
       if (!needle) return true
       const catalog = snapshot.value?.supplies?.find((entry) =>
@@ -419,8 +424,9 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
         slotFamilies: catalogItem?.supplySlotFamilies ?? [],
         isHardcore: item.isHardcore,
         reusable: item.reusable,
+        stackCount: item.stackCount,
         eligible,
-        detail: `${item.isHardcore ? 'HC' : 'SC'} · archived ${item.slot}${eligible ? '' : ' · select a matching character or stash'}`,
+        detail: `${item.isHardcore ? 'HC' : 'SC'} · ${item.stackCount} stored · archived ${item.slot}${eligible ? '' : ' · select a matching character or stash'}`,
         source: 'archive',
         catalogItem,
         effects: effects.slice(0, 5),
@@ -4568,7 +4574,7 @@ function formatPercentile(value: number | null | undefined): string {
         </header>
         <div class="supply-toolbar">
           <div class="segmented-control" aria-label="Supply category">
-            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; supplySlotFilter = 'all'; selectedSupplyIds = []">Boosts, warrants & merits</button>
+            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; supplySlotFilter = 'all'; selectedSupplyIds = []">Boosts, merits & consumables</button>
             <button type="button" :class="{ active: supplyCategory === 'augments' }" @click="supplyCategory = 'augments'; selectedSupplyIds = []">Augments & runes</button>
           </div>
           <div v-if="supplyCategory === 'augments'" class="segmented-control supply-slot-filter" aria-label="Compatible equipment slot">
@@ -4614,7 +4620,7 @@ function formatPercentile(value: number | null | undefined): string {
               </ul>
               <small v-else class="supply-no-effects">No visible stat effect is indexed.</small>
             </span>
-            <b>{{ item.reusable ? '∞' : '1' }}</b>
+            <b>{{ item.reusable ? '∞' : item.stackCount }}</b>
           </label>
         </div>
         <p v-else class="vault-empty">{{ reusableSupplyQuery ? 'No unlocked supplies match this filter.' : 'No supplies unlocked in this category yet.' }}</p>

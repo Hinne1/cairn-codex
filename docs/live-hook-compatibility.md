@@ -39,9 +39,9 @@ Build inputs:
 - Boost: `1.78.0`
 - Boost source SHA-256:
   `090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c`
-- Hook version: `1.5.9731.18898`
+- Hook version: `1.5.9731.33714`
 - Hook SHA-256:
-  `556763606e341ce06c579d53bfba6c93d2e10ea6752fc3778f211ee4799af1d2`
+  `b553e19d825caaacc45c9b6f37e1dad7fcf2f2e4cc5b809186b0d871c89cc505`
 - Injector SHA-256:
   `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
 
@@ -65,6 +65,15 @@ Personal-inventory delivery receipts retain Cairn's unique operation filename
 when the hook moves them to the completed or rejected queue. The helper verifies
 that exact receipt and its semantic item hash in constant time; payload matching
 remains only as recovery support for receipts created by older hooks.
+
+The Cairn queue extends GDIA's 17-field replica format with an eighteenth
+`stackSize` field. Readers remain backward-compatible with 17-field receipts;
+new writes preserve stack counts end to end. The native ingest filter admits
+exactly `records/items/crafting/consumables/xppotion_malmouth.dbr` through its
+otherwise unchanged stackable-item and crafting-item guards. This lets a Potion
+of Clarity stack enter Supplies without broadening live ingest to components or
+other consumables. Potion stacks remain finite even when Infinite Supplies is
+enabled; their exact stored quantity is shown and returned together.
 
 The only `misc` records admitted by that exception are:
 
@@ -106,8 +115,9 @@ time. On 2026-08-20, the bundled hook and injector fingerprints, compatibility
 inspection, injection, worker handshake, repeated ready-state inspection,
 clean disconnect, and game-process survival were verified against its exact
 `Game.dll`. Its first personal-inventory delivery exposed the changed native
-ABI on 2026-08-22. Hook `1.5.9731.18898` contains the ABI correction and safe
-queue rollback, but still requires a live delivery round trip before personal
+ABI on 2026-08-22. Hook `1.5.9731.33714` contains the ABI correction, safe
+queue rollback, and stack-preserving Potion of Clarity support, but still
+requires a live delivery round trip before personal
 delivery on this build is considered fully verified. Live mode remains
 explicitly opt-in because it mutates the running game process.
 

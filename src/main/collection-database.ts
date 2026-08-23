@@ -326,7 +326,7 @@ export class CollectionDatabase {
     const importedIds: string[] = []
     const duplicateIds: string[] = []
     const unsupportedIds: string[] = []
-    const catalogItem = this.database.prepare('SELECT rarity FROM catalog_item WHERE record = ?')
+    const catalogItem = this.database.prepare('SELECT rarity, slot FROM catalog_item WHERE record = ?')
     const insertVault = this.database.prepare(`
       INSERT OR IGNORE INTO vault_item (
         id, base_record, state, serialized_item, ingested_at_utc, retrieved_at_utc,
@@ -343,7 +343,7 @@ export class CollectionDatabase {
     this.database.exec('BEGIN IMMEDIATE')
     try {
       for (const item of input.items) {
-        const catalog = catalogItem.get(item.baseRecord) as { rarity: string } | undefined
+        const catalog = catalogItem.get(item.baseRecord) as { rarity: string; slot: string } | undefined
         if (!catalog) {
           unsupportedIds.push(item.externalId)
           continue
@@ -364,7 +364,7 @@ export class CollectionDatabase {
           Buffer.from(JSON.stringify(item.payload), 'utf8'),
           item.createdAtUtc,
           item.isHardcore ? 1 : 0,
-          catalog.rarity === 'supply' && infiniteSupplies ? 1 : 0
+          catalog.rarity === 'supply' && catalog.slot !== 'potion' && infiniteSupplies ? 1 : 0
         )
         if (Number(inserted.changes) !== 1) {
           duplicateIds.push(item.externalId)
@@ -447,7 +447,10 @@ export class CollectionDatabase {
             pending_ingest_item.vault_item_id,
             pending_ingest_item.base_record,
             pending_ingest_item.payload_json,
-            CASE WHEN catalog_item.rarity = 'supply' THEN 1 ELSE 0 END AS reusable
+            CASE
+              WHEN catalog_item.rarity = 'supply' AND catalog_item.slot <> 'potion' THEN 1
+              ELSE 0
+            END AS reusable
           FROM pending_ingest_item
           JOIN catalog_item ON catalog_item.record = pending_ingest_item.base_record
           WHERE operation_id = ?
@@ -602,6 +605,7 @@ export class CollectionDatabase {
     return rows.map((row) => {
       const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as {
         seed?: number
+        stackCount?: number
         prefixRecord?: string
         suffixRecord?: string
       }
@@ -616,6 +620,7 @@ export class CollectionDatabase {
         isHardcore: row.is_hardcore === 1,
         state: row.state,
         seed: payload.seed ?? 0,
+        stackCount: Math.max(1, payload.stackCount ?? 1),
         prefixRecord: payload.prefixRecord ?? '',
         suffixRecord: payload.suffixRecord ?? '',
         instanceKey: vaultPayloadFingerprint(payload),
@@ -822,7 +827,9 @@ export class CollectionDatabase {
           UPDATE vault_item
           SET reusable = 1
           WHERE state = 'ingested'
-            AND base_record IN (SELECT record FROM catalog_item WHERE rarity = 'supply')
+            AND base_record IN (
+              SELECT record FROM catalog_item WHERE rarity = 'supply' AND slot <> 'potion'
+            )
         `)
       } else {
         this.database.exec(`
@@ -1217,7 +1224,9 @@ export class CollectionDatabase {
         SET reusable = 1
         WHERE reusable = 0
           AND state = 'ingested'
-          AND base_record IN (SELECT record FROM catalog_item WHERE rarity = 'supply')
+          AND base_record IN (
+            SELECT record FROM catalog_item WHERE rarity = 'supply' AND slot <> 'potion'
+          )
       `)
     }
   }

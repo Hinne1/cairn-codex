@@ -20,7 +20,7 @@ internal sealed class LiveGameAdapter : IDisposable
     private const string CrashingRetailHookSha256 =
         "14e57644d5403819aebfb856053f28afbc40dcdc2d95d0d9a8c71eafdf707891";
     private const string VerifiedRetailHookSha256 =
-        "556763606e341ce06c579d53bfba6c93d2e10ea6752fc3778f211ee4799af1d2";
+        "b553e19d825caaacc45c9b6f37e1dad7fcf2f2e4cc5b809186b0d871c89cc505";
     private const string VerifiedInjectorSha256 =
         "569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c";
     private static readonly IReadOnlyDictionary<string, string> VerifiedRetailGameDlls =
@@ -62,13 +62,13 @@ internal sealed class LiveGameAdapter : IDisposable
             "records/modifier/test.dbr", "records/transmute/test.dbr", 4_000_000_001,
             "records/materia/test.dbr", "records/relic/test.dbr", 123,
             "records/enchantment/test.dbr", "records/ascendant/test.dbr", "records/ascendant/test2h.dbr",
-            0, 456, 0, 1, 7, 9, 0, 0);
+            0, 456, 0, 20, 7, 9, 0, 0);
         var serialized = SerializeCsv(true, sample);
         var parsed = ParseCsv(Encoding.UTF8.GetBytes("\uFEFF" + serialized + "\n6;Sample tooltip"));
         var stable = SerializeCsv(parsed.IsHardcore, parsed.Item);
-        if (!parsed.IsHardcore || parsed.Item != sample || serialized != stable || serialized.Split(';').Length != 17)
+        if (!parsed.IsHardcore || parsed.Item != sample || serialized != stable || serialized.Split(';').Length != 18)
         {
-            throw new InvalidDataException("The GDIA live queue serializer failed its round trip.");
+            throw new InvalidDataException("The Cairn live queue serializer failed its round trip.");
         }
         var receiptPath = Path.Combine(Path.GetTempPath(), $"cairn-live-receipt-{Guid.NewGuid():N}.csv");
         try
@@ -101,7 +101,7 @@ internal sealed class LiveGameAdapter : IDisposable
             throw new InvalidDataException("The bundled Cairn live adapter failed fingerprint verification.");
         }
         return new LiveQueueSelfTestResult(
-            true, 17, sample.Seed, sample.AffixRerolls, hookHash, injectorHash);
+            true, 18, sample.Seed, sample.AffixRerolls, hookHash, injectorHash);
     }
 
     public LiveGameStatus Inspect()
@@ -572,9 +572,9 @@ internal sealed class LiveGameAdapter : IDisposable
         var firstLine = Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF')
             .Split(['\r', '\n'], 2)[0];
         var fields = firstLine.Split(';');
-        if (fields.Length != 17)
+        if (fields.Length is not (17 or 18))
         {
-            throw new InvalidDataException($"Expected 17 live item fields, found {fields.Length}.");
+            throw new InvalidDataException($"Expected 17 or 18 live item fields, found {fields.Length}.");
         }
         static uint Number(string value) => uint.TryParse(value, out var parsed) ? parsed : 0;
         var item = new VaultItemPayload(
@@ -582,7 +582,9 @@ internal sealed class LiveGameAdapter : IDisposable
             fields[2].Trim(), fields[3].Trim(), fields[4].Trim(), fields[7].Trim(),
             fields[13].Trim(), Number(fields[5]), fields[8].Trim(), fields[9].Trim(),
             Number(fields[10]), fields[11].Trim(), fields[14].Trim(), fields[15].Trim(),
-            0, Number(fields[12]), 0, 1, Number(fields[6]), Number(fields[16]), 0, 0);
+            0, Number(fields[12]), 0,
+            fields.Length == 18 ? Math.Max(1, Number(fields[17])) : 1,
+            Number(fields[6]), Number(fields[16]), 0, 0);
         if (string.IsNullOrWhiteSpace(item.BaseRecord))
         {
             throw new InvalidDataException("The live item has no base record.");
@@ -607,7 +609,8 @@ internal sealed class LiveGameAdapter : IDisposable
         item.TransmuteRecord,
         item.AscendantRecord,
         item.AscendantRecord2H,
-        item.AffixRerolls);
+        item.AffixRerolls,
+        Math.Max(1, item.StackCount));
 
     private string ValidateIncomingPath(string path)
     {

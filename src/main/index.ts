@@ -1517,8 +1517,8 @@ async function runSmokeTest(
     }>('self-test-live-queue')
     if (
       !liveQueue.passed ||
-      liveQueue.fields !== 17 ||
-      liveQueue.hookSha256 !== '556763606e341ce06c579d53bfba6c93d2e10ea6752fc3778f211ee4799af1d2' ||
+      liveQueue.fields !== 18 ||
+      liveQueue.hookSha256 !== 'b553e19d825caaacc45c9b6f37e1dad7fcf2f2e4cc5b809186b0d871c89cc505' ||
       liveQueue.injectorSha256 !== '569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c'
     ) {
       throw new Error('Live queue serializer self-test failed.')
@@ -1557,6 +1557,9 @@ async function runSmokeTest(
     const warrant = supplies.find((item) => item.slot === 'warrant')
     const merits = supplies.filter((item) => item.slot === 'merit')
     const saviorsMerit = merits.find((item) => item.name === "Savior's Merit")
+    const clarityPotion = supplies.find((item) =>
+      item.record.toLocaleLowerCase().endsWith('/xppotion_malmouth.dbr')
+    )
     const augment = supplies.find((item) => item.slot === 'augment')
     const movementRune = supplies.find((item) => item.slot === 'rune')
     if (
@@ -1570,10 +1573,14 @@ async function runSmokeTest(
       !saviorsMerit.presentation?.sections.some((section) =>
         section.lines.some((line) => line.label === 'Unlocks Ultimate difficulty')
       ) ||
+      clarityPotion?.slot !== 'potion' ||
+      !clarityPotion.presentation?.grantedSkill?.lines.some(
+        (line) => line.label === 'Experience Gained' && line.minimum === 100
+      ) ||
       !augment ||
       !movementRune
     ) {
-      throw new Error('Reusable supply catalog did not include faction boosts, merits, augments, and movement runes.')
+      throw new Error('Reusable supply catalog did not include faction boosts, merits, Potion of Clarity, augments, and movement runes.')
     }
     if (
       materials.filter((item) => item.rarity === 'component').length < 40 ||
@@ -2038,6 +2045,37 @@ async function runSmokeTest(
     ) {
       throw new Error('Dispensing a reusable supply consumed its stored unlock.')
     }
+    const clarityVaultItemId = randomUUID()
+    const clarityIngestOperationId = randomUUID()
+    database.prepareIngestOperation({
+      operationId: clarityIngestOperationId,
+      stashPath: 'smoke-test-transfer.gsh',
+      sourceSha256: 'smoke-clarity-source',
+      startedAtUtc: new Date().toISOString(),
+      items: [
+        {
+          vaultItemId: clarityVaultItemId,
+          baseRecord: clarityPotion.record,
+          payload: { baseRecord: clarityPotion.record, seed: 43, stackCount: 20 }
+        }
+      ],
+      detail: { phase: 'prepared', smokeTest: true, finiteStack: true }
+    })
+    database.completeIngestOperation({
+      operationId: clarityIngestOperationId,
+      backupPath: 'smoke-clarity-ingest-backup',
+      completedAtUtc: new Date().toISOString(),
+      isHardcore: true,
+      detail: { phase: 'committed', smokeTest: true, finiteStack: true }
+    })
+    const storedClarity = database.getVaultItems([clarityVaultItemId])[0]
+    if (
+      storedClarity?.state !== 'ingested' ||
+      storedClarity.reusable ||
+      (storedClarity.payload as { stackCount?: number }).stackCount !== 20
+    ) {
+      throw new Error('Potion of Clarity did not preserve its finite stack count in Supplies.')
+    }
     if (!database.getInfiniteSupplies() || database.setInfiniteSupplies(false) !== false) {
       throw new Error('Infinite-supplies setting did not persist its disabled state.')
     }
@@ -2059,9 +2097,12 @@ async function runSmokeTest(
     })
     database.setInfiniteSupplies(true)
     const finiteAfterRetrieval = database.getVaultItems([reusableVaultItemId])[0]
+    const clarityAfterSettingToggle = database.getVaultItems([clarityVaultItemId])[0]
     if (
       finiteAfterRetrieval?.state !== 'retrieved' ||
       finiteAfterRetrieval.reusable ||
+      clarityAfterSettingToggle?.reusable ||
+      (clarityAfterSettingToggle?.payload as { stackCount?: number } | undefined)?.stackCount !== 20 ||
       !database.getInfiniteSupplies()
     ) {
       throw new Error('Disabling infinite supplies did not consume the dispensed stored copy.')

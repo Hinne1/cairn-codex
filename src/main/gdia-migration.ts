@@ -166,7 +166,7 @@ async function readPendingQueueItems(
         .replace(/^\uFEFF/, '')
         .split(/\r?\n/, 1)[0]!
         .split(';')
-      if (fields.length !== 17 || !fields[2]?.trim()) {
+      if (![17, 18].includes(fields.length) || !fields[2]?.trim()) {
         throw new Error(`Unsupported GDIA queue receipt format: ${name}`)
       }
       const number = (value: string | undefined) => Number.parseInt(value ?? '', 10) >>> 0
@@ -200,7 +200,7 @@ async function readPendingQueueItems(
           unknown: 0,
           enchantmentSeed: number(fields[12]),
           materiaCombines: 0,
-          stackCount: 1,
+          stackCount: fields.length === 18 ? number(fields[17]) || 1 : 1,
           rerolls: number(fields[6]),
           affixRerolls: number(fields[16]),
           xOffset: 0,

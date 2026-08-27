@@ -357,6 +357,8 @@ export interface CollectionItem {
   acquisition?: ItemAcquisitionPresentation
   presentation?: ItemPresentation
   supplySlotFamilies?: Array<'weapon' | 'armor' | 'jewelry'> | null
+  upgradeRecord?: string | null
+  baseVersionRecord?: string | null
   availableCount: number
   bestRollPercentile: number | null
   analyzedCopyCount: number

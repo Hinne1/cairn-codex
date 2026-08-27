@@ -2932,6 +2932,28 @@ function openItem(item: CollectionItem): void {
   selectedRecord.value = item.record
 }
 
+function catalogItemByRecord(record: string | null | undefined): CollectionItem | null {
+  if (!record) return null
+  return [
+    ...(snapshot.value?.supplies ?? []),
+    ...(snapshot.value?.materials ?? []),
+    ...plannerCatalogItems.value
+  ].find((item) => item.record.toLocaleLowerCase() === record.toLocaleLowerCase()) ?? null
+}
+
+function itemVersionCounterpart(item: CollectionItem): CollectionItem | null {
+  return catalogItemByRecord(item.upgradeRecord ?? item.baseVersionRecord)
+}
+
+function showItemVersion(item: CollectionItem): void {
+  const counterpart = itemVersionCounterpart(item)
+  if (!counterpart) return
+  cancelTooltipHide()
+  tooltipExpanded.value = false
+  tooltipPinned.value = true
+  tooltipRecord.value = counterpart.record
+}
+
 function openSelectedMiInWorkshop(): void {
   if (!selectedItem.value || selectedItem.value.rarity !== 'mi') return
   miWorkshopQuery.value = selectedItem.value.name
@@ -3668,7 +3690,7 @@ function formatPercentile(value: number | null | undefined): string {
             <span>Legendaries</span>
             <strong>{{ rarity('legendary')?.collected ?? 0 }} / {{ rarity('legendary')?.total ?? '—' }}</strong>
           </div>
-          <div class="meter"><span :style="{ width: percentage(rarity('legendary')) }" /></div>
+          <div class="meter legendary"><span :style="{ width: percentage(rarity('legendary')) }" /></div>
           <small>
             {{ percentage(rarity('legendary')) }} discovered · {{ rarity('legendary')?.availableCopies ?? 0 }} copies available
             <template v-if="legendaryRollSummary.median !== null"> · median best {{ legendaryRollSummary.median.toFixed(1) }}% ({{ legendaryRollSummary.scored }} scored)</template>
@@ -5248,10 +5270,12 @@ function formatPercentile(value: number | null | undefined): string {
             <div class="item-mark" aria-hidden="true">
               <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
               <span v-else>{{ item.discovered ? '✓' : '?' }}</span>
+              <span v-if="item.upgradeRecord" class="awakening-sigil card-awakening-sigil"><i /></span>
             </div>
             <div class="item-copy">
               <h3>{{ item.name }}</h3>
               <p>{{ rarityLabel(item) }} · {{ item.slot }} · Lv{{ item.levelRequirement }}</p>
+              <small v-if="item.upgradeRecord" class="awakening-label">Awakenable</small>
               <small v-if="item.setName">{{ item.setName }}</small>
             </div>
             <div class="card-result">
@@ -5303,7 +5327,12 @@ function formatPercentile(value: number | null | undefined): string {
         <header class="tooltip-header">
           <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" />
           <div>
-            <h3>{{ tooltipItem.name }}</h3>
+            <h3>
+              <span v-if="tooltipItem.upgradeRecord || tooltipItem.baseVersionRecord" class="awakening-sigil tooltip-awakening-sigil"><i /></span>
+              {{ tooltipItem.name }}
+            </h3>
+            <p v-if="tooltipItem.upgradeRecord" class="awakening-copy">Can be upgraded by Ashes of Awakening.</p>
+            <p v-else-if="tooltipItem.baseVersionRecord" class="awakening-copy">Awakened with Ashes of Awakening.</p>
             <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
             <strong>{{ rarityLabel(tooltipItem) }} · {{ itemTypeLabel(tooltipItem) }}</strong>
           </div>
@@ -5315,6 +5344,20 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
         </header>
         <small class="tooltip-hotkey">{{ tooltipPinned ? 'Pinned · Esc or × to close' : 'Hold Ctrl to keep this tooltip open' }}</small>
+
+        <button
+          v-if="itemVersionCounterpart(tooltipItem)"
+          class="tooltip-version-link"
+          type="button"
+          @click.stop="showItemVersion(tooltipItem)"
+        >
+          <span class="awakening-sigil"><i /></span>
+          <span>
+            <small>{{ tooltipItem.upgradeRecord ? 'Awakened version' : 'Original version' }}</small>
+            <strong>{{ itemVersionCounterpart(tooltipItem)?.name }} · {{ tooltipItem.upgradeRecord ? 'Legendary' : 'Epic' }}</strong>
+          </span>
+          <b>View →</b>
+        </button>
 
         <template v-if="tooltipItem.presentation">
           <section

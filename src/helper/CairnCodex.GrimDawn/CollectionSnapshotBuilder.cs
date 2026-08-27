@@ -320,6 +320,8 @@ internal sealed record CollectionCatalogItem(
     ItemAcquisitionPresentation Acquisition,
     ItemPresentation Presentation,
     IReadOnlyList<string>? SupplySlotFamilies,
+    string? UpgradeRecord,
+    string? BaseVersionRecord,
     int AvailableCount,
     double? BestRollPercentile,
     int AnalyzedCopyCount)
@@ -345,6 +347,8 @@ internal sealed record CollectionCatalogItem(
             item.Acquisition,
             item.Presentation,
             item.SupplySlotFamilies,
+            item.UpgradeRecord,
+            item.BaseVersionRecord,
             availableCount,
             bestRollPercentile,
             analyzedCopyCount)

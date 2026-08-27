@@ -176,7 +176,8 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .metric-heading strong { color: #cba65d; }
 .meter, .set-meter { height: 5px; overflow: hidden; border-radius: 8px; background: #151512; }
 .meter span, .set-meter span { display: block; width: 0; height: 100%; background: #c99a43; transition: width 240ms ease; }
-.meter.epic span { background: #9d7fd4; }
+.meter.legendary span { background: #b957e5; box-shadow: 0 0 7px rgba(185, 87, 229, .24); }
+.meter.epic span { background: #4ea6dd; box-shadow: 0 0 7px rgba(78, 166, 221, .22); }
 .meter.mi span { background: #66a84f; }
 .meter.affix span { background: #ca7f45; }
 .meter.supply span { background: #5fa8a4; }
@@ -271,6 +272,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-card.consumable { border-color: #3f6874; }
 .item-card.missing { border-color: #302e29; filter: saturate(0.3); opacity: 0.63; }
 .item-mark {
+  position: relative;
   display: grid;
   place-items: center;
   width: 100%;
@@ -294,7 +296,40 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-card.consumable .item-copy h3 { color: #82c4d5; }
 .item-copy h3 { margin: 0 0 5px; color: #e7dec9; font-size: 18px; font-weight: 600; line-height: 1.15; }
 .item-copy p { margin: 0 0 4px; color: #8e8269; font-size: 9px; letter-spacing: 0.09em; text-transform: capitalize; }
-.item-copy small { color: #746e63; font-size: 10px; }
+.item-copy small { display: block; color: #746e63; font-size: 10px; }
+.item-copy .awakening-label { margin-bottom: 3px; color: #d6a84d; font-family: Georgia, serif; font-style: italic; }
+.awakening-sigil {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 17px;
+  height: 21px;
+  margin-right: 5px;
+  vertical-align: -5px;
+  filter: drop-shadow(0 1px 2px #000);
+}
+.awakening-sigil::before {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #e3bd55;
+  background: #241433;
+  content: '';
+  transform: rotate(45deg);
+  box-shadow: inset 0 0 3px #ab51dc, 0 0 0 1px #6d5423;
+}
+.awakening-sigil::after {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(#dfb94f, #dfb94f) center top / 2px 5px no-repeat,
+    linear-gradient(#dfb94f, #dfb94f) center bottom / 2px 5px no-repeat,
+    linear-gradient(135deg, transparent 42%, #dfb94f 43% 56%, transparent 57%) left 2px center / 6px 9px no-repeat,
+    linear-gradient(45deg, transparent 42%, #dfb94f 43% 56%, transparent 57%) right 2px center / 6px 9px no-repeat;
+  content: '';
+}
+.awakening-sigil i { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #bd64ef; box-shadow: 0 0 4px #bd64ef; }
+.card-awakening-sigil { position: absolute; top: 7px; left: 8px; width: 21px; height: 25px; margin: 0; }
 .card-result { align-self: end; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(143, 117, 69, 0.22); }
 .card-result > strong:last-child { color: #d4c19a; font-size: 11px; }
 .roll-score { color: #e1b85d; font-size: 13px; }
@@ -367,12 +402,19 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .game-tooltip.legendary .tooltip-header h3 { color: #c157f4; }
 .game-tooltip.mi .tooltip-header h3, .game-tooltip.rare .tooltip-header h3 { color: #72d05e; }
 .tooltip-header p { margin: 3px 0 4px; color: #d8c69e; font-style: normal; }
+.tooltip-header .awakening-copy { color: #dea64b; font-style: italic; }
+.tooltip-awakening-sigil { margin-right: 3px; }
 .tooltip-header strong { color: #f0bc54; font-weight: 500; text-transform: capitalize; }
 .tooltip-actions { display: flex; gap: 4px; position: sticky; top: 0; }
 .tooltip-actions button, .tooltip-expand { padding: 5px 7px; border: 1px solid #4b4335; border-radius: 4px; color: #9d927c; background: #1c1b17; cursor: pointer; font: 600 9px Inter, sans-serif; }
 .tooltip-actions button:hover, .tooltip-expand:hover { border-color: #81683f; color: #e0c78d; }
 .tooltip-actions .tooltip-close { width: 25px; padding: 3px; color: #b7aa91; font-size: 14px; line-height: 1; }
 .tooltip-hotkey { display: block; margin: 7px 0 -1px 53px; color: #716a5e; font: 9px Inter, sans-serif; }
+.tooltip-version-link { width: 100%; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border: 1px solid #59462d; border-radius: 4px; color: #cdbb96; background: linear-gradient(90deg, rgba(77, 51, 23, .48), rgba(42, 29, 48, .42)); cursor: pointer; text-align: left; }
+.tooltip-version-link:hover { border-color: #a3793b; background: linear-gradient(90deg, rgba(91, 61, 28, .62), rgba(58, 34, 69, .54)); }
+.tooltip-version-link small { display: block; margin-bottom: 2px; color: #9f8450; font: 8px Inter, sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+.tooltip-version-link strong { color: #efd27e; font: 12px Georgia, serif; font-weight: 500; }
+.tooltip-version-link b { color: #b89c66; font-size: 9px; font-weight: 500; text-transform: uppercase; }
 .tooltip-expand { width: 100%; margin-top: 9px; padding: 7px; color: #c2aa75; }
 .tooltip-section { margin-top: 10px; }
 .tooltip-section + .tooltip-section { padding-top: 9px; border-top: 1px solid rgba(117, 94, 55, 0.32); }

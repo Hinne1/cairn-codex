@@ -75,7 +75,7 @@ internal static class ItemCatalogBuilder
                 path => path,
                 path => ItemPresentationBuilder.BuildSet(path, presentationSource),
                 StringComparer.OrdinalIgnoreCase);
-        var items = data.Records.Values
+        var projectedItems = data.Records.Values
             .Select(source => Project(
                 source,
                 data.Tags,
@@ -88,6 +88,8 @@ internal static class ItemCatalogBuilder
                 knownFormulas))
             .Where(item => item is not null)
             .Cast<CatalogItem>()
+            .ToArray();
+        var items = LinkAwakenedVersions(projectedItems)
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Record, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -183,6 +185,37 @@ internal static class ItemCatalogBuilder
             skillMasteries,
             skillClassNames);
     }
+
+    private static IReadOnlyList<CatalogItem> LinkAwakenedVersions(IReadOnlyList<CatalogItem> items)
+    {
+        const string itemPrefix = "records/items/";
+        const string awakenedPrefix = "records/items/awakened/";
+        var byRecord = items.ToDictionary(item => NormalizeRecord(item.Record), StringComparer.OrdinalIgnoreCase);
+
+        return items.Select(item =>
+        {
+            var record = NormalizeRecord(item.Record);
+            if (record.StartsWith(awakenedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var baseRecord = itemPrefix + record[awakenedPrefix.Length..];
+                return item.Rarity == "legendary" && byRecord.TryGetValue(baseRecord, out var baseItem) && baseItem.Rarity == "epic"
+                    ? item with { BaseVersionRecord = baseItem.Record }
+                    : item;
+            }
+
+            if (!record.StartsWith(itemPrefix, StringComparison.OrdinalIgnoreCase) || item.Rarity != "epic")
+            {
+                return item;
+            }
+
+            var upgradeRecord = awakenedPrefix + record[itemPrefix.Length..];
+            return byRecord.TryGetValue(upgradeRecord, out var upgrade) && upgrade.Rarity == "legendary"
+                ? item with { UpgradeRecord = upgrade.Record }
+                : item;
+        }).ToArray();
+    }
+
+    private static string NormalizeRecord(string record) => record.Replace('\\', '/');
 
     private static IReadOnlyDictionary<string, string> BuildSkillClassNames(ItemCatalogData data)
     {
@@ -991,7 +1024,9 @@ internal sealed record CatalogItem(
     ItemSetPresentation? SetPresentation,
     ItemAcquisitionPresentation Acquisition,
     ItemPresentation Presentation,
-    IReadOnlyList<string>? SupplySlotFamilies = null);
+    IReadOnlyList<string>? SupplySlotFamilies = null,
+    string? UpgradeRecord = null,
+    string? BaseVersionRecord = null);
 
 internal sealed record CatalogAffix(
     string Key,

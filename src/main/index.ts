@@ -39,7 +39,7 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 27
+const CATALOG_PRESENTATION_VERSION = 28
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 

@@ -189,6 +189,7 @@ internal static class ItemCatalogBuilder
     private static IReadOnlyList<CatalogItem> LinkAwakenedVersions(IReadOnlyList<CatalogItem> items)
     {
         const string itemPrefix = "records/items/";
+        const string upgradedPrefix = "records/items/upgraded/";
         const string awakenedPrefix = "records/items/awakened/";
         var byRecord = items.ToDictionary(item => NormalizeRecord(item.Record), StringComparer.OrdinalIgnoreCase);
 
@@ -197,18 +198,41 @@ internal static class ItemCatalogBuilder
             var record = NormalizeRecord(item.Record);
             if (record.StartsWith(awakenedPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                var baseRecord = itemPrefix + record[awakenedPrefix.Length..];
-                return item.Rarity == "legendary" && byRecord.TryGetValue(baseRecord, out var baseItem) && baseItem.Rarity == "epic"
-                    ? item with { BaseVersionRecord = baseItem.Record }
+                var awakenedRelativeRecord = record[awakenedPrefix.Length..];
+                var upgradedRecord = upgradedPrefix + awakenedRelativeRecord;
+                var baseRecord = itemPrefix + awakenedRelativeRecord;
+                var hasUpgradedVersion = byRecord.TryGetValue(upgradedRecord, out var upgradedItem) && upgradedItem.Rarity == "epic";
+                var hasBaseVersion = byRecord.TryGetValue(baseRecord, out var baseItem) && baseItem.Rarity == "epic";
+                var sourceItem = hasUpgradedVersion ? upgradedItem : hasBaseVersion ? baseItem : null;
+                return item.Rarity == "legendary" && sourceItem is not null
+                    ? item with { BaseVersionRecord = sourceItem.Record }
                     : item;
             }
 
-            if (!record.StartsWith(itemPrefix, StringComparison.OrdinalIgnoreCase) || item.Rarity != "epic")
+            if (item.Rarity != "epic")
             {
                 return item;
             }
 
-            var upgradeRecord = awakenedPrefix + record[itemPrefix.Length..];
+            string relativeRecord;
+            if (record.StartsWith(upgradedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                relativeRecord = record[upgradedPrefix.Length..];
+            }
+            else if (record.StartsWith(itemPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                relativeRecord = record[itemPrefix.Length..];
+                if (byRecord.TryGetValue(upgradedPrefix + relativeRecord, out var upgradedItem) && upgradedItem.Rarity == "epic")
+                {
+                    return item;
+                }
+            }
+            else
+            {
+                return item;
+            }
+
+            var upgradeRecord = awakenedPrefix + relativeRecord;
             return byRecord.TryGetValue(upgradeRecord, out var upgrade) && upgrade.Rarity == "legendary"
                 ? item with { UpgradeRecord = upgrade.Record }
                 : item;

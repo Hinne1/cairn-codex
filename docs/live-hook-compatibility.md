@@ -39,9 +39,9 @@ Build inputs:
 - Boost: `1.78.0`
 - Boost source SHA-256:
   `090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c`
-- Hook version: `1.5.9731.33714`
+- Hook version: `1.5.9736.15764`
 - Hook SHA-256:
-  `b553e19d825caaacc45c9b6f37e1dad7fcf2f2e4cc5b809186b0d871c89cc505`
+  `419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5`
 - Injector SHA-256:
   `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
 
@@ -58,8 +58,9 @@ The app-owned hook also replaces GDIA's blanket rejection of
 `records/items/misc/` with an exact allowlist for the four transferable
 difficulty merits. Champion's, Savior's, Challenger's, and Gladiator's Merits
 therefore enter Cairn's durable incoming queue, while unrelated special items
-remain untouched in the stash. Native archive and retrieval notifications are
-branded as Cairn Codex rather than Item Assistant.
+remain untouched in the stash. Native monitoring, archive, retrieval, and
+ignored-item notifications are consistently branded as Cairn Codex rather than
+Item Assistant.
 
 Personal-inventory delivery receipts retain Cairn's unique operation filename
 when the hook moves them to the completed or rejected queue. The helper verifies
@@ -115,11 +116,11 @@ time. On 2026-08-20, the bundled hook and injector fingerprints, compatibility
 inspection, injection, worker handshake, repeated ready-state inspection,
 clean disconnect, and game-process survival were verified against its exact
 `Game.dll`. Its first personal-inventory delivery exposed the changed native
-ABI on 2026-08-22. Hook `1.5.9731.33714` contains the ABI correction, safe
-queue rollback, and stack-preserving Potion of Clarity support, but still
-requires a live delivery round trip before personal
-delivery on this build is considered fully verified. Live mode remains
-explicitly opt-in because it mutates the running game process.
+ABI on 2026-08-22. Hook `1.5.9736.15764` contains the ABI correction, safe
+queue rollback, stack-preserving Potion of Clarity support, and consistent
+Cairn Codex notification wording, but still requires a live delivery round trip
+before personal delivery on this build is considered fully verified. Live mode
+remains explicitly opt-in because it mutates the running game process.
 
 ## Planned local compatibility approval
 

@@ -39,7 +39,7 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 28
+const CATALOG_PRESENTATION_VERSION = 29
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
@@ -1721,6 +1721,17 @@ async function runSmokeTest(
       mythicalMaw?.presentation?.sections.filter((section) => section.kind === 'skill-modifier').length !== 3
     ) {
       throw new Error('Catalog presentation did not resolve Mythical Maw skill levels and modifiers.')
+    }
+    const jackalStep = helperSnapshot.items.find((item) => item.name === "Mythical Jackal's Step")
+    const stunBlast = helperSnapshot.items
+      .flatMap((item) => item.setPresentation?.tiers ?? [])
+      .map((tier) => tier.grantedSkill)
+      .find((skill) => skill?.name === 'Stun Blast')
+    if (
+      jackalStep?.presentation?.grantedSkill?.trigger !== '20% Chance when Hit' ||
+      stunBlast?.trigger !== '35% Chance on Default Weapon Attack'
+    ) {
+      throw new Error('Granted passive and proc skills did not preserve their activation trigger.')
     }
     const forbiddenMark = helperSnapshot.items.find(
       (item) => item.name === 'Mythical Mark of the Forbidden'

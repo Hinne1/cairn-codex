@@ -539,9 +539,9 @@ internal static partial class ItemPresentationBuilder
         if (skillPath is null || !TryResolveDisplaySkill(skillPath, data, out var skill)) return null;
         var name = Resolve(skill.Text("skillDisplayName"), data.Tags) ?? "Granted Skill";
         var description = Resolve(skill.Text("skillBaseDescription"), data.Tags);
-        var trigger = ResolveTrigger(item.Text("itemSkillAutoController"));
         var level = Math.Max(1, RecordInteger(item, "itemSkillLevelEq") ??
             RecordInteger(item, "itemSkillLevel") ?? 1);
+        var trigger = ResolveTrigger(item.Text("itemSkillAutoController"), skill, level);
         var lines = new List<ItemPresentationLine>();
         if (NumberAt(skill, "skillManaCost", level) is { } energy)
             lines.Add(Line("Energy Cost", energy, null));
@@ -732,17 +732,39 @@ internal static partial class ItemPresentationBuilder
             ? value[1..^1]
             : value;
 
-    private static string ResolveTrigger(string? controller)
+    private static string? ResolveTrigger(string? controller, ArzRecord skill, int level)
     {
-        if (controller is null) return string.Empty;
-        var chance = PercentPattern().Match(controller).Groups[1].Value;
-        var prefix = chance.Length > 0 ? chance + "% " : string.Empty;
-        if (controller.Contains("enemyonattack", StringComparison.OrdinalIgnoreCase)) return prefix + "Chance on Attack";
-        if (controller.Contains("enemyonanyhit", StringComparison.OrdinalIgnoreCase)) return prefix + "Chance when Hit";
-        if (controller.Contains("selfonblock", StringComparison.OrdinalIgnoreCase)) return prefix + "Chance when Blocking";
-        if (controller.Contains("selfonkill", StringComparison.OrdinalIgnoreCase)) return prefix + "Chance on Enemy Death";
-        if (controller.Contains("selfonlowhealth", StringComparison.OrdinalIgnoreCase)) return prefix + "Chance at Low Health";
-        return prefix.Trim();
+        if (controller is not null)
+        {
+            var chance = PercentPattern().Match(controller).Groups[1].Value;
+            var prefix = chance.Length > 0 ? chance + "% " : string.Empty;
+            if (controller.Contains("onattackcrit", StringComparison.OrdinalIgnoreCase))
+                return prefix + "Chance on Critical Attack";
+            if (controller.Contains("onmeleehit", StringComparison.OrdinalIgnoreCase))
+                return prefix + "Chance on Melee Attack";
+            if (controller.Contains("onattack", StringComparison.OrdinalIgnoreCase))
+                return prefix + "Chance on Attack";
+            if (controller.Contains("onanyhit", StringComparison.OrdinalIgnoreCase))
+                return prefix + "Chance when Hit";
+            if (controller.Contains("onblock", StringComparison.OrdinalIgnoreCase))
+                return prefix + "Chance on Block";
+            if (controller.Contains("onkill", StringComparison.OrdinalIgnoreCase))
+                return prefix + "Chance on Enemy Death";
+            var healthThreshold = HealthThresholdPattern().Match(controller).Groups[1].Value;
+            if (healthThreshold.Length > 0)
+                return prefix + "Chance at " + healthThreshold + "% Health";
+            if (controller.Contains("onlowhealth", StringComparison.OrdinalIgnoreCase))
+                return prefix + "Chance at Low Health";
+            if (prefix.Length > 0) return prefix.Trim();
+        }
+
+        if (skill.Type.StartsWith("Skill_WPAttack", StringComparison.OrdinalIgnoreCase) &&
+            NumberAt(skill, "skillChanceWeight", level) is { } chanceWeight &&
+            chanceWeight > 0)
+        {
+            return Format(chanceWeight) + "% Chance on Default Weapon Attack";
+        }
+        return null;
     }
 
     private static string DamageName(string value) => value switch
@@ -767,6 +789,9 @@ internal static partial class ItemPresentationBuilder
 
     [GeneratedRegex(@"_([0-9]+)%", RegexOptions.CultureInvariant)]
     private static partial Regex PercentPattern();
+
+    [GeneratedRegex(@"selfat([0-9]+)%health", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex HealthThresholdPattern();
 
     private sealed record StatLabel(string Label, string Unit = "");
     private readonly record struct NumericRange(double Minimum, double Maximum);

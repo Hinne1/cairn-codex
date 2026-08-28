@@ -30,6 +30,7 @@ type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
 type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'oracle' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
+type SetSortMode = 'completion' | 'level' | 'name'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
 type TransferMode = 'live' | 'offline'
@@ -89,6 +90,8 @@ interface CollectionSet {
   items: CollectionItem[]
   collected: number
   availableCopies: number
+  minimumLevel: number
+  maximumLevel: number
 }
 
 interface RollTrackerSummary {
@@ -150,6 +153,8 @@ const sortDirection = ref<SortDirection>('desc')
 const trackerCollapsed = ref(readStoredTrackerCollapsed())
 const showLegacyScanner = ref(readStoredBoolean('cairn-codex-show-legacy-scanner', false))
 const setProgressFilter = ref<SetProgressFilter>('all')
+const setSortMode = ref<SetSortMode>('completion')
+const setSortDirection = ref<SortDirection>('desc')
 const selectedSkill = ref(localStorage.getItem('cairn-codex-skill') ?? 'Wendigo Totem')
 const skillScope = ref<SkillScope>(
   localStorage.getItem('cairn-codex-skill-scope') === 'archive' ? 'archive' : 'all'
@@ -656,29 +661,33 @@ const collectionSets = computed<CollectionSet[]>(() => {
       existing.items.push(item)
       existing.collected += item.discovered ? 1 : 0
       existing.availableCopies += item.availableCount
+      if (item.levelRequirement > 0) {
+        existing.minimumLevel = existing.minimumLevel > 0
+          ? Math.min(existing.minimumLevel, item.levelRequirement)
+          : item.levelRequirement
+        existing.maximumLevel = Math.max(existing.maximumLevel, item.levelRequirement)
+      }
     } else {
       grouped.set(item.setRecord, {
         record: item.setRecord,
         name: item.setName,
         items: [item],
         collected: item.discovered ? 1 : 0,
-        availableCopies: item.availableCount
+        availableCopies: item.availableCount,
+        minimumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0,
+        maximumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0
       })
     }
   }
   for (const set of grouped.values()) {
     set.items.sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
   }
-  return [...grouped.values()].sort((left, right) => {
-    const leftRatio = left.collected / left.items.length
-    const rightRatio = right.collected / right.items.length
-    return rightRatio - leftRatio || left.name.localeCompare(right.name)
-  })
+  return [...grouped.values()]
 })
 
 const visibleSets = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
-  return collectionSets.value
+  const sets = collectionSets.value
     .filter(
       (set) =>
         rarityFilter.value === 'all' || set.items.some((item) => item.rarity === rarityFilter.value)
@@ -701,6 +710,7 @@ const visibleSets = computed(() => {
         set.items.some((item) => matchesSearch(item, needle))
       )
     })
+  return sets.sort(compareSets)
 })
 
 const displayedResultCount = computed(() =>
@@ -1537,7 +1547,7 @@ function navigateAppHistory(direction: 'back' | 'forward'): void {
 }
 
 watch(
-  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, materialCategory],
+  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, setSortMode, setSortDirection, materialCategory],
   () => {
     currentPage.value = 1
   }
@@ -1545,6 +1555,10 @@ watch(
 
 watch(sortMode, (mode) => {
   sortDirection.value = mode === 'name' ? 'asc' : 'desc'
+})
+
+watch(setSortMode, (mode) => {
+  setSortDirection.value = mode === 'completion' ? 'desc' : 'asc'
 })
 
 watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
@@ -2896,6 +2910,26 @@ function setCompletionPercent(set: CollectionSet): string {
   return ((set.collected / set.items.length) * 100).toFixed(1) + '%'
 }
 
+function setLevelLabel(set: CollectionSet): string {
+  if (set.maximumLevel <= 0) return 'No level requirement'
+  if (set.minimumLevel === set.maximumLevel) return `Level ${set.minimumLevel}`
+  return `Levels ${set.minimumLevel}–${set.maximumLevel}`
+}
+
+function compareSets(left: CollectionSet, right: CollectionSet): number {
+  let comparison = 0
+  if (setSortMode.value === 'level') {
+    comparison = left.minimumLevel - right.minimumLevel || left.maximumLevel - right.maximumLevel
+  } else if (setSortMode.value === 'completion') {
+    comparison = left.collected / left.items.length - right.collected / right.items.length
+    if (comparison === 0) comparison = left.collected - right.collected
+  } else {
+    comparison = left.name.localeCompare(right.name)
+  }
+  if (comparison === 0) comparison = left.name.localeCompare(right.name)
+  return setSortDirection.value === 'asc' ? comparison : -comparison
+}
+
 function bestStoredCopy(record: string): VaultListItem | null {
   const matches = vaultItems.value.filter(
     (item) =>
@@ -3951,6 +3985,15 @@ function formatPercentile(value: number | null | undefined): string {
           <option value="roll">Best roll</option>
         </select>
         <select v-if="activeView === 'collection' || activeView === 'materials'" v-model="sortDirection" class="sort-direction" aria-label="Sort direction">
+          <option value="asc">↑ Ascending</option>
+          <option value="desc">↓ Descending</option>
+        </select>
+        <select v-if="activeView === 'sets'" v-model="setSortMode" aria-label="Sort sets">
+          <option value="completion">Completion</option>
+          <option value="level">Required level</option>
+          <option value="name">Name</option>
+        </select>
+        <select v-if="activeView === 'sets'" v-model="setSortDirection" class="sort-direction" aria-label="Set sort direction">
           <option value="asc">↑ Ascending</option>
           <option value="desc">↓ Descending</option>
         </select>
@@ -5207,6 +5250,7 @@ function formatPercentile(value: number | null | undefined): string {
             <div>
               <p>Item set</p>
               <h3>{{ set.name }}</h3>
+              <small class="set-level">{{ setLevelLabel(set) }}</small>
             </div>
             <strong :class="{ complete: set.collected === set.items.length }">
               {{ set.collected }} / {{ set.items.length }}

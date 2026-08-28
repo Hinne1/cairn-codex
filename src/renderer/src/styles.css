@@ -349,6 +349,8 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-card header > strong.complete { border-color: #81652f; color: #e1bd6b; background: rgba(111, 81, 31, 0.18); }
 .set-percentage { align-self: center; min-width: 48px; color: #9c8b67; font-size: 11px; text-align: right; }
 .set-meter { margin: 16px 0; }
+.set-readiness { margin: -7px 0 8px; color: #9fbd77; font-size: 9px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+.set-readiness.crafting { color: #70aeb8; }
 .set-card ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .set-card li { color: #c3b99f; }
 .set-card li > button { width: 100%; display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 8px; padding: 8px 4px; border: 0; border-radius: 4px; color: inherit; background: transparent; cursor: pointer; text-align: left; }
@@ -359,6 +361,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-card li strong { font-size: 12px; font-weight: 550; }
 .set-card li small { color: #746e63; font-size: 10px; text-transform: capitalize; }
 .set-card li em { color: #a98d59; font-size: 11px; font-style: normal; }
+.set-card li.craftable { color: #a8c7c2; }
+.set-card li.craftable button > span { color: #6fb4be; }
+.set-card li em.craftable { color: #6fb4be; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 .set-card li.missing { color: #656158; }
 .set-card li.missing button > span { color: #565249; }
 .set-bonus-tiers { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #39342b; }

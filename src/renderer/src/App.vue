@@ -581,9 +581,8 @@ const affixRollSummary = computed(() => {
 const setSummary = computed(() => ({
   total: collectionSets.value.length,
   collected: collectionSets.value.filter((set) => set.collected === set.items.length).length,
-  availableCopies: collectionSets.value.filter((set) =>
-    set.items.every((item) => item.availableCount > 0)
-  ).length
+  readyFromStorage: collectionSets.value.filter(setReadyFromStorage).length,
+  readyAfterCrafting: collectionSets.value.filter(setReadyAfterCrafting).length
 }))
 const componentSummary = computed<CollectionRaritySummary>(() => {
   const items = (snapshot.value?.materials ?? []).filter((item) => item.rarity === 'component')
@@ -659,7 +658,7 @@ const collectionSets = computed<CollectionSet[]>(() => {
     const existing = grouped.get(item.setRecord)
     if (existing) {
       existing.items.push(item)
-      existing.collected += item.discovered ? 1 : 0
+      existing.collected += setItemCollected(item) ? 1 : 0
       existing.availableCopies += item.availableCount
       if (item.levelRequirement > 0) {
         existing.minimumLevel = existing.minimumLevel > 0
@@ -672,7 +671,7 @@ const collectionSets = computed<CollectionSet[]>(() => {
         record: item.setRecord,
         name: item.setName,
         items: [item],
-        collected: item.discovered ? 1 : 0,
+        collected: setItemCollected(item) ? 1 : 0,
         availableCopies: item.availableCount,
         minimumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0,
         maximumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0
@@ -2910,6 +2909,24 @@ function setCompletionPercent(set: CollectionSet): string {
   return ((set.collected / set.items.length) * 100).toFixed(1) + '%'
 }
 
+function setItemCollected(item: CollectionItem): boolean {
+  return Boolean(item.discovered || item.recipeUnlocked)
+}
+
+function setReadyFromStorage(set: CollectionSet): boolean {
+  return set.items.every((item) => item.availableCount > 0)
+}
+
+function setReadyAfterCrafting(set: CollectionSet): boolean {
+  return set.items.every((item) => item.availableCount > 0 || item.recipeUnlocked)
+}
+
+function setReadinessLabel(set: CollectionSet): string | null {
+  if (setReadyFromStorage(set)) return 'Ready from storage'
+  if (setReadyAfterCrafting(set)) return 'Ready after crafting'
+  return null
+}
+
 function setLevelLabel(set: CollectionSet): string {
   if (set.maximumLevel <= 0) return 'No level requirement'
   if (set.minimumLevel === set.maximumLevel) return `Level ${set.minimumLevel}`
@@ -3811,7 +3828,10 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
           <div class="meter set"><span :style="{ width: percentage(setSummary) }" /></div>
           <small>
-            {{ percentage(setSummary) }} complete · {{ setSummary.availableCopies }} ready to equip
+            {{ percentage(setSummary) }} complete · {{ setSummary.readyFromStorage }} ready from storage
+            <template v-if="setSummary.readyAfterCrafting > setSummary.readyFromStorage">
+              · {{ setSummary.readyAfterCrafting - setSummary.readyFromStorage }} more after crafting
+            </template>
             <template v-if="setRollSummary.median !== null"> · median best piece {{ setRollSummary.median.toFixed(1) }}% ({{ setRollSummary.scored }} scored)</template>
           </small>
         </button>
@@ -5260,8 +5280,22 @@ function formatPercentile(value: number | null | undefined): string {
           <div class="set-meter">
             <span :style="{ width: `${(set.collected / set.items.length) * 100}%` }" />
           </div>
+          <p
+            v-if="setReadinessLabel(set)"
+            class="set-readiness"
+            :class="{ crafting: !setReadyFromStorage(set) }"
+          >
+            {{ setReadinessLabel(set) }}
+          </p>
           <ul>
-            <li v-for="item in set.items" :key="item.record" :class="{ missing: !item.discovered }">
+            <li
+              v-for="item in set.items"
+              :key="item.record"
+              :class="{
+                missing: !setItemCollected(item),
+                craftable: item.recipeUnlocked && item.availableCount === 0
+              }"
+            >
               <button
                 type="button"
                 aria-describedby="item-tooltip"
@@ -5272,9 +5306,10 @@ function formatPercentile(value: number | null | undefined): string {
                 @blur="scheduleTooltipHide"
                 @click="openItem(item)"
               >
-                <span aria-hidden="true">{{ item.discovered ? '✓' : '○' }}</span>
+                <span aria-hidden="true">{{ setItemCollected(item) ? (item.availableCount > 0 ? '✓' : '◇') : '○' }}</span>
                 <div><strong>{{ item.name }}</strong><small>{{ item.slot }}</small></div>
                 <em v-if="item.availableCount > 0">×{{ item.availableCount }}</em>
+                <em v-else-if="item.recipeUnlocked" class="craftable">Craftable</em>
               </button>
             </li>
           </ul>

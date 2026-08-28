@@ -232,8 +232,8 @@ const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', t
 const tooltipRecord = ref<string | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
 const tooltipMaxHeight = computed(() => Math.max(180, window.innerHeight - tooltipPosition.value.top - 14))
-const tooltipPinned = ref(false)
-const tooltipExpanded = ref(false)
+const tooltipElement = ref<HTMLElement | null>(null)
+const tooltipDetailsHeld = ref(false)
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
@@ -1671,6 +1671,7 @@ onMounted(async () => {
   updateHistoryButtons()
   window.addEventListener('popstate', handleAppHistory)
   window.addEventListener('keydown', handleEscape)
+  window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
   try {
@@ -1711,6 +1712,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('popstate', handleAppHistory)
   window.removeEventListener('keydown', handleEscape)
+  window.removeEventListener('keyup', handleTooltipKeyUp)
   window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
   cancelTooltipHide()
@@ -2140,6 +2142,15 @@ async function setZoom(factor: number): Promise<void> {
 }
 
 function handleZoomWheel(event: WheelEvent): void {
+  const tooltip = tooltipElement.value
+  if (tooltipRecord.value && tooltip && tooltip.scrollHeight > tooltip.clientHeight) {
+    event.preventDefault()
+    tooltip.scrollTop = Math.max(
+      0,
+      Math.min(tooltip.scrollTop + event.deltaY, tooltip.scrollHeight - tooltip.clientHeight)
+    )
+    return
+  }
   if (!event.ctrlKey) return
   event.preventDefault()
   void setZoom(zoomFactor.value + (event.deltaY < 0 ? 0.1 : -0.1))
@@ -2949,9 +2960,9 @@ function showItemVersion(item: CollectionItem): void {
   const counterpart = itemVersionCounterpart(item)
   if (!counterpart) return
   cancelTooltipHide()
-  tooltipExpanded.value = false
-  tooltipPinned.value = true
+  tooltipDetailsHeld.value = false
   tooltipRecord.value = counterpart.record
+  resetTooltipScroll()
 }
 
 function openSelectedMiInWorkshop(): void {
@@ -3050,12 +3061,12 @@ function locationDisplayName(location: Pick<MapRegionLocation, 'name' | 'routeNa
 
 function tooltipSources(item: CollectionItem): string[] {
   const sources = item.acquisition?.sources ?? []
-  return tooltipExpanded.value ? sources : sources.slice(0, 5)
+  return tooltipDetailsHeld.value ? sources : sources.slice(0, 5)
 }
 
 function tooltipLocations(item: CollectionItem): MapRegionLocation[] {
   const locations = item.acquisition?.locations ?? []
-  return tooltipExpanded.value ? locations : locations.slice(0, 6)
+  return tooltipDetailsHeld.value ? locations : locations.slice(0, 6)
 }
 
 function tooltipHasMore(item: CollectionItem): boolean {
@@ -3150,21 +3161,21 @@ function matchesLevel(level: number, expression: string): boolean {
 
 function queueTooltip(item: CollectionItem, event: MouseEvent | FocusEvent): void {
   cancelTooltipHide()
-  if (tooltipPinned.value) return
   cancelTooltip()
   positionTooltip(event)
   tooltipTimer = setTimeout(() => {
-    tooltipExpanded.value = false
+    tooltipDetailsHeld.value = false
     tooltipRecord.value = item.record
+    resetTooltipScroll()
   }, 180)
 }
 
 function moveTooltip(event: MouseEvent): void {
-  if (tooltipRecord.value && !tooltipPinned.value) positionTooltip(event)
+  if (!tooltipRecord.value) positionTooltip(event)
 }
 
 function positionTooltip(event: MouseEvent | FocusEvent): void {
-  const width = 430
+  const width = 455
   const margin = 14
   const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   const rect = target?.getBoundingClientRect()
@@ -3193,27 +3204,27 @@ function cancelTooltipHide(): void {
 function scheduleTooltipHide(): void {
   cancelTooltip()
   cancelTooltipHide()
-  if (tooltipPinned.value) return
-  tooltipHideTimer = setTimeout(hideTooltip, 220)
+  tooltipHideTimer = setTimeout(hideTooltip, 90)
 }
 
-function toggleTooltipPinned(): void {
-  tooltipPinned.value = !tooltipPinned.value
-  cancelTooltipHide()
-}
-
-function toggleTooltipExpanded(): void {
-  tooltipExpanded.value = !tooltipExpanded.value
-  tooltipPinned.value = true
-  cancelTooltipHide()
+function resetTooltipScroll(): void {
+  void nextTick(() => {
+    if (tooltipElement.value) tooltipElement.value.scrollTop = 0
+  })
 }
 
 function hideTooltip(): void {
   cancelTooltip()
   cancelTooltipHide()
   tooltipRecord.value = null
-  tooltipPinned.value = false
-  tooltipExpanded.value = false
+  tooltipDetailsHeld.value = false
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
 }
 
 function handleEscape(event: KeyboardEvent): void {
@@ -3232,9 +3243,19 @@ function handleEscape(event: KeyboardEvent): void {
     void setZoom(1)
     return
   }
-  if (event.key === 'Control' && tooltipRecord.value && !tooltipPinned.value) {
-    tooltipPinned.value = true
-    cancelTooltipHide()
+  if (event.key === 'Control' && tooltipRecord.value) {
+    tooltipDetailsHeld.value = true
+    return
+  }
+  if (
+    event.key.toLocaleLowerCase() === 'v' &&
+    !event.repeat &&
+    !isTypingTarget(event.target) &&
+    tooltipItem.value &&
+    itemVersionCounterpart(tooltipItem.value)
+  ) {
+    event.preventDefault()
+    showItemVersion(tooltipItem.value)
     return
   }
   if (event.key !== 'Escape') return
@@ -3245,6 +3266,10 @@ function handleEscape(event: KeyboardEvent): void {
   hideTooltip()
   showConnectionDiagnostics.value = false
   selectedRecord.value = null
+}
+
+function handleTooltipKeyUp(event: KeyboardEvent): void {
+  if (event.key === 'Control') tooltipDetailsHeld.value = false
 }
 
 function setMemberItems(item: CollectionItem): CollectionItem[] {
@@ -5316,13 +5341,12 @@ function formatPercentile(value: number | null | undefined): string {
     <Teleport to="body">
       <aside
         v-if="tooltipItem"
+        ref="tooltipElement"
         id="item-tooltip"
         class="game-tooltip"
-        :class="[tooltipItem.rarity, { pinned: tooltipPinned }]"
+        :class="tooltipItem.rarity"
         :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px`, maxHeight: `${tooltipMaxHeight}px` }"
-        :role="tooltipPinned ? 'dialog' : 'tooltip'"
-        @mouseenter="cancelTooltipHide"
-        @mouseleave="scheduleTooltipHide"
+        role="tooltip"
       >
         <header class="tooltip-header">
           <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" />
@@ -5336,28 +5360,19 @@ function formatPercentile(value: number | null | undefined): string {
             <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
             <strong>{{ rarityLabel(tooltipItem) }} · {{ itemTypeLabel(tooltipItem) }}</strong>
           </div>
-          <div class="tooltip-actions">
-            <button type="button" :aria-pressed="tooltipPinned" @click.stop="toggleTooltipPinned">
-              {{ tooltipPinned ? 'Unpin' : 'Pin' }}
-            </button>
-            <button type="button" class="tooltip-close" aria-label="Close tooltip" @click.stop="hideTooltip">×</button>
-          </div>
         </header>
-        <small class="tooltip-hotkey">{{ tooltipPinned ? 'Pinned · Esc or × to close' : 'Hold Ctrl to keep this tooltip open' }}</small>
 
-        <button
+        <div
           v-if="itemVersionCounterpart(tooltipItem)"
-          class="tooltip-version-link"
-          type="button"
-          @click.stop="showItemVersion(tooltipItem)"
+          class="tooltip-version-summary"
         >
           <span class="awakening-sigil"><i /></span>
           <span>
             <small>{{ tooltipItem.upgradeRecord ? 'Awakened version' : 'Original version' }}</small>
             <strong>{{ itemVersionCounterpart(tooltipItem)?.name }} · {{ tooltipItem.upgradeRecord ? 'Legendary' : 'Epic' }}</strong>
           </span>
-          <b>View →</b>
-        </button>
+          <b>[V]</b>
+        </div>
 
         <template v-if="tooltipItem.presentation">
           <section
@@ -5378,14 +5393,17 @@ function formatPercentile(value: number | null | undefined): string {
 
           <section v-if="tooltipItem.setPresentation" class="tooltip-section tooltip-set">
             <h4>{{ tooltipItem.setPresentation.name }}</h4>
+            <p v-if="tooltipItem.setPresentation.description" class="set-description">
+              “{{ tooltipItem.setPresentation.description }}”
+            </p>
             <p
               v-for="member in setMemberItems(tooltipItem)"
               :key="member.record"
               class="set-member"
-              :class="{
-                current: member.record === tooltipItem.record,
-                missing: !member.discovered
-              }"
+              :class="[member.rarity, {
+                  current: member.record === tooltipItem.record,
+                  missing: !member.discovered
+                }]"
             >
               {{ member.name }}
             </p>
@@ -5472,20 +5490,17 @@ function formatPercentile(value: number | null | undefined): string {
               +{{ (tooltipItem.acquisition.locations.length - tooltipLocations(tooltipItem).length) + (tooltipItem.acquisition.additionalLocationCount ?? 0) }} more indexed regions
             </p>
           </template>
-          <button
-            v-if="tooltipHasMore(tooltipItem)"
-            class="tooltip-expand"
-            type="button"
-            @click.stop="toggleTooltipExpanded"
-          >
-            {{ tooltipExpanded ? 'Show summary' : 'Show expanded sources and areas' }}
-          </button>
         </section>
 
         <footer>
           <span v-if="tooltipItem.levelRequirement">Required Player Level: {{ tooltipItem.levelRequirement }}</span>
           <span>Item Level: {{ tooltipItem.itemLevel }}</span>
           <em v-if="tooltipItem.contentPack !== 'base'">{{ tooltipItem.contentPack.toUpperCase() }}</em>
+          <small class="tooltip-controls">
+            <span v-if="tooltipElement && tooltipElement.scrollHeight > tooltipElement.clientHeight">[Mouse Wheel to Scroll]</span>
+            <span v-if="itemVersionCounterpart(tooltipItem)">[V to View {{ tooltipItem.upgradeRecord ? 'Awakened' : 'Original' }} Version]</span>
+            <span v-if="tooltipHasMore(tooltipItem)">[Hold Ctrl to Show Full Drop Details]</span>
+          </small>
         </footer>
       </aside>
     </Teleport>

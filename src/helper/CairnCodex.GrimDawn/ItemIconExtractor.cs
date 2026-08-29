@@ -31,7 +31,7 @@ internal static class ItemIconExtractor
             unresolved.Remove(bitmap);
         }
 
-        foreach (var archive in FindItemArchives(root))
+        foreach (var archive in FindTextureArchives(root))
         {
             if (unresolved.Count == 0) break;
             foreach (var pair in ArcArchiveReader.ReadFiles(archive, unresolved))
@@ -68,16 +68,25 @@ internal static class ItemIconExtractor
     private static string IconKey(string bitmap) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(bitmap)));
 
-    private static IEnumerable<string> FindItemArchives(string root)
+    private static IEnumerable<string> FindTextureArchives(string root)
     {
-        for (var index = 9; index >= 1; index--)
+        foreach (var archiveName in TextureArchiveNames)
         {
-            var path = Path.Combine(root, $"gdx{index}", "resources", "Items.arc");
-            if (File.Exists(path)) yield return path;
+            for (var index = 9; index >= 1; index--)
+            {
+                var contentPackPath = Path.Combine(root, $"gdx{index}", "resources", archiveName);
+                if (File.Exists(contentPackPath)) yield return contentPackPath;
+            }
+            var baseArchivePath = Path.Combine(root, "resources", archiveName);
+            if (File.Exists(baseArchivePath)) yield return baseArchivePath;
         }
-        var basePath = Path.Combine(root, "resources", "Items.arc");
-        if (File.Exists(basePath)) yield return basePath;
     }
+
+    // Item bitmap fields normally resolve from Items.arc. Lokarr's deliberately
+    // disguised set is stored under storyelement/sign records and points at four
+    // perfectly valid textures in Level Art.arc instead. Search both asset homes
+    // in content-pack precedence order rather than special-casing those records.
+    private static readonly string[] TextureArchiveNames = ["Items.arc", "Level Art.arc"];
 
     private static string NormalizePath(string value) => value.Replace('\\', '/').TrimStart('/');
 }

@@ -33,6 +33,7 @@ type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare' | 'recipe'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
+type MiCountingMode = 'base' | 'tier'
 type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'oracle' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SetSortMode = 'completion' | 'level' | 'name'
@@ -156,6 +157,7 @@ const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('recent')
 const sortDirection = ref<SortDirection>('desc')
 const trackerCollapsed = ref(readStoredTrackerCollapsed())
+const miCountingMode = ref<MiCountingMode>(readStoredMiCountingMode())
 const showLegacyScanner = ref(readStoredBoolean('cairn-codex-show-legacy-scanner', false))
 const setProgressFilter = ref<SetProgressFilter>('all')
 const setSortMode = ref<SetSortMode>('completion')
@@ -555,6 +557,18 @@ function itemRollSummary(rarity?: 'epic' | 'legendary' | 'mi'): RollTrackerSumma
   const items = (snapshot.value?.items ?? []).filter((item) =>
     ['epic', 'legendary', 'mi'].includes(item.rarity) && (!rarity || item.rarity === rarity)
   )
+  if (miCountingMode.value === 'base' && (rarity === 'mi' || rarity === undefined)) {
+    const ordinary = items
+      .filter((item) => item.rarity !== 'mi')
+      .map((item) => item.bestRollPercentile)
+    const bestMiByBase = new Map<string, number>()
+    for (const item of items.filter((candidate) => candidate.rarity === 'mi')) {
+      if (item.bestRollPercentile === null) continue
+      const key = miFamilyKey(item)
+      bestMiByBase.set(key, Math.max(bestMiByBase.get(key) ?? -1, item.bestRollPercentile))
+    }
+    return medianSummary([...ordinary, ...bestMiByBase.values()])
+  }
   return medianSummary(items.map((item) => item.bestRollPercentile))
 }
 const allItemRollSummary = computed(() => itemRollSummary())
@@ -566,6 +580,11 @@ const awakeningAvailableLegendaryCount = computed(() =>
     item.rarity === 'legendary' && itemAvailableByAwakeningOnly(item)
   ).length
 )
+const collectedMiFamilies = computed(() => new Set(
+  (snapshot.value?.items ?? [])
+    .filter((item) => item.rarity === 'mi' && isCollectionOwned(item))
+    .map(miFamilyKey)
+))
 const setRollSummary = computed(() => medianSummary(
   collectionSets.value.flatMap((set) => set.items.map((item) => item.bestRollPercentile))
 ))
@@ -944,7 +963,7 @@ const farmTargets = computed<FarmTarget[]>(() => {
   const query = farmingQuery.value.trim().toLocaleLowerCase()
   const grouped = new Map<string, FarmTarget>()
   for (const item of snapshot.value.items) {
-    if (isCollectionOwned(item)) continue
+    if (isCollectedForCompletion(item)) continue
     if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
     if (query && !matchesSearch(item, query)) continue
     for (const location of item.acquisition?.locations ?? []) {
@@ -1573,6 +1592,7 @@ watch(setSortMode, (mode) => {
 
 watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
 watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
+watch(miCountingMode, (mode) => localStorage.setItem('cairn-codex-mi-counting-mode', mode))
 watch(oracleClass, (className) => localStorage.setItem('cairn-codex-oracle-class', className))
 watch(oracleStyle, (style) => localStorage.setItem('cairn-codex-oracle-style', style))
 watch(oracleMinimumLevel, (level) => localStorage.setItem('cairn-codex-oracle-minimum-level', String(level)))
@@ -2070,6 +2090,10 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   return stored === null ? fallback : stored === 'true'
 }
 
+function readStoredMiCountingMode(): MiCountingMode {
+  return localStorage.getItem('cairn-codex-mi-counting-mode') === 'tier' ? 'tier' : 'base'
+}
+
 function readStoredTrackerCollapsed(): boolean {
   const versionKey = 'cairn-codex-tracker-layout-version'
   if (localStorage.getItem(versionKey) !== '2') {
@@ -2236,7 +2260,26 @@ async function hydrateArchiveRolls(): Promise<void> {
 }
 
 function rarity(name: 'epic' | 'legendary' | 'mi'): CollectionRaritySummary | undefined {
-  return snapshot.value?.rarities.find((summary) => summary.rarity === name)
+  if (!snapshot.value) return undefined
+  if (name !== 'mi' || miCountingMode.value === 'tier') {
+    return snapshot.value.rarities.find((summary) => summary.rarity === name)
+  }
+  const families = new Map<string, CollectionItem[]>()
+  for (const item of snapshot.value.items.filter((candidate) => candidate.rarity === 'mi')) {
+    const key = miFamilyKey(item)
+    const family = families.get(key)
+    if (family) family.push(item)
+    else families.set(key, [item])
+  }
+  return {
+    rarity: 'mi',
+    total: families.size,
+    collected: [...families.values()].filter((family) => family.some(isCollectionOwned)).length,
+    availableCopies: [...families.values()].reduce(
+      (count, family) => count + family.reduce((sum, item) => sum + item.availableCount, 0),
+      0
+    )
+  }
 }
 
 function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
@@ -2381,7 +2424,14 @@ function recipePercentage(): string {
 function categoryProgress(category: string): string {
   if (!snapshot.value) return '0 / 0'
   const matches = snapshot.value.items.filter((item) => matchesCategory(item, category))
-  return `${matches.filter(isCollectionOwned).length} / ${matches.length}`
+  const entries = new Map<string, boolean>()
+  for (const item of matches) {
+    const key = item.rarity === 'mi' && miCountingMode.value === 'base'
+      ? `mi:${miFamilyKey(item)}`
+      : `item:${item.record.toLocaleLowerCase()}`
+    entries.set(key, Boolean(entries.get(key) || isCollectionOwned(item)))
+  }
+  return `${[...entries.values()].filter(Boolean).length} / ${entries.size}`
 }
 
 function preferredStashPath(value: CollectionSnapshot): string {
@@ -2927,6 +2977,15 @@ function setCompletionPercent(set: CollectionSet): string {
 
 function setItemCollected(item: CollectionItem): boolean {
   return Boolean(item.discovered || item.recipeUnlocked || isAvailableViaAwakening(item))
+}
+
+function miFamilyKey(item: CollectionItem): string {
+  return `${item.slot}\0${item.name.normalize('NFKC').trim().toLocaleLowerCase()}`
+}
+
+function isCollectedForCompletion(item: CollectionItem): boolean {
+  if (item.rarity !== 'mi' || miCountingMode.value === 'tier') return isCollectionOwned(item)
+  return collectedMiFamilies.value.has(miFamilyKey(item))
 }
 
 function setReadyFromStorage(set: CollectionSet): boolean {
@@ -3785,7 +3844,7 @@ function formatPercentile(value: number | null | undefined): string {
 
       <section class="completion-tracker" aria-label="Collection completion">
         <header>
-          <div><p class="section-label">Collection progress</p><strong>{{ allItemSummary.collected }} / {{ allItemSummary.total }} item bases</strong></div>
+          <div><p class="section-label">Collection progress</p><strong>{{ allItemSummary.collected }} / {{ allItemSummary.total }} tracked entries</strong></div>
           <button type="button" :aria-expanded="!trackerCollapsed" @click="toggleTracker">{{ trackerCollapsed ? 'Show trackers' : 'Hide trackers' }}</button>
         </header>
         <div v-if="!trackerCollapsed" class="metrics">
@@ -3800,7 +3859,7 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
           <div class="meter all"><span :style="{ width: percentage(allItemSummary) }" /></div>
           <small>
-            {{ percentage(allItemSummary) }} discovered · Epic, Legendary, and MI bases
+            {{ percentage(allItemSummary) }} discovered · Epic, Legendary, and {{ miCountingMode === 'base' ? 'MI bases' : 'MI level tiers' }}
             <template v-if="allItemRollSummary.median !== null"> · median best {{ allItemRollSummary.median.toFixed(1) }}% ({{ allItemRollSummary.scored }} scored)</template>
           </small>
         </button>
@@ -3841,12 +3900,12 @@ function formatPercentile(value: number | null | undefined): string {
           @click="filterToRarity('mi')"
         >
           <div class="metric-heading">
-            <span>MI Bases</span>
+            <span>{{ miCountingMode === 'base' ? 'MI Bases' : 'MI Level Tiers' }}</span>
             <strong>{{ rarity('mi')?.collected ?? 0 }} / {{ rarity('mi')?.total ?? '—' }}</strong>
           </div>
           <div class="meter mi"><span :style="{ width: percentage(rarity('mi')) }" /></div>
           <small>
-            {{ percentage(rarity('mi')) }} discovered · level tiers tracked separately
+            {{ percentage(rarity('mi')) }} discovered · {{ miCountingMode === 'base' ? 'any owned tier completes its base' : 'every obtainable level tier counted separately' }}
             <template v-if="miRollSummary.median !== null"> · median best {{ miRollSummary.median.toFixed(1) }}% ({{ miRollSummary.scored }} scored)</template>
           </small>
         </button>
@@ -4640,7 +4699,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div>
             <p class="section-label">Monster Infrequent research</p>
             <h2>MI Workshop</h2>
-            <p>Each MI level tier is its own base entry. Affix combinations are grouped below, with the strongest rolled copy leading each group.</p>
+            <p>Physical copies retain their exact level tier here regardless of the completion-counting preference. Affix combinations are grouped below, with the strongest rolled copy leading each group.</p>
           </div>
           <label class="reserve-toggle">
             <input v-model="showMiReserves" type="checkbox" />
@@ -4648,7 +4707,7 @@ function formatPercentile(value: number | null | undefined): string {
           </label>
         </header>
         <div class="mi-workshop-summary">
-          <span><strong>{{ rarity('mi')?.collected ?? 0 }}</strong> MI tiers collected</span>
+          <span><strong>{{ rarity('mi')?.collected ?? 0 }}</strong> {{ miCountingMode === 'base' ? 'MI bases collected' : 'MI tiers collected' }}</span>
           <span><strong>{{ snapshot?.affixSummary.collected ?? 0 }}</strong> affixes discovered</span>
           <span><strong>{{ miWorkshopRows.length }}</strong> combinations retained</span>
         </div>
@@ -4874,6 +4933,26 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" @click="setZoom(1)">Reset</button>
             </div>
             <small>Ctrl + mouse wheel works anywhere in Cairn.</small>
+          </article>
+
+          <article class="settings-card">
+            <p class="section-label">Collection progress</p>
+            <h3>Monster Infrequent counting</h3>
+            <label class="settings-toggle">
+              <input v-model="miCountingMode" type="radio" value="base" />
+              <span>
+                <strong>Count each MI base once</strong>
+                <small>Recommended. Owning any level tier completes that named base; exact tiers remain visible and retrievable.</small>
+              </span>
+            </label>
+            <label class="settings-toggle">
+              <input v-model="miCountingMode" type="radio" value="tier" />
+              <span>
+                <strong>Count every level tier</strong>
+                <small>Strict mode. Each obtainable required-level variant is a separate collection entry.</small>
+              </span>
+            </label>
+            <small>This changes progress and farming recommendations immediately. It never merges or discards stored copies.</small>
           </article>
 
           <article class="settings-card">

@@ -17,6 +17,17 @@ $manifestPath = Join-Path $releaseRoot "$artifactName.manifest.json"
 $installerSource = Join-Path $projectRoot "dist\builder\Cairn-Codex-$version-Setup.exe"
 $installerPath = Join-Path $releaseRoot "Cairn-Codex-$version-Setup.exe"
 
+function Get-CairnSha256([string] $Path) {
+  $stream = [System.IO.File]::OpenRead($Path)
+  $algorithm = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $algorithm.Dispose()
+    $stream.Dispose()
+  }
+}
+
 $dirtyFiles = @(& git -c "safe.directory=$projectRoot" -C $projectRoot status --porcelain)
 if ($dirtyFiles.Count -gt 0 -and -not $AllowDirty) {
   throw 'Refusing to create a release artifact from a dirty worktree. Commit or stash changes, or pass -AllowDirty for a local test build.'
@@ -49,8 +60,8 @@ Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 Copy-Item -LiteralPath $installerSource -Destination $installerPath -Force
 
-$hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$hash = Get-CairnSha256 $zipPath
+$installerHash = Get-CairnSha256 $installerPath
 $hookPath = Join-Path $packageRoot 'resources\helper\native\ItemAssistantHook_x64.dll'
 $injectorPath = Join-Path $packageRoot 'resources\helper\native\DllInjector64.exe'
 $manifest = [ordered]@{
@@ -61,8 +72,8 @@ $manifest = [ordered]@{
   artifactSha256 = $hash
   installer = Split-Path $installerPath -Leaf
   installerSha256 = $installerHash
-  hookSha256 = (Get-FileHash -LiteralPath $hookPath -Algorithm SHA256).Hash.ToLowerInvariant()
-  injectorSha256 = (Get-FileHash -LiteralPath $injectorPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  hookSha256 = Get-CairnSha256 $hookPath
+  injectorSha256 = Get-CairnSha256 $injectorPath
   commit = (& git -c "safe.directory=$projectRoot" -C $projectRoot rev-parse HEAD).Trim()
   dirty = $dirtyFiles.Count -gt 0
 }

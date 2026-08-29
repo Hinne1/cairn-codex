@@ -592,8 +592,17 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
   ipcMain.handle(
     IPC_CHANNELS.recoverSahdinasMemento,
-    (_event, input: { destination: SpecialRecoveryDestination }): Promise<SpecialItemRecoveryResult> =>
-      runTransferExclusive(() => executeSahdinasMementoRecovery(helper, input.destination))
+    (_event, input: { destination: SpecialRecoveryDestination; expectedCharacterName?: string }): Promise<SpecialItemRecoveryResult> =>
+      runTransferExclusive(async () => {
+        latestCollection ??= await readCollectionCache(collectionCachePath)
+        if (!latestCollection) throw new Error('Build the game-data index before recovering Sahdina\'s Memento.')
+        return executeSahdinasMementoRecovery(
+          helper,
+          latestCollection,
+          input.destination,
+          input.expectedCharacterName
+        )
+      })
   )
 }
 
@@ -804,7 +813,9 @@ function createSupplyPayload(baseRecord: string): LiveVaultPayload {
 
 async function executeSahdinasMementoRecovery(
   helper: GrimDawnHelperClient,
-  destination: SpecialRecoveryDestination
+  collection: CollectionSnapshot,
+  destination: SpecialRecoveryDestination,
+  expectedCharacterName?: string
 ): Promise<SpecialItemRecoveryResult> {
   if (destination !== 'shared-stash' && destination !== 'character-inventory') {
     throw new Error('Sahdina recovery only supports the shared stash or active character inventory.')
@@ -812,14 +823,44 @@ async function executeSahdinasMementoRecovery(
 
   const status = await helper.request<LiveGameStatus>('inspect-live-game')
   if (status.state !== 'ready') throw new Error(status.detail)
-  if (status.isHardcore === null) {
-    throw new Error('Cairn has not resolved whether the active character is Hardcore or Softcore yet. Retry in a moment.')
+  const confirmedCharacterName = expectedCharacterName?.trim() || null
+  if (
+    status.activeCharacterName &&
+    confirmedCharacterName &&
+    status.activeCharacterName.localeCompare(confirmedCharacterName, undefined, { sensitivity: 'base' }) !== 0
+  ) {
+    throw new Error(
+      `The active character changed from “${confirmedCharacterName}” to “${status.activeCharacterName}”. Review the character and try again.`
+    )
+  }
+  const activeCharacterName = status.activeCharacterName ?? confirmedCharacterName
+  let activeIsHardcore = status.isHardcore
+  if (activeIsHardcore === null) {
+    if (!activeCharacterName) {
+      throw new Error('Cairn could not identify the active character well enough to resolve Hardcore or Softcore mode.')
+    }
+    const installationPath = collection.discovery.installations[0]?.path
+    if (!installationPath) throw new Error('No Grim Dawn installation is available.')
+    const profiles = await helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
+    const matchingProfiles = profiles
+      .filter((profile) => !profile.error)
+      .filter((profile) => profile.name.localeCompare(activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
+    const matchingModes = [...new Set(matchingProfiles.map((profile) => profile.isHardcore))]
+    if (matchingModes.length > 1) {
+      throw new Error(
+        `Cairn found both Hardcore and Softcore saves named “${activeCharacterName}”. Rename one before using live recovery.`
+      )
+    }
+    activeIsHardcore = matchingModes[0] ?? null
+    if (activeIsHardcore === null) {
+      throw new Error(`The active character “${activeCharacterName}” was not found in the parsed saves.`)
+    }
   }
 
   const operationId = `sahdina-${randomUUID()}`
   const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
     operationId,
-    isHardcore: status.isHardcore,
+    isHardcore: activeIsHardcore,
     destination,
     item: createSupplyPayload(SAHDINAS_MEMENTO.record)
   })
@@ -841,7 +882,7 @@ async function executeSahdinasMementoRecovery(
       return {
         operationId,
         status: 'committed',
-        activeCharacter: status.activeCharacterName ?? 'Active character',
+        activeCharacter: activeCharacterName ?? 'Active character',
         destination,
         record: SAHDINAS_MEMENTO.record,
         name: SAHDINAS_MEMENTO.name,

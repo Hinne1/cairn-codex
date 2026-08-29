@@ -72,8 +72,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.retrieveLiveVaultItems, { vaultItemIds }) as Promise<LiveRetrievalResult>,
   dispenseLiveAugments: (records, expectedCharacterName) =>
     ipcRenderer.invoke(IPC_CHANNELS.dispenseLiveAugments, { records, expectedCharacterName }) as Promise<LiveSupplyDispenseResult>,
-  recoverSahdinasMemento: (destination) =>
-    ipcRenderer.invoke(IPC_CHANNELS.recoverSahdinasMemento, { destination }) as Promise<SpecialItemRecoveryResult>
+  recoverSahdinasMemento: (destination, expectedCharacterName) =>
+    ipcRenderer.invoke(IPC_CHANNELS.recoverSahdinasMemento, { destination, expectedCharacterName }) as Promise<SpecialItemRecoveryResult>
 }
 
 contextBridge.exposeInMainWorld('cairnCodex', api)

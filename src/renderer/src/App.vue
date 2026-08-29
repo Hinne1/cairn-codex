@@ -2384,7 +2384,10 @@ async function recoverSahdinasMemento(destination: 'shared-stash' | 'character-i
   vaultError.value = null
   vaultMessage.value = null
   try {
-    const result = await window.cairnCodex.recoverSahdinasMemento(destination)
+    const result = await window.cairnCodex.recoverSahdinasMemento(
+      destination,
+      activeCharacter.value?.name ?? liveStatus.value?.activeCharacterName ?? undefined
+    )
     const deliveredTo = result.destination === 'character-inventory'
       ? `${result.activeCharacter}'s inventory`
       : liveStatus.value?.depositTabDescription ?? 'the shared stash'

@@ -79,7 +79,7 @@ export interface CairnCodexApi {
   syncLiveGame: () => Promise<LiveGameSyncResult>
   retrieveLiveVaultItems: (vaultItemIds: string[]) => Promise<LiveRetrievalResult>
   dispenseLiveAugments: (records: string[], expectedCharacterName?: string) => Promise<LiveSupplyDispenseResult>
-  recoverSahdinasMemento: (destination: SpecialRecoveryDestination) => Promise<SpecialItemRecoveryResult>
+  recoverSahdinasMemento: (destination: SpecialRecoveryDestination, expectedCharacterName?: string) => Promise<SpecialItemRecoveryResult>
 }
 
 export interface WriteSafetyStatus {

@@ -403,11 +403,16 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-card li.missing { color: #656158; }
 .set-card li.missing button > span { color: #565249; }
 .set-bonus-tiers { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #39342b; }
-.set-bonus-tiers section { padding-left: 10px; border-left: 2px solid #514a3e; color: #938b7d; }
-.set-bonus-tiers section.unlocked { border-left-color: #b08a43; color: #bfa675; }
+.set-bonus-tiers section { color: #938b7d; }
+.set-bonus-tiers section.unlocked { color: #bfa675; }
+.set-tier-base, .set-tier-group { padding-left: 10px; border-left: 2px solid #514a3e; }
+.set-bonus-tiers section.unlocked > .set-tier-base,
+.set-bonus-tiers section.unlocked > .set-tier-group { border-left-color: #b08a43; }
 .set-bonus-tiers h4 { margin: 0 0 3px; color: inherit; font: 500 13px Georgia, serif; }
 .set-bonus-tiers p { margin: 1px 0; font-size: 11px; }
-.set-tier-group { display: grid; gap: 1px; margin-top: 6px; }
+.set-tier-group { display: grid; gap: 1px; margin-top: 9px; }
+.set-tier-base > .set-tier-group { margin-left: 0; }
+.set-tier-group.skill-bonus { padding-top: 8px; border-top: 1px solid rgba(108, 91, 57, .28); }
 .set-tier-group h5 { margin: 0; color: #b99f72; font: 500 11px Georgia, serif; }
 .set-tier-group.skill-bonus h5 { color: #6ca9d5; }
 .set-tier-group.skill-bonus p { color: #879daf; }
@@ -472,7 +477,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .tooltip-set .set-member.missing { color: #62615e; }
 .tooltip-set-tier { margin: 12px 0 0 12px; color: #aaa9a4; }
 .tooltip-set-tier h5 { margin: 0 0 2px; color: #b5b4b0; font-size: 16px; font-weight: 500; }
-.tooltip-set-subsection { margin: 6px 0 0 10px; }
+.tooltip-set-subsection { margin: 9px 0 0 10px; }
+.tooltip-set-subsection.skill-bonus,
+.tooltip-set-subsection.granted-skill { padding-top: 8px; border-top: 1px solid rgba(105, 87, 55, .3); }
 .tooltip-set-subsection h6 { margin: 0 0 2px; color: #c89a55; font-size: 14px; font-weight: 500; }
 .tooltip-set-subsection.skill-bonus h6 { color: #55a8ff; }
 .tooltip-set-subsection.granted-skill p { margin-left: 0; }
@@ -627,6 +634,12 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .copy-card > header p { margin: 0 0 5px; color: #716b60; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
 .copy-card > header strong { color: #e0bd6d; font: 500 26px Georgia, serif; }
 .copy-identity { display: grid; gap: 10px; min-width: 0; }
+.copy-item-heading { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: start; gap: 11px; padding-bottom: 10px; border-bottom: 1px solid #342f27; }
+.copy-item-heading > img { width: 44px; height: 54px; object-fit: contain; filter: drop-shadow(0 2px 4px #000); }
+.copy-item-heading h3 { overflow-wrap: anywhere; margin: 1px 0 3px; color: #58b9ef; font: 500 19px/1.08 Georgia, serif; }
+.copy-item-heading.legendary h3 { color: #c157f4; }
+.copy-item-heading.mi h3, .copy-item-heading.rare h3 { color: #72d05e; }
+.copy-item-heading > div > small { color: #d6b96f; font: 11px Georgia, serif; text-transform: capitalize; }
 .copy-score { display: flex; align-items: baseline; gap: 9px; }
 .copy-score strong.unscored { color: #8b8271; font-size: 20px; }
 .copy-score small { color: #777064; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
@@ -661,6 +674,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .copy-roll-sections { display: grid; gap: 18px; }
 .copy-roll-sections > section { display: grid; gap: 10px; }
 .copy-roll-sections h3 { margin: 0; color: #8d8575; font: 500 11px Inter, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+.copy-roll-guide { margin: -5px 0 0; color: #6d675b; font-size: 9px; line-height: 1.4; }
 .copy-roll-sections .pet-roll-section { padding-top: 15px; border-top: 1px solid #3b352a; }
 .copy-roll-sections .pet-roll-section h3 { color: #d5b75f; }
 .stat-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px 20px; }

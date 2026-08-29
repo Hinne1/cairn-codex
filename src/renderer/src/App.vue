@@ -3752,24 +3752,26 @@ function presentRolledStats(source: RolledStat[] | undefined, includeFixed = fal
   return stats
     .flatMap((stat) => {
       if (consumed.has(stat.field)) return []
-      if (stat.field.endsWith('Min')) {
-        const root = stat.field.slice(0, -3)
-        const maximum = byField.get(root + 'Max')
+      if (stat.field.endsWith('Max') && byField.has(stat.field.slice(0, -3))) return []
+      const root = stat.field.endsWith('Min') ? stat.field.slice(0, -3) : stat.field
+      const maximum = byField.get(root + 'Max')
+      if (maximum && maximum.field !== stat.field) {
         if (maximum && (includeFixed || maximum.estimatedPercentile !== null)) {
           consumed.add(maximum.field)
+          const unit = rollStatUnit(root)
           const valueLabel =
             stat.value === maximum.value
-              ? formatRollValue(stat.value)
-              : `${formatRollValue(stat.value)}–${formatRollValue(maximum.value)}`
+              ? `${formatRollValue(stat.value)}${unit}`
+              : `${formatRollValue(stat.value)}–${formatRollValue(maximum.value)}${unit}`
           return [
             {
               key: root,
-              label: humanStatName(root),
+              label: rollStatName(root),
               valueLabel,
               percentile: stat.estimatedPercentile === null || maximum.estimatedPercentile === null
                 ? null
                 : (stat.estimatedPercentile + maximum.estimatedPercentile) / 2,
-              rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(maximum.observedMaximum ?? maximum.value)}`
+              rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(maximum.observedMaximum ?? maximum.value)}${unit}`
             }
           ]
         }
@@ -3777,14 +3779,38 @@ function presentRolledStats(source: RolledStat[] | undefined, includeFixed = fal
       return [
         {
           key: stat.field,
-          label: humanStatName(stat.field),
-          valueLabel: formatRollValue(stat.value),
+          label: rollStatName(stat.field),
+          valueLabel: `${formatRollValue(stat.value)}${rollStatUnit(stat.field)}`,
           percentile: stat.estimatedPercentile!,
-          rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(stat.observedMaximum ?? stat.value)}`
+          rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(stat.observedMaximum ?? stat.value)}${rollStatUnit(stat.field)}`
         }
       ]
     })
     .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function rollStatName(field: string): string {
+  if (field.startsWith('conversionPercentage')) {
+    const conversionIndex = field.endsWith('2') ? 1 : 0
+    const conversions = (selectedItem.value?.presentation?.sections ?? [])
+      .flatMap((section) => section.lines)
+      .filter((line) => line.label.includes('Damage converted to'))
+    return conversions[conversionIndex]?.label ?? 'Damage conversion'
+  }
+  return humanStatName(field)
+}
+
+function rollStatUnit(field: string): string {
+  if (
+    field.startsWith('conversionPercentage') ||
+    field.endsWith('Modifier') ||
+    (field.startsWith('defensive') &&
+      !['defensiveProtection', 'defensiveBlock', 'defensiveBonusProtection'].includes(field)) ||
+    field === 'offensiveLifeLeechMin' ||
+    field.includes('Chance') ||
+    field.includes('Reduction')
+  ) return '%'
+  return ''
 }
 
 function rollableStats(copy: ObservedStashItem) {
@@ -3797,20 +3823,80 @@ function petRollableStats(copy: ObservedStashItem) {
 
 function humanStatName(field: string): string {
   const names: Record<string, string> = {
+    characterStrength: 'Physique',
+    characterDexterity: 'Cunning',
     characterAttackSpeedModifier: 'Attack speed',
     characterSpellCastSpeedModifier: 'Cast speed',
+    characterRunSpeedModifier: 'Movement speed',
+    characterTotalSpeedModifier: 'Total speed',
     characterIntelligence: 'Spirit',
+    characterLife: 'Health',
     characterLifeModifier: 'Health',
+    characterMana: 'Energy',
+    characterManaModifier: 'Energy',
     characterDefensiveAbility: 'Defensive ability',
     characterOffensiveAbility: 'Offensive ability',
     characterOffensiveAbilityModifier: 'Offensive ability',
     conversionPercentage: 'Damage conversion',
     offensiveTotalDamageModifier: 'All damage',
+    offensivePhysical: 'Physical damage',
+    offensivePhysicalModifier: 'Physical damage',
+    offensivePierce: 'Pierce damage',
+    offensivePierceModifier: 'Pierce damage',
+    offensiveFire: 'Fire damage',
     offensiveFireModifier: 'Fire damage',
+    offensiveCold: 'Cold damage',
+    offensiveColdModifier: 'Cold damage',
+    offensiveLightning: 'Lightning damage',
+    offensiveLightningModifier: 'Lightning damage',
+    offensivePoison: 'Acid damage',
+    offensivePoisonModifier: 'Acid damage',
+    offensiveLife: 'Vitality damage',
+    offensiveLifeModifier: 'Vitality damage',
+    offensiveAether: 'Aether damage',
+    offensiveAetherModifier: 'Aether damage',
+    offensiveChaos: 'Chaos damage',
+    offensiveChaosModifier: 'Chaos damage',
+    offensiveElemental: 'Elemental damage',
+    offensiveElementalModifier: 'Elemental damage',
+    offensiveCritDamageModifier: 'Critical damage',
+    offensiveLifeLeechMin: 'Attack damage converted to health',
+    offensiveSlowPhysical: 'Internal trauma damage',
+    offensiveSlowPhysicalModifier: 'Internal trauma damage',
+    offensiveSlowBleeding: 'Bleeding damage',
+    offensiveSlowBleedingModifier: 'Bleeding damage',
     offensiveSlowFire: 'Burn damage',
-    offensiveSlowFireModifier: 'Burn damage bonus'
+    offensiveSlowFireModifier: 'Burn damage',
+    offensiveSlowCold: 'Frostburn damage',
+    offensiveSlowColdModifier: 'Frostburn damage',
+    offensiveSlowLightning: 'Electrocute damage',
+    offensiveSlowLightningModifier: 'Electrocute damage',
+    offensiveSlowPoison: 'Poison damage',
+    offensiveSlowPoisonModifier: 'Poison damage',
+    offensiveSlowLife: 'Vitality decay',
+    offensiveSlowLifeModifier: 'Vitality decay',
+    defensivePhysical: 'Physical resistance',
+    defensivePierce: 'Pierce resistance',
+    defensiveFire: 'Fire resistance',
+    defensiveCold: 'Cold resistance',
+    defensiveLightning: 'Lightning resistance',
+    defensivePoison: 'Acid resistance',
+    defensiveLife: 'Vitality resistance',
+    defensiveAether: 'Aether resistance',
+    defensiveChaos: 'Chaos resistance',
+    defensiveBleeding: 'Bleeding resistance',
+    defensiveElementalResistance: 'Elemental resistance'
   }
   return names[field] ?? field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (value) => value.toUpperCase())
+}
+
+function copyDisplayName(copy: ObservedStashItem): string {
+  if (!selectedItem.value) return 'Stored item'
+  return [
+    copy.prefixRecord ? copyAffixName(copy.prefixRecord, '') : '',
+    selectedItem.value.name,
+    copy.suffixRecord ? copyAffixName(copy.suffixRecord, '') : ''
+  ].filter(Boolean).join(' ')
 }
 
 function formatRollValue(value: number): string {
@@ -4369,12 +4455,17 @@ function formatPercentile(value: number | null | undefined): string {
           <button type="button" :class="{ active: materialCategory === 'material' }" @click="materialCategory = 'material'">Materials</button>
           <button type="button" :class="{ active: materialCategory === 'potion-formula' }" @click="materialCategory = 'potion-formula'">Potion formulas</button>
         </div>
-        <select v-if="activeView !== 'materials'" v-model="rarityFilter" aria-label="Rarity">
+        <select v-if="activeView === 'sets'" v-model="rarityFilter" aria-label="Set rarity">
+          <option value="all">All set rarities</option>
+          <option value="legendary">Legendary sets</option>
+          <option value="epic">Epic sets</option>
+        </select>
+        <select v-else-if="activeView !== 'materials'" v-model="rarityFilter" aria-label="Rarity">
           <option value="all">All rarities</option>
           <option value="legendary">Legendary</option>
           <option value="epic">Epic</option>
           <option value="mi">Monster Infrequent</option>
-          <option value="rare">Rare recipe item</option>
+          <option value="rare">Rare items</option>
           <option value="recipe">Craftable from recipe</option>
         </select>
         <select v-if="activeView === 'sets'" v-model="setFeatureFilter" aria-label="Set feature">
@@ -5749,15 +5840,17 @@ function formatPercentile(value: number | null | undefined): string {
               :key="tier.requiredPieces"
               :class="{ unlocked: set.collected >= tier.requiredPieces }"
             >
-              <h4>({{ tier.requiredPieces }}) Set</h4>
-              <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
-              </p>
-              <div v-if="tier.petLines?.length" class="set-tier-group">
-                <h5>Bonus to All Pets</h5>
-                <p v-for="(line, index) in tier.petLines" :key="`pet:${line.label}:${index}`">
+              <div class="set-tier-base">
+                <h4>({{ tier.requiredPieces }}) Set</h4>
+                <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
                   {{ formatPresentationLine(line) }}
                 </p>
+                <div v-if="tier.petLines?.length" class="set-tier-group pet-bonus">
+                  <h5>Bonus to All Pets</h5>
+                  <p v-for="(line, index) in tier.petLines" :key="`pet:${line.label}:${index}`">
+                    {{ formatPresentationLine(line) }}
+                  </p>
+                </div>
               </div>
               <div
                 v-for="modifier in tier.skillModifiers ?? []"
@@ -6091,7 +6184,14 @@ function formatPercentile(value: number | null | undefined): string {
           >
             <header>
               <div class="copy-identity">
-                <p>Copy {{ index + 1 }} <span v-if="vaultCopyForObserved(copy)" class="stored-badge">Stored</span></p>
+                <div class="copy-item-heading" :class="selectedItem.rarity">
+                  <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" />
+                  <div>
+                    <p>Copy {{ index + 1 }} <span v-if="vaultCopyForObserved(copy)" class="stored-badge">Stored</span></p>
+                    <h3>{{ copyDisplayName(copy) }}</h3>
+                    <small>{{ rarityLabel(selectedItem) }} · {{ itemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
+                  </div>
+                </div>
                 <div class="copy-score">
                   <strong v-if="copy.rollAnalysis?.overallEstimatedPercentile != null">
                     {{ copy.rollAnalysis.overallEstimatedPercentile.toFixed(1) }}%
@@ -6163,6 +6263,7 @@ function formatPercentile(value: number | null | undefined): string {
             <div v-else-if="copy.rollAnalysis && (rollableStats(copy).length || petRollableStats(copy).length)" class="copy-roll-sections">
               <section v-if="rollableStats(copy).length">
                 <h3>Item rolls</h3>
+                <p class="copy-roll-guide">Actual rolled value · percentile within this exact item and affix range</p>
                 <div class="stat-list">
                   <div v-for="stat in rollableStats(copy)" :key="stat.key" class="stat-row">
                     <div class="stat-heading">
@@ -6176,6 +6277,7 @@ function formatPercentile(value: number | null | undefined): string {
               </section>
               <section v-if="petRollableStats(copy).length" class="pet-roll-section">
                 <h3>Bonus to All Pets</h3>
+                <p class="copy-roll-guide">Includes inherent and affix-granted pet bonuses</p>
                 <div class="stat-list">
                   <div v-for="stat in petRollableStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row">
                     <div class="stat-heading">

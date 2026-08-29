@@ -359,6 +359,10 @@ export interface CollectionItem {
   supplySlotFamilies?: Array<'weapon' | 'armor' | 'jewelry'> | null
   upgradeRecord?: string | null
   baseVersionRecord?: string | null
+  availableViaAwakening?: boolean
+  awakeningSourceRecord?: string | null
+  awakeningSourceName?: string | null
+  awakeningSourceAvailableCount?: number
   availableCount: number
   bestRollPercentile: number | null
   analyzedCopyCount: number

@@ -5,6 +5,11 @@ import {
   type OracleReadiness,
   type OracleStyle
 } from './stash-oracle'
+import {
+  isAvailableViaAwakening,
+  isCollectionOwned,
+  withAwakeningAvailability
+} from '@shared/collection-availability'
 import type {
   CharacterSaveProfile,
   CollectionBasis,
@@ -556,6 +561,11 @@ const allItemRollSummary = computed(() => itemRollSummary())
 const legendaryRollSummary = computed(() => itemRollSummary('legendary'))
 const epicRollSummary = computed(() => itemRollSummary('epic'))
 const miRollSummary = computed(() => itemRollSummary('mi'))
+const awakeningAvailableLegendaryCount = computed(() =>
+  (snapshot.value?.items ?? []).filter((item) =>
+    item.rarity === 'legendary' && itemAvailableByAwakeningOnly(item)
+  ).length
+)
 const setRollSummary = computed(() => medianSummary(
   collectionSets.value.flatMap((set) => set.items.map((item) => item.bestRollPercentile))
 ))
@@ -582,7 +592,8 @@ const setSummary = computed(() => ({
   total: collectionSets.value.length,
   collected: collectionSets.value.filter((set) => set.collected === set.items.length).length,
   readyFromStorage: collectionSets.value.filter(setReadyFromStorage).length,
-  readyAfterCrafting: collectionSets.value.filter(setReadyAfterCrafting).length
+  readyAfterCrafting: collectionSets.value.filter(setReadyAfterCrafting).length,
+  readyWithQualifiedAvailability: collectionSets.value.filter(setReadyWithQualifiedAvailability).length
 }))
 const componentSummary = computed<CollectionRaritySummary>(() => {
   const items = (snapshot.value?.materials ?? []).filter((item) => item.rarity === 'component')
@@ -633,8 +644,8 @@ const filteredItems = computed(() => {
         : item.rarity === rarityFilter.value)
     )
     .filter((item) => {
-      if (ownership.value === 'owned') return Boolean(item.discovered)
-      if (ownership.value === 'missing') return !item.discovered
+      if (ownership.value === 'owned') return isCollectionOwned(item)
+      if (ownership.value === 'missing') return !isCollectionOwned(item)
       return true
     })
     .filter((item) => {
@@ -933,7 +944,7 @@ const farmTargets = computed<FarmTarget[]>(() => {
   const query = farmingQuery.value.trim().toLocaleLowerCase()
   const grouped = new Map<string, FarmTarget>()
   for (const item of snapshot.value.items) {
-    if (item.discovered) continue
+    if (isCollectionOwned(item)) continue
     if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
     if (query && !matchesSearch(item, query)) continue
     for (const location of item.acquisition?.locations ?? []) {
@@ -2370,7 +2381,7 @@ function recipePercentage(): string {
 function categoryProgress(category: string): string {
   if (!snapshot.value) return '0 / 0'
   const matches = snapshot.value.items.filter((item) => matchesCategory(item, category))
-  return `${matches.filter((item) => item.discovered).length} / ${matches.length}`
+  return `${matches.filter(isCollectionOwned).length} / ${matches.length}`
 }
 
 function preferredStashPath(value: CollectionSnapshot): string {
@@ -2761,13 +2772,16 @@ function applyLiveRetrievals(
 }
 
 function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
+  const awakeningSources = [...value.items, ...(value.plannerItems ?? [])]
+  const items = withAwakeningAvailability(value.items, awakeningSources)
+  const plannerItems = withAwakeningAvailability(value.plannerItems ?? [], awakeningSources)
   const rarities = (['epic', 'legendary', 'mi'] as const).map((rarity) => {
-    const items = value.items.filter((item) => item.rarity === rarity)
+    const matching = items.filter((item) => item.rarity === rarity)
     return {
       rarity,
-      total: items.length,
-      collected: items.filter((item) => item.discovered).length,
-      availableCopies: items.reduce((sum, item) => sum + item.availableCount, 0)
+      total: matching.length,
+      collected: matching.filter(isCollectionOwned).length,
+      availableCopies: matching.reduce((sum, item) => sum + item.availableCount, 0)
     }
   })
   const affixCounts = new Map<string, number>()
@@ -2787,6 +2801,8 @@ function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
   }))
   return {
     ...value,
+    items,
+    plannerItems,
     rarities,
     affixes,
     supplySummary: {
@@ -2890,7 +2906,7 @@ function compareItems(left: CollectionItem, right: CollectionItem): number {
   if (sortMode.value === 'level') {
     comparison = left.levelRequirement - right.levelRequirement
   } else if (sortMode.value === 'completion') {
-    comparison = Number(Boolean(left.discovered)) - Number(Boolean(right.discovered))
+    comparison = Number(isCollectionOwned(left)) - Number(isCollectionOwned(right))
     if (comparison === 0) comparison = left.availableCount - right.availableCount
   } else if (sortMode.value === 'recent') {
     comparison =
@@ -2910,7 +2926,7 @@ function setCompletionPercent(set: CollectionSet): string {
 }
 
 function setItemCollected(item: CollectionItem): boolean {
-  return Boolean(item.discovered || item.recipeUnlocked)
+  return Boolean(item.discovered || item.recipeUnlocked || isAvailableViaAwakening(item))
 }
 
 function setReadyFromStorage(set: CollectionSet): boolean {
@@ -2921,10 +2937,34 @@ function setReadyAfterCrafting(set: CollectionSet): boolean {
   return set.items.every((item) => item.availableCount > 0 || item.recipeUnlocked)
 }
 
+function setReadyWithQualifiedAvailability(set: CollectionSet): boolean {
+  return set.items.every((item) =>
+    item.availableCount > 0 || item.recipeUnlocked || isAvailableViaAwakening(item)
+  )
+}
+
 function setReadinessLabel(set: CollectionSet): string | null {
   if (setReadyFromStorage(set)) return 'Ready from storage'
-  if (setReadyAfterCrafting(set)) return 'Ready after crafting'
-  return null
+  if (!setReadyWithQualifiedAvailability(set)) return null
+  const needsAwakening = set.items.some((item) =>
+    item.availableCount === 0 && isAvailableViaAwakening(item)
+  )
+  const needsCrafting = set.items.some((item) =>
+    item.availableCount === 0 && !isAvailableViaAwakening(item) && item.recipeUnlocked
+  )
+  if (needsAwakening && needsCrafting) return 'Ready after crafting & awakening'
+  if (needsAwakening) return 'Ready after awakening'
+  return 'Ready after crafting'
+}
+
+function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
+  return item.availableCount === 0 && isAvailableViaAwakening(item)
+}
+
+function awakeningAvailabilityLabel(item: CollectionItem): string {
+  const source = item.awakeningSourceName ?? 'owned Epic base'
+  const count = item.awakeningSourceAvailableCount ?? 0
+  return `Available by awakening ${source}${count > 1 ? ` (${count} bases)` : ''}`
 }
 
 function setLevelLabel(set: CollectionSet): string {
@@ -3029,11 +3069,18 @@ function itemIconUrl(item: CollectionItem): string | null {
 
 function isArchivedItem(item: CollectionItem): boolean {
   return archivedRecordSet.value.has(item.record.toLocaleLowerCase()) ||
-    (collectionBasis.value === 'archive' && Boolean(item.discovered))
+    Boolean(item.awakeningSourceRecord &&
+      archivedRecordSet.value.has(item.awakeningSourceRecord.toLocaleLowerCase())) ||
+    (collectionBasis.value === 'archive' && isCollectionOwned(item))
 }
 
 function plannerOwnershipLabel(item: CollectionItem): string | null {
   if (archivedRecordSet.value.has(item.record.toLocaleLowerCase())) return 'Archived'
+  if (item.awakeningSourceRecord &&
+      archivedRecordSet.value.has(item.awakeningSourceRecord.toLocaleLowerCase())) {
+    return `Available by awakening ${item.awakeningSourceName ?? 'owned Epic base'}`
+  }
+  if (itemAvailableByAwakeningOnly(item)) return awakeningAvailabilityLabel(item)
   if (item.recipeUnlocked) return 'Recipe learned'
   if (collectionBasis.value === 'archive' && item.discovered) return 'Archived'
   return null
@@ -3769,6 +3816,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div class="meter legendary"><span :style="{ width: percentage(rarity('legendary')) }" /></div>
           <small>
             {{ percentage(rarity('legendary')) }} discovered · {{ rarity('legendary')?.availableCopies ?? 0 }} copies available
+            <template v-if="awakeningAvailableLegendaryCount"> · {{ awakeningAvailableLegendaryCount }} available by awakening</template>
             <template v-if="legendaryRollSummary.median !== null"> · median best {{ legendaryRollSummary.median.toFixed(1) }}% ({{ legendaryRollSummary.scored }} scored)</template>
           </small>
         </button>
@@ -3831,6 +3879,9 @@ function formatPercentile(value: number | null | undefined): string {
             {{ percentage(setSummary) }} complete · {{ setSummary.readyFromStorage }} ready from storage
             <template v-if="setSummary.readyAfterCrafting > setSummary.readyFromStorage">
               · {{ setSummary.readyAfterCrafting - setSummary.readyFromStorage }} more after crafting
+            </template>
+            <template v-if="setSummary.readyWithQualifiedAvailability > setSummary.readyAfterCrafting">
+              · {{ setSummary.readyWithQualifiedAvailability - setSummary.readyAfterCrafting }} more with awakening
             </template>
             <template v-if="setRollSummary.median !== null"> · median best piece {{ setRollSummary.median.toFixed(1) }}% ({{ setRollSummary.scored }} scored)</template>
           </small>
@@ -4116,7 +4167,10 @@ function formatPercentile(value: number | null | undefined): string {
                 <td>
                   <div class="skill-item-name">
                     <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-                    <span><strong>{{ row.item.name }}</strong><small>{{ row.item.rarity }}</small></span>
+                    <span>
+                      <strong>{{ row.item.name }}</strong>
+                      <small>{{ row.item.rarity }}<template v-if="plannerOwnershipLabel(row.item)"> · {{ plannerOwnershipLabel(row.item) }}</template></small>
+                    </span>
                   </div>
                 </td>
                 <td>{{ row.item.slot }}</td>
@@ -4231,7 +4285,7 @@ function formatPercentile(value: number | null | undefined): string {
                   @click="openItem(evidence.item)"
                 >
                   <img v-if="itemIconUrl(evidence.item)" :src="itemIconUrl(evidence.item)!" alt="" />
-                  <span><strong>{{ evidence.item.name }}</strong><small>{{ evidence.owned ? 'Archived' : 'Missing' }} · {{ evidence.reasons.slice(0, 2).join(' · ') }}</small></span>
+                    <span><strong>{{ evidence.item.name }}</strong><small>{{ evidence.owned ? (plannerOwnershipLabel(evidence.item) ?? 'Archived') : 'Missing' }} · {{ evidence.reasons.slice(0, 2).join(' · ') }}</small></span>
                 </button>
               </div>
             </div>
@@ -5283,7 +5337,10 @@ function formatPercentile(value: number | null | undefined): string {
           <p
             v-if="setReadinessLabel(set)"
             class="set-readiness"
-            :class="{ crafting: !setReadyFromStorage(set) }"
+            :class="{
+              crafting: !setReadyFromStorage(set),
+              awakening: setReadinessLabel(set)?.includes('awakening')
+            }"
           >
             {{ setReadinessLabel(set) }}
           </p>
@@ -5293,7 +5350,8 @@ function formatPercentile(value: number | null | undefined): string {
               :key="item.record"
               :class="{
                 missing: !setItemCollected(item),
-                craftable: item.recipeUnlocked && item.availableCount === 0
+                craftable: item.recipeUnlocked && item.availableCount === 0 && !isAvailableViaAwakening(item),
+                awakening: itemAvailableByAwakeningOnly(item)
               }"
             >
               <button
@@ -5306,9 +5364,10 @@ function formatPercentile(value: number | null | undefined): string {
                 @blur="scheduleTooltipHide"
                 @click="openItem(item)"
               >
-                <span aria-hidden="true">{{ setItemCollected(item) ? (item.availableCount > 0 ? '✓' : '◇') : '○' }}</span>
+                <span aria-hidden="true">{{ item.availableCount > 0 ? '✓' : itemAvailableByAwakeningOnly(item) ? '✦' : setItemCollected(item) ? '◇' : '○' }}</span>
                 <div><strong>{{ item.name }}</strong><small>{{ item.slot }}</small></div>
                 <em v-if="item.availableCount > 0">×{{ item.availableCount }}</em>
+                <em v-else-if="itemAvailableByAwakeningOnly(item)" class="awakening">Awaken base</em>
                 <em v-else-if="item.recipeUnlocked" class="craftable">Craftable</em>
               </button>
             </li>
@@ -5359,7 +5418,7 @@ function formatPercentile(value: number | null | undefined): string {
             v-for="item in visibleItems"
             :key="item.record"
             class="item-card"
-            :class="{ missing: !item.discovered, legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare', component: item.rarity === 'component', consumable: item.rarity === 'consumable' }"
+            :class="{ missing: !isCollectionOwned(item), 'awakening-available': itemAvailableByAwakeningOnly(item), legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare', component: item.rarity === 'component', consumable: item.rarity === 'consumable' }"
             role="button"
             tabindex="0"
             aria-describedby="item-tooltip"
@@ -5373,7 +5432,7 @@ function formatPercentile(value: number | null | undefined): string {
           >
             <div class="item-mark" aria-hidden="true">
               <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
-              <span v-else>{{ item.discovered ? '✓' : '?' }}</span>
+              <span v-else>{{ isCollectionOwned(item) ? '✓' : '?' }}</span>
               <span v-if="item.upgradeRecord" class="awakening-sigil card-awakening-sigil"><i /></span>
             </div>
             <div class="item-copy">
@@ -5390,6 +5449,7 @@ function formatPercentile(value: number | null | undefined): string {
               <strong v-if="item.availableCount > 0">
                 {{ item.availableCount }} {{ activeView === 'materials' ? (item.slot === 'potion-formula' ? 'learned' : 'stored') : item.availableCount === 1 ? 'copy' : 'copies' }}
               </strong>
+              <strong v-else-if="itemAvailableByAwakeningOnly(item)" class="awakening-available">{{ awakeningAvailabilityLabel(item) }}</strong>
               <strong v-else-if="item.recipeUnlocked">Recipe unlocked · no stored copy</strong>
               <strong v-else-if="item.discovered">Discovered · no copies</strong>
               <strong v-else>Not found</strong>
@@ -5436,6 +5496,7 @@ function formatPercentile(value: number | null | undefined): string {
             </h3>
             <p v-if="tooltipItem.upgradeRecord" class="awakening-copy">Can be upgraded by Ashes of Awakening.</p>
             <p v-else-if="tooltipItem.baseVersionRecord" class="awakening-copy">Awakened with Ashes of Awakening.</p>
+            <p v-if="itemAvailableByAwakeningOnly(tooltipItem)" class="awakening-availability">{{ awakeningAvailabilityLabel(tooltipItem) }}</p>
             <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
             <strong>{{ rarityLabel(tooltipItem) }} · {{ itemTypeLabel(tooltipItem) }}</strong>
           </div>
@@ -5481,7 +5542,7 @@ function formatPercentile(value: number | null | undefined): string {
               class="set-member"
               :class="[member.rarity, {
                   current: member.record === tooltipItem.record,
-                  missing: !member.discovered
+                  missing: !setItemCollected(member)
                 }]"
             >
               {{ member.name }}
@@ -5626,6 +5687,19 @@ function formatPercentile(value: number | null | undefined): string {
           </header>
           <p>Select the exact copy below. Roll, affixes, seed, pin state, and retrieval now stay together.</p>
         </section>
+        <section v-else-if="itemAvailableByAwakeningOnly(selectedItem)" class="drawer-awakening-source">
+          <span class="awakening-sigil"><i /></span>
+          <div>
+            <p class="section-label">Qualified availability</p>
+            <strong>{{ awakeningAvailabilityLabel(selectedItem) }}</strong>
+            <small>This Legendary is not stored yet. Awakening consumes one qualifying Epic base.</small>
+          </div>
+          <button
+            v-if="catalogItemByRecord(selectedItem.awakeningSourceRecord)"
+            type="button"
+            @click="openItem(catalogItemByRecord(selectedItem.awakeningSourceRecord)!)"
+          >View Epic base</button>
+        </section>
         <p
           v-if="selectedItem.pinnedInstanceKey && !selectedCopies.some((copy) => copy.instanceKey === selectedItem?.pinnedInstanceKey)"
           class="pinned-away"
@@ -5634,7 +5708,7 @@ function formatPercentile(value: number | null | undefined): string {
         </p>
 
         <div class="copy-list">
-          <p v-if="selectedCopies.length === 0" class="drawer-empty">
+          <p v-if="selectedCopies.length === 0 && !itemAvailableByAwakeningOnly(selectedItem)" class="drawer-empty">
             No currently scanned copy is available. The catalog tooltip will show this item's possible ranges.
           </p>
           <article

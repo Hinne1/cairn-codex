@@ -266,6 +266,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .item-card[role='button'] { cursor: pointer; }
 .item-card[role='button']:focus-visible { outline: 2px solid #b88c40; outline-offset: 2px; }
 .item-card.legendary { border-color: #6d3b82; }
+.item-card.awakening-available { box-shadow: inset 0 0 0 1px rgba(215, 167, 75, 0.28), 0 8px 22px rgba(0, 0, 0, 0.14); }
 .item-card.epic { border-color: #315a79; }
 .item-card.mi, .item-card.rare { border-color: #3d7434; }
 .item-card.component { border-color: #7b6638; }
@@ -332,6 +333,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .card-awakening-sigil { position: absolute; top: 7px; left: 8px; width: 21px; height: 25px; margin: 0; }
 .card-result { align-self: end; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(143, 117, 69, 0.22); }
 .card-result > strong:last-child { color: #d4c19a; font-size: 11px; }
+.card-result > strong.awakening-available { max-width: 62%; color: #d6a84d; line-height: 1.25; text-align: right; }
 .roll-score { color: #e1b85d; font-size: 13px; }
 .roll-score.dim { color: #635e55; }
 .pin-indicator { color: #c7aa69; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -351,6 +353,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-meter { margin: 16px 0; }
 .set-readiness { margin: -7px 0 8px; color: #9fbd77; font-size: 9px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
 .set-readiness.crafting { color: #70aeb8; }
+.set-readiness.awakening { color: #d6a84d; }
 .set-card ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .set-card li { color: #c3b99f; }
 .set-card li > button { width: 100%; display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 8px; padding: 8px 4px; border: 0; border-radius: 4px; color: inherit; background: transparent; cursor: pointer; text-align: left; }
@@ -364,6 +367,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-card li.craftable { color: #a8c7c2; }
 .set-card li.craftable button > span { color: #6fb4be; }
 .set-card li em.craftable { color: #6fb4be; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.set-card li.awakening { color: #dcc58b; }
+.set-card li.awakening button > span, .set-card li em.awakening { color: #d6a84d; }
+.set-card li em.awakening { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 .set-card li.missing { color: #656158; }
 .set-card li.missing button > span { color: #565249; }
 .set-bonus-tiers { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #39342b; }
@@ -408,6 +414,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .game-tooltip.mi .tooltip-header h3, .game-tooltip.rare .tooltip-header h3 { color: #72d05e; }
 .tooltip-header p { margin: 3px 0 4px; color: #d7c59c; font-style: normal; }
 .tooltip-header .awakening-copy { color: #dea64b; font-style: italic; }
+.tooltip-header .awakening-availability { color: #ead39c; font-size: 13px; }
 .tooltip-awakening-sigil { margin-right: 3px; }
 .tooltip-header strong { color: #f0bc54; font-weight: 500; text-transform: capitalize; }
 .tooltip-version-summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin: 9px 0 3px 54px; color: #cdbb96; }
@@ -568,6 +575,11 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .drawer-stored-copies > header strong { color: #dfc58b; font: 500 16px Georgia, serif; }
 .drawer-stored-copies > header small { color: #827867; font-size: 10px; }
 .drawer-stored-copies > p { margin: 0; color: #9a8d77; font-size: 11px; line-height: 1.45; }
+.drawer-awakening-source { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; margin: 0 0 20px; padding: 16px; border: 1px solid #6a5130; border-radius: 8px; background: rgba(62, 43, 20, .42); }
+.drawer-awakening-source strong, .drawer-awakening-source small { display: block; }
+.drawer-awakening-source strong { color: #e0bd70; font: 500 15px Georgia, serif; }
+.drawer-awakening-source small { margin-top: 4px; color: #95856a; font-size: 10px; }
+.drawer-awakening-source button { padding: 8px 11px; border: 1px solid #6a5130; border-radius: 5px; color: #d8b66b; background: #272015; cursor: pointer; }
 .drawer-stored-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .drawer-stored-actions button { padding: 8px 10px; border: 1px solid #675333; border-radius: 5px; color: #dbc486; background: #30271b; cursor: pointer; font-size: 10px; }
 .drawer-stored-actions button:disabled { opacity: .42; cursor: default; }

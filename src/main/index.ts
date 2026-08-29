@@ -22,6 +22,10 @@ import {
   type VaultListItem,
   type WriteSafetyStatus
 } from '@shared/contracts'
+import {
+  isCollectionOwned,
+  withAwakeningAvailability
+} from '@shared/collection-availability'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import {
   CollectionDatabase,
@@ -1409,9 +1413,12 @@ function withRecipeCollection(
         snapshot.basis === 'archive' ? Boolean(item.discovered || recipeUnlocked) : item.discovered
     }
   }
-  const items = snapshot.items.map(decorate)
-  const plannerItems = (snapshot.plannerItems ?? []).map(decorate)
+  const recipeItemsCatalog = snapshot.items.map(decorate)
+  const recipePlannerItems = (snapshot.plannerItems ?? []).map(decorate)
   const materials = (snapshot.materials ?? []).map(decorate)
+  const awakeningSources = [...recipeItemsCatalog, ...recipePlannerItems]
+  const items = withAwakeningAvailability(recipeItemsCatalog, awakeningSources)
+  const plannerItems = withAwakeningAvailability(recipePlannerItems, awakeningSources)
   const recipeItems = [...items, ...plannerItems, ...materials].filter(
     (item, index, all) =>
       Boolean(item.acquisition?.crafting) &&
@@ -1422,7 +1429,7 @@ function withRecipeCollection(
     return {
       ...summary,
       total: matching.length,
-      collected: matching.filter((item) => item.discovered).length,
+      collected: matching.filter(isCollectionOwned).length,
       availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
     }
   })
@@ -1902,6 +1909,28 @@ async function runSmokeTest(
       recipeUnlockedMask.availableCount !== 0
     ) {
       throw new Error('Known recipes did not unlock their Codex items without creating stored copies.')
+    }
+    const awakenedCatalogItem = helperSnapshot.items.find((item) => item.baseVersionRecord)
+    const awakeningBase = awakenedCatalogItem?.baseVersionRecord
+      ? helperSnapshot.items.find(
+          (item) => item.record.toLowerCase() === awakenedCatalogItem.baseVersionRecord!.toLowerCase()
+        )
+      : undefined
+    if (!awakenedCatalogItem || !awakeningBase) {
+      throw new Error('Catalog did not link an Awakened Legendary to its Epic base.')
+    }
+    const [availableAwakened] = withAwakeningAvailability(
+      [{ ...awakenedCatalogItem, availableCount: 0, discovered: false }],
+      [{ ...awakeningBase, availableCount: 1, discovered: true }]
+    )
+    if (
+      !availableAwakened ||
+      !isCollectionOwned(availableAwakened) ||
+      !availableAwakened.availableViaAwakening ||
+      availableAwakened.availableCount !== 0 ||
+      availableAwakened.awakeningSourceRecord?.toLowerCase() !== awakeningBase.record.toLowerCase()
+    ) {
+      throw new Error('Owned Epic bases did not qualify their Awakened Legendary without fabricating a stored copy.')
     }
     const pinCandidate = snapshot.observedItems.find(
       (item) => item.instanceKey && item.rollAnalysis?.trusted

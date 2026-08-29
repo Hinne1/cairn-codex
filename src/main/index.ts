@@ -325,9 +325,28 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     for (const name of ['backups', 'live-receipts', 'live-adapter', 'quarantine']) {
       directoryCounts[name] = await countFiles(join(userData, name))
     }
+    const live = await safely(() => helper.request<LiveGameStatus>('inspect-live-game'))
+    const safeLive = 'error' in live ? live : {
+      state: live.state,
+      grimDawnProcessCount: live.grimDawnProcessIds.length,
+      itemAssistantProcessCount: live.itemAssistantProcessIds.length,
+      hookAvailable: live.hookAvailable,
+      hookVersion: live.hookVersion,
+      connected: live.connectedProcessId !== null,
+      activeCharacterPresent: live.activeCharacterName !== null,
+      isHardcore: live.isHardcore,
+      hostWindowReady: live.hostWindowReady,
+      gameVersion: live.gameVersion,
+      gameBuildId: live.gameBuildId,
+      gameDllSha256: live.gameDllSha256,
+      gameDllLastWriteUtc: live.gameDllLastWriteUtc,
+      hookSha256: live.hookSha256,
+      recommendation: live.recommendation,
+      hookMessageCount: live.messages.length
+    }
     const report = {
       generatedAtUtc,
-      privacy: 'No item payloads, save contents, database contents, or extracted game assets are included.',
+      privacy: 'No item payloads, save contents, database contents, character names, raw hook messages, or extracted game assets are included.',
       app: {
         version: app.getVersion(),
         packaged: app.isPackaged,
@@ -341,14 +360,15 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       collection: latestCollection ? {
         scannedAtUtc: latestCollection.scannedAtUtc,
         basis: latestCollection.basis,
-        warnings: latestCollection.warnings,
+        warningCount: latestCollection.warnings.length,
+        warningMessages: latestCollection.warnings.map((warning) => warning.message),
         contentPacks: latestCollection.contentPacks.map((pack) => pack.id),
         sourceCount: latestCollection.scannedStashes.length,
         catalogItems: latestCollection.items.length,
         observedItems: latestCollection.observedItems.length
       } : null,
       writeSafety: await safely(() => helper.request<WriteSafetyStatus>('inspect-write-safety')),
-      live: await safely(() => helper.request<LiveGameStatus>('inspect-live-game'))
+      live: safeLive
     }
     await writeFile(selection.filePath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
     return { canceled: false, path: selection.filePath }

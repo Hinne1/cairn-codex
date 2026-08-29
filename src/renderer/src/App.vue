@@ -105,6 +105,16 @@ interface RollTrackerSummary {
   scored: number
 }
 
+interface CollectionTriviaFact {
+  id: string
+  eyebrow: string
+  value: string
+  title: string
+  detail: string
+  tone: 'gold' | 'purple' | 'blue' | 'green' | 'ember'
+  itemRecord?: string
+}
+
 interface FarmTarget {
   key: string
   name: string
@@ -230,6 +240,7 @@ const liveSyncing = ref(false)
 const liveLifecyclePolling = ref(false)
 const showConnectionDiagnostics = ref(false)
 const todoOpen = ref(false)
+const triviaOpen = ref(false)
 const todoDraft = ref('')
 const todoInput = ref<HTMLInputElement | null>(null)
 const todos = ref<TodoItem[]>(readStoredTodos())
@@ -735,6 +746,152 @@ const visibleSets = computed(() => {
       )
     })
   return sets.sort(compareSets)
+})
+
+const collectionTrivia = computed<CollectionTriviaFact[]>(() => {
+  if (!snapshot.value) return []
+  const facts: CollectionTriviaFact[] = []
+  const items = snapshot.value.items
+  const physicallyOwned = items.filter((item) => item.availableCount > 0)
+  const scored = physicallyOwned
+    .filter((item) => item.bestRollPercentile !== null)
+    .sort((left, right) => right.bestRollPercentile! - left.bestRollPercentile!)
+  const byCopies = (left: CollectionItem, right: CollectionItem) =>
+    right.availableCount - left.availableCount || left.name.localeCompare(right.name)
+
+  const legendaryHoard = physicallyOwned
+    .filter((item) => item.rarity === 'legendary')
+    .sort(byCopies)[0]
+  if (legendaryHoard) {
+    facts.push({
+      id: 'legendary-hoard', eyebrow: 'Purple pile', value: `${legendaryHoard.availableCount}×`,
+      title: legendaryHoard.name, detail: 'Your most-copied Legendary item.', tone: 'purple',
+      itemRecord: legendaryHoard.record
+    })
+  }
+
+  const copyChampion = [...physicallyOwned].sort(byCopies)[0]
+  if (copyChampion) {
+    facts.push({
+      id: 'copy-champion', eyebrow: 'Duplicate dynasty', value: `${copyChampion.availableCount}×`,
+      title: copyChampion.name,
+      detail: `${Math.max(0, copyChampion.availableCount - 1)} copies beyond the first. Cairn respects the commitment.`,
+      tone: copyChampion.rarity === 'epic' ? 'blue' : copyChampion.rarity === 'mi' ? 'green' : 'gold',
+      itemRecord: copyChampion.record
+    })
+  }
+
+  const bestRoll = scored[0]
+  if (bestRoll) {
+    facts.push({
+      id: 'best-roll', eyebrow: 'Roll royalty', value: `${bestRoll.bestRollPercentile!.toFixed(1)}%`,
+      title: bestRoll.name,
+      detail: `Best estimated aggregate roll among ${scored.length.toLocaleString()} scored item bases.`,
+      tone: 'gold', itemRecord: bestRoll.record
+    })
+  }
+
+  if (scored.length) {
+    const nearPerfect = scored.filter((item) => item.bestRollPercentile! >= 95).length
+    const excellent = scored.filter((item) => item.bestRollPercentile! >= 90).length
+    facts.push({
+      id: 'near-perfect', eyebrow: 'Top shelf', value: excellent.toLocaleString(),
+      title: '90th-percentile rolls',
+      detail: `${nearPerfect.toLocaleString()} item bases clear the 95th percentile.`, tone: 'gold'
+    })
+  }
+
+  const completeSets = collectionSets.value
+    .filter((set) => set.collected === set.items.length)
+    .sort((left, right) => right.items.length - left.items.length || left.name.localeCompare(right.name))
+  if (completeSets[0]) {
+    facts.push({
+      id: 'largest-complete-set', eyebrow: 'Set archivist',
+      value: `${completeSets[0].items.length}/${completeSets[0].items.length}`, title: completeSets[0].name,
+      detail: `Your largest completed collection set. ${completeSets.length} sets are complete in total.`, tone: 'ember',
+      itemRecord: completeSets[0].items[0]?.record
+    })
+  }
+
+  const closestSet = collectionSets.value
+    .filter((set) => set.collected > 0 && set.collected < set.items.length)
+    .sort((left, right) =>
+      right.collected / right.items.length - left.collected / left.items.length ||
+      right.collected - left.collected || left.name.localeCompare(right.name)
+    )[0]
+  if (closestSet) {
+    const missing = closestSet.items.filter((item) => !setItemCollected(item)).map((item) => item.name)
+    facts.push({
+      id: 'closest-set', eyebrow: 'Almost assembled', value: `${closestSet.collected}/${closestSet.items.length}`,
+      title: closestSet.name,
+      detail: `Still missing ${missing.slice(0, 2).join(' and ')}${missing.length > 2 ? `, plus ${missing.length - 2} more` : ''}.`,
+      tone: 'ember', itemRecord: closestSet.items[0]?.record
+    })
+  }
+
+  const dated = items
+    .filter((item) => item.firstDiscoveredAt && Number.isFinite(Date.parse(item.firstDiscoveredAt)))
+    .sort((left, right) => Date.parse(left.firstDiscoveredAt!) - Date.parse(right.firstDiscoveredAt!))
+  if (dated[0]) {
+    facts.push({
+      id: 'oldest-discovery', eyebrow: 'First page', value: formatTriviaDate(dated[0].firstDiscoveredAt!),
+      title: dated[0].name, detail: 'The oldest discovery timestamp still recorded in this archive scope.',
+      tone: 'blue', itemRecord: dated[0].record
+    })
+  }
+  const newest = dated.at(-1)
+  if (newest && newest.record !== dated[0]?.record) {
+    facts.push({
+      id: 'newest-discovery', eyebrow: 'Fresh ink', value: formatTriviaDate(newest.firstDiscoveredAt!),
+      title: newest.name, detail: 'Your most recently discovered item base.', tone: 'green',
+      itemRecord: newest.record
+    })
+  }
+
+  const slotCounts = new Map<string, number>()
+  for (const item of items.filter(isCollectionOwned)) {
+    slotCounts.set(item.slot, (slotCounts.get(item.slot) ?? 0) + 1)
+  }
+  const favoriteSlot = [...slotCounts.entries()].sort((left, right) => right[1] - left[1])[0]
+  if (favoriteSlot) {
+    facts.push({
+      id: 'favorite-slot', eyebrow: 'Armory bias', value: favoriteSlot[1].toLocaleString(),
+      title: triviaSlotLabel(favoriteSlot[0]),
+      detail: 'The equipment slot with the most discovered catalog entries.', tone: 'blue'
+    })
+  }
+
+  const miItems = items.filter((item) => item.rarity === 'mi')
+  const miFamilies = new Set(miItems.map(miFamilyKey))
+  const ownedMiFamilies = new Set(miItems.filter(isCollectionOwned).map(miFamilyKey))
+  facts.push({
+    id: 'mi-menagerie', eyebrow: 'Green menagerie', value: `${ownedMiFamilies.size}/${miFamilies.size}`,
+    title: 'Named MI bases',
+    detail: `${miItems.filter(isCollectionOwned).length.toLocaleString()} of ${miItems.length.toLocaleString()} individual level tiers have been discovered.`,
+    tone: 'green'
+  })
+
+  const topAffix = [...snapshot.value.affixes]
+    .filter((affix) => affix.availableCount > 0)
+    .sort((left, right) => right.availableCount - left.availableCount || left.name.localeCompare(right.name))[0]
+  if (topAffix) {
+    facts.push({
+      id: 'affix-magnet', eyebrow: 'Affix magnet', value: `${topAffix.availableCount}×`,
+      title: topAffix.name, detail: `Your most frequently retained ${topAffix.kind}.`,
+      tone: topAffix.rarity === 'rare' ? 'green' : 'blue'
+    })
+  }
+
+  const duplicateCopies = physicallyOwned.reduce(
+    (total, item) => total + Math.max(0, item.availableCount - 1), 0
+  )
+  facts.push({
+    id: 'duplicate-reserve', eyebrow: 'Emergency reserves', value: duplicateCopies.toLocaleString(),
+    title: 'Copies beyond completion',
+    detail: 'Everything after the first physical copy of each stored item tier.', tone: 'purple'
+  })
+
+  return facts
 })
 
 const displayedResultCount = computed(() =>
@@ -1899,9 +2056,40 @@ function storeTodos(): void {
 
 async function openTodos(): Promise<void> {
   todoOpen.value = true
+  triviaOpen.value = false
   showConnectionDiagnostics.value = false
   await nextTick()
   todoInput.value?.focus()
+}
+
+function openTrivia(): void {
+  triviaOpen.value = true
+  todoOpen.value = false
+  showConnectionDiagnostics.value = false
+  hideTooltip()
+}
+
+function openTriviaItem(record?: string): void {
+  if (!record) return
+  const item = catalogItemByRecord(record)
+  if (!item) return
+  triviaOpen.value = false
+  openItem(item)
+}
+
+function formatTriviaDate(value: string): string {
+  return new Date(value).toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  })
+}
+
+function triviaSlotLabel(slot: string): string {
+  const labels: Record<string, string> = {
+    head: 'Headgear', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Gloves',
+    legs: 'Leg armor', feet: 'Boots', waist: 'Belts', weapon: 'Weapons', offhand: 'Offhands',
+    shield: 'Shields', ring: 'Rings', amulet: 'Amulets', medal: 'Medals', relic: 'Relics'
+  }
+  return labels[slot] ?? slot.replaceAll('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function addTodo(): void {
@@ -3406,6 +3594,10 @@ function handleEscape(event: KeyboardEvent): void {
     return
   }
   if (event.key !== 'Escape') return
+  if (triviaOpen.value) {
+    triviaOpen.value = false
+    return
+  }
   if (todoOpen.value) {
     todoOpen.value = false
     return
@@ -3755,6 +3947,43 @@ function formatPercentile(value: number | null | undefined): string {
       </article>
     </aside>
 
+    <div v-if="triviaOpen" class="trivia-backdrop" @click.self="triviaOpen = false">
+      <section class="trivia-dialog" role="dialog" aria-modal="true" aria-labelledby="trivia-title">
+        <header>
+          <div>
+            <p class="section-label">Collection trivia</p>
+            <h2 id="trivia-title">Codex Curiosities</h2>
+            <p>Odd records and minor triumphs from the currently selected archive scope.</p>
+          </div>
+          <button type="button" class="todo-close" aria-label="Close collection trivia" @click="triviaOpen = false">×</button>
+        </header>
+        <div class="trivia-scroll">
+          <div v-if="collectionTrivia.length" class="trivia-grid">
+            <component
+              :is="fact.itemRecord ? 'button' : 'article'"
+              v-for="fact in collectionTrivia"
+              :key="fact.id"
+              :type="fact.itemRecord ? 'button' : undefined"
+              class="trivia-fact"
+              :class="[`tone-${fact.tone}`, { actionable: fact.itemRecord }]"
+              @click="openTriviaItem(fact.itemRecord)"
+            >
+              <span class="trivia-eyebrow">{{ fact.eyebrow }}</span>
+              <strong class="trivia-value">{{ fact.value }}</strong>
+              <h3>{{ fact.title }}</h3>
+              <p>{{ fact.detail }}</p>
+              <small v-if="fact.itemRecord">Inspect item →</small>
+            </component>
+          </div>
+          <p v-else class="todo-empty">The Codex needs a few discoveries before it can become nosy.</p>
+        </div>
+        <footer>
+          <span>{{ collectionTrivia.length }} curiosities · recalculated from live collection data</span>
+          <button type="button" @click="triviaOpen = false">Close</button>
+        </footer>
+      </section>
+    </div>
+
     <div v-if="todoOpen" class="todo-backdrop" @click.self="todoOpen = false">
       <section class="todo-dialog" role="dialog" aria-modal="true" aria-labelledby="todo-title">
         <header>
@@ -4033,6 +4262,9 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button type="button" :class="{ active: activeView === 'farming' }" @click="activeView = 'farming'">
           <span>Collection Farming</span><small>{{ farmTargets.length }} useful areas</small>
+        </button>
+        <button type="button" :aria-expanded="triviaOpen" @click="openTrivia">
+          <span>Collection Trivia</span><small>{{ collectionTrivia.length }} curiosities</small>
         </button>
         <button type="button" :aria-expanded="todoOpen" @click="openTodos">
           <span>To-do</span><small>{{ remainingTodoCount }} remaining</small>

@@ -61,6 +61,33 @@ button, select { color: inherit; }
 .todo-list article > button:hover { color: #dc9b87; background: #38221d; }
 .todo-empty { margin: 0; padding: 54px 24px; color: #756e61; text-align: center; font: italic 14px Georgia, serif; }
 .todo-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; border-top: 1px solid #393329; color: #7d7567; font-size: 10px; }
+.trivia-backdrop { position: fixed; z-index: 110; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(3, 3, 3, .76); backdrop-filter: blur(8px); }
+.trivia-dialog { width: min(980px, 100%); max-height: min(850px, calc(100vh - 48px)); overflow: hidden; border: 1px solid #745c32; border-radius: 11px; background: radial-gradient(circle at 72% 0, rgba(105, 72, 31, .18), transparent 35%), linear-gradient(145deg, #25221c, #141412 76%); box-shadow: 0 34px 100px rgba(0, 0, 0, .78); }
+.trivia-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 24px; padding: 24px 27px 20px; border-bottom: 1px solid #40372a; }
+.trivia-dialog > header h2 { margin: 2px 0 5px; color: #f1e5c9; font-size: 31px; font-weight: 500; }
+.trivia-dialog > header p:not(.section-label) { max-width: 620px; margin: 0; color: #8d836f; font-size: 11px; line-height: 1.5; }
+.trivia-scroll { max-height: min(650px, calc(100vh - 205px)); padding: 20px 22px 24px; overflow-y: auto; }
+.trivia-scroll::-webkit-scrollbar { width: 10px; }
+.trivia-scroll::-webkit-scrollbar-track { background: #151411; }
+.trivia-scroll::-webkit-scrollbar-thumb { border: 2px solid #151411; border-radius: 999px; background: #514631; }
+.trivia-scroll::-webkit-scrollbar-thumb:hover { background: #735d37; }
+.trivia-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 11px; }
+.trivia-fact { --trivia-accent: #cda655; position: relative; display: grid; min-height: 190px; align-content: start; gap: 7px; padding: 17px 17px 15px; overflow: hidden; border: 1px solid #40392e; border-radius: 7px; color: inherit; background: linear-gradient(145deg, rgba(38, 35, 29, .98), rgba(21, 20, 17, .98)); text-align: left; }
+.trivia-fact::before { content: ''; position: absolute; inset: 0 0 auto; height: 2px; background: var(--trivia-accent); box-shadow: 0 0 16px color-mix(in srgb, var(--trivia-accent), transparent 35%); }
+.trivia-fact.tone-purple { --trivia-accent: #bd64ef; }
+.trivia-fact.tone-blue { --trivia-accent: #4eb9f0; }
+.trivia-fact.tone-green { --trivia-accent: #69c94b; }
+.trivia-fact.tone-ember { --trivia-accent: #df9443; }
+.trivia-fact.actionable { cursor: pointer; }
+.trivia-fact.actionable:hover { border-color: color-mix(in srgb, var(--trivia-accent), #40392e 58%); transform: translateY(-1px); background: linear-gradient(145deg, rgba(48, 42, 32, .98), rgba(24, 22, 18, .98)); }
+.trivia-fact:focus-visible { outline: 2px solid var(--trivia-accent); outline-offset: 2px; }
+.trivia-eyebrow { color: var(--trivia-accent); font-size: 8px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
+.trivia-value { margin-top: 4px; color: var(--trivia-accent); font: 500 27px Georgia, serif; }
+.trivia-fact h3 { margin: 0; color: #e8dcc2; font-size: 17px; font-weight: 500; line-height: 1.15; }
+.trivia-fact p { margin: 0; color: #8c8374; font-size: 10px; line-height: 1.5; }
+.trivia-fact small { align-self: end; margin-top: auto; padding-top: 8px; color: #ad9362; font-size: 8px; letter-spacing: .05em; text-transform: uppercase; }
+.trivia-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; border-top: 1px solid #3e372d; color: #7d7567; font-size: 10px; }
+.trivia-dialog > footer button { padding: 9px 13px; border: 1px solid #665333; border-radius: 5px; color: #e4c67f; background: #30281d; cursor: pointer; }
 .connection-control { position: relative; display: flex; flex: 0 1 330px; align-items: stretch; min-width: 190px; }
 .game-status-pill { display: flex; flex: 1; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px 8px 12px; border: 1px solid #403a2c; border-radius: 7px 0 0 7px; background: #171613; cursor: pointer; text-align: left; }
 .game-status-pill:disabled { cursor: wait; opacity: .72; }

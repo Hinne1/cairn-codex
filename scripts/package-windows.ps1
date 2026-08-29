@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$packageRoot = Join-Path $projectRoot 'dist\Cairn Codex-win32-x64'
+$packageRoot = Join-Path $projectRoot 'dist\package\Cairn Codex-win32-x64'
 $electronRoot = Join-Path $projectRoot 'node_modules\electron\dist'
 $helperProject = Join-Path $projectRoot 'src\helper\CairnCodex.GrimDawn\CairnCodex.GrimDawn.csproj'
 $helperPublish = Join-Path $projectRoot 'dist\helper-win-x64'
@@ -70,7 +70,7 @@ function Copy-PublishedHelperPreservingHook {
     ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $destinationNative -Recurse -Force }
 }
 
-if (-not $packageRoot.StartsWith((Join-Path $projectRoot 'dist'), [StringComparison]::OrdinalIgnoreCase)) {
+if (-not $packageRoot.StartsWith((Join-Path $projectRoot 'dist\package'), [StringComparison]::OrdinalIgnoreCase)) {
   throw "Refusing to package outside the project's dist directory: $packageRoot"
 }
 
@@ -79,7 +79,8 @@ try {
   & npm.cmd run build
   if ($LASTEXITCODE -ne 0) { throw 'Electron application build failed.' }
 
-  & dotnet publish $helperProject --configuration Release --runtime win-x64 --self-contained false --output $helperPublish
+  # Public packages must not depend on a separately installed .NET runtime.
+  & dotnet publish $helperProject --configuration Release --runtime win-x64 --self-contained true --output $helperPublish
   if ($LASTEXITCODE -ne 0) { throw 'Grim Dawn helper publish failed.' }
 
   $hookName = 'ItemAssistantHook_x64.dll'
@@ -136,6 +137,12 @@ try {
   } else {
     Copy-Item -Path (Join-Path $helperPublish '*') -Destination $packagedHelper -Recurse -Force
   }
+
+  # Electron ships its own top-level LICENSE. Keep that file and add Cairn's
+  # license under an unambiguous name rather than overwriting it.
+  Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $packageRoot 'LICENSE.CAIRN-CODEX.txt') -Force
+  Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageRoot -Force
+  Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $packageRoot -Force
 
   Write-Host ''
   Write-Host "Packaged Cairn Codex: $appExe"

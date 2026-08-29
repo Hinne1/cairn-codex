@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible Cairn Codex defect that does not contain private save data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach character saves, stash files, the Cairn database, live queues, or crash dumps publicly. Follow SECURITY.md for suspected data-loss, duplication, or injection-safety issues.
+  - type: input
+    id: version
+    attributes:
+      label: Cairn Codex version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Grim Dawn version and Steam/GOG build
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Feature area
+      options:
+        - Read-only collection or research tools
+        - Offline transfer
+        - Live ingest
+        - Live retrieval or supply delivery
+        - Packaging or startup
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include exact UI wording and safe reproduction steps. Redact character names.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic summary
+      description: Paste only the non-sensitive portions of Settings → Export diagnostic report. Use the private route for transfer-safety incidents.

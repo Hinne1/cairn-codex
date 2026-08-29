@@ -143,6 +143,9 @@ button, select { color: inherit; }
 .growl.error strong { color: #dfa291; }
 .growl.success { border-color: #526039; }
 .growl.success strong { color: #bdce91; }
+.growl.warning { border-color: #80632e; }
+.growl.warning strong { color: #e0bd69; }
+.growl.warning button { width: auto; padding: 4px 7px; color: #d9bd7b; font-size: 10px; }
 
 .eyebrow, .section-label {
   margin: 0 0 5px;
@@ -943,6 +946,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .settings-status strong { color: #c8bda7; font-size: 11px; }
 .settings-recommendation { padding-left: 11px; border-left: 2px solid #8b6c37; }
 .settings-recommendation strong { color: #cdb478; }
+.recovery-alert { display: grid; gap: 5px; padding: 11px; border: 1px solid #704834; border-left: 3px solid #bd734e; border-radius: 5px; color: #b9a58d; background: #251b17; font-size: 10px; }
+.recovery-alert strong { color: #e0a383; text-transform: uppercase; letter-spacing: .08em; }
+.recovery-alert code { overflow: hidden; color: #c8b898; font: 9px ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .zoom-controls { display: flex; align-items: center; gap: 7px; }
 .zoom-controls button, .settings-card select { padding: 8px 11px; border: 1px solid #51452f; border-radius: 5px; color: #d2bd88; background: #2a241b; cursor: pointer; }
 .zoom-controls strong { min-width: 56px; color: #e2cf9e; text-align: center; }

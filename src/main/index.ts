@@ -1,7 +1,8 @@
 import { join } from 'node:path'
 import { createHash, randomInt, randomUUID } from 'node:crypto'
-import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
-import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
+import { readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { arch, platform, release } from 'node:os'
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron'
 import {
   IPC_CHANNELS,
   type AppStatus,
@@ -208,6 +209,18 @@ function isHardcoreStashPath(path: string): boolean {
   return path.toLocaleLowerCase().endsWith('.gsh')
 }
 
+async function countFiles(directory: string): Promise<number> {
+  try {
+    let count = 0
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      count += entry.isDirectory() ? await countFiles(join(directory, entry.name)) : 1
+    }
+    return count
+  } catch {
+    return 0
+  }
+}
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'cairn-icon',
@@ -254,6 +267,17 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     )
     return result
   }
+  const runTransferExclusive = <T>(operation: () => Promise<T>): Promise<T> =>
+    runExclusive(async () => {
+      const unresolved = database.getRecoveryOperationCount()
+      if (unresolved > 0) {
+        throw new Error(
+          `${unresolved} earlier transfer operation${unresolved === 1 ? '' : 's'} require recovery attention. ` +
+          'Pause writes, export diagnostics in Settings, and audit the retained journal and receipts first.'
+        )
+      }
+      return operation()
+    })
 
   ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
     try {
@@ -262,6 +286,72 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     } catch {
       return { appVersion: app.getVersion(), helper: 'unavailable', mode: 'read-only' }
     }
+  })
+  ipcMain.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
+    return shell.openPath(app.getPath('userData'))
+  })
+  ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => {
+    const operations = database.getDiagnosticSummary().recoveryOperations
+    return {
+      requiresAttention: operations.length > 0,
+      operations: operations.map((operation) => ({
+        id: operation.id,
+        operation: operation.operation,
+        state: operation.state,
+        startedAtUtc: operation.startedAtUtc,
+        hasBackup: operation.hasBackup
+      }))
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.exportDiagnostics, async () => {
+    const generatedAtUtc = new Date().toISOString()
+    const fileStamp = generatedAtUtc.replaceAll(':', '-').replace(/\.\d{3}Z$/, 'Z')
+    const selection = await dialog.showSaveDialog({
+      title: 'Save Cairn Codex diagnostics',
+      defaultPath: join(app.getPath('downloads'), `cairn-codex-diagnostics-${fileStamp}.json`),
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (selection.canceled || !selection.filePath) return { canceled: true, path: null }
+
+    const safely = async <T>(operation: () => Promise<T>): Promise<T | { error: string }> => {
+      try {
+        return await operation()
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+    const userData = app.getPath('userData')
+    const directoryCounts: Record<string, number> = {}
+    for (const name of ['backups', 'live-receipts', 'live-adapter', 'quarantine']) {
+      directoryCounts[name] = await countFiles(join(userData, name))
+    }
+    const report = {
+      generatedAtUtc,
+      privacy: 'No item payloads, save contents, database contents, or extracted game assets are included.',
+      app: {
+        version: app.getVersion(),
+        packaged: app.isPackaged,
+        electron: process.versions.electron,
+        node: process.versions.node,
+        chrome: process.versions.chrome
+      },
+      system: { platform: platform(), release: release(), architecture: arch() },
+      database: database.getDiagnosticSummary(),
+      files: directoryCounts,
+      collection: latestCollection ? {
+        scannedAtUtc: latestCollection.scannedAtUtc,
+        basis: latestCollection.basis,
+        warnings: latestCollection.warnings,
+        contentPacks: latestCollection.contentPacks.map((pack) => pack.id),
+        sourceCount: latestCollection.scannedStashes.length,
+        catalogItems: latestCollection.items.length,
+        observedItems: latestCollection.observedItems.length
+      } : null,
+      writeSafety: await safely(() => helper.request<WriteSafetyStatus>('inspect-write-safety')),
+      live: await safely(() => helper.request<LiveGameStatus>('inspect-live-game'))
+    }
+    await writeFile(selection.filePath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+    return { canceled: false, path: selection.filePath }
   })
   ipcMain.handle(
     IPC_CHANNELS.setZoomFactor,
@@ -405,12 +495,12 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   ipcMain.handle(
     IPC_CHANNELS.ingestStagingTab,
     (_event, input: { path: string }): Promise<IngestResult> =>
-      runExclusive(() => executeStagingTabIngest(helper, database, input.path))
+      runTransferExclusive(() => executeStagingTabIngest(helper, database, input.path))
   )
   ipcMain.handle(
     IPC_CHANNELS.retrieveVaultItems,
     (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> =>
-      runExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds))
+      runTransferExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds))
   )
   ipcMain.handle(
     IPC_CHANNELS.inspectLiveGame,
@@ -448,7 +538,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     IPC_CHANNELS.syncLiveGame,
     async (): Promise<LiveGameSyncResult> => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
-      return runExclusive(() => syncLiveIncoming(
+      return runTransferExclusive(() => syncLiveIncoming(
         helper,
         database,
         latestCollection?.discovery.installations[0]?.path
@@ -458,12 +548,12 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   ipcMain.handle(
     IPC_CHANNELS.retrieveLiveVaultItems,
     (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> =>
-      runExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds))
+      runTransferExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds))
   )
   ipcMain.handle(
     IPC_CHANNELS.dispenseLiveAugments,
     (_event, input: { records: string[]; expectedCharacterName?: string }): Promise<LiveSupplyDispenseResult> =>
-      runExclusive(async () => {
+      runTransferExclusive(async () => {
         latestCollection ??= await readCollectionCache(collectionCachePath)
         if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
         return executeLiveAugmentDispense(
@@ -1525,8 +1615,8 @@ async function runSmokeTest(
     if (
       !liveQueue.passed ||
       liveQueue.fields !== 18 ||
-      liveQueue.hookSha256 !== 'b553e19d825caaacc45c9b6f37e1dad7fcf2f2e4cc5b809186b0d871c89cc505' ||
-      liveQueue.injectorSha256 !== '569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c'
+      !/^[0-9a-f]{64}$/.test(liveQueue.hookSha256) ||
+      !/^[0-9a-f]{64}$/.test(liveQueue.injectorSha256)
     ) {
       throw new Error('Live queue serializer self-test failed.')
     }
@@ -2231,6 +2321,26 @@ async function runSmokeTest(
     if (retainedDiscoveries !== collected) {
       throw new Error('Lifetime discoveries were lost when availability dropped to zero.')
     }
+    const recoveryOperationId = randomUUID()
+    database.prepareRetrievalOperation({
+      operationId: recoveryOperationId,
+      stashPath: 'smoke-uncertain-outcome.gsh',
+      sourceSha256: 'smoke-uncertain-outcome',
+      startedAtUtc: new Date().toISOString(),
+      vaultItemIds: [migration.importedIds[1]!],
+      detail: { phase: 'prepared', smokeTest: true, scenario: 'helper_timeout' }
+    })
+    database.markRetrievalNeedsRecovery(recoveryOperationId, new Error('Simulated lost response.'))
+    const diagnostics = database.getDiagnosticSummary()
+    if (
+      diagnostics.quickCheck.some((value) => value.toLocaleLowerCase() !== 'ok') ||
+      database.getRecoveryOperationCount() !== 1 ||
+      !diagnostics.recoveryOperations.some(
+        (operation) => operation.id === recoveryOperationId && operation.state === 'needs_recovery'
+      )
+    ) {
+      throw new Error('Uncertain transfer state was not retained for recovery diagnostics.')
+    }
     console.log(
       JSON.stringify({
         helper: 'available',
@@ -2239,6 +2349,8 @@ async function runSmokeTest(
         migrationDedupe: 'verified',
         duplicateSelection: 'rejected',
         rejectedRetrievalRollback: 'verified',
+        uncertainOutcomeRecovery: 'verified',
+        databaseIntegrity: 'verified',
         archiveRollCache: 'verified',
         serializerRoundTrips: roundTrips.length,
         ingestPlans: ingestPlans.length,
@@ -2942,9 +3054,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
   }
 }
 
-// Visual diagnostics run in a disposable process and must not be mistaken for a
-// user-launched second instance while an earlier test process is winding down.
-const hasSingleInstanceLock = process.env.CAIRN_CODEX_SCREENSHOT_PATH
+// Automated diagnostics run in disposable processes and must not be mistaken
+// for user-launched second instances while the ordinary app is open.
+const hasSingleInstanceLock = process.env.CAIRN_CODEX_SCREENSHOT_PATH || process.env.CAIRN_CODEX_SMOKE_TEST === '1'
   ? true
   : app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {

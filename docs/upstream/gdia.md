@@ -9,6 +9,11 @@
 
 The full upstream license is reproduced in `THIRD_PARTY_NOTICES.md`.
 
+The exact live-hook overlay is tracked as `native/patches/iagd-cairn.patch`, with
+its guarded reproduction command documented in `native/README.md`. A rebuilt
+binary is never trusted merely because it compiles: its fingerprint and live
+compatibility must pass the separate release gate.
+
 ## Imported source boundary
 
 The following files were copied from `Parser/Stash` into

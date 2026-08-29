@@ -89,6 +89,65 @@ export class CollectionDatabase {
     this.migrate()
   }
 
+  getDiagnosticSummary(): CollectionDatabaseDiagnosticSummary {
+    const schema = this.database.prepare('PRAGMA user_version').get() as { user_version: number }
+    const integrity = this.database.prepare('PRAGMA quick_check').all() as Array<Record<string, string>>
+    const vaultStates = this.database.prepare(`
+      SELECT state, COUNT(*) AS count
+      FROM vault_item
+      GROUP BY state
+      ORDER BY state
+    `).all() as Array<{ state: string; count: number }>
+    const journalStates = this.database.prepare(`
+      SELECT operation, state, COUNT(*) AS count
+      FROM operation_journal
+      GROUP BY operation, state
+      ORDER BY operation, state
+    `).all() as Array<{ operation: string; state: string; count: number }>
+    const recoveryOperations = this.database.prepare(`
+      SELECT id, operation, state, started_at_utc, completed_at_utc,
+             CASE WHEN backup_path IS NULL OR backup_path = '' THEN 0 ELSE 1 END AS has_backup
+      FROM operation_journal
+      WHERE state NOT IN ('committed', 'failed')
+      ORDER BY started_at_utc DESC
+      LIMIT 50
+    `).all() as Array<{
+      id: string
+      operation: string
+      state: string
+      started_at_utc: string
+      completed_at_utc: string | null
+      has_backup: number
+    }>
+    return {
+      schemaVersion: Number(schema.user_version),
+      quickCheck: integrity.flatMap((row) => Object.values(row)),
+      vaultStates: vaultStates.map((row) => ({ state: row.state, count: Number(row.count) })),
+      journalStates: journalStates.map((row) => ({
+        operation: row.operation,
+        state: row.state,
+        count: Number(row.count)
+      })),
+      recoveryOperations: recoveryOperations.map((row) => ({
+        id: row.id,
+        operation: row.operation,
+        state: row.state,
+        startedAtUtc: row.started_at_utc,
+        completedAtUtc: row.completed_at_utc,
+        hasBackup: Boolean(row.has_backup)
+      }))
+    }
+  }
+
+  getRecoveryOperationCount(): number {
+    const row = this.database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM operation_journal
+      WHERE state NOT IN ('committed', 'failed')
+    `).get() as { count: number }
+    return Number(row.count)
+  }
+
   persistSnapshot(snapshot: CollectionSnapshot): CollectionSnapshot {
     snapshot = this.withInstanceKeys(snapshot)
     this.database.exec('BEGIN IMMEDIATE')
@@ -1537,4 +1596,19 @@ export interface CompletedRetrievalOperation {
   completedAtUtc: string
   vaultItemIds: string[]
   detail: unknown
+}
+
+export interface CollectionDatabaseDiagnosticSummary {
+  schemaVersion: number
+  quickCheck: string[]
+  vaultStates: Array<{ state: string; count: number }>
+  journalStates: Array<{ operation: string; state: string; count: number }>
+  recoveryOperations: Array<{
+    id: string
+    operation: string
+    state: string
+    startedAtUtc: string
+    completedAtUtc: string | null
+    hasBackup: boolean
+  }>
 }

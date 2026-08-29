@@ -3,6 +3,27 @@
 A local-first Pokedex-style collection manager for Grim Dawn Epic, Legendary,
 and Monster Infrequent items.
 
+> **Pre-release software.** Cairn Codex is an unofficial community project and
+> is not affiliated with or endorsed by Crate Entertainment. It does not bundle
+> Grim Dawn databases, maps, or item art; those are read from the user's locally
+> installed game.
+
+## Installing a release build
+
+1. Download either the per-user Setup executable or the portable Windows x64 ZIP,
+   plus the `.sha256` file from the same release.
+2. Verify the chosen artifact with `Get-FileHash <file> -Algorithm SHA256`.
+3. Run Setup, or extract the complete portable folder and run `Cairn Codex.exe`.
+   Do not run it inside the ZIP or move the executable away from `resources`.
+
+The unsigned beta may show a Windows SmartScreen warning. Cairn needs no separate
+Node.js or .NET installation. The first catalog scan can take a while because it
+indexes the locally installed game; subsequent starts use an invalidated cache.
+
+Collection browsing is read-only. Live transfers are opt-in and remain blocked
+for unknown Grim Dawn or native-adapter fingerprints. See the maintained
+[compatibility matrix](docs/compatibility.md) before testing transfers.
+
 ## Product direction
 
 - Show both lifetime discovery and currently available collection completion by
@@ -181,11 +202,34 @@ Build a directly launchable Windows folder:
 npm.cmd run package:win
 ```
 
-Then run `dist\Cairn Codex-win32-x64\Cairn Codex.exe`. Keep the rest of that
+Then run `dist\package\Cairn Codex-win32-x64\Cairn Codex.exe`. Keep the rest of that
 folder beside the executable; it contains Electron and the Grim Dawn helper.
+
+Create the versioned unsigned ZIP, checksum, and release manifest from a clean
+worktree with:
+
+```powershell
+npm.cmd run package:release
+```
 
 The renderer communicates only through the narrow API exposed by the preload
 script. The helper's versioned newline-JSON protocol is documented in
 [`docs/architecture/helper-protocol.md`](docs/architecture/helper-protocol.md).
 Collection persistence and its lifetime-discovery boundary are documented in
 [`docs/architecture/collection-schema.md`](docs/architecture/collection-schema.md).
+
+## Local data and recovery
+
+Cairn stores its archive, settings, game-data cache, operation journal, live
+receipts, quarantine, and automatic backups under `%APPDATA%\cairn-codex`.
+Settings can open that directory and export a small diagnostic report that omits
+item payloads and save contents.
+
+If a transfer result is uncertain, stop transferring, close Grim Dawn, preserve
+the entire directory, and consult [recovery guidance](docs/recovery.md). Do not
+post character saves, stash files, or the archive database in a public issue.
+
+## License
+
+Cairn Codex is distributed under the MIT License. Imported and bundled
+dependencies retain their own notices in `THIRD_PARTY_NOTICES.md`.

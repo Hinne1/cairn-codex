@@ -1,0 +1,356 @@
+diff --git a/HookDll/Hook/GrimTypes.cpp b/HookDll/Hook/GrimTypes.cpp
+index ecd4118..76f9fe0 100644
+--- a/HookDll/Hook/GrimTypes.cpp
++++ b/HookDll/Hook/GrimTypes.cpp
+@@ -40,7 +40,8 @@ namespace GAME {
+ 		stream << sanitizeCsvField(replica.ascendant2.c_str()).c_str() << ";";
+ 
+ 		// Affix rerolls column (offset 0x180).
+-		stream << replica.affixRerolls;
++		stream << replica.affixRerolls << ";";
++		stream << replica.stackSize;
+ 
+ 		return stream.str();
+ 	}
+@@ -70,9 +71,10 @@ namespace GAME {
+ 		// 13 = legacy (no rerolls, no ascendants)
+ 		// 14 = bugfix compat (rerolls present, ascendants split to next line)
+ 		// 16 = rerolls + ascendants
+-		// 17 = current format (rerolls + ascendants + affixRerolls)
+-		if (tokens.size() != 13 && tokens.size() != 14 && tokens.size() != 16 && tokens.size() != 17) {
+-			LogToFile(LogLevel::WARNING, L"Error parsing CSV file, expected 13, 14, 16, or 17 tokens, got " + std::to_wstring(tokens.size()));
++		// 17 = GDIA format (rerolls + ascendants + affixRerolls)
++		// 18 = Cairn format (GDIA fields + stackSize)
++		if (tokens.size() != 13 && tokens.size() != 14 && tokens.size() != 16 && tokens.size() != 17 && tokens.size() != 18) {
++			LogToFile(LogLevel::WARNING, L"Error parsing CSV file, expected 13, 14, 16, 17, or 18 tokens, got " + std::to_wstring(tokens.size()));
+ 			return nullptr;
+ 		}
+ 
+@@ -86,7 +88,7 @@ namespace GAME {
+ 		// counts owned recipe ingredients by summing GetStackSize() over the inventory,
+ 		// so a stackSize=0 item is never recognized as a crafting ingredient (until an
+ 		// inventor reroll re-creates it with a game-built replica). IA never loots
+-		// stackable items, so 1 is always the correct count for deposited items.
++		// stackable items, so 1 remains the correct count for legacy queue items.
+ 		item->stackSize = 1;
+ 
+ 		int idx = 2; // 0: is the mod name, 1: is "isHardcore"
+@@ -109,10 +111,14 @@ namespace GAME {
+ 			item->ascendant1 = tokens.at(idx++);
+ 			item->ascendant2 = tokens.at(idx++);
+ 		}
+-		if (tokens.size() == 17) {
++		if (tokens.size() >= 17) {
+ 			// See Serialize(): this column carries the affix reroll count (offset 0x180).
+ 			item->affixRerolls = (unsigned int)stoul(tokens.at(idx++));
+ 		}
++		if (tokens.size() == 18) {
++			item->stackSize = (unsigned int)stoul(tokens.at(idx++));
++			if (item->stackSize == 0) item->stackSize = 1;
++		}
+ 
+ 		return item;
+ 	}
+@@ -292,4 +298,4 @@ void* GetProcAddressOrLogToFile(const wchar_t* dll, char* procAddress, bool skip
+ IsGameLoadingPtr IsGameLoading = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameLoading@GameEngine@GAME@@QEBA_NXZ"));
+ IsGameLoadingPtr IsGameEngineOnline = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameEngineOnline@GameEngine@GAME@@QEBA_NXZ"));
+ IsGameWaitingPtr IsGameWaiting = IsGameWaitingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameWaiting@GameEngine@GAME@@QEAA_N_N@Z"));
+-SortInventorySackPtr SortInventorySack = SortInventorySackPtr(GetProcAddressOrLogToFile(L"game.dll", "?Sort@InventorySack@GAME@@QEAA_NI@Z"));
+\ No newline at end of file
++SortInventorySackPtr SortInventorySack = SortInventorySackPtr(GetProcAddressOrLogToFile(L"game.dll", "?Sort@InventorySack@GAME@@QEAA_NI@Z"));
+diff --git a/HookDll/Hook/GrimTypes.h b/HookDll/Hook/GrimTypes.h
+index 07cf105..1e03406 100644
+--- a/HookDll/Hook/GrimTypes.h
++++ b/HookDll/Hook/GrimTypes.h
+@@ -210,6 +210,18 @@ static auto fnItemGetItemReplicaInfo = ItemGetItemReplicaInfo(GetProcAddressOrLo
+ typedef GAME::Player* (__fastcall* pGetMainPlayer)(GAME::GameEngine*);
+ static auto fnGetMainPlayer = pGetMainPlayer(GetProcAddressOrLogToFile(L"game.dll", "?GetMainPlayer@GameEngine@GAME@@QEBAPEAVPlayer@2@XZ"));
+ 
++typedef const wchar_t* (__fastcall* pGetPlayerName)(GAME::Player*);
++static auto fnGetPlayerName = pGetPlayerName(GetProcAddressOrLogToFile(
++	L"game.dll", "?GetPlayerName@Player@GAME@@QEBAPEBGXZ"));
++
++typedef bool(__fastcall* pIsInventorySpaceAvailable)(GAME::Player*, const GAME::Item*);
++static auto fnIsInventorySpaceAvailable = pIsInventorySpaceAvailable(GetProcAddressOrLogToFile(
++	L"game.dll", "?IsInventorySpaceAvailable@Player@GAME@@UEBA_NPEBVItem@2@@Z"));
++
++typedef void(__fastcall* pGiveItemToCharacter)(GAME::Player*, GAME::Item*, bool, bool);
++static auto fnGiveItemToCharacter = pGiveItemToCharacter(GetProcAddressOrLogToFile(
++	L"game.dll", "?GiveItemToCharacter@Player@GAME@@UEAAXPEAVItem@2@_N1@Z"));
++
+ 
+ typedef void(__fastcall* pGetModNameArg)(GAME::GameInfo* gi, std::wstring* str);
+ static auto fnGetModNameArg = pGetModNameArg(GetProcAddressOrLogToFile(L"engine.dll", "?GetModName@GameInfo@GAME@@QEAAXAEAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@@Z"));
+@@ -287,4 +299,4 @@ void fnLogWorldStateTransition(GAME::GameEngine* gameEngine, const wchar_t* site
+ /// Milliseconds since the last AddItem, or -1 if there hasn't been one.
+ long long fnMsSinceLastAddItem();
+ 
+-bool fnGetHardcore(GAME::GameInfo* gameInfo, bool skipLog = false);
+\ No newline at end of file
++bool fnGetHardcore(GAME::GameInfo* gameInfo, bool skipLog = false);
+diff --git a/HookDll/Hook/HookLog.cpp b/HookDll/Hook/HookLog.cpp
+index 34d6bfb..558df27 100644
+--- a/HookDll/Hook/HookLog.cpp
++++ b/HookDll/Hook/HookLog.cpp
+@@ -20,11 +20,11 @@ std::wstring GetIagdFolder() {
+     std::wstring path = path_tmp;
+     CoTaskMemFree(path_tmp);
+ 
+-    return path + L"\\..\\local\\evilsoft\\iagd\\";
++    return path + L"\\cairn-codex\\live-adapter\\";
+ }
+ 
+ HookLog::HookLog() : m_lastMessageCount(0), m_initialized(false) {
+-    std::wstring iagdFolder = GetIagdFolder(); // %appdata%\..\local\evilsoft\iagd
++    std::wstring iagdFolder = GetIagdFolder(); // %appdata%\cairn-codex\live-adapter
+ 
+     wchar_t tmpfolder[MAX_PATH]; // "%appdata%\..\local\temp\"
+     GetTempPath(MAX_PATH, tmpfolder);
+diff --git a/HookDll/Hook/InventorySack_AddItem.cpp b/HookDll/Hook/InventorySack_AddItem.cpp
+index ee3b0ed..ad368a8 100644
+--- a/HookDll/Hook/InventorySack_AddItem.cpp
++++ b/HookDll/Hook/InventorySack_AddItem.cpp
+@@ -51,6 +51,8 @@ InventorySack_AddItem::GameEngine_Update InventorySack_AddItem::dll_GameEngine_U
+ bool InventorySack_AddItem::m_isTransferStashOpen;
+ 
+ std::set<std::wstring> InventorySack_AddItem::m_depositQueue;
++std::set<std::wstring> InventorySack_AddItem::m_personalDepositQueue;
++std::wstring InventorySack_AddItem::m_activeCharacterName;
+ boost::mutex InventorySack_AddItem::m_mutex;
+ 
+ void InventorySack_AddItem::EnableHook() {
+@@ -107,7 +109,7 @@ void InventorySack_AddItem::EnableHook() {
+ 	
+ 	if (m_isGrimDawnParsed) {
+ 		LogToFile(LogLevel::INFO, L"Grim is parsed, displaying message..");
+-		DisplayMessage(L"Item Assistant", L"Item monitoring enabled");
++		DisplayMessage(L"Cairn Codex", L"Item monitoring enabled");
+ 	}
+ 	else {
+ 		LogToFile(LogLevel::INFO, L"Grim is not parsed, skipping message..");
+@@ -159,6 +161,7 @@ void InventorySack_AddItem::SetActive(bool isActive)
+ {
+ 	bool isActivating = isActive && !m_isActive;
+ 	m_isActive = isActive;
++	if (isActivating) m_activeCharacterName.clear();
+ 
+ 	// IA has been shut down, start the thread now
+ 	if (isActivating) {
+@@ -325,6 +328,8 @@ static void DumpReplicaInfo(const GAME::ItemReplicaInfo& item) {
+ }
+ 
+ bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
++	const bool isClarityPotion =
++		item.baseRecord == "records/items/crafting/consumables/xppotion_malmouth.dbr";
+ 
+ 	if (!m_isGrimDawnParsed) {
+ 		m_isGrimDawnParsed = m_settingsReader.GetIsGrimDawnParsed();
+@@ -332,14 +337,14 @@ bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
+ 			DisplayMessage(L"Item not looted", L"Grim Dawn not parsed");
+ 			return false;
+ 		} else {
+-			DisplayMessage(L"Item Assistant", L"Item monitoring enabled");
++			DisplayMessage(L"Cairn Codex", L"Item monitoring enabled");
+ 		}
+ 	}
+ 	
+ 
+-	if (item.stackSize > 1) {
+-		LogToFile(LogLevel::WARNING, (L"Stackable item - IA does not loot stackable items, got " + std::to_wstring(item.stackSize) + L" in stacksize"));
+-		DisplayMessage(L"Stackable item - IA does not loot stackable items", L"Item Assistant");
++	if (item.stackSize > 1 && !isClarityPotion) {
++		LogToFile(LogLevel::WARNING, (L"Unsupported stackable item, got " + std::to_wstring(item.stackSize) + L" in stacksize"));
++		DisplayMessage(L"Stackable item ignored - Cairn only tracks supported supplies", L"Cairn Codex");
+ 		// DumpReplicaInfo(item);
+ 		return false;
+ 	}
+@@ -353,34 +358,39 @@ bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
+ 		else if (item.baseRecord.find("records/storyelements/questassets/q000_torso.dbr") != std::string::npos) {} // Gazer Man
+ 		else if (item.baseRecord.find("records/endlessdungeon/items/q001_torso.dbr") != std::string::npos) {} // Miss Gazer Man
+ 		else {
+-			DisplayMessage(L"Quest item - IA does not support this specific item", L"Item Assistant");
++			DisplayMessage(L"Quest item ignored - Cairn does not archive this item", L"Cairn Codex");
+ 			return false;
+ 		}
+ 	}
+ 
+ 	if (item.baseRecord.find("/materia/") != std::string::npos) {
+-		DisplayMessage(L"Component ignored - IA does not loot components", L"Item Assistant");
++		DisplayMessage(L"Component ignored - Cairn tracks components separately", L"Cairn Codex");
+ 		return false;
+ 	}
+ 
+-	if (item.baseRecord.find("records/items/misc/") != std::string::npos) {
+-		DisplayMessage(L"Special item ignored - IA does not loot this item", L"Item Assistant");
++	const bool isDifficultyMerit =
++		item.baseRecord == "records/items/misc/difficultyunlock_elite.dbr" ||
++		item.baseRecord == "records/items/misc/difficultyunlock_ultimate.dbr" ||
++		item.baseRecord == "records/items/misc/dlc_crucible_epicunlock.dbr" ||
++		item.baseRecord == "records/items/misc/dlc_crucible_legendaryunlock.dbr";
++	if (item.baseRecord.find("records/items/misc/") != std::string::npos && !isDifficultyMerit) {
++		DisplayMessage(L"Special item ignored - Cairn does not archive this item", L"Cairn Codex");
+ 		return false;
+ 	}
+ 	
+ 	if (item.baseRecord.find("/questitems/") != std::string::npos) {
+-		DisplayMessage(L"Quest item ignored - IA does not loot quest items", L"Item Assistant");
++		DisplayMessage(L"Quest item ignored - Cairn does not archive quest items", L"Cairn Codex");
+ 		return false;
+ 	}
+ 
+-	if (item.baseRecord.find("/crafting/") != std::string::npos) {
+-		DisplayMessage(L"Component ignored - IA does not loot components", L"Item Assistant");
++	if (item.baseRecord.find("/crafting/") != std::string::npos && !isClarityPotion) {
++		DisplayMessage(L"Crafting item ignored - Cairn does not archive this item", L"Cairn Codex");
+ 		return false;
+ 	}
+ 
+ 	// Salt bag - Frequently get questions about these (Lifegiver is OK, both regular and mystical)
+ 	if (item.baseRecord.find("gearaccessories/necklaces/a00_necklace.dbr") != std::string::npos ) {
+-		DisplayMessage(L"Special item - This item is not supported by IA", L"Item Assistant");
++		DisplayMessage(L"Special item ignored - Cairn does not archive this item", L"Cairn Codex");
+ 		return false;
+ 	}
+ 
+@@ -593,7 +603,7 @@ bool InventorySack_AddItem::HandleItem(void* stash, GAME::Item* item) {
+ 
+ 	std::wstring modName = GetModName(gameInfo);
+ 	if (Persist(replica, fnGetHardcore(gameInfo), modName, gameTextLines)) {
+-		DisplayMessage(L"Item looted", L"By Item Assistant");
++		DisplayMessage(L"Item archived", L"By Cairn Codex");
+ 		fnPlayDropSound(item);
+ 		return true;
+ 	}
+@@ -769,6 +779,73 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+ 			return dll_GameEngine_Update(This, v);
+ 		}
+ 
++		// Cairn augments are soulbound and cannot travel through the shared transfer
++		// stash. Files with the explicit cairn-personal- prefix are instead delivered
++		// to the current character's inventory. The file remains in outgoing when no
++		// player is available, and is returned to ingoing if the inventory is full.
++		{
++			boost::lock_guard<boost::mutex> guard(m_mutex);
++			GAME::Player* player = fnGetMainPlayer((GAME::GameEngine*)This);
++			if (player != nullptr) {
++				const wchar_t* playerName = fnGetPlayerName(player);
++				const std::wstring currentName = playerName == nullptr ? L"" : playerName;
++				if (!currentName.empty() && currentName != m_activeCharacterName) {
++					m_activeCharacterName = currentName;
++					DataItemPtr characterEvent(new DataItem(
++						TYPE_CAIRN_ACTIVE_CHARACTER,
++						(unsigned int)(currentName.size() * sizeof(wchar_t)),
++						(char*)currentName.data()));
++					m_dataQueue->push(characterEvent);
++					SetEvent(m_hEvent);
++				}
++			}
++			if (player != nullptr && !m_personalDepositQueue.empty()) {
++				bool success = false;
++				for (auto it = m_personalDepositQueue.begin(); it != m_personalDepositQueue.end(); ++it) {
++					std::wstring targetFolder = GetFolderToMoveTo(GetModName(gameInfo), fnGetHardcore(gameInfo));
++					// Cairn names every personal delivery with its operation id. Preserve that
++					// name in the completed/rejected folder so the desktop process can
++					// acknowledge the exact operation instead of guessing by item payload.
++					const std::wstring queueLeaf = boost::filesystem::path(*it).filename().wstring();
++					std::wstring targetFile = targetFolder + L"\\" + queueLeaf;
++					if (fnCreateItem == nullptr || fnIsInventorySpaceAvailable == nullptr || fnGiveItemToCharacter == nullptr) {
++						targetFile = m_storageFolder + queueLeaf;
++						LogToFile(LogLevel::FATAL, L"Cairn personal delivery API is unavailable; returning queue item to " + targetFile);
++						if (!MoveFile(it->c_str(), targetFile.c_str())) {
++							LogToFile(LogLevel::WARNING, L"Failed returning unsupported Cairn personal queue file, error code: " + std::to_wstring(GetLastError()));
++						}
++						continue;
++					}
++					GAME::ItemReplicaInfo* replica = ReadReplicaInfo(*it);
++					GAME::Item* item = nullptr;
++					try {
++						if (replica != nullptr) item = fnCreateItem(replica);
++						if (item != nullptr && fnIsInventorySpaceAvailable(player, item)) {
++							fnGiveItemToCharacter(player, item, true, false);
++							item = nullptr; // ownership transferred to the player
++							success = true;
++						}
++						else {
++							targetFile = m_storageFolder + queueLeaf;
++							LogToFile(LogLevel::WARNING, L"Character inventory is full; returning Cairn personal delivery to " + targetFile);
++						}
++					}
++					catch (...) {
++						targetFile = m_storageFolder + queueLeaf;
++						LogToFile(LogLevel::FATAL, L"Cairn personal delivery failed; returning queue item to " + targetFile);
++					}
++					if (item != nullptr) fnDestroyObjectEx(fnGetObjectManager(), (GAME::Object*)item, nullptr, 0);
++					delete replica;
++					if (!MoveFile(it->c_str(), targetFile.c_str())) {
++						LogToFile(LogLevel::WARNING, L"Failed moving Cairn personal queue file, error code: " + std::to_wstring(GetLastError()));
++					}
++				}
++				if (success) DisplayMessage(L"Supply delivered to character inventory", L"By Cairn Codex");
++				else DisplayMessage(L"Character inventory is full", L"By Cairn Codex");
++				m_personalDepositQueue.clear();
++			}
++		}
++
+ 		if (m_isTransferStashOpen) {
+ 			void* sackPtr = GetSackToDepositTo((GAME::GameEngine*)This);
+ 			if (sackPtr != nullptr) {
+@@ -825,17 +902,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+ 				if (!m_depositQueue.empty()) {
+ 					if (success) {
+ 						if (m_depositQueue.size() == 1) {
+-							DisplayMessage(L"An item was deposited", L"By Item Assistant");
++							DisplayMessage(L"An item was deposited", L"By Cairn Codex");
+ 						}
+ 						else {
+-							DisplayMessage(std::to_wstring(m_depositQueue.size()) + L" items were deposited", L"By Item Assistant");
++							DisplayMessage(std::to_wstring(m_depositQueue.size()) + L" items were deposited", L"By Cairn Codex");
+ 						}
+ 
+ 						// Sort the items, as we've deposited them all in position 1,1
+ 						SortInventorySack(sackPtr, 1);
+ 					}
+ 					else {
+-						DisplayMessage(L"Could not transfer item, moved back to IA.", L"By Item Assistant");
++						DisplayMessage(L"Could not transfer item; returned it to Cairn's queue.", L"By Cairn Codex");
+ 
+ 					}
+ 					// fnPlayDropSound(item);
+@@ -910,7 +987,13 @@ void InventorySack_AddItem::ThreadMain(void*) {
+ 
+ 					if (boost::algorithm::ends_with(filename, ".csv")) {
+ 						LogToFile(LogLevel::INFO, std::wstring(L"Found file: ") + std::wstring(entry.path().c_str()));
+-						m_depositQueue.insert(filename);
++						const std::wstring leaf = entry.path().filename().wstring();
++						if (boost::algorithm::starts_with(leaf, L"cairn-personal-")) {
++							m_personalDepositQueue.insert(filename);
++						}
++						else {
++							m_depositQueue.insert(filename);
++						}
+ 					}
+ 					else {
+ 						LogToFile(LogLevel::INFO, std::wstring(L"Ignoring file: ") + std::wstring(entry.path().c_str()));
+diff --git a/HookDll/Hook/InventorySack_AddItem.h b/HookDll/Hook/InventorySack_AddItem.h
+index 622f3e2..d1459b1 100644
+--- a/HookDll/Hook/InventorySack_AddItem.h
++++ b/HookDll/Hook/InventorySack_AddItem.h
+@@ -37,6 +37,8 @@ private:
+ 
+ 	static bool m_isTransferStashOpen;
+ 	static std::set<std::wstring> m_depositQueue;
++	static std::set<std::wstring> m_personalDepositQueue;
++	static std::wstring m_activeCharacterName;
+ 	static boost::mutex m_mutex;
+ 
+ 
+diff --git a/HookDll/Hook/MessageType.h b/HookDll/Hook/MessageType.h
+index 4b2a978..ed65e1b 100644
+--- a/HookDll/Hook/MessageType.h
++++ b/HookDll/Hook/MessageType.h
+@@ -22,4 +22,5 @@ enum MessageType {
+ 	TYPE_GAMEENGINE_UPDATE = 8000,
+ 	TYPE_GAMEENGINE_SetDifficultyRamp= 8001,
+ 	TYPE_INJECTION_CANCELLED = 8100,
++	TYPE_CAIRN_ACTIVE_CHARACTER = 8201,
+ };

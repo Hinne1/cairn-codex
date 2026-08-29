@@ -23,6 +23,7 @@ import type {
   LiveGameStatus,
   MapRegionLocation,
   ObservedStashItem,
+  RecoveryStatus,
   RolledStat,
   StagingTabInspection,
   VaultListItem,
@@ -230,6 +231,8 @@ const farmingQuery = ref('')
 const farmingRarity = ref<RarityFilter>('all')
 const infiniteSupplies = ref(true)
 const infiniteSuppliesBusy = ref(false)
+const diagnosticsBusy = ref(false)
+const recoveryStatus = ref<RecoveryStatus | null>(null)
 const vaultBusy = ref(false)
 const vaultError = ref<string | null>(null)
 const vaultMessage = ref<string | null>(null)
@@ -1875,6 +1878,7 @@ onMounted(async () => {
   } catch (error) {
     console.warn('Stored-supply setting could not be loaded; preserving the safe default.', error)
   }
+  await refreshRecoveryStatus()
   // Establish live ownership before catalog projection/scanning queues any heavyweight
   // helper work. This keeps reconnect independent from collection startup time.
   await pollLiveLifecycle()
@@ -1968,6 +1972,32 @@ async function rebuildGameDataIndex(): Promise<void> {
     vaultError.value = readableError(error)
   } finally {
     scanning.value = false
+  }
+}
+
+async function exportDiagnostics(): Promise<void> {
+  diagnosticsBusy.value = true
+  vaultError.value = null
+  try {
+    const result = await window.cairnCodex.exportDiagnostics()
+    if (!result.canceled) vaultMessage.value = `Diagnostic report saved to ${result.path}.`
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    diagnosticsBusy.value = false
+  }
+}
+
+async function openDataDirectory(): Promise<void> {
+  const error = await window.cairnCodex.openDataDirectory()
+  if (error) vaultError.value = `Windows could not open Cairn's data folder: ${error}`
+}
+
+async function refreshRecoveryStatus(): Promise<void> {
+  try {
+    recoveryStatus.value = await window.cairnCodex.getRecoveryStatus()
+  } catch {
+    // Collection browsing remains available even if diagnostics cannot load.
   }
 }
 
@@ -2662,6 +2692,7 @@ async function refreshVault(): Promise<void> {
     else console.warn('Live-game status could not be refreshed.', live.reason)
     if (selectedStashPath.value) await refreshStaging()
     else staging.value = null
+    await refreshRecoveryStatus()
   } catch (error) {
     vaultError.value = readableError(error)
   }
@@ -3933,6 +3964,13 @@ function formatPercentile(value: number | null | undefined): string {
     </header>
 
     <aside class="growl-stack" aria-live="polite" aria-label="Notifications">
+      <article v-if="recoveryStatus?.requiresAttention" class="growl warning">
+        <span>
+          <strong>Recovery attention required</strong>
+          {{ recoveryStatus.operations.length }} transfer operation{{ recoveryStatus.operations.length === 1 ? '' : 's' }} need audit before more writes.
+        </span>
+        <button type="button" aria-label="Open recovery settings" @click="activeView = 'settings'">Review</button>
+      </article>
       <article v-if="vaultError" class="growl error">
         <span><strong>Transfer problem</strong>{{ vaultError }}</span>
         <button type="button" aria-label="Dismiss notification" @click="vaultError = null">×</button>
@@ -5277,6 +5315,24 @@ function formatPercentile(value: number | null | undefined): string {
               {{ scanning && scanActivity === 'game-data' ? 'Rebuilding index…' : 'Rebuild game-data index' }}
             </button>
             <small>Use this after changing mods or if a location looks stale.</small>
+          </article>
+
+          <article class="settings-card">
+            <p class="section-label">Support and recovery</p>
+            <h3>Local diagnostics</h3>
+            <div v-if="recoveryStatus?.requiresAttention" class="recovery-alert">
+              <strong>Pause transfers</strong>
+              <span>{{ recoveryStatus.operations.length }} journal operation{{ recoveryStatus.operations.length === 1 ? '' : 's' }} require a recovery audit.</span>
+              <code v-for="operation in recoveryStatus.operations.slice(0, 5)" :key="operation.id">
+                {{ operation.operation }} · {{ operation.state }} · {{ operation.id }}
+              </code>
+            </div>
+            <p>Export a small JSON report with versions, adapter fingerprints, database integrity, and unfinished-operation state. Item payloads and save contents are excluded.</p>
+            <button class="settings-action" type="button" :disabled="diagnosticsBusy" @click="exportDiagnostics">
+              {{ diagnosticsBusy ? 'Collecting diagnostics…' : 'Export diagnostic report' }}
+            </button>
+            <button class="settings-action" type="button" @click="openDataDirectory">Open data and backups folder</button>
+            <small>Preserve this folder after any uncertain transfer. Do not post saves or the archive database publicly.</small>
           </article>
         </div>
       </section>

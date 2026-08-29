@@ -1,6 +1,9 @@
 export const IPC_CHANNELS = {
   getAppStatus: 'app:get-status',
   setZoomFactor: 'app:set-zoom-factor',
+  exportDiagnostics: 'app:export-diagnostics',
+  openDataDirectory: 'app:open-data-directory',
+  getRecoveryStatus: 'app:get-recovery-status',
   getCachedCollection: 'collection:get-cached',
   hydrateArchiveRolls: 'collection:hydrate-archive-rolls',
   discoverGrimDawn: 'grim-dawn:discover',
@@ -32,9 +35,28 @@ export interface AppStatus {
   mode: 'read-only'
 }
 
+export interface DiagnosticExportResult {
+  canceled: boolean
+  path: string | null
+}
+
+export interface RecoveryStatus {
+  requiresAttention: boolean
+  operations: Array<{
+    id: string
+    operation: string
+    state: string
+    startedAtUtc: string
+    hasBackup: boolean
+  }>
+}
+
 export interface CairnCodexApi {
   getAppStatus: () => Promise<AppStatus>
   setZoomFactor: (factor: number) => Promise<number>
+  exportDiagnostics: () => Promise<DiagnosticExportResult>
+  openDataDirectory: () => Promise<string>
+  getRecoveryStatus: () => Promise<RecoveryStatus>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   listCharacters: () => Promise<CharacterSaveProfile[]>
   getCachedCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot | null>

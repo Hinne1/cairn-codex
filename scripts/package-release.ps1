@@ -1,0 +1,81 @@
+param(
+  [switch] $AllowDirty
+)
+
+$ErrorActionPreference = 'Stop'
+
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$packageScript = Join-Path $PSScriptRoot 'package-windows.ps1'
+$packageJson = Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
+$version = [string]$packageJson.version
+$packageRoot = Join-Path $projectRoot 'dist\package\Cairn Codex-win32-x64'
+$releaseRoot = Join-Path $projectRoot 'dist\release'
+$artifactName = "Cairn-Codex-$version-win-x64"
+$zipPath = Join-Path $releaseRoot "$artifactName.zip"
+$checksumPath = Join-Path $releaseRoot "$artifactName.sha256"
+$manifestPath = Join-Path $releaseRoot "$artifactName.manifest.json"
+$installerSource = Join-Path $projectRoot "dist\builder\Cairn-Codex-$version-Setup.exe"
+$installerPath = Join-Path $releaseRoot "Cairn-Codex-$version-Setup.exe"
+
+$dirtyFiles = @(& git -c "safe.directory=$projectRoot" -C $projectRoot status --porcelain)
+if ($dirtyFiles.Count -gt 0 -and -not $AllowDirty) {
+  throw 'Refusing to create a release artifact from a dirty worktree. Commit or stash changes, or pass -AllowDirty for a local test build.'
+}
+
+& $packageScript
+if ($LASTEXITCODE -ne 0) { throw 'Windows package creation failed.' }
+
+& node (Join-Path $PSScriptRoot 'audit-package.mjs') $packageRoot
+if ($LASTEXITCODE -ne 0) { throw 'Packaged-content audit failed.' }
+
+$packagedHelper = Join-Path $packageRoot 'resources\helper\CairnCodex.GrimDawn.exe'
+& node (Join-Path $PSScriptRoot 'smoke-helper.mjs') $packagedHelper
+if ($LASTEXITCODE -ne 0) { throw 'Packaged helper self-test failed.' }
+
+Push-Location $projectRoot
+try {
+  & (Join-Path $PSScriptRoot 'prepare-builder-app.ps1')
+  & npx.cmd electron-builder --projectDir dist\builder-app --win nsis
+  if ($LASTEXITCODE -ne 0) { throw 'NSIS installer build failed.' }
+} finally {
+  Pop-Location
+}
+$installerPayload = Join-Path $projectRoot 'dist\builder\win-unpacked'
+& node (Join-Path $PSScriptRoot 'audit-package.mjs') $installerPayload
+if ($LASTEXITCODE -ne 0) { throw 'Installer payload audit failed.' }
+
+New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+Copy-Item -LiteralPath $installerSource -Destination $installerPath -Force
+
+$hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$hookPath = Join-Path $packageRoot 'resources\helper\native\ItemAssistantHook_x64.dll'
+$injectorPath = Join-Path $packageRoot 'resources\helper\native\DllInjector64.exe'
+$manifest = [ordered]@{
+  product = 'Cairn Codex'
+  version = $version
+  platform = 'win-x64'
+  artifact = Split-Path $zipPath -Leaf
+  artifactSha256 = $hash
+  installer = Split-Path $installerPath -Leaf
+  installerSha256 = $installerHash
+  hookSha256 = (Get-FileHash -LiteralPath $hookPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  injectorSha256 = (Get-FileHash -LiteralPath $injectorPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  commit = (& git -c "safe.directory=$projectRoot" -C $projectRoot rev-parse HEAD).Trim()
+  dirty = $dirtyFiles.Count -gt 0
+}
+
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText(
+  $checksumPath,
+  "$hash  $($manifest.artifact)`r`n$installerHash  $($manifest.installer)`r`n",
+  $utf8NoBom)
+[System.IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json) + "`r`n"), $utf8NoBom)
+
+Write-Host ''
+Write-Host "Release artifact: $zipPath"
+Write-Host "SHA-256: $hash"
+Write-Host "Installer: $installerPath"
+Write-Host "Installer SHA-256: $installerHash"

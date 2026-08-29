@@ -3,15 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "description": "A Pokedex-style collection manager for Grim Dawn items.",
+  "author": {
+    "name": "Hinne Stolzenberg",
+    "email": "HinneStolzenberg@gmail.com"
+  },
   "main": "./out/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "build:helper": "dotnet build ./src/helper/CairnCodex.GrimDawn/CairnCodex.GrimDawn.csproj",
+    "test:helper": "node ./scripts/smoke-helper.mjs",
+    "audit:repo": "node ./scripts/audit-repository.mjs",
     "package:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1",
+    "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-release.ps1",
+    "package:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-installer.ps1",
+    "test:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-installer.ps1",
+    "test:release-local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-release.ps1",
     "preview": "electron-vite preview",
     "smoke:desktop": "npm run build:helper && npm run build && node ./scripts/smoke-desktop.mjs",
+    "verify": "npm run audit:repo && npm run build && npm run build:helper && npm run test:helper",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json"
@@ -20,12 +31,55 @@
     "vue": "^3.5.41"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
-    "electron": "^43.3.0",
+    "electron": "43.3.0",
+    "electron-builder": "26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vue-tsc": "^3.3.9"
+  },
+  "build": {
+    "appId": "com.hinnestolzenberg.cairncodex",
+    "productName": "Cairn Codex",
+    "asar": true,
+    "directories": {
+      "app": "dist/builder-app",
+      "output": "dist/builder"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/helper-win-x64",
+        "to": "helper"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "LICENSE",
+        "to": "LICENSE.CAIRN-CODEX.txt"
+      },
+      "THIRD_PARTY_NOTICES.md",
+      "README.md"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.svg",
+      "artifactName": "Cairn-Codex-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cairn Codex",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

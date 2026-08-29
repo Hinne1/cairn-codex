@@ -1,0 +1,2 @@
+# Native patches preserve the upstream C++ project's indentation verbatim.
+native/patches/*.patch whitespace=-trailing-space,-space-before-tab

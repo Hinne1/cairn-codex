@@ -5,6 +5,7 @@ import {
   type CairnCodexApi,
   type CharacterSaveProfile,
   type CollectionSnapshot,
+  type DiagnosticExportResult,
   type GrimDawnDiscovery,
   type IngestResult,
   type LiveGameStatus,
@@ -12,6 +13,7 @@ import {
   type LiveRetrievalResult,
   type LiveSupplyDispenseResult,
   type RetrievalResult,
+  type RecoveryStatus,
   type StagingTabInspection,
   type VaultListItem,
   type WriteSafetyStatus
@@ -21,6 +23,12 @@ const api: CairnCodexApi = {
   getAppStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getAppStatus) as Promise<AppStatus>,
   setZoomFactor: (factor) =>
     ipcRenderer.invoke(IPC_CHANNELS.setZoomFactor, { factor }) as Promise<number>,
+  exportDiagnostics: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.exportDiagnostics) as Promise<DiagnosticExportResult>,
+  openDataDirectory: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.openDataDirectory) as Promise<string>,
+  getRecoveryStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getRecoveryStatus) as Promise<RecoveryStatus>,
   getCachedCollection: (sourcePaths, basis) =>
     ipcRenderer.invoke(IPC_CHANNELS.getCachedCollection, { sourcePaths, basis }) as Promise<CollectionSnapshot | null>,
   hydrateArchiveRolls: (sourcePaths) =>

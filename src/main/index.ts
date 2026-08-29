@@ -812,9 +812,6 @@ async function executeSahdinasMementoRecovery(
 
   const status = await helper.request<LiveGameStatus>('inspect-live-game')
   if (status.state !== 'ready') throw new Error(status.detail)
-  if (!status.activeCharacterName) {
-    throw new Error('Enter a character world before recovering Sahdina\'s Memento.')
-  }
   if (status.isHardcore === null) {
     throw new Error('Cairn has not resolved whether the active character is Hardcore or Softcore yet. Retry in a moment.')
   }
@@ -844,7 +841,7 @@ async function executeSahdinasMementoRecovery(
       return {
         operationId,
         status: 'committed',
-        activeCharacter: status.activeCharacterName,
+        activeCharacter: status.activeCharacterName ?? 'Active character',
         destination,
         record: SAHDINAS_MEMENTO.record,
         name: SAHDINAS_MEMENTO.name,

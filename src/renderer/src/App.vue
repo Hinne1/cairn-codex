@@ -5599,7 +5599,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div class="quest-recovery-actions">
             <button
               type="button"
-              :disabled="vaultBusy || liveStatus?.state !== 'ready' || !liveStatus?.activeCharacterName"
+              :disabled="vaultBusy || liveStatus?.state !== 'ready'"
               @click="recoverSahdinasMemento('character-inventory')"
             >{{ sahdinaRecoveryBusy === 'character-inventory' ? 'Delivering…' : 'Recover to inventory' }}</button>
             <button

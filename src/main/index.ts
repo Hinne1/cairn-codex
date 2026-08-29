@@ -44,7 +44,7 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 29
+const CATALOG_PRESENTATION_VERSION = 30
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 
@@ -1891,6 +1891,41 @@ async function runSmokeTest(
       )
     ) {
       throw new Error('Set presentation omitted flat damage, skill bonuses, or granted skills.')
+    }
+    const iceKing = helperSnapshot.items.find((item) => item.setName === "Ice King's Adornments")
+      ?.setPresentation
+    const iceKingModifiers = iceKing?.tiers.flatMap((tier) => tier.skillModifiers) ?? []
+    const iceKingHellhound = iceKingModifiers.find(
+      (section) => section.kind === 'skill-modifier' && section.heading === 'Summon Hellhound'
+    )
+    const iceKingVisual = iceKingModifiers.find(
+      (section) => section.kind === 'visual-modifier' &&
+        section.lines.some((line) => line.label === 'Summoned form: Direwolf')
+    )
+    const anyWpsSetModifier = helperSnapshot.items
+      .flatMap((item) => item.setPresentation?.tiers ?? [])
+      .flatMap((tier) => tier.skillModifiers)
+      .filter((section) => section.kind === 'skill-modifier')
+      .some((section) =>
+        section.lines.some((line) => line.label === 'Weapon Damage') &&
+        section.lines.some((line) => line.label === 'Chance on Default Weapon Attack')
+      )
+    const anyProjectileVisual = helperSnapshot.items
+      .flatMap((item) => item.setPresentation?.tiers ?? [])
+      .flatMap((tier) => tier.skillModifiers)
+      .filter((section) => section.kind === 'visual-modifier')
+      .some((section) =>
+        section.lines.some((line) => line.label === 'Alternate projectile effects')
+      )
+    if (
+      iceKingHellhound?.lines.find(
+        (line) => line.label === 'Chaos Damage converted to Cold Damage'
+      )?.minimum !== 100 ||
+      !iceKingVisual ||
+      !anyWpsSetModifier ||
+      !anyProjectileVisual
+    ) {
+      throw new Error('Set presentation omitted a mechanical or visual skill modifier.')
     }
     const invertedRange = helperSnapshot.items
       .flatMap((item) => item.presentation?.sections ?? [])

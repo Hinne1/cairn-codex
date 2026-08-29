@@ -37,6 +37,7 @@ type SortDirection = 'asc' | 'desc'
 type MiCountingMode = 'base' | 'tier'
 type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'oracle' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
+type SetFeatureFilter = 'all' | 'visual'
 type SetSortMode = 'completion' | 'level' | 'name'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
@@ -171,6 +172,7 @@ const trackerCollapsed = ref(readStoredTrackerCollapsed())
 const miCountingMode = ref<MiCountingMode>(readStoredMiCountingMode())
 const showLegacyScanner = ref(readStoredBoolean('cairn-codex-show-legacy-scanner', false))
 const setProgressFilter = ref<SetProgressFilter>('all')
+const setFeatureFilter = ref<SetFeatureFilter>('all')
 const setSortMode = ref<SetSortMode>('completion')
 const setSortDirection = ref<SortDirection>('desc')
 const selectedSkill = ref(localStorage.getItem('cairn-codex-skill') ?? 'Wendigo Totem')
@@ -738,6 +740,7 @@ const visibleSets = computed(() => {
       if (setProgressFilter.value === 'unstarted') return set.collected === 0
       return true
     })
+    .filter((set) => setFeatureFilter.value === 'all' || setHasVisualChanges(set))
     .filter((set) => {
       if (!needle) return true
       return (
@@ -1731,7 +1734,7 @@ function navigateAppHistory(direction: 'back' | 'forward'): void {
 }
 
 watch(
-  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, setSortMode, setSortDirection, materialCategory],
+  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, setFeatureFilter, setSortMode, setSortDirection, materialCategory],
   () => {
     currentPage.value = 1
   }
@@ -2529,6 +2532,7 @@ function openSets(): void {
   query.value = ''
   rarityFilter.value = 'all'
   setProgressFilter.value = 'all'
+  setFeatureFilter.value = 'all'
 }
 
 function openOracleSet(name: string): void {
@@ -3514,6 +3518,12 @@ function skillSearchText(item: CollectionItem): string {
     .join(' ')
 }
 
+function setHasVisualChanges(set: CollectionSet): boolean {
+  return (set.items[0]?.setPresentation?.tiers ?? []).some((tier) =>
+    (tier.skillModifiers ?? []).some((section) => section.kind === 'visual-modifier')
+  )
+}
+
 function matchesLevel(level: number, expression: string): boolean {
   const match = /^(>=|<=|>|<|=)?(\d+)$/.exec(expression)
   if (!match) return false
@@ -4366,6 +4376,10 @@ function formatPercentile(value: number | null | undefined): string {
           <option value="mi">Monster Infrequent</option>
           <option value="rare">Rare recipe item</option>
           <option value="recipe">Craftable from recipe</option>
+        </select>
+        <select v-if="activeView === 'sets'" v-model="setFeatureFilter" aria-label="Set feature">
+          <option value="all">All set effects</option>
+          <option value="visual">Visual transformations</option>
         </select>
         <select v-if="activeView === 'collection' || activeView === 'materials'" v-model="sortMode" aria-label="Sort collection">
           <option value="recent">Recently collected</option>
@@ -5749,6 +5763,7 @@ function formatPercentile(value: number | null | undefined): string {
                 v-for="modifier in tier.skillModifiers ?? []"
                 :key="`modifier:${modifier.heading}`"
                 class="set-tier-group skill-bonus"
+                :class="{ 'visual-bonus': modifier.kind === 'visual-modifier' }"
               >
                 <h5>{{ modifier.heading }}</h5>
                 <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">

@@ -402,7 +402,7 @@ export interface ItemPresentation {
 }
 
 export interface ItemPresentationSection {
-  kind: 'base' | 'pet' | 'skill-modifier'
+  kind: 'base' | 'pet' | 'skill-modifier' | 'visual-modifier'
   heading: string | null
   lines: ItemPresentationLine[]
 }
@@ -412,7 +412,7 @@ export interface ItemPresentationLine {
   minimum: number | null
   maximum: number | null
   unit: '' | '%' | 's' | 'm' | '°'
-  tone: 'standard' | 'skill' | 'mastery' | 'pet'
+  tone: 'standard' | 'skill' | 'mastery' | 'pet' | 'visual'
   prefix: string
   suffix: string
 }

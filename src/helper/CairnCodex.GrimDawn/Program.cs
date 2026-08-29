@@ -34,6 +34,7 @@ while ((line = Console.ReadLine()) is not null)
             "resolve-archive-items" => ResolveArchiveItems(request),
             "inspect-game-record" => InspectGameRecord(request),
             "inspect-game-records" => InspectGameRecords(request),
+            "inspect-set-presentations" => InspectSetPresentations(request),
             "inspect-archive-text" => InspectArchiveText(request),
             "build-map-location-index" => BuildMapLocationIndex(request),
             "extract-item-icons" => ExtractItemIcons(request),
@@ -180,6 +181,7 @@ HelperResponse InspectGameRecords(HelperRequest request)
     var data = ItemCatalogBuilder.Load(parameters.InstallationPath);
     var limit = Math.Clamp(parameters.Limit, 1, 5000);
     var fields = parameters.Fields ?? [];
+    var includeAllFields = fields.Any(field => field == "*");
     var matches = data.Records.Values
         .Where(source => string.IsNullOrWhiteSpace(parameters.RecordContains) ||
             source.Record.Name.Contains(parameters.RecordContains, StringComparison.OrdinalIgnoreCase))
@@ -213,11 +215,11 @@ HelperResponse InspectGameRecords(HelperRequest request)
                         StringComparison.OrdinalIgnoreCase) == true)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray(),
-            fields = fields.ToDictionary(
+            fields = (includeAllFields ? source.Record.Values.Keys : fields).ToDictionary(
                 field => field,
                 field => source.Record.Values.GetValueOrDefault(field) ?? [],
                 StringComparer.OrdinalIgnoreCase),
-            resolvedText = fields.ToDictionary(
+            resolvedText = (includeAllFields ? source.Record.Values.Keys : fields).ToDictionary(
                 field => field,
                 field => source.Record.Values.GetValueOrDefault(field)?
                     .Select(value => value.Text is { } text && data.Tags.TryGetValue(text, out var resolved)
@@ -229,6 +231,27 @@ HelperResponse InspectGameRecords(HelperRequest request)
         })
         .ToArray();
     return HelperResponse.Success(request.Id, new { count = matches.Length, records = matches });
+}
+
+HelperResponse InspectSetPresentations(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
+        ?? throw new JsonException("inspect-set-presentations requires an installationPath parameter.");
+    var data = ItemCatalogBuilder.Load(parameters.InstallationPath);
+    var presentationSource = new ItemPresentationSource(data.Tags, data.Records);
+    var sets = data.Records.Values
+        .Select(source => source.Record.Text("itemSetName"))
+        .OfType<string>()
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Select(path => new
+        {
+            record = path,
+            presentation = ItemPresentationBuilder.BuildSet(path, presentationSource)
+        })
+        .Where(set => set.presentation is not null)
+        .OrderBy(set => set.presentation!.Name, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    return HelperResponse.Success(request.Id, new { count = sets.Length, sets });
 }
 
 HelperResponse InspectArchiveText(HelperRequest request)

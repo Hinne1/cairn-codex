@@ -36,6 +36,7 @@ internal static partial class ItemPresentationBuilder
             ["characterConstitutionModifier"] = new("Constitution", "%"),
             ["characterHealIncreasePercent"] = new("Healing Effects", "%"),
             ["characterRunSpeedMaxModifier"] = new("Maximum Movement Speed", "%"),
+            ["characterAttackSpeedMaxModifier"] = new("Maximum Attack Speed", "%"),
             ["characterSpellCastSpeedMaxModifier"] = new("Maximum Casting Speed", "%"),
             ["characterDodgePercent"] = new("Chance to Avoid Melee Attacks", "%"),
             ["characterDeflectProjectile"] = new("Chance to Avoid Projectiles", "%"),
@@ -96,7 +97,8 @@ internal static partial class ItemPresentationBuilder
             ["defensiveBleedingDuration"] = new("Reduced Bleeding Duration", "%"),
             ["defensiveFireDuration"] = new("Reduced Burn Duration", "%"),
             ["defensiveAbsorptionModifier"] = new("Increased Armor Absorption", "%"),
-            ["skillCooldownReduction"] = new("Skill Cooldown Reduction", "%"),
+            ["characterDefensiveBlockRecoveryReduction"] = new("Shield Recovery Time", "%"),
+            ["skillCooldownReduction"] = new("Skill Recharge", "%"),
             ["skillManaCostReduction"] = new("Skill Energy Cost", "%"),
             ["skillComboChargeSpendReduction"] = new("Weapon Pool Charge Cost", "%"),
             ["retaliationTotalDamageModifier"] = new("Total Retaliation Damage", "%")
@@ -353,10 +355,14 @@ internal static partial class ItemPresentationBuilder
             if (fieldValue is not { } value || Math.Abs(value) < 0.001) continue;
             var scaled = pair.Key.StartsWith("offensive", StringComparison.Ordinal) &&
                 pair.Key.EndsWith("Modifier", StringComparison.Ordinal);
+            if (pair.Key == "skillCooldownReduction" &&
+                record.Number("skillCooldownReductionChance") is { } chance && chance > 0)
+                continue;
             var range = level.HasValue
                 ? new NumericRange(value, value)
                 : RollRange(record, pair.Key, value, scaled);
-            var prefix = pair.Key is "skillCooldownReduction" or "skillManaCostReduction" || value < 0
+            var prefix = pair.Key is "skillCooldownReduction" or "skillManaCostReduction" or
+                "characterDefensiveBlockRecoveryReduction" || value < 0
                 ? "−"
                 : string.Empty;
             var absoluteMinimum = Math.Min(Math.Abs(range.Minimum), Math.Abs(range.Maximum));
@@ -427,9 +433,11 @@ internal static partial class ItemPresentationBuilder
             var input = record.Text("conversionInType" + suffix);
             var output = record.Text("conversionOutType" + suffix);
             if (input is null || output is null) continue;
-            var range = new NumericRange(
-                Math.Max(0, Math.Round(value * 0.8, MidpointRounding.AwayFromZero)),
-                Math.Min(100, Math.Round(value * 1.2, MidpointRounding.AwayFromZero)));
+            var range = level.HasValue
+                ? new NumericRange(value, value)
+                : new NumericRange(
+                    Math.Max(0, Math.Round(value * 0.8, MidpointRounding.AwayFromZero)),
+                    Math.Min(100, Math.Round(value * 1.2, MidpointRounding.AwayFromZero)));
             lines.Add(Line(
                 $"{DamageName(input)} Damage converted to {DamageName(output)} Damage",
                 range.Minimum,
@@ -576,18 +584,52 @@ internal static partial class ItemPresentationBuilder
                 !data.Records.TryGetValue(modifierSkill, out var modifier))
                 continue;
             var modifierRecord = ResolveSkillModifierRecord(modifier.Record, data);
+            var skillName = ResolveSkillName(modifiedSkill, data);
             var lines = new List<ItemPresentationLine>();
             AddFlatDamage(modifierRecord, lines, level: 1);
             AddDurationDamage(modifierRecord, lines, level: 1);
             AddSimpleStats(modifierRecord, lines, "standard", level: 1);
+            AddRetaliation(modifierRecord, lines, level: 1);
             AddConversions(modifierRecord, lines, level: 1);
             AddSkillModifierSpecialStats(modifierRecord, lines);
-            if (lines.Count > 0)
-                sections.Add(new ItemPresentationSection(
+            AddSkillModifierMechanics(modifierRecord, data, lines);
+            AddSkillModifierMechanics(modifier.Record, data, lines);
+            var uniqueLines = lines.Distinct().ToArray();
+            if (uniqueLines.Length > 0)
+                AddOrMergeSection(sections, new ItemPresentationSection(
                     "skill-modifier",
-                    ResolveSkillName(modifiedSkill, data),
-                    lines));
+                    skillName,
+                    uniqueLines));
+
+            var visualLines = new List<ItemPresentationLine>();
+            AddSkillModifierVisuals(modifierRecord, data, visualLines);
+            AddSkillModifierVisuals(modifier.Record, data, visualLines);
+            var uniqueVisualLines = visualLines.Distinct().ToArray();
+            if (uniqueVisualLines.Length > 0)
+                AddOrMergeSection(sections, new ItemPresentationSection(
+                    "visual-modifier",
+                    skillName + " · Visual transformation",
+                    uniqueVisualLines));
         }
+    }
+
+    private static void AddOrMergeSection(
+        List<ItemPresentationSection> sections,
+        ItemPresentationSection section)
+    {
+        var existingIndex = sections.FindIndex(existing =>
+            existing.Kind == section.Kind &&
+            string.Equals(existing.Heading, section.Heading, StringComparison.Ordinal));
+        if (existingIndex < 0)
+        {
+            sections.Add(section);
+            return;
+        }
+        var existing = sections[existingIndex];
+        sections[existingIndex] = existing with
+        {
+            Lines = existing.Lines.Concat(section.Lines).Distinct().ToArray()
+        };
     }
 
     private static ArzRecord ResolveSkillModifierRecord(
@@ -623,6 +665,262 @@ internal static partial class ItemPresentationBuilder
             lines.Add(Line("Duration", Math.Abs(activeDuration), null, "s", prefix: activeDuration < 0 ? "−" : "+"));
         if (record.Number("petLimit") is { } summonLimit && Math.Abs(summonLimit) > 0.001)
             lines.Add(Line("Summon Limit", Math.Abs(summonLimit), null, prefix: summonLimit < 0 ? "−" : "+"));
+    }
+
+    private static void AddSkillModifierMechanics(
+        ArzRecord record,
+        ItemPresentationSource data,
+        List<ItemPresentationLine> lines)
+    {
+        AddExactPercent(record, lines, "weaponDamagePct", "Weapon Damage");
+        AddExactPercent(record, lines, "skillChanceWeight", "Chance on Default Weapon Attack", showPositive: true);
+        AddExactPercent(record, lines, "projectilePiercing", "Chance to Pass Through Enemies");
+        AddExactPercent(record, lines, "retaliationDamagePct", "of Retaliation Damage added to Attack");
+
+        if (record.Number("offensiveDamageMultModifier") is { } totalDamage && Math.Abs(totalDamage) > 0.001)
+            lines.Add(Line($"Total Damage Modified by {Format(totalDamage)}%", null, null));
+        if (record.Number("skillTargetNumber") is { } targets && Math.Abs(targets) > 0.001)
+            lines.Add(Line("Target Maximum", Math.Abs(targets), null, prefix: targets < 0 ? "−" : "+"));
+        if (record.Number("skillTargetAngle") is { } angle && Math.Abs(angle) > 0.001)
+            lines.Add(Line("Attack Arc", Math.Abs(angle), null, "°", prefix: angle < 0 ? "−" : "+"));
+        if (record.Number("skillTargetRadius") is { } radius && Math.Abs(radius) > 0.001)
+            lines.Add(Line("Target Area", Math.Abs(radius), null, "m", prefix: radius < 0 ? "−" : "+"));
+        if (record.Number("projectileLaunchNumber") is { } projectiles && Math.Abs(projectiles) > 0.001)
+            lines.Add(Line(Math.Abs(projectiles) == 1 ? "Projectile" : "Projectiles", Math.Abs(projectiles), null,
+                prefix: projectiles < 0 ? "−" : "+"));
+        if (record.Number("projectileLaunchRotation") is { } spread && Math.Abs(spread) > 0.001)
+            lines.Add(Line("Projectile Spread", Math.Abs(spread), null, "°"));
+        if (record.Number("explosionRadius") is { } explosionRadius && Math.Abs(explosionRadius) > 0.001)
+            lines.Add(Line("Explosion Radius", Math.Abs(explosionRadius), null, "m",
+                prefix: explosionRadius < 0 ? "−" : "+"));
+        if (record.Number("petBurstSpawn") is { } summons && Math.Abs(summons) > 0.001)
+            lines.Add(Line(Math.Abs(summons) == 1 ? "Summon" : "Summons", Math.Abs(summons), null,
+                prefix: summons < 0 ? "−" : "+"));
+        if (record.Number("petLimit") is { } summonLimit && Math.Abs(summonLimit) > 0.001)
+            lines.Add(Line("Summon Limit", Math.Abs(summonLimit), null, prefix: summonLimit < 0 ? "−" : "+"));
+        if (record.Number("cooldownCharges") is { } charges && Math.Abs(charges) > 0.001)
+            lines.Add(Line(Math.Abs(charges) == 1 ? "Skill Charge" : "Skill Charges", Math.Abs(charges), null,
+                prefix: charges < 0 ? "−" : "+"));
+        if (record.Number("waveDistance") is { } distance && Math.Abs(distance) > 0.001)
+            lines.Add(Line("Travel Distance", Math.Abs(distance), null, "m", prefix: distance < 0 ? "−" : "+"));
+        if (record.Number("spawnObjectsTimeToLive") is { } objectDuration && Math.Abs(objectDuration) > 0.001)
+            lines.Add(Line("Spawned Object Duration", Math.Abs(objectDuration), null, "s",
+                prefix: objectDuration < 0 ? "−" : "+"));
+
+        if (record.Number("skillLifePercent") is { } healing && Math.Abs(healing) > 0.001)
+            lines.Add(Line("Health Restored", Math.Abs(healing), null, "%", prefix: healing < 0 ? "−" : "+"));
+        if (record.Number("skillLifePercentBuffDuration") is { } healthDuration && Math.Abs(healthDuration) > 0.001)
+            lines.Add(Line("Health Bonus Duration", Math.Abs(healthDuration), null, "s",
+                prefix: healthDuration < 0 ? "−" : "+"));
+        if (record.Number("skillComboChargeLevel") is { } chargeLevel && Math.Abs(chargeLevel) > 0.001)
+            lines.Add(Line("Maximum Charge Level", Math.Abs(chargeLevel), null,
+                prefix: chargeLevel < 0 ? "−" : "+"));
+        if (record.Number("skillComboChargeDuration") is { } chargeDuration && Math.Abs(chargeDuration) > 0.001)
+            lines.Add(Line("Charge Duration", Math.Abs(chargeDuration), null, "s",
+                prefix: chargeDuration < 0 ? "−" : "+"));
+
+        if (record.Number("skillCooldownReductionChance") is { } cooldownChance && cooldownChance > 0 &&
+            record.Number("skillCooldownReduction") is { } cooldownReduction && Math.Abs(cooldownReduction) > 0.001)
+        {
+            lines.Add(Line(
+                $"{Format(cooldownChance)}% Chance for {Format(Math.Abs(cooldownReduction))}% Skill Cooldown Reduction",
+                null,
+                null));
+        }
+
+        AddResistanceReduction(record, lines,
+            "offensiveTotalResistanceReductionAbsoluteMin",
+            "offensiveTotalResistanceReductionAbsoluteDurationMin",
+            "Reduced Target's Resistances");
+        AddResistanceReduction(record, lines,
+            "offensiveTotalResistanceReductionPercentMin",
+            "offensiveTotalResistanceReductionPercentDurationMin",
+            "Reduced Target's Resistances",
+            "%");
+        AddResistanceReduction(record, lines,
+            "offensiveSlowDefensiveAbilityMin",
+            "offensiveSlowDefensiveAbilityDurationMin",
+            "Reduced Target's Defensive Ability");
+
+        if (record.Number("offensiveFreezeMin") is { } freeze && freeze > 0)
+        {
+            var chance = record.Number("offensiveFreezeChance");
+            lines.Add(Line(chance is { } value && value > 0
+                    ? $"{Format(value)}% Chance to Freeze Target for {Format(freeze)} Seconds"
+                    : $"Freeze Target for {Format(freeze)} Seconds",
+                null,
+                null));
+        }
+        if (record.Number("offensivePetrifyMin") is { } petrify && petrify > 0)
+            lines.Add(Line($"Petrify Target for {Format(petrify)} Seconds", null, null));
+
+        if (record.Number("sparkChance") is { } sparkChance && sparkChance > 0 &&
+            record.Number("sparkMaxNumber") is { } sparkTargets && sparkTargets > 0)
+        {
+            lines.Add(Line(
+                $"{Format(sparkChance)}% Chance to Chain to up to {Format(sparkTargets)} Targets",
+                null,
+                null));
+        }
+
+        AddTriggeredSkillAdjustment(
+            record,
+            data,
+            lines,
+            "refreshCooldownSkill",
+            "refreshCooldownAmount",
+            "refreshCooldownChance",
+            "refreshCooldownTrigger",
+            "reduce {0}'s recharge by {1} Seconds");
+        AddTriggeredSkillAdjustment(
+            record,
+            data,
+            lines,
+            "refreshDurationSkill",
+            "refreshDurationAmount",
+            "refreshDurationChance",
+            "refreshDurationTrigger",
+            "extend {0} by {1} Seconds",
+            record.Number("refreshDurationMax"));
+    }
+
+    private static void AddSkillModifierVisuals(
+        ArzRecord record,
+        ItemPresentationSource data,
+        List<ItemPresentationLine> lines)
+    {
+        var petChanges = record.Values.GetValueOrDefault("petChanges")?
+            .Select(value => value.Text)
+            .OfType<string>()
+            .Where(value => value.Length > 0)
+            .ToArray() ?? [];
+        if (petChanges.Length > 0)
+        {
+            var form = DescribeChangedForm(petChanges[0], data);
+            lines.Add(Line(form is null ? "Alternate summoned form" : "Summoned form: " + form,
+                null, null, tone: "visual"));
+        }
+
+        var shapeshift = record.Text("shapeshiftMeshOverrideMale") ?? record.Text("shapeshiftMeshOverrideFemale");
+        if (shapeshift is not null)
+        {
+            var form = DescribeVisualPath(shapeshift);
+            lines.Add(Line(form is null ? "Alternate shapeshift form" : "Shapeshift form: " + form,
+                null, null, tone: "visual"));
+        }
+
+        AddVisualOverride(record, lines, ["projectileOverride", "projectileFXOverride", "projectileFragmentsOverride"],
+            "Alternate projectile effects");
+        AddVisualOverride(record, lines, ["targetFxPakOverride"], "Alternate impact effects");
+        AddVisualOverride(record, lines, ["waveFxPakOverride"], "Alternate wave effects");
+        AddVisualOverride(record, lines, ["lightningOverride"], "Alternate lightning effects");
+        AddVisualOverride(record, lines, ["particleEffect1Override"], "Alternate particle effects");
+        AddVisualOverride(record, lines, ["fxChanges"], "Alternate skill effects");
+    }
+
+    private static void AddExactPercent(
+        ArzRecord record,
+        List<ItemPresentationLine> lines,
+        string field,
+        string label,
+        bool showPositive = false)
+    {
+        if (record.Number(field) is not { } value || Math.Abs(value) < 0.001) return;
+        lines.Add(Line(label, Math.Abs(value), null, "%",
+            prefix: value < 0 ? "−" : showPositive ? "+" : string.Empty));
+    }
+
+    private static void AddResistanceReduction(
+        ArzRecord record,
+        List<ItemPresentationLine> lines,
+        string valueField,
+        string durationField,
+        string label,
+        string unit = "")
+    {
+        if (record.Number(valueField) is not { } value || Math.Abs(value) < 0.001) return;
+        var duration = record.Number(durationField);
+        var suffix = duration is { } seconds && seconds > 0
+            ? $" for {Format(seconds)} Seconds"
+            : string.Empty;
+        lines.Add(Line(label, Math.Abs(value), null, unit, suffix: suffix));
+    }
+
+    private static void AddTriggeredSkillAdjustment(
+        ArzRecord record,
+        ItemPresentationSource data,
+        List<ItemPresentationLine> lines,
+        string skillField,
+        string amountField,
+        string chanceField,
+        string triggerField,
+        string actionFormat,
+        double? maximum = null)
+    {
+        var skill = record.Text(skillField);
+        var amount = record.Number(amountField);
+        var chance = record.Number(chanceField);
+        if (skill is null || amount is not { } seconds || chance is not { } chanceValue ||
+            Math.Abs(seconds) < 0.001 || chanceValue <= 0)
+            return;
+        var action = string.Format(
+            CultureInfo.InvariantCulture,
+            actionFormat,
+            ResolveSkillName(skill, data),
+            Format(Math.Abs(seconds)));
+        var maximumText = maximum is { } cap && cap > 0 ? $" (up to {Format(cap)} Seconds)" : string.Empty;
+        lines.Add(Line($"{Format(chanceValue)}% Chance {TriggerPhrase(record.Text(triggerField))} to {action}{maximumText}",
+            null, null));
+    }
+
+    private static string TriggerPhrase(string? trigger) => trigger switch
+    {
+        "AttackEnemyCrit" => "on Critical Attack",
+        "AttackEnemy" => "on Attack",
+        "HitByEnemy" => "when Hit",
+        "KillEnemy" => "on Enemy Death",
+        _ => "when triggered"
+    };
+
+    private static void AddVisualOverride(
+        ArzRecord record,
+        List<ItemPresentationLine> lines,
+        IReadOnlyList<string> fields,
+        string label)
+    {
+        if (!fields.Any(field => record.Values.GetValueOrDefault(field)?.Any(value =>
+                !string.IsNullOrWhiteSpace(value.Text)) == true))
+            return;
+        lines.Add(Line(label, null, null, tone: "visual"));
+    }
+
+    private static string? DescribeChangedForm(string path, ItemPresentationSource data)
+    {
+        if (!data.Records.TryGetValue(path, out var source)) return DescribeVisualPath(path);
+        var candidates = new[]
+        {
+            source.Record.Text("mesh"),
+            source.Record.Text("baseTexture"),
+            source.Record.Text("unarmedSpawnAnim"),
+            path
+        };
+        foreach (var candidate in candidates)
+        {
+            var description = DescribeVisualPath(candidate);
+            if (description is not null) return description;
+        }
+        return null;
+    }
+
+    private static string? DescribeVisualPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (path.Contains("direwolf", StringComparison.OrdinalIgnoreCase)) return "Direwolf";
+        if (path.Contains("raven", StringComparison.OrdinalIgnoreCase) &&
+            path.Contains("spectral", StringComparison.OrdinalIgnoreCase)) return "Spectral Raven";
+        if (path.Contains("werewolf", StringComparison.OrdinalIgnoreCase)) return "Werewolf";
+        if (path.Contains("inquisitorseal_aether", StringComparison.OrdinalIgnoreCase)) return "Aether form";
+        return null;
     }
 
     private static bool TryResolveDisplaySkill(

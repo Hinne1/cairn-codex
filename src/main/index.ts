@@ -16,6 +16,8 @@ import {
   type LiveGameSyncResult,
   type LiveRetrievalResult,
   type LiveSupplyDispenseResult,
+  type SpecialItemRecoveryResult,
+  type SpecialRecoveryDestination,
   type MapRegionLocation,
   type RetrievalResult,
   type ObservedStashItem,
@@ -47,6 +49,10 @@ for (const stream of [process.stdout, process.stderr]) {
 const CATALOG_PRESENTATION_VERSION = 30
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
+const SAHDINAS_MEMENTO = {
+  record: 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr',
+  name: "Sahdina's Memento"
+} as const
 
 interface IngestCommand {
   path: string
@@ -584,6 +590,11 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
         )
       })
   )
+  ipcMain.handle(
+    IPC_CHANNELS.recoverSahdinasMemento,
+    (_event, input: { destination: SpecialRecoveryDestination }): Promise<SpecialItemRecoveryResult> =>
+      runTransferExclusive(() => executeSahdinasMementoRecovery(helper, input.destination))
+  )
 }
 
 async function syncLiveIncoming(
@@ -789,6 +800,63 @@ function createSupplyPayload(baseRecord: string): LiveVaultPayload {
     xOffset: 0,
     yOffset: 0
   }
+}
+
+async function executeSahdinasMementoRecovery(
+  helper: GrimDawnHelperClient,
+  destination: SpecialRecoveryDestination
+): Promise<SpecialItemRecoveryResult> {
+  if (destination !== 'shared-stash' && destination !== 'character-inventory') {
+    throw new Error('Sahdina recovery only supports the shared stash or active character inventory.')
+  }
+
+  const status = await helper.request<LiveGameStatus>('inspect-live-game')
+  if (status.state !== 'ready') throw new Error(status.detail)
+  if (!status.activeCharacterName) {
+    throw new Error('Enter a character world before recovering Sahdina\'s Memento.')
+  }
+  if (status.isHardcore === null) {
+    throw new Error('Cairn has not resolved whether the active character is Hardcore or Softcore yet. Retry in a moment.')
+  }
+
+  const operationId = `sahdina-${randomUUID()}`
+  const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
+    operationId,
+    isHardcore: status.isHardcore,
+    destination,
+    item: createSupplyPayload(SAHDINAS_MEMENTO.record)
+  })
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
+    if (result.state === 'rejected') {
+      if (result.receiptPath) {
+        await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+          path: result.receiptPath,
+          expectedSha256: queue.semanticSha256,
+          receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-special-recoveries')
+        })
+      }
+      const target = destination === 'character-inventory' ? 'personal inventory' : status.depositTabDescription
+      throw new Error(`The game rejected the recovery because the ${target} is full. No replacement was delivered.`)
+    }
+    if (result.state === 'deposited' && result.receiptPath) {
+      return {
+        operationId,
+        status: 'committed',
+        activeCharacter: status.activeCharacterName,
+        destination,
+        record: SAHDINAS_MEMENTO.record,
+        name: SAHDINAS_MEMENTO.name,
+        receiptPath: result.receiptPath
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+
+  throw new Error(
+    'Timed out waiting for Grim Dawn to acknowledge Sahdina\'s Memento. Do not click recovery again until the pending live queue has resolved.'
+  )
 }
 
 async function executeLiveAugmentDispense(

@@ -236,6 +236,7 @@ const infiniteSuppliesBusy = ref(false)
 const diagnosticsBusy = ref(false)
 const recoveryStatus = ref<RecoveryStatus | null>(null)
 const vaultBusy = ref(false)
+const sahdinaRecoveryBusy = ref<'shared-stash' | 'character-inventory' | null>(null)
 const vaultError = ref<string | null>(null)
 const vaultMessage = ref<string | null>(null)
 const liveStatus = ref<LiveGameStatus | null>(null)
@@ -2364,6 +2365,35 @@ async function setInfiniteSupplies(enabled: boolean): Promise<void> {
     vaultError.value = readableError(error)
   } finally {
     infiniteSuppliesBusy.value = false
+  }
+}
+
+async function recoverSahdinasMemento(destination: 'shared-stash' | 'character-inventory'): Promise<void> {
+  if (vaultBusy.value || liveStatus.value?.state !== 'ready') return
+  const target = destination === 'character-inventory'
+    ? `${liveStatus.value.activeCharacterName ?? 'the active character'}'s inventory`
+    : liveStatus.value.depositTabDescription
+  const confirmed = window.confirm(
+    `Create one replacement Sahdina's Memento in ${target}?\n\n` +
+    'Use this only if the original secret quest item was accidentally sold or otherwise lost.'
+  )
+  if (!confirmed) return
+
+  vaultBusy.value = true
+  sahdinaRecoveryBusy.value = destination
+  vaultError.value = null
+  vaultMessage.value = null
+  try {
+    const result = await window.cairnCodex.recoverSahdinasMemento(destination)
+    const deliveredTo = result.destination === 'character-inventory'
+      ? `${result.activeCharacter}'s inventory`
+      : liveStatus.value?.depositTabDescription ?? 'the shared stash'
+    vaultMessage.value = `${result.name} recovered to ${deliveredTo}.`
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    sahdinaRecoveryBusy.value = null
+    vaultBusy.value = false
   }
 }
 
@@ -5558,6 +5588,27 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
         </section>
         <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>
+
+        <article class="quest-recovery-panel">
+          <div class="quest-recovery-copy">
+            <p class="section-label">Lost quest-item recovery</p>
+            <h3>Sahdina's Memento fixer</h3>
+            <p>Crate left this secret necklace sellable. Create exactly one clean replacement through Cairn's verified live-delivery queue.</p>
+            <small>Item record: {{ "records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr" }}</small>
+          </div>
+          <div class="quest-recovery-actions">
+            <button
+              type="button"
+              :disabled="vaultBusy || liveStatus?.state !== 'ready' || !liveStatus?.activeCharacterName"
+              @click="recoverSahdinasMemento('character-inventory')"
+            >{{ sahdinaRecoveryBusy === 'character-inventory' ? 'Delivering…' : 'Recover to inventory' }}</button>
+            <button
+              type="button"
+              :disabled="vaultBusy || liveStatus?.state !== 'ready'"
+              @click="recoverSahdinasMemento('shared-stash')"
+            >{{ sahdinaRecoveryBusy === 'shared-stash' ? 'Delivering…' : 'Recover to shared stash' }}</button>
+          </div>
+        </article>
 
         <section v-if="quarantinedVaultItems.length" class="vault-quarantine">
           <header>

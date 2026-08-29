@@ -24,7 +24,8 @@ export const IPC_CHANNELS = {
   stopLiveGame: 'live:stop',
   syncLiveGame: 'live:sync',
   retrieveLiveVaultItems: 'live:retrieve-items',
-  dispenseLiveAugments: 'live:dispense-augments'
+  dispenseLiveAugments: 'live:dispense-augments',
+  recoverSahdinasMemento: 'live:recover-sahdinas-memento'
 } as const
 
 export type CollectionBasis = 'stashes' | 'archive'
@@ -78,6 +79,7 @@ export interface CairnCodexApi {
   syncLiveGame: () => Promise<LiveGameSyncResult>
   retrieveLiveVaultItems: (vaultItemIds: string[]) => Promise<LiveRetrievalResult>
   dispenseLiveAugments: (records: string[], expectedCharacterName?: string) => Promise<LiveSupplyDispenseResult>
+  recoverSahdinasMemento: (destination: SpecialRecoveryDestination) => Promise<SpecialItemRecoveryResult>
 }
 
 export interface WriteSafetyStatus {
@@ -143,6 +145,18 @@ export interface LiveSupplyDispenseResult {
   dispensed: Array<{ record: string; name: string }>
   receiptPaths: string[]
   issues: string[]
+}
+
+export type SpecialRecoveryDestination = 'shared-stash' | 'character-inventory'
+
+export interface SpecialItemRecoveryResult {
+  operationId: string
+  status: 'committed'
+  activeCharacter: string
+  destination: SpecialRecoveryDestination
+  record: string
+  name: string
+  receiptPath: string
 }
 
 export interface StagingTabInspection {

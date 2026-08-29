@@ -12,6 +12,7 @@ import {
   type LiveGameSyncResult,
   type LiveRetrievalResult,
   type LiveSupplyDispenseResult,
+  type SpecialItemRecoveryResult,
   type RetrievalResult,
   type RecoveryStatus,
   type StagingTabInspection,
@@ -70,7 +71,9 @@ const api: CairnCodexApi = {
   retrieveLiveVaultItems: (vaultItemIds) =>
     ipcRenderer.invoke(IPC_CHANNELS.retrieveLiveVaultItems, { vaultItemIds }) as Promise<LiveRetrievalResult>,
   dispenseLiveAugments: (records, expectedCharacterName) =>
-    ipcRenderer.invoke(IPC_CHANNELS.dispenseLiveAugments, { records, expectedCharacterName }) as Promise<LiveSupplyDispenseResult>
+    ipcRenderer.invoke(IPC_CHANNELS.dispenseLiveAugments, { records, expectedCharacterName }) as Promise<LiveSupplyDispenseResult>,
+  recoverSahdinasMemento: (destination) =>
+    ipcRenderer.invoke(IPC_CHANNELS.recoverSahdinasMemento, { destination }) as Promise<SpecialItemRecoveryResult>
 }
 
 contextBridge.exposeInMainWorld('cairnCodex', api)

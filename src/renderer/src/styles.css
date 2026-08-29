@@ -699,6 +699,14 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .transfer-mode-tabs button.active strong { color: #efd49a; }
 .live-mode-card { margin-top: 16px; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid #474033; border-radius: 8px; background: rgba(24, 23, 20, 0.9); }
 .live-mode-card.state-ready { border-color: #68713f; background: linear-gradient(120deg, rgba(40, 53, 29, 0.72), rgba(24, 25, 20, 0.94)); box-shadow: inset 3px 0 #a8bd5b; }
+.quest-recovery-panel { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 16px; padding: 18px 20px; border: 1px solid #4b4030; border-radius: 8px; background: linear-gradient(120deg, rgba(50, 38, 25, .82), rgba(23, 22, 19, .96)); }
+.quest-recovery-copy { min-width: 0; }
+.quest-recovery-copy h3 { margin: 2px 0 7px; color: #eadbbd; font: 500 21px Georgia, serif; }
+.quest-recovery-copy p:not(.section-label) { max-width: 780px; margin: 0; color: #9a917f; font-size: 11px; line-height: 1.55; }
+.quest-recovery-copy small { display: block; margin-top: 8px; overflow: hidden; color: #665f54; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.quest-recovery-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.quest-recovery-actions button { padding: 9px 12px; border: 1px solid #6c5632; border-radius: 5px; color: #e3c77f; background: #332a1c; cursor: pointer; }
+.quest-recovery-actions button:disabled { opacity: .4; cursor: default; }
 .vault-quarantine { margin: 14px 0; padding: 16px; border: 1px solid #9b5738; background: linear-gradient(120deg, rgba(77, 30, 19, .72), rgba(25, 23, 19, .96)); }
 .vault-quarantine > p { color: #c9b09d; max-width: 1000px; }
 .vault-quarantine .unsupported { border-color: rgba(196, 99, 57, .52); }

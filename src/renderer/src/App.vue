@@ -580,11 +580,6 @@ const awakeningAvailableLegendaryCount = computed(() =>
     item.rarity === 'legendary' && itemAvailableByAwakeningOnly(item)
   ).length
 )
-const collectedMiFamilies = computed(() => new Set(
-  (snapshot.value?.items ?? [])
-    .filter((item) => item.rarity === 'mi' && isCollectionOwned(item))
-    .map(miFamilyKey)
-))
 const setRollSummary = computed(() => medianSummary(
   collectionSets.value.flatMap((set) => set.items.map((item) => item.bestRollPercentile))
 ))
@@ -963,7 +958,7 @@ const farmTargets = computed<FarmTarget[]>(() => {
   const query = farmingQuery.value.trim().toLocaleLowerCase()
   const grouped = new Map<string, FarmTarget>()
   for (const item of snapshot.value.items) {
-    if (isCollectedForCompletion(item)) continue
+    if (isCollectionOwned(item)) continue
     if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
     if (query && !matchesSearch(item, query)) continue
     for (const location of item.acquisition?.locations ?? []) {
@@ -2983,11 +2978,6 @@ function miFamilyKey(item: CollectionItem): string {
   return `${item.slot}\0${item.name.normalize('NFKC').trim().toLocaleLowerCase()}`
 }
 
-function isCollectedForCompletion(item: CollectionItem): boolean {
-  if (item.rarity !== 'mi' || miCountingMode.value === 'tier') return isCollectionOwned(item)
-  return collectedMiFamilies.value.has(miFamilyKey(item))
-}
-
 function setReadyFromStorage(set: CollectionSet): boolean {
   return set.items.every((item) => item.availableCount > 0)
 }
@@ -4952,7 +4942,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <small>Strict mode. Each obtainable required-level variant is a separate collection entry.</small>
               </span>
             </label>
-            <small>This changes progress and farming recommendations immediately. It never merges or discards stored copies.</small>
+            <small>This changes completion statistics only. Farming, Skill Explorer, and Leveling Planner always retain the full MI tier catalog; stored copies are never merged or discarded.</small>
           </article>
 
           <article class="settings-card">

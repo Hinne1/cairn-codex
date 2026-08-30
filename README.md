@@ -191,6 +191,7 @@ Install and verify the Electron application:
 npm.cmd install
 npm.cmd run typecheck
 npm.cmd run build
+npm.cmd run test:discovery
 npm.cmd run smoke:desktop
 ```
 
@@ -214,6 +215,11 @@ npm.cmd run package:win
 
 Then run `dist\package\Cairn Codex-win32-x64\Cairn Codex.exe`. Keep the rest of that
 folder beside the executable; it contains Electron and the Grim Dawn helper.
+
+The release harness also includes isolated environment, migration, and UI
+performance diagnostics under `scripts/`. They write only below `local-cache`
+and can be pointed at copied/closed profiles; they never need to mutate a Grim
+Dawn installation or save.
 
 Create the versioned unsigned ZIP, checksum, and release manifest from a clean
 worktree with:

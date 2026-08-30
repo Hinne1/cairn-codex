@@ -24,18 +24,18 @@ updates are deliberately deferred until after the beta has real users.
 - [x] A versioned ZIP and SHA-256 checksum are produced from a clean checkout.
 - [x] Package contents include the project license, third-party notices, and no
       extracted Grim Dawn assets or personal application data.
-- [ ] The release artifact starts on a clean supported Windows installation.
+- [x] The release artifact starts on a clean supported Windows installation.
 
 ## First run and compatibility
 
-- [ ] Test no prior Cairn database, no GDIA install, and no development SDKs.
-- [ ] Test a non-default Steam library and missing/partial expansion installs.
-- [ ] Test Softcore-only, Hardcore-only, and both save populations.
-- [ ] Test user-facing Item Assistant migration with SC-only, HC-only, mixed,
+- [x] Test no prior Cairn database, no GDIA install, and no development SDKs.
+- [x] Test a non-default Steam library and missing/partial expansion layouts.
+- [x] Test Softcore-only, Hardcore-only, and both save populations.
+- [x] Test user-facing Item Assistant migration with SC-only, HC-only, mixed,
       repeated import, retained queue receipts, and unsupported catalog records.
 - [ ] Missing Grim Dawn, missing saves, or an unsupported game build produces an
       actionable status rather than a blank or permanently loading application.
-- [ ] Live transfers remain opt-in and fail closed for unknown binary hashes.
+- [x] Live transfers remain opt-in and fail closed for unknown binary hashes.
 
 ## Data safety
 

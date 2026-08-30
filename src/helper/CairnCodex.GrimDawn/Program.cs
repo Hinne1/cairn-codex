@@ -29,6 +29,16 @@ while ((line = Console.ReadLine()) is not null)
                 mode = "read-only"
             }),
             "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
+            "discover-grim-dawn-at" => HelperResponse.Success(
+                request.Id,
+                GrimDawnDiscovery.Discover(
+                    request.Params?.Deserialize<GrimDawnDiscoveryRequest>(jsonOptions)
+                    ?? throw new ArgumentException("Discovery roots are required."))),
+            "inspect-content-packs" => HelperResponse.Success(
+                request.Id,
+                ItemCatalogBuilder.InspectContentPacks(
+                    request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)?.InstallationPath
+                    ?? throw new ArgumentException("An installation path is required."))),
             "list-characters" => ListCharacters(request),
             "build-item-catalog" => BuildItemCatalog(request),
             "resolve-archive-items" => ResolveArchiveItems(request),

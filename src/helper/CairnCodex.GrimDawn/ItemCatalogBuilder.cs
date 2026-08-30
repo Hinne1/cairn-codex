@@ -995,6 +995,9 @@ internal static class ItemCatalogBuilder
         _ => itemClass.Length == 0 ? "unknown" : itemClass.ToLowerInvariant()
     };
 
+    internal static IReadOnlyList<ContentPack> InspectContentPacks(string root) =>
+        FindContentPacks(Path.GetFullPath(root)).ToArray();
+
     private static IEnumerable<ContentPack> FindContentPacks(string root)
     {
         var baseDatabase = Path.Combine(root, "database", "database.arz");

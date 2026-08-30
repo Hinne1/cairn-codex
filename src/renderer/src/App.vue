@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   buildStashOracle,
   type OracleReadiness,
@@ -190,7 +190,10 @@ const defaultWorkspaceToolIds = workspaceToolDefinitions.map((tool) => tool.id)
 const essentialWorkspaceToolIds: WorkspaceToolId[] = ['sets', 'skills', 'planner', 'mi-workshop', 'supplies']
 
 const discovery = ref<GrimDawnDiscovery | null>(null)
-const snapshot = ref<CollectionSnapshot | null>(null)
+// Collection snapshots are immutable and replaced wholesale. Keeping thousands of
+// catalog records shallow avoids proxying every tooltip line, set tier, and drop
+// location while preserving reactive updates when a new snapshot arrives.
+const snapshot = shallowRef<CollectionSnapshot | null>(null)
 const indexStashPaths = ref<string[]>(readStoredSourcePaths('stashes'))
 const archiveStashPaths = ref<string[]>(readStoredSourcePaths('archive'))
 const collectionBasis = ref<CollectionBasis>(readStoredCollectionBasis())
@@ -212,6 +215,7 @@ const zoomFactor = ref(readStoredZoomFactor())
 const activeCategory = ref('All')
 const activeView = ref<ActiveView>('collection')
 const query = ref('')
+const searchQuery = ref('')
 const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('recent')
@@ -732,9 +736,36 @@ const ingestBlockedReason = computed(() => {
   return null
 })
 
+const categoryProgressByName = computed(() => {
+  const progress = new Map<string, string>()
+  if (!snapshot.value) {
+    for (const category of categories) progress.set(category, '0 / 0')
+    return progress
+  }
+  const entriesByCategory = new Map(categories.map((category) => [category, new Map<string, boolean>()]))
+  for (const item of snapshot.value.items) {
+    const key = item.rarity === 'mi' && miCountingMode.value === 'base'
+      ? `mi:${miFamilyKey(item)}`
+      : `item:${item.record.toLocaleLowerCase()}`
+    const owned = isCollectionOwned(item)
+    for (const category of categories) {
+      if (!matchesCategory(item, category)) continue
+      const entries = entriesByCategory.get(category)!
+      entries.set(key, Boolean(entries.get(key) || owned))
+    }
+  }
+  for (const category of categories) {
+    const entries = entriesByCategory.get(category)!
+    let collected = 0
+    for (const owned of entries.values()) if (owned) collected += 1
+    progress.set(category, `${collected} / ${entries.size}`)
+  }
+  return progress
+})
+
 const filteredItems = computed(() => {
   if (!snapshot.value) return []
-  const needle = query.value.trim().toLocaleLowerCase()
+  const needle = searchQuery.value.trim().toLocaleLowerCase()
   const sourceItems = activeView.value === 'materials'
     ? (snapshot.value.materials ?? [])
     : snapshot.value.items
@@ -804,7 +835,7 @@ const collectionSets = computed<CollectionSet[]>(() => {
 })
 
 const visibleSets = computed(() => {
-  const needle = query.value.trim().toLocaleLowerCase()
+  const needle = searchQuery.value.trim().toLocaleLowerCase()
   const sets = collectionSets.value
     .filter(
       (set) =>
@@ -1825,6 +1856,15 @@ watch(
   }
 )
 
+let searchQueryTimer: ReturnType<typeof setTimeout> | null = null
+watch(query, (value) => {
+  if (searchQueryTimer) clearTimeout(searchQueryTimer)
+  searchQueryTimer = setTimeout(() => {
+    searchQuery.value = value
+    searchQueryTimer = null
+  }, 120)
+})
+
 watch(sortMode, (mode) => {
   sortDirection.value = mode === 'name' ? 'asc' : 'desc'
 })
@@ -2019,6 +2059,8 @@ onBeforeUnmount(() => {
   if (vaultErrorTimer) clearTimeout(vaultErrorTimer)
   if (vaultMessageTimer) clearTimeout(vaultMessageTimer)
   if (scanErrorTimer) clearTimeout(scanErrorTimer)
+  if (searchQueryTimer) clearTimeout(searchQueryTimer)
+  cancelSearchDocumentWarmup()
 })
 
 async function scanCollection(): Promise<void> {
@@ -2125,6 +2167,7 @@ async function refreshRecoveryStatus(): Promise<void> {
 
 function applySnapshot(value: CollectionSnapshot): void {
   snapshot.value = value
+  warmSearchDocuments([...(value.items ?? []), ...(value.materials ?? [])])
   discovery.value = value.discovery
   if (enabledStashPaths.value.length === 0 && value.scannedStashes.length > 0) {
     enabledStashPaths.value = value.scannedStashes.map((stash) => stash.path)
@@ -2825,16 +2868,7 @@ function recipePercentage(): string {
 }
 
 function categoryProgress(category: string): string {
-  if (!snapshot.value) return '0 / 0'
-  const matches = snapshot.value.items.filter((item) => matchesCategory(item, category))
-  const entries = new Map<string, boolean>()
-  for (const item of matches) {
-    const key = item.rarity === 'mi' && miCountingMode.value === 'base'
-      ? `mi:${miFamilyKey(item)}`
-      : `item:${item.record.toLocaleLowerCase()}`
-    entries.set(key, Boolean(entries.get(key) || isCollectionOwned(item)))
-  }
-  return `${[...entries.values()].filter(Boolean).length} / ${entries.size}`
+  return categoryProgressByName.value.get(category) ?? '0 / 0'
 }
 
 function preferredStashPath(value: CollectionSnapshot): string {
@@ -3640,18 +3674,90 @@ function tooltipHasMore(item: CollectionItem): boolean {
     (item.acquisition?.additionalLocationCount ?? 0) > 0
 }
 
-function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
-  const tokens = normalizedQuery.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []
-  const fields: Record<string, string> = {
-    name: item.name,
-    set: item.setName ?? '',
-    skill: skillSearchText(item),
-    slot: item.slot,
-    type: item.itemClass,
-    rarity: item.rarity,
-    pack: item.contentPack
+interface ItemSearchDocument {
+  everything?: string
+  fields: Record<string, string>
+}
+
+const itemSearchDocumentCache = new WeakMap<CollectionItem, ItemSearchDocument>()
+const setSearchTextCache = new WeakMap<NonNullable<CollectionItem['setPresentation']>, string>()
+let searchWarmGeneration = 0
+let searchWarmTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelSearchDocumentWarmup(): void {
+  searchWarmGeneration += 1
+  if (searchWarmTimer) clearTimeout(searchWarmTimer)
+  searchWarmTimer = null
+}
+
+function warmSearchDocuments(items: CollectionItem[]): void {
+  cancelSearchDocumentWarmup()
+  const generation = searchWarmGeneration
+  let index = 0
+  let includeEverything = false
+  const warmChunk = (): void => {
+    if (generation !== searchWarmGeneration) return
+    const started = performance.now()
+    while (index < items.length && performance.now() - started < 10) {
+      const item = items[index]!
+      const document = itemSearchDocument(item)
+      if (includeEverything) itemSearchEverything(item, document)
+      index += 1
+    }
+    if (index >= items.length && !includeEverything) {
+      includeEverything = true
+      index = 0
+    }
+    if (index < items.length) searchWarmTimer = setTimeout(warmChunk, 4)
+    else searchWarmTimer = null
   }
-  const everything = [
+  searchWarmTimer = setTimeout(warmChunk, 0)
+}
+
+function itemSearchDocument(item: CollectionItem): ItemSearchDocument {
+  const cached = itemSearchDocumentCache.get(item)
+  if (cached) return cached
+  const fields: Record<string, string> = {
+    name: item.name.toLocaleLowerCase(),
+    set: (item.setName ?? '').toLocaleLowerCase(),
+    // The helper already materializes the item's searchable presentation text.
+    // Reuse it here instead of walking every deeply nested skill line for every
+    // keystroke; set bonuses are shared and cached once per set presentation.
+    skill: `${item.presentation?.searchText ?? ''} ${setSearchText(item)}`.toLocaleLowerCase(),
+    slot: item.slot.toLocaleLowerCase(),
+    type: item.itemClass.toLocaleLowerCase(),
+    rarity: item.rarity.toLocaleLowerCase(),
+    pack: item.contentPack.toLocaleLowerCase()
+  }
+  const document = { fields }
+  itemSearchDocumentCache.set(item, document)
+  return document
+}
+
+function setSearchText(item: CollectionItem): string {
+  const presentation = item.setPresentation
+  if (!presentation) return ''
+  const cached = setSearchTextCache.get(presentation)
+  if (cached !== undefined) return cached
+  const text = presentation.tiers.flatMap((tier) => [
+    ...tier.lines.map((line) => line.label),
+    ...tier.petLines.map((line) => line.label),
+    ...tier.skillModifiers.flatMap((section) => [
+      section.heading,
+      ...section.lines.map((line) => line.label)
+    ]),
+    tier.grantedSkill?.name,
+    tier.grantedSkill?.description,
+    tier.grantedSkill?.trigger,
+    ...(tier.grantedSkill?.lines.map((line) => line.label) ?? [])
+  ]).filter(Boolean).join(' ')
+  setSearchTextCache.set(presentation, text)
+  return text
+}
+
+function itemSearchEverything(item: CollectionItem, document: ItemSearchDocument): string {
+  if (document.everything !== undefined) return document.everything
+  document.everything = [
     item.name,
     item.setName,
     item.slot,
@@ -3679,15 +3785,21 @@ function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
     .filter(Boolean)
     .join(' ')
     .toLocaleLowerCase()
+  return document.everything
+}
+
+function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
+  const tokens = normalizedQuery.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []
+  const document = itemSearchDocument(item)
 
   return tokens.every((rawToken) => {
     const token = rawToken.replaceAll('"', '')
     const separator = token.indexOf(':')
-    if (separator < 1) return everything.includes(token)
+    if (separator < 1) return itemSearchEverything(item, document).includes(token)
     const field = token.slice(0, separator)
     const value = token.slice(separator + 1)
     if (field === 'level') return matchesLevel(item.levelRequirement, value)
-    return fields[field]?.toLocaleLowerCase().includes(value) ?? false
+    return document.fields[field]?.includes(value) ?? false
   })
 }
 

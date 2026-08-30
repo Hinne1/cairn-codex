@@ -8,7 +8,7 @@ a supported game installation and records the manual live-transfer results here.
 
 | Scenario | Evidence | Current result |
 | --- | --- | --- |
-| TypeScript/Vue production build | `npm run build` | Passed 2026-08-29 |
+| TypeScript/Vue production build | `npm run build` | Passed 2026-08-30 |
 | Fresh database migration/idempotent reopen | desktop smoke, in-memory database | Passed |
 | Atomic replacement, backup, rollback | helper write self-test in a unique temporary directory | Passed |
 | Stale source hash | helper write self-test | Rejected without changing source |
@@ -25,11 +25,18 @@ a supported game installation and records the manual live-transfer results here.
 | Representative ingest plans | desktop smoke | 5 passed without writing game files |
 | Representative ingest/retrieval round trips | desktop smoke | 5 passed in memory |
 | Packaged helper with external .NET lookup disabled | packaged-helper smoke | Passed |
-| Empty Cairn user profile | packaged screenshot diagnostic | Passed 2026-08-29 |
+| Empty Cairn user profile | packaged screenshot diagnostic | Passed 2026-08-30 |
+| Missing game and missing saves | isolated helper discovery roots | Passed; host environment did not leak into result |
+| Non-default Steam library and GOG install | synthetic filesystem discovery | Passed |
+| Incomplete expansion layout | content-pack layout diagnostic | Safely ignored; recognized after required database and tags were present |
+| Softcore-only, Hardcore-only, and mixed saves | isolated malformed-stash diagnostics | Passed; mode remained correctly classified without parsing unsafe bytes |
+| Item Assistant migration | packaged app, synthetic GDIA database and queue, copied catalog seed | 4 copies imported (2 SC / 2 HC), 1 queue receipt retained, 1 unsupported record skipped, source unchanged |
+| Repeated Item Assistant migration | second packaged import against same target | No duplicate vault item or journal; a second verified backup retained |
+| Large-archive startup and search | packaged app, isolated copy of 5,525-item profile | 3.1–3.5 s to rendered collection; 153 ms structured / 164 ms ordinary full-text search including 120 ms debounce |
 | Package personal-data/art audit | `scripts/audit-package.mjs` | Passed, 282 files |
 | Installer install/first run/uninstall | `npm run test:installer` | Passed; app removed and isolated user data retained |
 | Dependency vulnerability audit | `npm audit --audit-level=high` | Passed, 0 vulnerabilities |
-| Tracked-file privacy/provenance audit | `npm run audit:repo` | Passed, 90 files |
+| Tracked-file privacy/provenance audit | `npm run audit:repo` | Passed; native fingerprints verified |
 
 The 2026-08-30 installed-game run indexed one installation, two save locations,
 six transfer stashes, and 5,525 catalog items. It analyzed 97 owned copies and
@@ -54,7 +61,7 @@ They are never inferred from a successful injection handshake.
 | Game exits mid-operation | Outcome remains pending/recoverable, queue payload retained | Pending |
 | Cairn exits/restarts mid-operation | Journal and receipt reconcile without duplication | Pending |
 | Unsupported game rebuild | Live injection remains blocked; read-only tools still work | Pending |
-| Item Assistant migration | Verified backup; SC/HC multiplicity and queue receipts preserved; repeat creates no copies | Pending |
+| Item Assistant migration | Verified backup; SC/HC multiplicity and queue receipts preserved; repeat creates no copies | Automated packaged-app gate passed; user-path confirmation remains optional |
 
 Record the exact app version, game version/build, `Game.dll`, hook, and injector
 hashes with the completed manual run. A different hash starts a new matrix.

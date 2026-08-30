@@ -24,11 +24,23 @@ internal static partial class GrimDawnDiscovery
     public static GrimDawnDiscoveryResult Discover()
     {
         var steamRoots = FindSteamRoots().ToArray();
-        var installations = FindInstallations(steamRoots)
+        return Discover(new GrimDawnDiscoveryRequest(
+            steamRoots,
+            FindDefaultLocalSaveRoots().ToArray(),
+            FindGogInstallations().ToArray()));
+    }
+
+    public static GrimDawnDiscoveryResult Discover(GrimDawnDiscoveryRequest request)
+    {
+        var steamRoots = request.SteamRoots
+            .Where(Directory.Exists)
+            .Select(Path.GetFullPath)
+            .ToArray();
+        var installations = FindInstallations(steamRoots, request.GogInstallations)
             .DistinctBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
             .OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var saves = FindSaveLocations(steamRoots)
+        var saves = FindSaveLocations(steamRoots, request.LocalSaveRoots)
             .DistinctBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
             .OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -36,7 +48,9 @@ internal static partial class GrimDawnDiscovery
         return new GrimDawnDiscoveryResult(installations, saves);
     }
 
-    private static IEnumerable<GrimDawnInstallation> FindInstallations(IEnumerable<string> steamRoots)
+    private static IEnumerable<GrimDawnInstallation> FindInstallations(
+        IEnumerable<string> steamRoots,
+        IEnumerable<string> gogInstallations)
     {
         foreach (var root in steamRoots)
         {
@@ -50,7 +64,7 @@ internal static partial class GrimDawnDiscovery
             }
         }
 
-        foreach (var path in FindGogInstallations())
+        foreach (var path in gogInstallations)
         {
             if (TryCreateInstallation(path, "gog", out var installation))
             {
@@ -70,12 +84,21 @@ internal static partial class GrimDawnDiscovery
         return File.Exists(databasePath);
     }
 
-    private static IEnumerable<GrimDawnSaveLocation> FindSaveLocations(IEnumerable<string> steamRoots)
+    private static IEnumerable<string> FindDefaultLocalSaveRoots()
     {
         var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         if (!string.IsNullOrWhiteSpace(documents))
         {
-            var localSave = Path.Combine(documents, "My Games", "Grim Dawn", "save");
+            yield return Path.Combine(documents, "My Games", "Grim Dawn", "save");
+        }
+    }
+
+    private static IEnumerable<GrimDawnSaveLocation> FindSaveLocations(
+        IEnumerable<string> steamRoots,
+        IEnumerable<string> localSaveRoots)
+    {
+        foreach (var localSave in localSaveRoots)
+        {
             if (TryCreateSaveLocation(localSave, "documents", out var location))
             {
                 yield return location;
@@ -258,3 +281,8 @@ internal sealed record TransferStashCandidate(
     long? FileSize,
     DateTime? LastWriteUtc,
     string? Error);
+
+internal sealed record GrimDawnDiscoveryRequest(
+    IReadOnlyList<string> SteamRoots,
+    IReadOnlyList<string> LocalSaveRoots,
+    IReadOnlyList<string> GogInstallations);

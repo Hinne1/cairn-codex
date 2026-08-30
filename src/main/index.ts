@@ -3226,6 +3226,8 @@ async function createWindow(): Promise<void> {
 }
 
 async function captureWindowWhenReady(window: BrowserWindow, path: string): Promise<void> {
+  const captureStartedAt = Date.now()
+  const interactionTimings: Record<string, number> = {}
   try {
     window.setContentSize(1440, 1000)
     for (let attempt = 0; attempt < 240; attempt += 1) {
@@ -3244,11 +3246,16 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       if (ready) {
         const category = process.env.CAIRN_CODEX_SCREENSHOT_CATEGORY
         if (category) {
-          await window.webContents.executeJavaScript(`
-            [...document.querySelectorAll('.workspace-tabs button, .category-tabs button, .system-nav button')]
-              .find((button) =>
-                (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
-              ?.click()
+          interactionTimings.categoryMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              ;[...document.querySelectorAll('.workspace-tabs button, .category-tabs button, .system-nav button')]
+                .find((button) =>
+                  (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
+                ?.click()
+              await new Promise((resolve) => setTimeout(resolve, 0))
+              return performance.now() - started
+            })()
           `)
         }
         if (process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_MAP === '1') {
@@ -3282,13 +3289,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         }
         const query = process.env.CAIRN_CODEX_SCREENSHOT_QUERY
         if (query) {
-          await window.webContents.executeJavaScript(`
-            (() => {
+          interactionTimings.searchMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
               const input = document.querySelector('.search-field input')
               if (input) {
                 input.value = ${JSON.stringify(query)}
                 input.dispatchEvent(new Event('input', { bubbles: true }))
               }
+              await new Promise((resolve) => setTimeout(resolve, 150))
+              await new Promise((resolve) => setTimeout(resolve, 0))
+              return performance.now() - started
             })()
           `)
         }
@@ -3344,10 +3355,21 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
           mainX: document.querySelector('main')?.getBoundingClientRect().x
         })`)
+        const performanceReport = {
+          readyMs: Date.now() - captureStartedAt,
+          interactions: interactionTimings,
+          renderedState
+        }
         const image = await window.webContents.capturePage()
         await writeFile(path, image.toPNG())
+        if (process.env.CAIRN_CODEX_PERF_REPORT_PATH) {
+          await writeFile(
+            process.env.CAIRN_CODEX_PERF_REPORT_PATH,
+            JSON.stringify(performanceReport, null, 2)
+          )
+        }
         console.log(
-          JSON.stringify({ screenshotPath: path, width: 1440, height: 1000, renderedState })
+          JSON.stringify({ screenshotPath: path, width: 1440, height: 1000, ...performanceReport })
         )
         app.quit()
         return
@@ -3421,7 +3443,7 @@ app.whenReady().then(() => {
       gdiaImportPath,
       process.env.CAIRN_CODEX_MIGRATION_BACKUP_DIR ??
         join(app.getPath('userData'), 'migrations', 'gdia'),
-      { requireHardcoreOnly: true, requireAllCatalogued: true }
+      { requireAllCatalogued: false }
     )
       .then((result) => {
         console.log(JSON.stringify({ migration: 'gdia', ...result }))

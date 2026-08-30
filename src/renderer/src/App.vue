@@ -48,6 +48,7 @@ type SupplyCategory = 'writs' | 'augments'
 type SupplySlotFilter = 'all' | 'weapon' | 'armor' | 'jewelry'
 type MaterialCategory = 'all' | 'component' | 'material' | 'potion-formula'
 type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `item:${string}` | `pet:${string}`
+type WorkspaceToolId = 'sets' | 'materials' | 'skills' | 'oracle' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'trivia' | 'todo'
 
 interface AppHistoryState {
   cairnCodex: true
@@ -83,6 +84,24 @@ interface SkillMatch {
   conversionTarget: string
   conversionDetails: string
   special: string
+}
+
+interface PresentedRollStat {
+  key: string
+  label: string
+  value: number
+  maximumValue: number | null
+  unit: string
+  valueLabel: string
+  percentile: number | null
+  rangeLabel: string
+}
+
+interface ComparisonStatRow extends PresentedRollStat {
+  deltaLabel: string
+  deltaTone: 'positive' | 'negative' | 'same' | 'unique' | 'missing' | 'reference'
+  percentileDeltaLabel: string | null
+  missingFromCopy: boolean
 }
 
 interface TodoItem {
@@ -141,6 +160,33 @@ interface SupplyOption {
   effects: string[]
   effectCount: number
 }
+
+interface SupplyPresentationIndexEntry {
+  item: CollectionItem
+  effects: string[]
+  searchText: string
+}
+
+interface WorkspaceToolDefinition {
+  id: WorkspaceToolId
+  label: string
+  detail: string
+}
+
+const workspaceToolDefinitions: WorkspaceToolDefinition[] = [
+  { id: 'sets', label: 'Sets', detail: 'Set completion, bonuses, recipes, and visual modifiers.' },
+  { id: 'materials', label: 'Components & Consumables', detail: 'Components, crafting materials, and consumable formulas.' },
+  { id: 'skills', label: 'Skill Explorer', detail: 'Every item that ranks, converts, or otherwise modifies a skill.' },
+  { id: 'oracle', label: 'Stash Oracle', detail: 'Build archetypes suggested by the items already in your archive.' },
+  { id: 'planner', label: 'Leveling Planner', detail: 'Character shopping lists and leveling routes.' },
+  { id: 'mi-workshop', label: 'MI Workshop', detail: 'Stored Monster Infrequents, affixes, and stat comparisons.' },
+  { id: 'supplies', label: 'Supplies', detail: 'Reusable boosts, merits, warrants, augments, and runes.' },
+  { id: 'farming', label: 'Collection Farming', detail: 'Areas ranked by potential collection progress.' },
+  { id: 'trivia', label: 'Collection Trivia', detail: 'Roll, duplicate, and collection curiosities.' },
+  { id: 'todo', label: 'To-do', detail: 'Your small in-app task list.' }
+]
+const defaultWorkspaceToolIds = workspaceToolDefinitions.map((tool) => tool.id)
+const essentialWorkspaceToolIds: WorkspaceToolId[] = ['sets', 'skills', 'planner', 'mi-workshop', 'supplies']
 
 const discovery = ref<GrimDawnDiscovery | null>(null)
 const snapshot = ref<CollectionSnapshot | null>(null)
@@ -228,6 +274,8 @@ const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
 const supplySlotFilter = ref<SupplySlotFilter>('all')
+const supplyVisibleCount = ref(60)
+const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>(readStoredWorkspaceToolIds())
 const materialCategory = ref<MaterialCategory>('all')
 const farmingQuery = ref('')
 const farmingRarity = ref<RarityFilter>('all')
@@ -341,32 +389,51 @@ const reusableSupplySummary = computed<CollectionRaritySummary>(() => {
     availableCopies: reusableSupplyUnlocks.value.length
   }
 })
-const eligibleFactionAugmentCount = computed(() =>
-  (snapshot.value?.supplies ?? [])
-    .filter((item) => item.slot === 'augment')
-    .filter((item) => (item.acquisition?.factions ?? []).some(
+const activeCharacterReputation = computed(() => new Map(
+  (activeCharacter.value?.factions ?? []).map((faction) => [normalizeFactionName(faction.name), faction])
+))
+const supplyPresentationByRecord = computed(() => {
+  const index = new Map<string, SupplyPresentationIndexEntry>()
+  for (const item of snapshot.value?.supplies ?? []) {
+    const effects = supplyEffectLines(item)
+    const requirements = (item.acquisition?.factions ?? [])
+      .flatMap((requirement) => [requirement.faction, requirement.reputation])
+    const searchText = [
+      item.name,
+      item.record,
+      item.slot,
+      ...(item.supplySlotFamilies ?? []),
+      ...requirements,
+      ...effects
+    ].join(' ').toLocaleLowerCase()
+    index.set(item.record.toLocaleLowerCase(), { item, effects, searchText })
+  }
+  return index
+})
+const eligibleFactionAugmentRecords = computed(() => new Set(
+  [...supplyPresentationByRecord.value.values()]
+    .filter(({ item }) => item.slot === 'augment')
+    .filter(({ item }) => (item.acquisition?.factions ?? []).some(
       (requirement) => characterMeetsReputation(requirement.faction, requirement.reputation)
-    )).length
-)
+    ))
+    .map(({ item }) => item.record.toLocaleLowerCase())
+))
+const eligibleFactionAugmentCount = computed(() => eligibleFactionAugmentRecords.value.size)
 const factionAugmentCount = computed(() =>
-  (snapshot.value?.supplies ?? []).filter((item) => item.slot === 'augment').length
+  [...supplyPresentationByRecord.value.values()].filter(({ item }) => item.slot === 'augment').length
 )
 const supplyAccessSummary = computed(() => activeCharacter.value
   ? `${eligibleFactionAugmentCount.value} augments available to ${activeCharacter.value.name}`
   : `${factionAugmentCount.value} augments indexed · connect a character to check access`
 )
-const supplyCatalogByRecord = computed(() => new Map(
-  (snapshot.value?.supplies ?? []).map((item) => [item.record.toLocaleLowerCase(), item])
-))
 const supplyVaultItems = computed<SupplyOption[]>(() => {
   const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
   if (supplyCategory.value === 'augments') {
-    const factionAugments = (snapshot.value?.supplies ?? [])
-      .filter((item) => item.slot === 'augment')
-      .map((item): SupplyOption => {
+    const factionAugments = [...supplyPresentationByRecord.value.values()]
+      .filter(({ item }) => item.slot === 'augment')
+      .map(({ item, effects, searchText }): SupplyOption & { searchText: string } => {
         const requirements = item.acquisition?.factions ?? []
-        const eligible = requirements.some((requirement) => characterMeetsReputation(requirement.faction, requirement.reputation))
-        const effects = supplyEffectLines(item)
+        const eligible = eligibleFactionAugmentRecords.value.has(item.record.toLocaleLowerCase())
         return {
           id: `augment:${item.record}`,
           record: item.record,
@@ -387,7 +454,8 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
           source: 'faction',
           catalogItem: item,
           effects: effects.slice(0, 5),
-          effectCount: effects.length
+          effectCount: effects.length,
+          searchText
         }
       })
     const archivedRunes = vaultItems.value
@@ -395,8 +463,9 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
       .map((item): SupplyOption => {
         const eligible = activeTransferHardcore.value !== undefined &&
           item.isHardcore === activeTransferHardcore.value
-        const catalogItem = supplyCatalogByRecord.value.get(item.baseRecord.toLocaleLowerCase()) ?? null
-        const effects = catalogItem ? supplyEffectLines(catalogItem) : []
+        const presentation = supplyPresentationByRecord.value.get(item.baseRecord.toLocaleLowerCase())
+        const catalogItem = presentation?.item ?? null
+        const effects = presentation?.effects ?? []
         return {
           id: item.id,
           record: item.baseRecord,
@@ -419,7 +488,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
       .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) ||
         item.detail.toLocaleLowerCase().includes(needle) ||
         item.effects.some((effect) => effect.toLocaleLowerCase().includes(needle)) ||
-        Boolean(item.catalogItem && matchesSearch(item.catalogItem, needle)))
+        ('searchText' in item && typeof item.searchText === 'string' && item.searchText.includes(needle)))
       .sort((left, right) => Number(right.eligible) - Number(left.eligible) || left.name.localeCompare(right.name))
   }
   const unique = new Map<string, VaultListItem>()
@@ -434,18 +503,17 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
     .filter((item) => ['writ', 'mandate', 'warrant', 'merit', 'potion'].includes(item.slot))
     .filter((item) => {
       if (!needle) return true
-      const catalog = snapshot.value?.supplies?.find((entry) =>
-        entry.record.toLocaleLowerCase() === item.baseRecord.toLocaleLowerCase()
-      )
+      const presentation = supplyPresentationByRecord.value.get(item.baseRecord.toLocaleLowerCase())
       return item.name.toLocaleLowerCase().includes(needle) || item.slot.includes(needle) ||
-        Boolean(catalog && matchesSearch(catalog, needle))
+        Boolean(presentation?.searchText.includes(needle))
     })
     .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
     .map((item): SupplyOption => {
       const eligible = activeTransferHardcore.value !== undefined &&
         item.isHardcore === activeTransferHardcore.value
-      const catalogItem = supplyCatalogByRecord.value.get(item.baseRecord.toLocaleLowerCase()) ?? null
-      const effects = catalogItem ? supplyEffectLines(catalogItem) : []
+      const presentation = supplyPresentationByRecord.value.get(item.baseRecord.toLocaleLowerCase())
+      const catalogItem = presentation?.item ?? null
+      const effects = presentation?.effects ?? []
       return {
         id: item.id,
         record: item.baseRecord,
@@ -464,6 +532,8 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
       }
     })
 })
+const visibleSupplyVaultItems = computed(() => supplyVaultItems.value.slice(0, supplyVisibleCount.value))
+const workspaceToolIdSet = computed(() => new Set(visibleWorkspaceToolIds.value))
 const quarantinedVaultItems = computed(() =>
   vaultItems.value.filter(
     (item) =>
@@ -989,6 +1059,13 @@ const selectedCopies = computed(() => {
       const metric = selectedItem.value?.rarity === 'mi' ? miComparisonMetric.value : 'overall'
       return compareCopiesByMiMetric(left, right, metric, miComparisonDirection.value)
     })
+})
+
+const comparisonReferenceCopy = computed(() => {
+  const copies = selectedCopies.value
+  if (!copies.length) return null
+  const pinned = selectedItem.value?.pinnedInstanceKey
+  return copies.find((copy) => copy.instanceKey === pinned) ?? copies.find(isAutoBest) ?? copies[0]!
 })
 
 const selectedStoredCopies = computed(() => {
@@ -1833,6 +1910,12 @@ watch(transferMode, () => {
 watch(supplySlotFilter, () => {
   selectedSupplyIds.value = []
 })
+watch([supplyCategory, supplySlotFilter, reusableSupplyQuery], () => {
+  supplyVisibleCount.value = 60
+})
+watch(visibleWorkspaceToolIds, (toolIds) => {
+  localStorage.setItem('cairn-codex-visible-workspace-tools', JSON.stringify(toolIds))
+}, { deep: true })
 
 watch(selectedStashPath, async (path) => {
   if (path) {
@@ -2308,6 +2391,38 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   return stored === null ? fallback : stored === 'true'
 }
 
+function readStoredWorkspaceToolIds(): WorkspaceToolId[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('cairn-codex-visible-workspace-tools') ?? 'null') as unknown
+    if (!Array.isArray(parsed)) return [...defaultWorkspaceToolIds]
+    const allowed = new Set(defaultWorkspaceToolIds)
+    const stored = parsed.filter((value): value is WorkspaceToolId =>
+      typeof value === 'string' && allowed.has(value as WorkspaceToolId)
+    )
+    return [...new Set(stored)]
+  } catch {
+    return [...defaultWorkspaceToolIds]
+  }
+}
+
+function workspaceToolVisible(id: WorkspaceToolId): boolean {
+  return workspaceToolIdSet.value.has(id)
+}
+
+function setWorkspaceToolVisible(id: WorkspaceToolId, visible: boolean): void {
+  visibleWorkspaceToolIds.value = visible
+    ? [...new Set([...visibleWorkspaceToolIds.value, id])]
+    : visibleWorkspaceToolIds.value.filter((candidate) => candidate !== id)
+}
+
+function showEssentialWorkspaceTools(): void {
+  visibleWorkspaceToolIds.value = [...essentialWorkspaceToolIds]
+}
+
+function showAllWorkspaceTools(): void {
+  visibleWorkspaceToolIds.value = [...defaultWorkspaceToolIds]
+}
+
 function readStoredMiCountingMode(): MiCountingMode {
   return localStorage.getItem('cairn-codex-mi-counting-mode') === 'tier' ? 'tier' : 'base'
 }
@@ -2628,7 +2743,7 @@ async function openSupplies(): Promise<void> {
 }
 
 function selectAllVisibleSupplies(): void {
-  selectedSupplyIds.value = supplyVaultItems.value.filter((item) => item.eligible).map((item) => item.id)
+  selectedSupplyIds.value = visibleSupplyVaultItems.value.filter((item) => item.eligible).map((item) => item.id)
 }
 
 async function dispenseAllWrits(): Promise<void> {
@@ -2655,9 +2770,12 @@ function characterMeetsReputation(factionName: string, requiredRank: string): bo
   }
   const threshold = thresholds[requiredRank.toLocaleLowerCase()]
   if (threshold === undefined || !activeCharacter.value) return false
-  const normalize = (value: string): string => value.toLocaleLowerCase().replaceAll('’', "'").replace(/[^a-z0-9]/g, '')
-  const faction = activeCharacter.value.factions.find((entry) => normalize(entry.name) === normalize(factionName))
+  const faction = activeCharacterReputation.value.get(normalizeFactionName(factionName))
   return Boolean(faction?.isUnlocked && faction.value >= threshold)
+}
+
+function normalizeFactionName(value: string): string {
+  return value.toLocaleLowerCase().replaceAll('’', "'").replace(/[^a-z0-9]/g, '')
 }
 
 function affixPercentage(): string {
@@ -3784,13 +3902,13 @@ function copySourceLabel(copy: ObservedStashItem): string {
   return name ? `Currently in ${name}` : 'Currently scanned copy'
 }
 
-function presentRolledStats(source: RolledStat[] | undefined, includeFixed = false) {
+function presentRolledStats(source: RolledStat[] | undefined, includeFixed = false): PresentedRollStat[] {
   const stats = (source ?? [])
     .filter((stat) => includeFixed || stat.estimatedPercentile !== null)
   const byField = new Map(stats.map((stat) => [stat.field, stat]))
   const consumed = new Set<string>()
   return stats
-    .flatMap((stat) => {
+    .flatMap<PresentedRollStat>((stat): PresentedRollStat[] => {
       if (consumed.has(stat.field)) return []
       if (stat.field.endsWith('Max') && byField.has(stat.field.slice(0, -3))) return []
       const root = stat.field.endsWith('Min') ? stat.field.slice(0, -3) : stat.field
@@ -3807,6 +3925,9 @@ function presentRolledStats(source: RolledStat[] | undefined, includeFixed = fal
             {
               key: root,
               label: rollStatName(root),
+              value: stat.value,
+              maximumValue: maximum.value,
+              unit,
               valueLabel,
               percentile: stat.estimatedPercentile === null || maximum.estimatedPercentile === null
                 ? null
@@ -3820,8 +3941,11 @@ function presentRolledStats(source: RolledStat[] | undefined, includeFixed = fal
         {
           key: stat.field,
           label: rollStatName(stat.field),
+          value: stat.value,
+          maximumValue: null,
+          unit: rollStatUnit(stat.field),
           valueLabel: `${formatRollValue(stat.value)}${rollStatUnit(stat.field)}`,
-          percentile: stat.estimatedPercentile!,
+          percentile: stat.estimatedPercentile,
           rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(stat.observedMaximum ?? stat.value)}${rollStatUnit(stat.field)}`
         }
       ]
@@ -3859,6 +3983,140 @@ function rollableStats(copy: ObservedStashItem) {
 
 function petRollableStats(copy: ObservedStashItem) {
   return presentRolledStats(copy.rollAnalysis?.petStats, true)
+}
+
+function formatSignedRollDelta(value: number, unit: string): string {
+  if (Math.abs(value) < 0.0000001) return `0${unit}`
+  return `${value > 0 ? '+' : '−'}${formatRollValue(Math.abs(value))}${unit}`
+}
+
+function statValuesMatch(left: PresentedRollStat, right: PresentedRollStat): boolean {
+  return left.value === right.value && left.maximumValue === right.maximumValue
+}
+
+function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatRow[] {
+  const reference = comparisonReferenceCopy.value
+  const sourceFor = (candidate: ObservedStashItem) => presentRolledStats(
+    pet ? candidate.rollAnalysis?.petStats : candidate.rollAnalysis?.stats,
+    true
+  )
+  const current = new Map(sourceFor(copy).map((stat) => [stat.key, stat]))
+  const referenceStats = new Map((reference ? sourceFor(reference) : []).map((stat) => [stat.key, stat]))
+  const universe = new Map<string, PresentedRollStat[]>()
+  for (const candidate of selectedCopies.value) {
+    for (const stat of sourceFor(candidate)) {
+      const existing = universe.get(stat.key)
+      if (existing) existing.push(stat)
+      else universe.set(stat.key, [stat])
+    }
+  }
+  return [...universe.entries()]
+    .filter(([, variants]) =>
+      variants.some((stat) => stat.percentile !== null) ||
+      variants.length !== selectedCopies.value.length ||
+      variants.some((stat) => !statValuesMatch(stat, variants[0]!))
+    )
+    .map(([key, variants]) => {
+      const own = current.get(key)
+      const baseline = referenceStats.get(key)
+      const template = own ?? baseline ?? variants[0]!
+      const isReference = copy.instanceKey === reference?.instanceKey
+      if (isReference) {
+        return {
+          ...template,
+          valueLabel: own?.valueLabel ?? '—',
+          percentile: own?.percentile ?? null,
+          deltaLabel: 'Reference',
+          deltaTone: 'reference' as const,
+          percentileDeltaLabel: null,
+          missingFromCopy: !own
+        }
+      }
+      if (!own && baseline) {
+        return {
+          ...baseline,
+          valueLabel: '—',
+          percentile: null,
+          deltaLabel: `Missing ${baseline.valueLabel}`,
+          deltaTone: 'missing' as const,
+          percentileDeltaLabel: null,
+          missingFromCopy: true
+        }
+      }
+      if (own && !baseline) {
+        return {
+          ...own,
+          deltaLabel: `Adds ${own.valueLabel}`,
+          deltaTone: 'unique' as const,
+          percentileDeltaLabel: null,
+          missingFromCopy: false
+        }
+      }
+      if (!own || !baseline) {
+        return {
+          ...template,
+          valueLabel: own?.valueLabel ?? '—',
+          percentile: own?.percentile ?? null,
+          deltaLabel: '—',
+          deltaTone: 'same' as const,
+          percentileDeltaLabel: null,
+          missingFromCopy: !own
+        }
+      }
+      const lowerDelta = own.value - baseline.value
+      const upperDelta = own.maximumValue !== null || baseline.maximumValue !== null
+        ? (own.maximumValue ?? own.value) - (baseline.maximumValue ?? baseline.value)
+        : null
+      const deltaLabel = upperDelta !== null && upperDelta !== lowerDelta
+        ? `${formatSignedRollDelta(lowerDelta, own.unit)} / ${formatSignedRollDelta(upperDelta, own.unit)}`
+        : formatSignedRollDelta(lowerDelta, own.unit)
+      const percentileDelta = own.percentile !== null && baseline.percentile !== null
+        ? own.percentile - baseline.percentile
+        : null
+      return {
+        ...own,
+        deltaLabel: statValuesMatch(own, baseline) ? 'Same value' : deltaLabel,
+        deltaTone: lowerDelta > 0 || (lowerDelta === 0 && (upperDelta ?? 0) > 0)
+          ? 'positive' as const
+          : lowerDelta < 0 || (lowerDelta === 0 && (upperDelta ?? 0) < 0)
+            ? 'negative' as const
+            : 'same' as const,
+        percentileDeltaLabel: percentileDelta === null || Math.abs(percentileDelta) < 0.05
+          ? null
+          : `${percentileDelta > 0 ? '+' : '−'}${Math.abs(percentileDelta).toFixed(0)} percentile points`,
+        missingFromCopy: false
+      }
+    })
+    .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function comparisonItemStats(copy: ObservedStashItem): ComparisonStatRow[] {
+  return comparisonStats(copy, false)
+}
+
+function comparisonPetStats(copy: ObservedStashItem): ComparisonStatRow[] {
+  return comparisonStats(copy, true)
+}
+
+function copyOverallDelta(copy: ObservedStashItem): string {
+  const score = copy.rollAnalysis?.overallEstimatedPercentile
+  const reference = comparisonReferenceCopy.value?.rollAnalysis?.overallEstimatedPercentile
+  if (copy.instanceKey === comparisonReferenceCopy.value?.instanceKey) return 'Reference score'
+  if (score == null || reference == null) return 'No comparable score'
+  const delta = score - reference
+  if (Math.abs(delta) < 0.05) return 'Same overall score'
+  return `${delta > 0 ? '+' : '−'}${Math.abs(delta).toFixed(1)} percentile points vs reference`
+}
+
+function copyAffixDelta(copy: ObservedStashItem, kind: 'prefix' | 'suffix'): string {
+  const reference = comparisonReferenceCopy.value
+  if (!reference || copy.instanceKey === reference.instanceKey) return 'Reference affix'
+  const record = kind === 'prefix' ? copy.prefixRecord : copy.suffixRecord
+  const baseline = kind === 'prefix' ? reference.prefixRecord : reference.suffixRecord
+  if (record === baseline) return 'Same as reference'
+  if (!record) return 'Missing vs reference'
+  if (!baseline) return 'Added vs reference'
+  return 'Different from reference'
 }
 
 function humanStatName(field: string): string {
@@ -4413,34 +4671,34 @@ function formatPercentile(value: number | null | undefined): string {
         <button type="button" :class="{ active: activeView === 'collection' }" @click="activeView = 'collection'">
           <span>Collection</span><small>Items and copies</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'sets' }" @click="activeView = 'sets'">
+        <button v-if="workspaceToolVisible('sets')" type="button" :class="{ active: activeView === 'sets' }" @click="activeView = 'sets'">
           <span>Sets</span><small>{{ collectionSets.length }} catalogued</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'materials' }" @click="openMaterials()">
+        <button v-if="workspaceToolVisible('materials')" type="button" :class="{ active: activeView === 'materials' }" @click="openMaterials()">
           <span>Components & Consumables</span><small>{{ componentSummary.collected + consumableSummary.collected }} discovered</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
+        <button v-if="workspaceToolVisible('skills')" type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
           <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'oracle' }" @click="openStashOracle">
+        <button v-if="workspaceToolVisible('oracle')" type="button" :class="{ active: activeView === 'oracle' }" @click="openStashOracle">
           <span>Stash Oracle</span><small>{{ oracleReadinessCounts.ready }} builds ready now</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'planner' }" @click="activeView = 'planner'">
+        <button v-if="workspaceToolVisible('planner')" type="button" :class="{ active: activeView === 'planner' }" @click="activeView = 'planner'">
           <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · Lv{{ plannerMinimumLevel }}–{{ plannerLevelCap }}</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
+        <button v-if="workspaceToolVisible('mi-workshop')" type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
           <span>MI Workshop</span><small>{{ miWorkshopRows.length }} affix combinations</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'supplies' }" @click="openSupplies">
+        <button v-if="workspaceToolVisible('supplies')" type="button" :class="{ active: activeView === 'supplies' }" @click="openSupplies">
           <span>Supplies</span><small>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</small>
         </button>
-        <button type="button" :class="{ active: activeView === 'farming' }" @click="activeView = 'farming'">
+        <button v-if="workspaceToolVisible('farming')" type="button" :class="{ active: activeView === 'farming' }" @click="activeView = 'farming'">
           <span>Collection Farming</span><small>{{ farmTargets.length }} useful areas</small>
         </button>
-        <button type="button" :aria-expanded="triviaOpen" @click="openTrivia">
+        <button v-if="workspaceToolVisible('trivia')" type="button" :aria-expanded="triviaOpen" @click="openTrivia">
           <span>Collection Trivia</span><small>{{ collectionTrivia.length }} curiosities</small>
         </button>
-        <button type="button" :aria-expanded="todoOpen" @click="openTodos">
+        <button v-if="workspaceToolVisible('todo')" type="button" :aria-expanded="todoOpen" @click="openTodos">
           <span>To-do</span><small>{{ remainingTodoCount }} remaining</small>
         </button>
       </nav>
@@ -5214,7 +5472,7 @@ function formatPercentile(value: number | null | undefined): string {
             <button type="button" :class="{ active: supplySlotFilter === 'jewelry' }" @click="supplySlotFilter = 'jewelry'">Jewelry</button>
           </div>
           <input v-model="reusableSupplyQuery" type="search" placeholder="Filter names, effects, factions…" />
-          <button type="button" :disabled="!supplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>
+          <button type="button" :disabled="!visibleSupplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>
           <button v-if="supplyCategory === 'writs'" type="button" :disabled="vaultBusy || !supplyVaultItems.length" @click="dispenseAllWrits">Dispense all unlocked faction boosts</button>
         </div>
         <div class="supply-status">
@@ -5226,7 +5484,7 @@ function formatPercentile(value: number | null | undefined): string {
         </div>
         <div v-if="supplyVaultItems.length" class="supply-grid">
           <label
-            v-for="item in supplyVaultItems"
+            v-for="item in visibleSupplyVaultItems"
             :key="item.id"
             class="supply-card"
             :class="{ locked: !item.eligible }"
@@ -5253,7 +5511,13 @@ function formatPercentile(value: number | null | undefined): string {
             <b>{{ item.reusable ? '∞' : item.stackCount }}</b>
           </label>
         </div>
-        <p v-else class="vault-empty">{{ reusableSupplyQuery ? 'No unlocked supplies match this filter.' : 'No supplies unlocked in this category yet.' }}</p>
+        <button
+          v-if="visibleSupplyVaultItems.length < supplyVaultItems.length"
+          class="supply-show-more"
+          type="button"
+          @click="supplyVisibleCount += 60"
+        >Show 60 more · {{ supplyVaultItems.length - visibleSupplyVaultItems.length }} remaining</button>
+        <p v-if="supplyVaultItems.length === 0" class="vault-empty">{{ reusableSupplyQuery ? 'No unlocked supplies match this filter.' : 'No supplies unlocked in this category yet.' }}</p>
         <button
           class="supply-dispense"
           type="button"
@@ -5338,6 +5602,27 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" @click="setZoom(1)">Reset</button>
             </div>
             <small>Ctrl + mouse wheel works anywhere in Cairn.</small>
+          </article>
+
+          <article class="settings-card workspace-tool-settings">
+            <header>
+              <div><p class="section-label">Workspace</p><h3>Visible tools</h3></div>
+              <div class="workspace-tool-presets">
+                <button type="button" @click="showEssentialWorkspaceTools">Essentials</button>
+                <button type="button" @click="showAllWorkspaceTools">Show all</button>
+              </div>
+            </header>
+            <p>Collection remains the permanent home view. Choose which specialist tools appear below the progress tracker.</p>
+            <div class="workspace-tool-options">
+              <label v-for="tool in workspaceToolDefinitions" :key="tool.id" class="settings-toggle compact">
+                <input
+                  type="checkbox"
+                  :checked="workspaceToolVisible(tool.id)"
+                  @change="setWorkspaceToolVisible(tool.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span><strong>{{ tool.label }}</strong><small>{{ tool.detail }}</small></span>
+              </label>
+            </div>
           </article>
 
           <article class="settings-card">
@@ -6171,14 +6456,24 @@ function formatPercentile(value: number | null | undefined): string {
       </aside>
     </Teleport>
 
-    <div v-if="selectedItem" class="drawer-backdrop" @click.self="selectedRecord = null">
-      <aside class="item-drawer" :aria-label="selectedItem.name + ' roll comparison'">
+    <div v-if="selectedItem" class="drawer-backdrop comparison-backdrop" @click.self="selectedRecord = null">
+      <aside class="item-drawer comparison-workspace" :aria-label="selectedItem.name + ' copy comparison'">
         <button class="drawer-close" type="button" aria-label="Close comparison" @click="selectedRecord = null">×</button>
-        <p class="section-label">Copy comparison</p>
-        <h2>{{ selectedItem.name }}</h2>
-        <p class="drawer-intro">
-          Auto-best averages the estimated percentile of each variable stat line. Pin whichever copy you actually prefer.
-        </p>
+        <header class="comparison-heading">
+          <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" />
+          <div>
+            <p class="section-label">Copy comparison</p>
+            <h2>{{ selectedItem.name }}</h2>
+            <p class="drawer-intro">
+              One copy is the reference. Every other copy shows its exact value and percentile deltas against it.
+              Saving a reference also remembers that copy as your preferred roll.
+            </p>
+          </div>
+          <div class="comparison-count">
+            <strong>{{ selectedCopies.length }}</strong>
+            <span>{{ selectedCopies.length === 1 ? 'copy' : 'copies' }}</span>
+          </div>
+        </header>
         <section v-if="selectedItem.rarity === 'mi'" class="drawer-mi-tools">
           <button type="button" @click="openSelectedMiInWorkshop">Open in MI Workshop</button>
           <label>
@@ -6241,14 +6536,20 @@ function formatPercentile(value: number | null | undefined): string {
             v-for="(copy, index) in selectedCopies"
             :key="copy.instanceKey"
             class="copy-card"
-            :class="{ pinned: copy.instanceKey === selectedItem.pinnedInstanceKey }"
+            :class="{
+              pinned: copy.instanceKey === selectedItem.pinnedInstanceKey,
+              reference: copy.instanceKey === comparisonReferenceCopy?.instanceKey
+            }"
           >
             <header>
               <div class="copy-identity">
                 <div class="copy-item-heading" :class="selectedItem.rarity">
                   <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" />
                   <div>
-                    <p>Copy {{ index + 1 }} <span v-if="vaultCopyForObserved(copy)" class="stored-badge">Stored</span></p>
+                    <p>
+                      {{ copy.instanceKey === comparisonReferenceCopy?.instanceKey ? 'Reference copy' : `Copy ${index + 1}` }}
+                      <span v-if="vaultCopyForObserved(copy)" class="stored-badge">Stored</span>
+                    </p>
                     <h3>{{ copyDisplayName(copy) }}</h3>
                     <small>{{ rarityLabel(selectedItem) }} · {{ itemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
                   </div>
@@ -6260,6 +6561,14 @@ function formatPercentile(value: number | null | undefined): string {
                   <strong v-else class="unscored">Unscored</strong>
                   <small>overall roll quality</small>
                 </div>
+                <p
+                  class="copy-overall-delta"
+                  :class="{
+                    positive: copyOverallDelta(copy).startsWith('+'),
+                    negative: copyOverallDelta(copy).startsWith('−'),
+                    reference: copy.instanceKey === comparisonReferenceCopy?.instanceKey
+                  }"
+                >{{ copyOverallDelta(copy) }}</p>
                 <p v-if="selectedItem.rarity === 'mi'" class="copy-selected-metric">
                   <span>{{ selectedMiMetricLabel }}</span>
                   <strong>{{ miMetricResult(copy, miComparisonMetric).display }}</strong>
@@ -6271,14 +6580,14 @@ function formatPercentile(value: number | null | undefined): string {
                     :class="{ active: copyAffixIsOpen(copy, copy.prefixRecord) }"
                     :title="copy.prefixRecord ? 'Show this prefix’s bonuses' : 'This copy has no prefix'"
                     @click="toggleCopyAffix(copy, copy.prefixRecord)"
-                  ><small>Prefix</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong></button>
+                  ><small>Prefix</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong><em>{{ copyAffixDelta(copy, 'prefix') }}</em></button>
                   <button
                     type="button"
                     :disabled="!copy.suffixRecord"
                     :class="{ active: copyAffixIsOpen(copy, copy.suffixRecord) }"
                     :title="copy.suffixRecord ? 'Show this suffix’s bonuses' : 'This copy has no suffix'"
                     @click="toggleCopyAffix(copy, copy.suffixRecord)"
-                  ><small>Suffix</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong></button>
+                  ><small>Suffix</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong><em>{{ copyAffixDelta(copy, 'suffix') }}</em></button>
                 </div>
                 <section
                   v-if="activeCopyAffix && activeCopyAffixTarget && [copy.prefixRecord, copy.suffixRecord].includes(activeCopyAffixTarget.record) && copyAffixIsOpen(copy, activeCopyAffixTarget.record)"
@@ -6302,6 +6611,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <p class="copy-provenance">{{ copySourceLabel(copy) }} · Seed {{ copy.seed }}</p>
               </div>
               <div class="copy-actions">
+                <span v-if="copy.instanceKey === comparisonReferenceCopy?.instanceKey" class="reference-badge">Reference</span>
                 <span v-if="isAutoBest(copy)" class="auto-badge">Auto-best</span>
                 <button
                   v-if="vaultCopyForObserved(copy)"
@@ -6313,7 +6623,11 @@ function formatPercentile(value: number | null | undefined): string {
                   Retrieve this copy
                 </button>
                 <button type="button" :disabled="pinning" @click="pinCopy(copy)">
-                  {{ copy.instanceKey === selectedItem.pinnedInstanceKey ? 'Unpin' : 'Pin this copy' }}
+                  {{ copy.instanceKey === selectedItem.pinnedInstanceKey
+                    ? 'Clear saved reference'
+                    : copy.instanceKey === comparisonReferenceCopy?.instanceKey
+                      ? 'Save this reference'
+                      : 'Use as reference' }}
                 </button>
               </div>
             </header>
@@ -6321,29 +6635,37 @@ function formatPercentile(value: number | null | undefined): string {
             <p v-if="copy.rollAnalysis && !copy.rollAnalysis.trusted" class="withheld-note">
               {{ copy.rollAnalysis.reason }}
             </p>
-            <div v-else-if="copy.rollAnalysis && (rollableStats(copy).length || petRollableStats(copy).length)" class="copy-roll-sections">
-              <section v-if="rollableStats(copy).length">
-                <h3>Item rolls</h3>
-                <p class="copy-roll-guide">Actual rolled value · percentile within this exact item and affix range</p>
+            <div v-else-if="copy.rollAnalysis && (comparisonItemStats(copy).length || comparisonPetStats(copy).length)" class="copy-roll-sections">
+              <section v-if="comparisonItemStats(copy).length">
+                <h3>Item differences</h3>
+                <p class="copy-roll-guide">Actual value · delta from reference · percentile within this exact item and affix range</p>
                 <div class="stat-list">
-                  <div v-for="stat in rollableStats(copy)" :key="stat.key" class="stat-row">
+                  <div v-for="stat in comparisonItemStats(copy)" :key="stat.key" class="stat-row" :class="{ missing: stat.missingFromCopy }">
                     <div class="stat-heading">
                       <span>{{ stat.label }}</span>
                       <strong>{{ stat.valueLabel }}<template v-if="stat.percentile !== null"> · {{ stat.percentile.toFixed(0) }}%</template><template v-else> · fixed</template></strong>
+                    </div>
+                    <div class="stat-delta" :class="`delta-${stat.deltaTone}`">
+                      <b>{{ stat.deltaLabel }}</b>
+                      <small v-if="stat.percentileDeltaLabel">{{ stat.percentileDeltaLabel }}</small>
                     </div>
                     <div v-if="stat.percentile !== null" class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
                     <small>{{ stat.percentile === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
                   </div>
                 </div>
               </section>
-              <section v-if="petRollableStats(copy).length" class="pet-roll-section">
-                <h3>Bonus to All Pets</h3>
-                <p class="copy-roll-guide">Includes inherent and affix-granted pet bonuses</p>
+              <section v-if="comparisonPetStats(copy).length" class="pet-roll-section">
+                <h3>Bonus to All Pets differences</h3>
+                <p class="copy-roll-guide">Includes inherent and affix-granted pet bonuses, compared to the reference copy</p>
                 <div class="stat-list">
-                  <div v-for="stat in petRollableStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row">
+                  <div v-for="stat in comparisonPetStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row" :class="{ missing: stat.missingFromCopy }">
                     <div class="stat-heading">
                       <span>{{ stat.label }}</span>
                       <strong>{{ stat.valueLabel }}<template v-if="stat.percentile !== null"> · {{ stat.percentile.toFixed(0) }}%</template><template v-else> · fixed</template></strong>
+                    </div>
+                    <div class="stat-delta" :class="`delta-${stat.deltaTone}`">
+                      <b>{{ stat.deltaLabel }}</b>
+                      <small v-if="stat.percentileDeltaLabel">{{ stat.percentileDeltaLabel }}</small>
                     </div>
                     <div v-if="stat.percentile !== null" class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
                     <small>{{ stat.percentile === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>

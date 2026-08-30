@@ -4,6 +4,10 @@ namespace CairnCodex.GrimDawn;
 
 internal static class ItemCatalogBuilder
 {
+    private static readonly object LoadCacheSync = new();
+    private static string? loadCacheKey;
+    private static ItemCatalogData? loadCache;
+
     private static readonly HashSet<string> CollectionSlots =
     [
         "head", "chest", "shoulders", "hands", "legs", "feet", "waist",
@@ -39,6 +43,21 @@ internal static class ItemCatalogBuilder
             throw new FileNotFoundException("No Grim Dawn database.arz was found.", root);
         }
 
+        // The desktop helper is a long-lived process. Character reputation checks,
+        // archive hydration, and tooltip inspection all need the same installed ARZ
+        // data; reparsing every content pack for each request adds tens of seconds to
+        // otherwise tiny live operations. File metadata keeps the cache fail-safe on
+        // game updates while making subsequent reads effectively free.
+        var cacheKey = string.Join("|", new[] { root }.Concat(contentPacks.SelectMany(pack => new[]
+        {
+            FileCacheFingerprint(pack.DatabasePath),
+            FileCacheFingerprint(pack.TagsPath)
+        })));
+        lock (LoadCacheSync)
+        {
+            if (loadCache is not null && cacheKey == loadCacheKey) return loadCache;
+        }
+
         var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var records = new Dictionary<string, CatalogSourceRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var pack in contentPacks)
@@ -55,7 +74,19 @@ internal static class ItemCatalogBuilder
             }
         }
 
-        return new ItemCatalogData(root, contentPacks, tags, records);
+        var loaded = new ItemCatalogData(root, contentPacks, tags, records);
+        lock (LoadCacheSync)
+        {
+            loadCacheKey = cacheKey;
+            loadCache = loaded;
+        }
+        return loaded;
+    }
+
+    private static string FileCacheFingerprint(string path)
+    {
+        var file = new FileInfo(path);
+        return $"{file.FullName}:{file.Length}:{file.LastWriteTimeUtc.Ticks}";
     }
 
     public static ItemCatalogResult Build(ItemCatalogData data, KnownFormulaIndex? knownFormulas = null)

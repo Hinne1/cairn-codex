@@ -31,6 +31,8 @@ updates are deliberately deferred until after the beta has real users.
 - [ ] Test no prior Cairn database, no GDIA install, and no development SDKs.
 - [ ] Test a non-default Steam library and missing/partial expansion installs.
 - [ ] Test Softcore-only, Hardcore-only, and both save populations.
+- [ ] Test user-facing Item Assistant migration with SC-only, HC-only, mixed,
+      repeated import, retained queue receipts, and unsupported catalog records.
 - [ ] Missing Grim Dawn, missing saves, or an unsupported game build produces an
       actionable status rather than a blank or permanently loading application.
 - [ ] Live transfers remain opt-in and fail closed for unknown binary hashes.

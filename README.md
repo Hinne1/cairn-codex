@@ -67,6 +67,16 @@ uses a bundled, fingerprint-allowlisted hook and injector to perform the transfe
 inside game memory. Item Assistant is not required; if it is still installed, it
 must remain closed while Cairn Codex owns that hook and queue.
 
+### Migrating from Item Assistant
+
+Open **Settings → Import from Item Assistant** and choose Item Assistant's
+`userdata.db`. Cairn creates and hash-verifies an immutable backup before it
+reads anything, imports both Softcore and Hardcore copies plus retained incoming
+queue receipts, and skips copies already present in the Codex Archive. The
+operation never modifies or deletes Item Assistant data and is safe to repeat.
+Close Item Assistant during the migration so its database cannot change while
+the verified backup is being created.
+
 ## Initial support scope
 
 - Personal, local-first Windows application.

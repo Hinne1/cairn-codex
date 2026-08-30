@@ -3,6 +3,7 @@ export const IPC_CHANNELS = {
   setZoomFactor: 'app:set-zoom-factor',
   exportDiagnostics: 'app:export-diagnostics',
   openDataDirectory: 'app:open-data-directory',
+  importGdiaDatabase: 'app:import-gdia-database',
   getRecoveryStatus: 'app:get-recovery-status',
   getCachedCollection: 'collection:get-cached',
   hydrateArchiveRolls: 'collection:hydrate-archive-rolls',
@@ -41,6 +42,20 @@ export interface DiagnosticExportResult {
   path: string | null
 }
 
+export interface GdiaImportResult {
+  canceled: boolean
+  sourcePath: string | null
+  sourceItems: number
+  sourceDatabaseItems: number
+  sourceQueueItems: number
+  sourceHardcoreItems: number
+  sourceSoftcoreItems: number
+  importedItems: number
+  duplicateItems: number
+  unsupportedItems: number
+  backupPath: string | null
+}
+
 export interface RecoveryStatus {
   requiresAttention: boolean
   operations: Array<{
@@ -57,6 +72,7 @@ export interface CairnCodexApi {
   setZoomFactor: (factor: number) => Promise<number>
   exportDiagnostics: () => Promise<DiagnosticExportResult>
   openDataDirectory: () => Promise<string>
+  importGdiaDatabase: () => Promise<GdiaImportResult>
   getRecoveryStatus: () => Promise<RecoveryStatus>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   listCharacters: () => Promise<CharacterSaveProfile[]>

@@ -6,6 +6,7 @@ import {
   type CharacterSaveProfile,
   type CollectionSnapshot,
   type DiagnosticExportResult,
+  type GdiaImportResult,
   type GrimDawnDiscovery,
   type IngestResult,
   type LiveGameStatus,
@@ -28,6 +29,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.exportDiagnostics) as Promise<DiagnosticExportResult>,
   openDataDirectory: () =>
     ipcRenderer.invoke(IPC_CHANNELS.openDataDirectory) as Promise<string>,
+  importGdiaDatabase: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.importGdiaDatabase) as Promise<GdiaImportResult>,
   getRecoveryStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getRecoveryStatus) as Promise<RecoveryStatus>,
   getCachedCollection: (sourcePaths, basis) =>

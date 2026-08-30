@@ -54,6 +54,7 @@ They are never inferred from a successful injection handshake.
 | Game exits mid-operation | Outcome remains pending/recoverable, queue payload retained | Pending |
 | Cairn exits/restarts mid-operation | Journal and receipt reconcile without duplication | Pending |
 | Unsupported game rebuild | Live injection remains blocked; read-only tools still work | Pending |
+| Item Assistant migration | Verified backup; SC/HC multiplicity and queue receipts preserved; repeat creates no copies | Pending |
 
 Record the exact app version, game version/build, `Game.dll`, hook, and injector
 hashes with the completed manual run. A different hash starts a new matrix.

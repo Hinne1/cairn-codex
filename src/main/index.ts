@@ -10,6 +10,7 @@ import {
   type CollectionBasis,
   type CollectionSnapshot,
   type GrimDawnDiscovery,
+  type GdiaImportResult,
   type IngestResult,
   type ItemRollAnalysis,
   type LiveGameStatus,
@@ -295,6 +296,63 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   })
   ipcMain.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
     return shell.openPath(app.getPath('userData'))
+  })
+  ipcMain.handle(IPC_CHANNELS.importGdiaDatabase, async (): Promise<GdiaImportResult> => {
+    latestCollection ??= await readCollectionCache(collectionCachePath)
+    if (!latestCollection) {
+      throw new Error('Let Cairn finish its initial game-data scan before importing Item Assistant.')
+    }
+    const defaultDatabase = join(
+      process.env.LOCALAPPDATA ?? app.getPath('appData'),
+      'EvilSoft',
+      'IAGD',
+      'data',
+      'userdata.db'
+    )
+    const selection = await dialog.showOpenDialog({
+      title: 'Import Grim Dawn Item Assistant archive',
+      defaultPath: defaultDatabase,
+      properties: ['openFile'],
+      filters: [
+        { name: 'Item Assistant database', extensions: ['db', 'sqlite', 'sqlite3'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    const sourcePath = selection.filePaths[0]
+    if (selection.canceled || !sourcePath) {
+      return {
+        canceled: true,
+        sourcePath: null,
+        sourceItems: 0,
+        sourceDatabaseItems: 0,
+        sourceQueueItems: 0,
+        sourceHardcoreItems: 0,
+        sourceSoftcoreItems: 0,
+        importedItems: 0,
+        duplicateItems: 0,
+        unsupportedItems: 0,
+        backupPath: null
+      }
+    }
+    const result = await runExclusive(() => migrateGdiaDatabase(
+      database,
+      sourcePath,
+      join(app.getPath('userData'), 'migrations', 'gdia'),
+      { requireAllCatalogued: false }
+    ))
+    return {
+      canceled: false,
+      sourcePath,
+      sourceItems: result.sourceItems,
+      sourceDatabaseItems: result.sourceDatabaseItems,
+      sourceQueueItems: result.sourceQueueItems,
+      sourceHardcoreItems: result.sourceHardcoreItems,
+      sourceSoftcoreItems: result.sourceSoftcoreItems,
+      importedItems: result.importedIds.length,
+      duplicateItems: result.duplicateIds.length,
+      unsupportedItems: result.unsupportedIds.length,
+      backupPath: result.backupPath
+    }
   })
   ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => {
     const operations = database.getDiagnosticSummary().recoveryOperations

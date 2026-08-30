@@ -79,6 +79,23 @@ try {
   & npm.cmd run build
   if ($LASTEXITCODE -ne 0) { throw 'Electron application build failed.' }
 
+  # Some clean CI environments restore the npm package without running
+  # Electron's binary-download postinstall. The TypeScript build does not need
+  # that runtime, but the portable package does. Recover it deterministically
+  # from Electron's pinned install script instead of failing later at Copy-Item.
+  if (-not (Test-Path -LiteralPath $electronRoot)) {
+    $electronInstall = Join-Path $projectRoot 'node_modules\electron\install.js'
+    if (-not (Test-Path -LiteralPath $electronInstall)) {
+      throw "Electron package is incomplete; missing installer: $electronInstall"
+    }
+
+    Write-Host 'Electron runtime is absent; downloading the pinned runtime for packaging.'
+    & node $electronInstall
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $electronRoot)) {
+      throw 'Electron runtime download failed; portable packaging cannot continue.'
+    }
+  }
+
   # Public packages must not depend on a separately installed .NET runtime.
   & dotnet publish $helperProject --configuration Release --runtime win-x64 --self-contained true --output $helperPublish
   if ($LASTEXITCODE -ne 0) { throw 'Grim Dawn helper publish failed.' }

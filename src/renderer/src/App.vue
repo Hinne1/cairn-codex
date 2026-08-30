@@ -251,6 +251,7 @@ const todoDraft = ref('')
 const todoInput = ref<HTMLInputElement | null>(null)
 const todos = ref<TodoItem[]>(readStoredTodos())
 const manualDisconnectProcessId = ref<number | null>(null)
+const liveDisconnectPending = ref(false)
 const showMiReserves = ref(false)
 const miWorkshopQuery = ref('')
 const miComparisonMetric = ref<MiMetricKey>('overall')
@@ -2760,9 +2761,14 @@ async function startLiveMode(): Promise<void> {
 }
 
 async function stopLiveMode(): Promise<void> {
-  if (vaultBusy.value || liveLifecyclePolling.value) return
-  liveLifecyclePolling.value = true
+  if (vaultBusy.value) return
   manualDisconnectProcessId.value = liveStatus.value?.connectedProcessId ?? liveStatus.value?.grimDawnProcessIds[0] ?? null
+  if (liveLifecyclePolling.value) {
+    liveDisconnectPending.value = true
+    return
+  }
+  liveDisconnectPending.value = false
+  liveLifecyclePolling.value = true
   try {
     liveStatus.value = await window.cairnCodex.stopLiveGame()
     liveIssues.value = []
@@ -2826,6 +2832,7 @@ async function pollLiveLifecycle(): Promise<void> {
     }
   } finally {
     liveLifecyclePolling.value = false
+    if (liveDisconnectPending.value) void stopLiveMode()
   }
 }
 
@@ -4082,7 +4089,7 @@ function formatPercentile(value: number | null | undefined): string {
               <span>{{ connectionRecommendation }}</span>
             </div>
             <footer>
-              <button type="button" :disabled="vaultBusy || liveLifecyclePolling" @click="handleHeaderLiveAction">{{ headerConnectionAction }}</button>
+              <button type="button" :disabled="vaultBusy" @click="handleHeaderLiveAction">{{ liveDisconnectPending ? 'Disconnecting…' : headerConnectionAction }}</button>
               <button v-if="canApproveCurrentGameBuild" type="button" :disabled="vaultBusy" @click="approveCurrentGameBuild">Trust exact build…</button>
               <button type="button" @click="activeView = 'vault'; transferMode = 'live'; showConnectionDiagnostics = false">Transfers</button>
               <button type="button" @click="activeView = 'settings'; showConnectionDiagnostics = false">Settings</button>

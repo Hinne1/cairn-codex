@@ -17,6 +17,7 @@ a supported game installation and records the manual live-transfer results here.
 | Bundled hook/injector fingerprints | helper and package audits | Passed |
 | Duplicate vault selection | desktop smoke | Rejected |
 | Rejected retrieval state rollback | desktop smoke | Passed |
+| Generated personal/special delivery journal | desktop smoke | Committed and rejected outcomes retained; queue identity persisted before acknowledgement |
 | Lost helper response after a queued write | desktop smoke | Retained as `needs_recovery`; later writes blocked |
 | Database integrity after uncertain outcome | `PRAGMA quick_check` in desktop smoke | Passed |
 | Archive roll cache and pinned-best persistence | desktop smoke | Passed |
@@ -28,9 +29,9 @@ a supported game installation and records the manual live-transfer results here.
 | Package personal-data/art audit | `scripts/audit-package.mjs` | Passed, 282 files |
 | Installer install/first run/uninstall | `npm run test:installer` | Passed; app removed and isolated user data retained |
 | Dependency vulnerability audit | `npm audit --audit-level=high` | Passed, 0 vulnerabilities |
-| Tracked-file privacy/provenance audit | `npm run audit:repo` | Passed, 88 files |
+| Tracked-file privacy/provenance audit | `npm run audit:repo` | Passed, 90 files |
 
-The 2026-08-29 installed-game run indexed one installation, two save locations,
+The 2026-08-30 installed-game run indexed one installation, two save locations,
 six transfer stashes, and 5,525 catalog items. It analyzed 97 owned copies and
 withheld no roll scores as untrusted.
 

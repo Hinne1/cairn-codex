@@ -829,6 +829,96 @@ export class CollectionDatabase {
       )
   }
 
+  prepareDeliveryOperation(input: PreparedDeliveryOperation): void {
+    this.database
+      .prepare(`
+        INSERT INTO operation_journal (
+          id, operation, state, vault_item_id, stash_path, source_sha256,
+          backup_path, started_at_utc, completed_at_utc, detail_json
+        ) VALUES (?, 'retrieve', 'prepared', NULL, ?, ?, NULL, ?, NULL, ?)
+      `)
+      .run(
+        input.operationId,
+        input.destination,
+        input.payloadSha256,
+        input.startedAtUtc,
+        JSON.stringify({ ...input.detail, transferKind: 'generated_delivery' })
+      )
+  }
+
+  updatePendingOperationDetail(operationId: string, detail: Record<string, unknown>): void {
+    const row = this.database
+      .prepare('SELECT detail_json FROM operation_journal WHERE id = ? AND state = \'prepared\'')
+      .get(operationId) as { detail_json: string } | undefined
+    if (!row) throw new Error('Prepared operation journal entry is missing.')
+    const previous = JSON.parse(row.detail_json) as Record<string, unknown>
+    const result = this.database
+      .prepare(`
+        UPDATE operation_journal SET detail_json = ?
+        WHERE id = ? AND state = 'prepared'
+      `)
+      .run(JSON.stringify({ ...previous, ...detail }), operationId)
+    if (Number(result.changes) !== 1) {
+      throw new Error('Prepared operation journal entry could not be updated.')
+    }
+  }
+
+  completeDeliveryOperation(input: CompletedDeliveryOperation): void {
+    const result = this.database
+      .prepare(`
+        UPDATE operation_journal
+        SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
+        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+      `)
+      .run(
+        input.receiptPath,
+        input.completedAtUtc,
+        JSON.stringify({ ...input.detail, transferKind: 'generated_delivery' }),
+        input.operationId
+      )
+    if (Number(result.changes) !== 1) {
+      throw new Error('Prepared delivery journal entry is missing.')
+    }
+  }
+
+  failDeliveryOperation(operationId: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error)
+    this.database
+      .prepare(`
+        UPDATE operation_journal
+        SET state = 'failed', completed_at_utc = ?, detail_json = ?
+        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+      `)
+      .run(
+        new Date().toISOString(),
+        JSON.stringify({ transferKind: 'generated_delivery', error: detail }),
+        operationId
+      )
+  }
+
+  markDeliveryNeedsRecovery(operationId: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error)
+    const row = this.database
+      .prepare('SELECT detail_json FROM operation_journal WHERE id = ?')
+      .get(operationId) as { detail_json: string } | undefined
+    const previous = row ? (JSON.parse(row.detail_json) as Record<string, unknown>) : {}
+    this.database
+      .prepare(`
+        UPDATE operation_journal
+        SET state = 'needs_recovery', detail_json = ?
+        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+      `)
+      .run(
+        JSON.stringify({
+          ...previous,
+          transferKind: 'generated_delivery',
+          error: detail,
+          phase: 'delivery_outcome_unknown'
+        }),
+        operationId
+      )
+  }
+
   setPinnedBest(record: string, instanceKey: string | null, isHardcore?: boolean): void {
     if (isHardcore === undefined) {
       if (instanceKey === null) {
@@ -1596,6 +1686,21 @@ export interface CompletedRetrievalOperation {
   completedAtUtc: string
   vaultItemIds: string[]
   detail: unknown
+}
+
+export interface PreparedDeliveryOperation {
+  operationId: string
+  destination: string
+  payloadSha256: string
+  startedAtUtc: string
+  detail: Record<string, unknown>
+}
+
+export interface CompletedDeliveryOperation {
+  operationId: string
+  receiptPath: string
+  completedAtUtc: string
+  detail: Record<string, unknown>
 }
 
 export interface CollectionDatabaseDiagnosticSummary {

@@ -22,7 +22,7 @@
 > and is not affiliated with or endorsed by Crate Entertainment. Live transfers
 > are experimental and deliberately fail closed on unknown game builds.
 
-![Cairn Codex collection progress with a Grim Dawn-style item tooltip](docs/images/collection-and-tooltip.png)
+![Cairn Codex collection progress](docs/images/collection-progress.png)
 
 ## What is Cairn Codex?
 
@@ -60,11 +60,18 @@ history, while the browser presents a clean canonical entry for each base item.
 <table>
   <tr>
     <td width="50%">
+      <img src="docs/images/item-tooltip.png" alt="Cairn Codex Grim Dawn-style item tooltip">
+      <br><strong>Game-native item details</strong> — exact ranges, skill modifiers,
+      pet bonuses, acquisition sources, and roll quality.
+    </td>
+    <td width="50%">
       <img src="docs/images/set-collection.png" alt="Cairn Codex set collection">
       <br><strong>Set collection</strong> — completion, level, crafting, awakening,
       owned pieces, and every threshold bonus.
     </td>
-    <td width="50%">
+  </tr>
+  <tr>
+    <td colspan="2">
       <img src="docs/images/skill-explorer.png" alt="Cairn Codex Skill Explorer">
       <br><strong>Skill Explorer</strong> — ranks, conversions, special modifiers,
       item level, ownership, and acquisition details.
@@ -111,8 +118,8 @@ Cairn Codex currently targets 64-bit Windows.
 
 The unsigned beta may trigger Windows SmartScreen. A release build is
 self-contained and requires neither Node.js nor a separately installed .NET
-runtime. The first game-data index can take roughly a minute on the current test
-machine; subsequent cached starts are normally a few seconds.
+runtime. Initial startup can take a few minutes while Cairn indexes the installed
+game data.
 
 Collection browsing works without live mode. Consult the maintained
 [compatibility matrix](docs/compatibility.md) before enabling transfers.

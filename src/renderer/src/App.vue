@@ -6339,10 +6339,12 @@ function formatPercentile(value: number | null | undefined): string {
               <h3>{{ set.name }}</h3>
               <small class="set-level">{{ setLevelLabel(set) }}</small>
             </div>
-            <strong :class="{ complete: set.collected === set.items.length }">
-              {{ set.collected }} / {{ set.items.length }}
-            </strong>
-            <span class="set-percentage">{{ setCompletionPercent(set) }}</span>
+            <div class="set-status">
+              <strong :class="{ complete: set.collected === set.items.length }">
+                {{ set.collected }} / {{ set.items.length }}
+              </strong>
+              <span class="set-percentage">{{ setCompletionPercent(set) }}</span>
+            </div>
           </header>
           <div class="set-meter">
             <span :style="{ width: `${(set.collected / set.items.length) * 100}%` }" />

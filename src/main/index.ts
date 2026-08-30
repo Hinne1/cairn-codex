@@ -3265,6 +3265,21 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS === '1') {
+          await window.webContents.executeJavaScript(`
+            (() => {
+              const toggle = document.querySelector('.completion-tracker > header button')
+              if (toggle?.getAttribute('aria-expanded') === 'true') toggle.click()
+            })()
+          `)
+        } else if (process.env.CAIRN_CODEX_SCREENSHOT_EXPAND_TRACKERS === '1') {
+          await window.webContents.executeJavaScript(`
+            (() => {
+              const toggle = document.querySelector('.completion-tracker > header button')
+              if (toggle?.getAttribute('aria-expanded') === 'false') toggle.click()
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_MAP === '1') {
           await window.webContents.executeJavaScript(
             "document.querySelector('.planner-display button:last-child')?.click()"
@@ -3310,6 +3325,20 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        const scrollTarget = process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET
+        if (scrollTarget) {
+          await window.webContents.executeJavaScript(`
+            (() => {
+              const target = document.querySelector(${JSON.stringify(scrollTarget)})
+              if (!target) return window.scrollTo(0, 0)
+              const topbar = document.querySelector('.topbar')
+              const offset = (topbar?.getBoundingClientRect().height ?? 0) + 12
+              window.scrollTo(0, Math.max(0, target.getBoundingClientRect().top + window.scrollY - offset))
+            })()
+          `)
+        } else {
+          await window.webContents.executeJavaScript('window.scrollTo(0, 0)')
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_OPEN_FIRST === '1') {
           await new Promise((resolve) => setTimeout(resolve, 250))
           await window.webContents.executeJavaScript(
@@ -3331,7 +3360,6 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
-        await window.webContents.executeJavaScript('window.scrollTo(0, 0)')
         window.setOpacity(0)
         window.showInactive()
         window.webContents.invalidate()

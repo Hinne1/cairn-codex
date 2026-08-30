@@ -60,7 +60,7 @@ They are never inferred from a successful injection handshake.
 | Full shared destination | Batch stops; unacknowledged archive copies remain stored | Pending |
 | Full character inventory | Personal delivery is rejected/returned without archive release | Pending |
 | Repeated submit | UI/orchestrator produces no duplicate operation or duplicate item | Pending |
-| Game exits mid-operation | Outcome remains pending/recoverable, queue payload retained | Pending |
+| Game exits mid-operation | Outcome remains pending/recoverable, queue payload retained | Passed 2026-08-30: five exact Hardcore records remained in the durable incoming queue after Grim Dawn exited; the next Cairn run committed each seed once, drained the queue, left no incomplete journal entry, and passed `PRAGMA quick_check` |
 | Cairn exits/restarts mid-operation | Journal and receipt reconcile without duplication | Pending |
 | Unsupported game rebuild | Live injection remains blocked; read-only tools still work | Pending |
 | Item Assistant migration | Verified backup; SC/HC multiplicity and queue receipts preserved; repeat creates no copies | Automated packaged-app gate passed; user-path confirmation remains optional |

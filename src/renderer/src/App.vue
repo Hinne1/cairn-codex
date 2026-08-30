@@ -202,6 +202,7 @@ const enabledStashPaths = computed<string[]>({
   }
 })
 const scanning = ref(false)
+const appInitializing = ref(true)
 const archiveRollHydrating = ref(false)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
 const scanError = ref<string | null>(null)
@@ -276,6 +277,7 @@ const supplyCategory = ref<SupplyCategory>('writs')
 const supplySlotFilter = ref<SupplySlotFilter>('all')
 const supplyVisibleCount = ref(60)
 const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>(readStoredWorkspaceToolIds())
+const toolSettingsOpen = ref(false)
 const materialCategory = ref<MaterialCategory>('all')
 const farmingQuery = ref('')
 const farmingRarity = ref<RarityFilter>('all')
@@ -316,6 +318,7 @@ let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
+let liveSyncInFlight = false
 let vaultErrorTimer: ReturnType<typeof setTimeout> | null = null
 let vaultMessageTimer: ReturnType<typeof setTimeout> | null = null
 let scanErrorTimer: ReturnType<typeof setTimeout> | null = null
@@ -1960,41 +1963,45 @@ onMounted(async () => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
-  zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
   try {
-    infiniteSupplies.value = await window.cairnCodex.getInfiniteSupplies()
-  } catch (error) {
-    console.warn('Stored-supply setting could not be loaded; preserving the safe default.', error)
+    zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
+    try {
+      infiniteSupplies.value = await window.cairnCodex.getInfiniteSupplies()
+    } catch (error) {
+      console.warn('Stored-supply setting could not be loaded; preserving the safe default.', error)
+    }
+    await refreshRecoveryStatus()
+    // Establish live ownership before catalog projection/scanning queues any heavyweight
+    // helper work. This keeps reconnect independent from collection startup time.
+    await pollLiveLifecycle()
+    liveSyncTimer = setInterval(() => void syncLiveMode(), 1000)
+    liveLifecycleTimer = setInterval(() => void pollLiveLifecycle(), 10_000)
+    let cached: CollectionSnapshot | null = null
+    try {
+      cached = await window.cairnCodex.getCachedCollection(
+        [...enabledStashPaths.value],
+        collectionBasis.value
+      )
+    } catch (error) {
+      cacheIssue.value = readableError(error)
+      console.warn('Cached collection was unavailable; falling back to a full scan.', error)
+    }
+    if (cached) {
+      applySnapshot(cached)
+      // While live mode owns the hook, keep the helper responsive to durable queue work.
+      // The cached catalog is complete enough to browse; heavy scan/roll refreshes remain
+      // manual and run automatically once the game session ends.
+      if (cached.cacheNeedsRefresh && liveStatus.value?.state !== 'ready') void scanCollection()
+      if (!cached.cacheNeedsRefresh || liveStatus.value?.state === 'ready') void hydrateArchiveRolls()
+    } else {
+      await scanCollection()
+    }
+    await refreshVault()
+    await nextTick()
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  } finally {
+    appInitializing.value = false
   }
-  await refreshRecoveryStatus()
-  // Establish live ownership before catalog projection/scanning queues any heavyweight
-  // helper work. This keeps reconnect independent from collection startup time.
-  await pollLiveLifecycle()
-  liveSyncTimer = setInterval(() => void syncLiveMode(), 1000)
-  liveLifecycleTimer = setInterval(() => void pollLiveLifecycle(), 10_000)
-  let cached: CollectionSnapshot | null = null
-  try {
-    cached = await window.cairnCodex.getCachedCollection(
-      [...enabledStashPaths.value],
-      collectionBasis.value
-    )
-  } catch (error) {
-    cacheIssue.value = readableError(error)
-    console.warn('Cached collection was unavailable; falling back to a full scan.', error)
-  }
-  if (cached) {
-    applySnapshot(cached)
-    // While live mode owns the hook, keep the helper responsive to durable queue work.
-    // The cached catalog is complete enough to browse; heavy scan/roll refreshes remain
-    // manual and run automatically once the game session ends.
-    if (cached.cacheNeedsRefresh && liveStatus.value?.state !== 'ready') void scanCollection()
-    if (!cached.cacheNeedsRefresh || liveStatus.value?.state === 'ready') void hydrateArchiveRolls()
-  } else {
-    await scanCollection()
-  }
-  await refreshVault()
-  await nextTick()
-  window.scrollTo({ top: 0, behavior: 'auto' })
 })
 
 onBeforeUnmount(() => {
@@ -2955,12 +2962,14 @@ async function pollLiveLifecycle(): Promise<void> {
 }
 
 async function syncLiveMode(): Promise<void> {
-  if (liveStatus.value?.state !== 'ready' || liveSyncing.value || vaultBusy.value) return
-  liveSyncing.value = true
+  if (liveStatus.value?.state !== 'ready' || liveSyncInFlight || vaultBusy.value) return
+  liveSyncInFlight = true
+  const showActivity = activeView.value === 'vault' || activeView.value === 'supplies'
+  if (showActivity) liveSyncing.value = true
   try {
     const result = await window.cairnCodex.syncLiveGame()
-    liveStatus.value = result.status
-    liveIssues.value = result.issues
+    if (JSON.stringify(liveStatus.value) !== JSON.stringify(result.status)) liveStatus.value = result.status
+    if (JSON.stringify(liveIssues.value) !== JSON.stringify(result.issues)) liveIssues.value = result.issues
     if (result.ingested.length > 0) {
       applyLiveIngests(result.ingested)
       vaultMessage.value = `Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`
@@ -2971,7 +2980,8 @@ async function syncLiveMode(): Promise<void> {
     const message = readableError(error)
     if (!message.includes('Another vault write is already in progress')) liveIssues.value = [message]
   } finally {
-    liveSyncing.value = false
+    liveSyncInFlight = false
+    if (showActivity) liveSyncing.value = false
   }
 }
 
@@ -3793,6 +3803,10 @@ function handleEscape(event: KeyboardEvent): void {
     return
   }
   if (event.key !== 'Escape') return
+  if (toolSettingsOpen.value) {
+    toolSettingsOpen.value = false
+    return
+  }
   if (triviaOpen.value) {
     triviaOpen.value = false
     return
@@ -4379,6 +4393,36 @@ function formatPercentile(value: number | null | undefined): string {
       </article>
     </aside>
 
+    <div v-if="toolSettingsOpen" class="tool-settings-backdrop" @click.self="toolSettingsOpen = false">
+      <section class="tool-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="tool-settings-title">
+        <header>
+          <div>
+            <p class="section-label">Workspace</p>
+            <h2 id="tool-settings-title">Choose your tools</h2>
+            <p>Collection always remains available. Hide specialist tools you do not need right now.</p>
+          </div>
+          <button type="button" class="todo-close" aria-label="Close tool settings" @click="toolSettingsOpen = false">×</button>
+        </header>
+        <div class="tool-settings-options">
+          <label v-for="tool in workspaceToolDefinitions" :key="tool.id" class="settings-toggle compact">
+            <input
+              type="checkbox"
+              :checked="workspaceToolVisible(tool.id)"
+              @change="setWorkspaceToolVisible(tool.id, ($event.target as HTMLInputElement).checked)"
+            />
+            <span><strong>{{ tool.label }}</strong><small>{{ tool.detail }}</small></span>
+          </label>
+        </div>
+        <footer>
+          <div class="workspace-tool-presets">
+            <button type="button" @click="showEssentialWorkspaceTools">Essentials</button>
+            <button type="button" @click="showAllWorkspaceTools">Show all</button>
+          </div>
+          <button type="button" class="tool-settings-done" @click="toolSettingsOpen = false">Done</button>
+        </footer>
+      </section>
+    </div>
+
     <div v-if="triviaOpen" class="trivia-backdrop" @click.self="triviaOpen = false">
       <section class="trivia-dialog" role="dialog" aria-modal="true" aria-labelledby="trivia-title">
         <header>
@@ -4463,11 +4507,12 @@ function formatPercentile(value: number | null | undefined): string {
     </div>
 
     <main>
-      <section v-if="(scanning || archiveRollHydrating) && snapshot" class="background-scan" aria-live="polite">
+      <section v-if="appInitializing || scanning || archiveRollHydrating" class="background-scan" aria-live="polite">
         <span class="scan-spinner" aria-hidden="true" />
         <div>
-          <strong>{{ archiveRollHydrating ? 'Rating archived item rolls' : scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>
-          <small v-if="archiveRollHydrating">The Codex remains usable while missing copy scores are calculated and saved.</small>
+          <strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : archiveRollHydrating ? 'Rating archived item rolls' : scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>
+          <small v-if="appInitializing && !snapshot">Loading the cached archive, game index, and live connection state.</small>
+          <small v-else-if="archiveRollHydrating">The Codex remains usable while missing copy scores are calculated and saved.</small>
           <small v-else-if="scanActivity === 'game-data'">Your cached Codex remains usable while map regions, drop sources, and game records are reindexed.</small>
           <small v-else>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
         </div>
@@ -4493,7 +4538,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
       </section>
 
-      <section class="completion-tracker" aria-label="Collection completion">
+      <section v-if="snapshot" class="completion-tracker" aria-label="Collection completion">
         <header>
           <div><p class="section-label">Collection progress</p><strong>{{ allItemSummary.collected }} / {{ allItemSummary.total }} tracked entries</strong></div>
           <button type="button" :aria-expanded="!trackerCollapsed" @click="toggleTracker">{{ trackerCollapsed ? 'Show trackers' : 'Hide trackers' }}</button>
@@ -4667,43 +4712,47 @@ function formatPercentile(value: number | null | undefined): string {
           <small>A live inventory of physical copies currently present in the selected Grim Dawn stash files.</small>
         </button>
       </section>
-      <nav class="workspace-tabs" aria-label="Cairn Codex workspace">
+      <header v-if="snapshot" class="workspace-launcher-heading">
+        <div><p class="section-label">Tools</p><small>Keep this workspace as focused—or as gloriously cluttered—as you like.</small></div>
+        <button type="button" @click="toolSettingsOpen = true">Customize tools</button>
+      </header>
+      <nav v-if="snapshot" class="workspace-tabs" aria-label="Cairn Codex workspace">
         <button type="button" :class="{ active: activeView === 'collection' }" @click="activeView = 'collection'">
           <span>Collection</span><small>Items and copies</small>
         </button>
         <button v-if="workspaceToolVisible('sets')" type="button" :class="{ active: activeView === 'sets' }" @click="activeView = 'sets'">
-          <span>Sets</span><small>{{ collectionSets.length }} catalogued</small>
+          <span>Sets</span><small>{{ setSummary.collected }} / {{ setSummary.total }} complete</small>
         </button>
         <button v-if="workspaceToolVisible('materials')" type="button" :class="{ active: activeView === 'materials' }" @click="openMaterials()">
           <span>Components & Consumables</span><small>{{ componentSummary.collected + consumableSummary.collected }} discovered</small>
         </button>
         <button v-if="workspaceToolVisible('skills')" type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
-          <span>Skill Explorer</span><small>{{ skillNames.length }} skills indexed</small>
+          <span>Skill Explorer</span><small>Browse item skill modifiers</small>
         </button>
         <button v-if="workspaceToolVisible('oracle')" type="button" :class="{ active: activeView === 'oracle' }" @click="openStashOracle">
-          <span>Stash Oracle</span><small>{{ oracleReadinessCounts.ready }} builds ready now</small>
+          <span>Stash Oracle</span><small>Build ideas from your archive</small>
         </button>
         <button v-if="workspaceToolVisible('planner')" type="button" :class="{ active: activeView === 'planner' }" @click="activeView = 'planner'">
           <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · Lv{{ plannerMinimumLevel }}–{{ plannerLevelCap }}</small>
         </button>
         <button v-if="workspaceToolVisible('mi-workshop')" type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
-          <span>MI Workshop</span><small>{{ miWorkshopRows.length }} affix combinations</small>
+          <span>MI Workshop</span><small>Compare bases, affixes, and rolls</small>
         </button>
         <button v-if="workspaceToolVisible('supplies')" type="button" :class="{ active: activeView === 'supplies' }" @click="openSupplies">
           <span>Supplies</span><small>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</small>
         </button>
         <button v-if="workspaceToolVisible('farming')" type="button" :class="{ active: activeView === 'farming' }" @click="activeView = 'farming'">
-          <span>Collection Farming</span><small>{{ farmTargets.length }} useful areas</small>
+          <span>Collection Farming</span><small>Ranked drop-source routes</small>
         </button>
         <button v-if="workspaceToolVisible('trivia')" type="button" :aria-expanded="triviaOpen" @click="openTrivia">
-          <span>Collection Trivia</span><small>{{ collectionTrivia.length }} curiosities</small>
+          <span>Collection Trivia</span><small>Archive records and curiosities</small>
         </button>
         <button v-if="workspaceToolVisible('todo')" type="button" :aria-expanded="todoOpen" @click="openTodos">
           <span>To-do</span><small>{{ remainingTodoCount }} remaining</small>
         </button>
       </nav>
 
-      <nav v-if="activeView === 'collection'" class="category-tabs" aria-label="Item categories">
+      <nav v-if="snapshot && activeView === 'collection'" class="category-tabs" aria-label="Item categories">
         <button
           v-for="category in categories"
           :key="category"
@@ -4716,7 +4765,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
       </nav>
 
-      <section v-if="activeView === 'collection' || activeView === 'sets' || activeView === 'materials'" class="filter-bar" aria-label="Collection filters">
+      <section v-if="snapshot && (activeView === 'collection' || activeView === 'sets' || activeView === 'materials')" class="filter-bar" aria-label="Collection filters">
         <label class="search-field">
           <span class="sr-only">Search collection</span>
           <input
@@ -6120,7 +6169,7 @@ function formatPercentile(value: number | null | undefined): string {
         </section>
       </section>
 
-      <section v-else-if="!snapshot && scanning" class="empty-state">
+      <section v-else-if="!snapshot && (appInitializing || scanning)" class="empty-state">
         <div class="sigil loading" aria-hidden="true">C</div>
         <h3>Opening the Codex</h3>
         <p>Parsing the game database and your transfer stashes.</p>

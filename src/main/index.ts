@@ -1,10 +1,11 @@
 import { join } from 'node:path'
 import { createHash, randomInt, randomUUID } from 'node:crypto'
-import { readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { arch, platform, release } from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron'
 import {
   IPC_CHANNELS,
+  type ArchiveBackupActionResult,
   type AppStatus,
   type CharacterSaveProfile,
   type CollectionBasis,
@@ -36,6 +37,7 @@ import {
   type ResolvedArchiveCatalogItem
 } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
+import { ArchiveBackupService } from './archive-backup'
 
 // Packaged GUI launches do not always have a durable console attached. Electron's
 // child processes can outlive a terminal or diagnostic launcher and inherit its
@@ -260,7 +262,11 @@ function createHelperClient(): GrimDawnHelperClient {
   })
 }
 
-function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionDatabase): void {
+function registerIpcHandlers(
+  helper: GrimDawnHelperClient,
+  database: CollectionDatabase,
+  archiveBackups: ArchiveBackupService
+): () => Promise<void> {
   let writeQueue: Promise<void> = Promise.resolve()
   let latestCollection: CollectionSnapshot | null = null
   let collectionScan: Promise<CollectionSnapshot> | null = null
@@ -285,6 +291,11 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       }
       return operation()
     })
+  const queueArchiveBackup = (reason: string): void => {
+    void runExclusive(() => archiveBackups.createBackup(reason)).catch((error) => {
+      console.error(`[archive-backup] ${reason} failed`, error)
+    })
+  }
 
   ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
     try {
@@ -296,6 +307,86 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   })
   ipcMain.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
     return shell.openPath(app.getPath('userData'))
+  })
+  ipcMain.handle(IPC_CHANNELS.getArchiveBackupStatus, () => archiveBackups.getStatus())
+  ipcMain.handle(
+    IPC_CHANNELS.createArchiveBackup,
+    async (): Promise<ArchiveBackupActionResult> => ({
+      canceled: false,
+      backup: await runExclusive(() => archiveBackups.createBackup('manual backup')),
+      path: null,
+      restarting: false
+    })
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.exportArchiveBackup,
+    async (): Promise<ArchiveBackupActionResult> => {
+      const stamp = new Date().toISOString().slice(0, 10)
+      const selection = await dialog.showSaveDialog({
+        title: 'Export Cairn Codex archive backup',
+        defaultPath: join(app.getPath('documents'), `cairn-codex-archive-${stamp}.sqlite3`),
+        filters: [{ name: 'Cairn Codex archive', extensions: ['sqlite3'] }]
+      })
+      if (selection.canceled || !selection.filePath) {
+        return { canceled: true, backup: null, path: null, restarting: false }
+      }
+      const backup = await runExclusive(() => archiveBackups.exportBackup(selection.filePath!))
+      return {
+        canceled: false,
+        backup,
+        path: selection.filePath,
+        restarting: false
+      }
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.restoreArchiveBackup,
+    async (): Promise<ArchiveBackupActionResult> => {
+      const unresolved = database.getRecoveryOperationCount()
+      if (unresolved > 0) {
+        throw new Error(
+          `${unresolved} transfer operation${unresolved === 1 ? '' : 's'} require recovery attention. ` +
+          'Resolve or audit them before restoring the archive.'
+        )
+      }
+      const selection = await dialog.showOpenDialog({
+        title: 'Restore Cairn Codex archive backup',
+        defaultPath: (await archiveBackups.getStatus()).backupDirectory,
+        properties: ['openFile'],
+        filters: [
+          { name: 'Cairn Codex archive', extensions: ['sqlite3', 'sqlite', 'db'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      })
+      const sourcePath = selection.filePaths[0]
+      if (selection.canceled || !sourcePath) {
+        return { canceled: true, backup: null, path: null, restarting: false }
+      }
+      const confirmation = await dialog.showMessageBox({
+        type: 'warning',
+        title: 'Restore Cairn Codex archive?',
+        message: 'Cairn will verify this backup and restart to restore it.',
+        detail:
+          'Before replacement, Cairn will preserve the current archive as a verified emergency backup. ' +
+          'Grim Dawn stash files are not changed.',
+        buttons: ['Cancel', 'Restore and restart'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      })
+      if (confirmation.response !== 1) {
+        return { canceled: true, backup: null, path: null, restarting: false }
+      }
+      const backup = await runExclusive(() => archiveBackups.stageRestore(sourcePath))
+      setTimeout(() => {
+        app.relaunch()
+        app.quit()
+      }, 100)
+      return { canceled: false, backup, path: sourcePath, restarting: true }
+    }
+  )
+  ipcMain.handle(IPC_CHANNELS.openArchiveBackupDirectory, async (): Promise<string> => {
+    return shell.openPath((await archiveBackups.getStatus()).backupDirectory)
   })
   ipcMain.handle(IPC_CHANNELS.importGdiaDatabase, async (): Promise<GdiaImportResult> => {
     latestCollection ??= await readCollectionCache(collectionCachePath)
@@ -340,6 +431,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       join(app.getPath('userData'), 'migrations', 'gdia'),
       { requireAllCatalogued: false }
     ))
+    if (result.importedIds.length > 0) queueArchiveBackup('Item Assistant migration')
     return {
       canceled: false,
       sourcePath,
@@ -369,7 +461,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   })
   ipcMain.handle(IPC_CHANNELS.exportDiagnostics, async () => {
     const generatedAtUtc = new Date().toISOString()
-    const fileStamp = generatedAtUtc.replaceAll(':', '-').replace(/\.\d{3}Z$/, 'Z')
+    const fileStamp = generatedAtUtc.replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
     const selection = await dialog.showSaveDialog({
       title: 'Save Cairn Codex diagnostics',
       defaultPath: join(app.getPath('downloads'), `cairn-codex-diagnostics-${fileStamp}.json`),
@@ -420,6 +512,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       },
       system: { platform: platform(), release: release(), architecture: arch() },
       database: database.getDiagnosticSummary(),
+      archiveBackups: await safely(() => archiveBackups.getStatus()),
       files: directoryCounts,
       collection: latestCollection ? {
         scannedAtUtc: latestCollection.scannedAtUtc,
@@ -551,6 +644,7 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     IPC_CHANNELS.setPinnedBest,
     (_event, input: { record: string; instanceKey: string | null; isHardcore: boolean }): void => {
       database.setPinnedBest(input.record, input.instanceKey, input.isHardcore)
+      queueArchiveBackup('pinned copy changed')
     }
   )
   ipcMain.handle(
@@ -559,8 +653,11 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
   ipcMain.handle(
     IPC_CHANNELS.setInfiniteSupplies,
-    (_event, input: { enabled: boolean }): Promise<boolean> =>
-      runExclusive(async () => database.setInfiniteSupplies(input.enabled))
+    async (_event, input: { enabled: boolean }): Promise<boolean> => {
+      const enabled = await runExclusive(async () => database.setInfiniteSupplies(input.enabled))
+      queueArchiveBackup('supply settings changed')
+      return enabled
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.inspectWriteSafety,
@@ -578,13 +675,19 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
   )
   ipcMain.handle(
     IPC_CHANNELS.ingestStagingTab,
-    (_event, input: { path: string }): Promise<IngestResult> =>
-      runTransferExclusive(() => executeStagingTabIngest(helper, database, input.path))
+    async (_event, input: { path: string }): Promise<IngestResult> => {
+      const result = await runTransferExclusive(() => executeStagingTabIngest(helper, database, input.path))
+      if (result.ingested.length > 0) queueArchiveBackup('offline ingest')
+      return result
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.retrieveVaultItems,
-    (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> =>
-      runTransferExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds))
+    async (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> => {
+      const result = await runTransferExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds))
+      if (result.retrieved.length > 0) queueArchiveBackup('offline retrieval')
+      return result
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.inspectLiveGame,
@@ -622,17 +725,22 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
     IPC_CHANNELS.syncLiveGame,
     async (): Promise<LiveGameSyncResult> => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
-      return runTransferExclusive(() => syncLiveIncoming(
+      const result = await runTransferExclusive(() => syncLiveIncoming(
         helper,
         database,
         latestCollection?.discovery.installations[0]?.path
       ))
+      if (result.ingested.length > 0) queueArchiveBackup('live ingest')
+      return result
     }
   )
   ipcMain.handle(
     IPC_CHANNELS.retrieveLiveVaultItems,
-    (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> =>
-      runTransferExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds))
+    async (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> => {
+      const result = await runTransferExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds))
+      if (result.retrieved.length > 0) queueArchiveBackup('live retrieval')
+      return result
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.dispenseLiveAugments,
@@ -640,13 +748,15 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       runTransferExclusive(async () => {
         latestCollection ??= await readCollectionCache(collectionCachePath)
         if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
-        return executeLiveAugmentDispense(
+        const result = await executeLiveAugmentDispense(
           helper,
           database,
           latestCollection,
           input.records,
           input.expectedCharacterName
         )
+        queueArchiveBackup('supply delivery')
+        return result
       })
   )
   ipcMain.handle(
@@ -655,15 +765,21 @@ function registerIpcHandlers(helper: GrimDawnHelperClient, database: CollectionD
       runTransferExclusive(async () => {
         latestCollection ??= await readCollectionCache(collectionCachePath)
         if (!latestCollection) throw new Error('Build the game-data index before recovering Sahdina\'s Memento.')
-        return executeSahdinasMementoRecovery(
+        const result = await executeSahdinasMementoRecovery(
           helper,
           database,
           latestCollection,
           input.destination,
           input.expectedCharacterName
         )
+        queueArchiveBackup('special item recovery')
+        return result
       })
   )
+  return async () => {
+    await writeQueue
+    await archiveBackups.flush()
+  }
 }
 
 async function syncLiveIncoming(
@@ -672,8 +788,10 @@ async function syncLiveIncoming(
   installationPath?: string
 ): Promise<LiveGameSyncResult> {
   const status = await helper.request<LiveGameStatus>('inspect-live-game')
-  if (status.state !== 'ready') return { status, ingested: [], issues: [] }
   const incoming = await helper.request<LiveIncomingItem[]>('poll-live-incoming')
+  if (status.state !== 'ready' && incoming.length === 0) {
+    return { status, ingested: [], issues: [] }
+  }
   const ingested: LiveGameSyncResult['ingested'] = []
   const analysisInputs: Array<{ vaultItemId: string; item: LiveVaultPayload }> = []
   const issues: string[] = []
@@ -1847,6 +1965,79 @@ async function runSmokeTest(
         )
       )
     }
+    const archiveSmokeRoot = join(
+      app.getPath('temp'),
+      `cairn-codex-archive-backup-smoke-${randomUUID()}`
+    )
+    const archiveSmokePath = join(archiveSmokeRoot, 'archive.sqlite3')
+    const archiveSmokeBackupDirectory = join(archiveSmokeRoot, 'backups')
+    try {
+      await mkdir(archiveSmokeRoot, { recursive: true })
+      const archiveSmokeDatabase = new CollectionDatabase(archiveSmokePath)
+      const archiveSmokeService = new ArchiveBackupService(
+        archiveSmokeDatabase,
+        archiveSmokePath,
+        archiveSmokeBackupDirectory,
+        2
+      )
+      const original = await archiveSmokeService.createBackup('smoke original')
+      archiveSmokeDatabase.setInfiniteSupplies(false)
+      await archiveSmokeService.createBackup('smoke changed')
+      await archiveSmokeService.stageRestore(
+        join(archiveSmokeBackupDirectory, original.fileName)
+      )
+      archiveSmokeDatabase.close()
+      if (!(await ArchiveBackupService.applyPendingRestore(
+        archiveSmokePath,
+        archiveSmokeBackupDirectory
+      ))) {
+        throw new Error('Archive backup smoke test did not apply its staged restore.')
+      }
+      const restoredArchive = new CollectionDatabase(archiveSmokePath)
+      try {
+        if (!restoredArchive.getInfiniteSupplies()) {
+          throw new Error('Archive restore did not recover the selected database state.')
+        }
+      } finally {
+        restoredArchive.close()
+      }
+      const archiveStatus = await archiveSmokeService.getStatus()
+      if (
+        archiveStatus.pendingRestore ||
+        archiveStatus.backups.length < 2 ||
+        !archiveStatus.backups.every((entry) => entry.verified && /^[0-9a-f]{64}$/.test(entry.sha256))
+      ) {
+        throw new Error('Archive backup rotation or verification metadata failed its smoke test.')
+      }
+      await writeFile(
+        join(archiveSmokeBackupDirectory, 'pending-restore.json'),
+        `${JSON.stringify({
+          sourcePath: join(archiveSmokeBackupDirectory, 'missing.sqlite3'),
+          sourceSha256: '0'.repeat(64),
+          requestedAtUtc: new Date().toISOString()
+        }, null, 2)}\n`,
+        'utf8'
+      )
+      let invalidRestoreRejected = false
+      try {
+        await ArchiveBackupService.applyPendingRestore(
+          archiveSmokePath,
+          archiveSmokeBackupDirectory
+        )
+      } catch {
+        invalidRestoreRejected = true
+      }
+      const quarantinedRestore = await ArchiveBackupService.quarantinePendingRestore(
+        archiveSmokeBackupDirectory
+      )
+      if (!invalidRestoreRejected || !quarantinedRestore) {
+        throw new Error('Invalid staged restore did not fail closed and leave the current archive usable.')
+      }
+      await stat(quarantinedRestore)
+      new CollectionDatabase(archiveSmokePath).close()
+    } finally {
+      await rm(archiveSmokeRoot, { recursive: true, force: true })
+    }
     await helper.request('health')
     const writeTransaction = await helper.request<{ passed: boolean }>('self-test-write-transaction')
     if (!writeTransaction.passed) {
@@ -1942,7 +2133,7 @@ async function runSmokeTest(
       !sanya?.skills.some((skill) => skill.name === 'Devouring Swarm' && skill.level > 0) ||
       !sanya.factions.some((faction) => faction.name === 'Devil\'s Crossing')
     ) {
-      throw new Error('Read-only character import did not validate current local and cloud saves.')
+      throw new Error('Read-only character loading did not validate current local and cloud saves.')
     }
     const factionPlannerItems = helperSnapshot.plannerItems ?? []
     const chosenArcanespark = factionPlannerItems.find((item) => item.name === 'Chosen Arcanespark')
@@ -2671,6 +2862,7 @@ async function runSmokeTest(
         generatedDeliveryJournal: 'verified',
         uncertainOutcomeRecovery: 'verified',
         databaseIntegrity: 'verified',
+        archiveBackupRestore: 'verified',
         archiveRollCache: 'verified',
         serializerRoundTrips: roundTrips.length,
         ingestPlans: ingestPlans.length,
@@ -3448,7 +3640,7 @@ if (!hasSingleInstanceLock) {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
   console.log('[startup] Electron ready; opening Cairn Codex services.')
   Menu.setApplicationMenu(null)
@@ -3456,13 +3648,30 @@ app.whenReady().then(() => {
   console.log('[startup] Item icon protocol registered.')
   const helper = createHelperClient()
   const databaseOverride = process.env.CAIRN_CODEX_DATABASE_PATH
-  const database = new CollectionDatabase(
-    process.env.CAIRN_CODEX_SMOKE_TEST === '1'
-      ? ':memory:'
-      : databaseOverride
-        ? databaseOverride
-      : join(app.getPath('userData'), 'cairn-codex.sqlite3')
-  )
+  const databasePath = process.env.CAIRN_CODEX_SMOKE_TEST === '1'
+    ? ':memory:'
+    : databaseOverride ?? join(app.getPath('userData'), 'cairn-codex.sqlite3')
+  const archiveBackupDirectory = process.env.CAIRN_CODEX_ARCHIVE_BACKUP_DIR ??
+    join(app.getPath('userData'), 'archive-backups')
+  if (databasePath !== ':memory:') {
+    try {
+      const restored = await ArchiveBackupService.applyPendingRestore(
+        databasePath,
+        archiveBackupDirectory
+      )
+      if (restored) console.log('[startup] Staged archive restore applied and verified.')
+    } catch (error) {
+      const quarantined = await ArchiveBackupService.quarantinePendingRestore(
+        archiveBackupDirectory
+      ).catch(() => null)
+      console.error(
+        '[startup] Staged archive restore was rejected; the current archive was preserved.' +
+        (quarantined ? ` Request quarantined at ${quarantined}.` : ''),
+        error
+      )
+    }
+  }
+  const database = new CollectionDatabase(databasePath)
   console.log('[startup] Collection database ready.')
 
   const ingestCommand = process.env.CAIRN_CODEX_INGEST_REQUEST
@@ -3520,13 +3729,32 @@ app.whenReady().then(() => {
     return
   }
 
-  registerIpcHandlers(helper, database)
+  const archiveBackups = new ArchiveBackupService(
+    database,
+    databasePath,
+    archiveBackupDirectory
+  )
+  const flushIpcWrites = registerIpcHandlers(helper, database, archiveBackups)
   console.log('[startup] IPC handlers registered; creating the main window.')
   void createWindow()
+  void archiveBackups.ensureStartupBackup()
+    .then((backup) => {
+      if (backup) console.log(`[archive-backup] verified ${backup.fileName}`)
+    })
+    .catch((error) => console.error('[archive-backup] automatic daily backup failed', error))
 
-  app.once('before-quit', () => {
-    helper.dispose()
-    database.close()
+  let shutdownReady = false
+  app.on('before-quit', (event) => {
+    if (shutdownReady) return
+    event.preventDefault()
+    void flushIpcWrites()
+      .catch((error) => console.error('[shutdown] queued archive work failed', error))
+      .finally(() => {
+        helper.dispose()
+        database.close()
+        shutdownReady = true
+        app.quit()
+      })
   })
 
   app.on('activate', () => {

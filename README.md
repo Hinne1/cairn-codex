@@ -93,6 +93,9 @@ Cairn treats save mutation as a transaction, not a file-copy shortcut.
   remain stored if the destination fills or an outcome becomes uncertain.
 - An operation journal, automatic backups, receipts, and quarantine records make
   interrupted work recoverable and auditable.
+- The Codex Archive has its own rotating, integrity-checked SQLite snapshots.
+  Settings can create, export, and restore them; restore preserves an emergency
+  copy of the current archive and is applied only during restart.
 
 Read the [write transaction design](docs/architecture/write-transactions.md),
 [live adapter design](docs/architecture/live-game-adapter.md), and
@@ -244,6 +247,8 @@ Useful design references:
 Cairn stores its archive, settings, caches, operation journal, receipts,
 quarantine, and backups under `%APPDATA%\cairn-codex`. Settings can open that
 directory and export a diagnostic report that omits item payloads and save data.
+Verified archive snapshots live under `archive-backups`; ordinary rotation keeps
+up to twelve snapshots, with up to three additional emergency pre-restore copies.
 
 Do not attach character saves, stash files, the archive database, crash dumps,
 or raw live-queue files to a public issue. Follow the [recovery guide](docs/recovery.md)
@@ -260,7 +265,7 @@ when a transfer outcome is uncertain.
 
 Unknown game and native-adapter fingerprints remain read-only until explicitly
 verified. Code signing and automatic updates are intentionally deferred for the
-first private beta.
+initial beta.
 
 ## Contributing
 

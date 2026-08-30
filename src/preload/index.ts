@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   IPC_CHANNELS,
   type AppStatus,
+  type ArchiveBackupActionResult,
+  type ArchiveBackupStatus,
   type CairnCodexApi,
   type CharacterSaveProfile,
   type CollectionSnapshot,
@@ -29,6 +31,16 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.exportDiagnostics) as Promise<DiagnosticExportResult>,
   openDataDirectory: () =>
     ipcRenderer.invoke(IPC_CHANNELS.openDataDirectory) as Promise<string>,
+  getArchiveBackupStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getArchiveBackupStatus) as Promise<ArchiveBackupStatus>,
+  createArchiveBackup: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.createArchiveBackup) as Promise<ArchiveBackupActionResult>,
+  exportArchiveBackup: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.exportArchiveBackup) as Promise<ArchiveBackupActionResult>,
+  restoreArchiveBackup: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.restoreArchiveBackup) as Promise<ArchiveBackupActionResult>,
+  openArchiveBackupDirectory: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.openArchiveBackupDirectory) as Promise<string>,
   importGdiaDatabase: () =>
     ipcRenderer.invoke(IPC_CHANNELS.importGdiaDatabase) as Promise<GdiaImportResult>,
   getRecoveryStatus: () =>

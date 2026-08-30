@@ -475,6 +475,12 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .tooltip-section .tone-skill, .tooltip-section .tone-mastery { color: #65acff; }
 .tooltip-section .tone-pet { padding-left: 10px; color: #c89a55; }
 .tooltip-section .tone-visual { color: #8bc6bf; font-style: italic; }
+.tooltip-affix { padding-top: 10px !important; border-top: 1px solid rgba(112, 91, 55, 0.38); }
+.tooltip-affix.magical > h4 { color: #e3c258; }
+.tooltip-affix.rare > h4 { color: #70c95d; }
+.tooltip-affix-section + .tooltip-affix-section { margin-top: 7px; }
+.tooltip-affix-section h5 { margin: 0 0 4px; color: #d4b55e; font-size: 14px; font-weight: 500; }
+.tooltip-affix-empty { color: #847c6f; font-style: italic; }
 .tooltip-set > h4 { color: #4ec9c0; font-size: 20px; }
 .tooltip-set .set-description { margin: 0 0 6px; color: #d5c49c; font-style: normal; line-height: 1.26; }
 .tooltip-set .set-member { margin-left: 12px; color: #aaa9a4; }
@@ -970,7 +976,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .mi-workshop-summary { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
 .mi-workshop-summary span { display: flex; align-items: baseline; gap: 7px; padding: 13px 15px; border: 1px solid #373d30; border-radius: 6px; color: #817f73; background: #191a16; font-size: 10px; }
 .mi-workshop-summary strong { color: #a8ce8e; font: 500 20px Georgia, serif; }
-.mi-workshop-controls { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(250px, 360px) 150px; gap: 8px; padding: 12px; border: 1px solid #394333; border-radius: 7px; background: #181a16; }
+.mi-workshop-controls { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(150px, 220px) minmax(230px, 320px) 140px; gap: 8px; padding: 12px; border: 1px solid #394333; border-radius: 7px; background: #181a16; }
 .mi-workshop-controls label { position: relative; display: grid; gap: 5px; color: #75816d; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
 .mi-workshop-controls input, .mi-workshop-controls select { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid #46523e; border-radius: 5px; color: #cad8be; outline: none; background: #11130f; font-size: 11px; text-transform: none; }
 .mi-workshop-controls input:focus, .mi-workshop-controls select:focus { border-color: #73955f; box-shadow: 0 0 0 2px rgba(105, 145, 83, .15); }
@@ -1013,6 +1019,14 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .settings-action { width: 100%; padding: 10px 12px; border: 1px solid #5b4b31; border-radius: 5px; color: #dfc47f; background: linear-gradient(#332b1f, #262119); cursor: pointer; font: 600 11px Inter, sans-serif; }
 .settings-action:hover:not(:disabled) { border-color: #8b6d38; background: linear-gradient(#413522, #2d261b); }
 .settings-action:disabled { color: #7b725f; background: #211f1a; opacity: .62; cursor: default; }
+.settings-action.danger { border-color: #6a3e34; color: #e4a38f; background: linear-gradient(#38231f, #281b18); }
+.settings-action.danger:hover:not(:disabled) { border-color: #a35743; background: linear-gradient(#482b24, #30201c); }
+.archive-backup-latest { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid #4a4435; border-radius: 6px; background: rgba(18, 21, 15, .72); }
+.archive-backup-latest > div { display: grid; gap: 3px; min-width: 0; }
+.archive-backup-latest strong { color: #d9caa7; font-size: 11px; }
+.archive-backup-latest small { color: #81796b; font-size: 9px; line-height: 1.45; }
+.archive-backup-latest.empty { background: rgba(28, 25, 21, .72); }
+.archive-backup-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .settings-toggle { display: flex; gap: 10px; align-items: start; padding: 12px; border: 1px solid #3c372e; border-radius: 6px; background: #191815; cursor: pointer; }
 .settings-toggle input { margin-top: 3px; accent-color: #b99147; }
 .settings-toggle span { display: grid; gap: 3px; }

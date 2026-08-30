@@ -343,8 +343,7 @@ internal sealed class LiveGameAdapter : IDisposable
     {
         lock (sync)
         {
-            DemandReady();
-            var incoming = Path.Combine(queueDirectory!, "ingoing");
+            var incoming = DemandIncomingQueueOwnership();
             var result = new List<LiveIncomingItem>();
             foreach (var path in Directory.EnumerateFiles(incoming, "*.csv")
                          .OrderBy(path => File.GetCreationTimeUtc(path)))
@@ -375,8 +374,8 @@ internal sealed class LiveGameAdapter : IDisposable
     {
         lock (sync)
         {
-            DemandReady();
-            var fullPath = ValidateIncomingPath(path);
+            var incoming = DemandIncomingQueueOwnership();
+            var fullPath = ValidateIncomingPath(path, incoming);
             var bytes = ReadStable(fullPath);
             var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             if (!hash.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
@@ -395,8 +394,8 @@ internal sealed class LiveGameAdapter : IDisposable
     {
         lock (sync)
         {
-            DemandReady();
-            var fullPath = ValidateIncomingPath(path);
+            var incoming = DemandIncomingQueueOwnership();
+            var fullPath = ValidateIncomingPath(path, incoming);
             var bytes = ReadStable(fullPath);
             var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             if (!hash.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
@@ -613,9 +612,9 @@ internal sealed class LiveGameAdapter : IDisposable
         item.AffixRerolls,
         Math.Max(1, item.StackCount));
 
-    private string ValidateIncomingPath(string path)
+    private static string ValidateIncomingPath(string path, string incomingDirectory)
     {
-        var root = Path.GetFullPath(Path.Combine(queueDirectory!, "ingoing")) + Path.DirectorySeparatorChar;
+        var root = Path.GetFullPath(incomingDirectory) + Path.DirectorySeparatorChar;
         var fullPath = Path.GetFullPath(path);
         if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) ||
             !fullPath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
@@ -623,6 +622,31 @@ internal sealed class LiveGameAdapter : IDisposable
             throw new UnauthorizedAccessException("Live acknowledgement path is outside the incoming queue.");
         }
         return fullPath;
+    }
+
+    private string DemandIncomingQueueOwnership()
+    {
+        var itemAssistant = FindProcesses(["IAGrim"]);
+        try
+        {
+            if (itemAssistant.Count > 0)
+            {
+                throw new WriteSafetyException(
+                    "Item Assistant is running; Cairn will not consume its incoming queue.");
+            }
+        }
+        finally
+        {
+            foreach (var process in itemAssistant) process.Dispose();
+        }
+
+        // Incoming files were already serialized and removed from the game by the
+        // verified hook. Committing those durable receipts is safe after the game or
+        // hook exits; requiring a live handshake here stranded the tail of large
+        // ingest batches until the next successful connection.
+        var incoming = Path.Combine(LiveDataDirectory(), "itemqueue", "ingoing");
+        Directory.CreateDirectory(incoming);
+        return Path.GetFullPath(incoming);
     }
 
     private static byte[] ReadStable(string path)

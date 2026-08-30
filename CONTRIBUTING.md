@@ -7,7 +7,7 @@ speed of delivery.
 ## Before opening an issue
 
 - Search existing issues and the in-app to-do list.
-- Confirm the problem on the newest private beta build.
+- Confirm the problem on the newest available beta build.
 - For live-transfer problems, stop transferring and preserve the application
   data directory before retrying.
 - Do not upload character saves, transfer stashes, the Cairn database, queue

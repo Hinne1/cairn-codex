@@ -11,6 +11,7 @@ import {
   withAwakeningAvailability
 } from '@shared/collection-availability'
 import type {
+  ArchiveBackupStatus,
   CharacterSaveProfile,
   CollectionBasis,
   CollectionItem,
@@ -32,10 +33,11 @@ import type {
 } from '@shared/contracts'
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
-type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare' | 'recipe'
+type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'double-rare' | 'rare' | 'recipe'
 type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
 type SortDirection = 'asc' | 'desc'
 type MiCountingMode = 'base' | 'tier'
+type MiAffixFilter = 'all' | 'double-rare'
 type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'oracle' | 'mi-workshop' | 'supplies' | 'farming' | 'vault' | 'settings'
 type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 type SetFeatureFilter = 'all' | 'visual'
@@ -61,8 +63,17 @@ interface AppHistoryState {
   ownership: OwnershipFilter
   rarityFilter: RarityFilter
   miWorkshopQuery: string
+  miAffixFilter: MiAffixFilter
   miComparisonMetric: MiMetricKey
   miComparisonDirection: SortDirection
+}
+
+interface TooltipAffix {
+  record: string
+  name: string
+  kind: 'prefix' | 'suffix'
+  rarity: 'magical' | 'rare'
+  presentation?: ItemPresentation
 }
 
 interface PlannerProfile {
@@ -289,6 +300,8 @@ const farmingRarity = ref<RarityFilter>('all')
 const infiniteSupplies = ref(true)
 const infiniteSuppliesBusy = ref(false)
 const diagnosticsBusy = ref(false)
+const archiveBackupBusy = ref<'backup' | 'export' | 'restore' | null>(null)
+const archiveBackupStatus = ref<ArchiveBackupStatus | null>(null)
 const gdiaImportBusy = ref(false)
 const gdiaImportResult = ref<GdiaImportResult | null>(null)
 const recoveryStatus = ref<RecoveryStatus | null>(null)
@@ -311,12 +324,14 @@ const manualDisconnectProcessId = ref<number | null>(null)
 const liveDisconnectPending = ref(false)
 const showMiReserves = ref(false)
 const miWorkshopQuery = ref('')
+const miAffixFilter = ref<MiAffixFilter>('all')
 const miComparisonMetric = ref<MiMetricKey>('overall')
 const miComparisonDirection = ref<SortDirection>('desc')
 const canNavigateBack = ref(false)
 const canNavigateForward = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
 const tooltipRecord = ref<string | null>(null)
+const tooltipCopyAffixes = ref<{ prefixRecord: string; suffixRecord: string } | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
 const tooltipMaxHeight = computed(() => Math.max(180, window.innerHeight - tooltipPosition.value.top - 14))
 const tooltipElement = ref<HTMLElement | null>(null)
@@ -780,7 +795,9 @@ const filteredItems = computed(() => {
       rarityFilter.value === 'all' ||
       (rarityFilter.value === 'recipe'
         ? Boolean(item.acquisition?.crafting)
-        : item.rarity === rarityFilter.value)
+        : rarityFilter.value === 'double-rare'
+          ? item.rarity === 'mi' && doubleRareMiBaseRecords.value.has(item.record.toLocaleLowerCase())
+          : item.rarity === rarityFilter.value)
     )
     .filter((item) => {
       if (ownership.value === 'owned') return isCollectionOwned(item)
@@ -1406,6 +1423,36 @@ const affixByRecord = computed(() => {
   return byRecord
 })
 
+const tooltipAffixes = computed<TooltipAffix[]>(() => {
+  const copy = tooltipCopyAffixes.value
+  if (!copy) return []
+  const result: TooltipAffix[] = []
+  for (const record of [copy.prefixRecord, copy.suffixRecord]) {
+    if (!record) continue
+    const affix = affixByRecord.value.get(record.toLocaleLowerCase())
+    if (affix) result.push({ record, ...affix })
+  }
+  return result
+})
+
+const tooltipDisplayName = computed(() => {
+  if (!tooltipItem.value) return ''
+  const prefix = tooltipAffixes.value.find((affix) => affix.kind === 'prefix')?.name
+  const suffix = tooltipAffixes.value.find((affix) => affix.kind === 'suffix')?.name
+  return [prefix, tooltipItem.value.name, suffix].filter(Boolean).join(' ')
+})
+
+function isDoubleRareMiCopy(copy: ObservedStashItem): boolean {
+  return affixByRecord.value.get(copy.prefixRecord.toLocaleLowerCase())?.rarity === 'rare' &&
+    affixByRecord.value.get(copy.suffixRecord.toLocaleLowerCase())?.rarity === 'rare'
+}
+
+const doubleRareMiBaseRecords = computed(() => new Set(
+  allOwnedCopies.value
+    .filter(isDoubleRareMiCopy)
+    .map((copy) => copy.baseRecord.toLocaleLowerCase())
+))
+
 const activeCopyAffix = computed(() =>
   activeCopyAffixTarget.value
     ? affixByRecord.value.get(activeCopyAffixTarget.value.record.toLocaleLowerCase()) ?? null
@@ -1500,6 +1547,8 @@ const miWorkshopRows = computed(() => {
         selectedMetric: miMetricResult(copies[0]!, miComparisonMetric.value)
       }
     })
+    .filter((group) => miAffixFilter.value === 'all' ||
+      (group.prefixRarity === 'rare' && group.suffixRarity === 'rare'))
     .filter((group) => !needle || normalizeLoose([
       group.base.name,
       group.base.record,
@@ -1816,6 +1865,7 @@ function currentAppHistoryState(index = appHistoryIndex): AppHistoryState {
     ownership: ownership.value,
     rarityFilter: rarityFilter.value,
     miWorkshopQuery: miWorkshopQuery.value,
+    miAffixFilter: miAffixFilter.value,
     miComparisonMetric: miComparisonMetric.value,
     miComparisonDirection: miComparisonDirection.value
   }
@@ -1838,6 +1888,7 @@ function handleAppHistory(event: PopStateEvent): void {
   ownership.value = state.ownership
   rarityFilter.value = state.rarityFilter
   miWorkshopQuery.value = state.miWorkshopQuery
+  miAffixFilter.value = state.miAffixFilter ?? 'all'
   miComparisonMetric.value = state.miComparisonMetric
   miComparisonDirection.value = state.miComparisonDirection
   updateHistoryButtons()
@@ -1894,7 +1945,7 @@ watch([activeView, selectedRecord], () => {
   updateHistoryButtons()
 }, { flush: 'post' })
 watch(
-  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miComparisonMetric, miComparisonDirection],
+  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection],
   () => {
     if (!appHistoryReady || restoringAppHistory) return
     window.history.replaceState(currentAppHistoryState(), '')
@@ -2014,6 +2065,7 @@ onMounted(async () => {
       console.warn('Stored-supply setting could not be loaded; preserving the safe default.', error)
     }
     await refreshRecoveryStatus()
+    await refreshArchiveBackupStatus()
     // Establish live ownership before catalog projection/scanning queues any heavyweight
     // helper work. This keeps reconnect independent from collection startup time.
     await pollLiveLifecycle()
@@ -2131,6 +2183,80 @@ async function exportDiagnostics(): Promise<void> {
 async function openDataDirectory(): Promise<void> {
   const error = await window.cairnCodex.openDataDirectory()
   if (error) vaultError.value = `Windows could not open Cairn's data folder: ${error}`
+}
+
+async function refreshArchiveBackupStatus(): Promise<void> {
+  try {
+    archiveBackupStatus.value = await window.cairnCodex.getArchiveBackupStatus()
+  } catch (error) {
+    console.warn('Archive backup status could not be loaded.', error)
+  }
+}
+
+function formatBackupDate(value: string): string {
+  return new Date(value).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  })
+}
+
+function formatBackupSize(value: number): string {
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+async function createArchiveBackup(): Promise<void> {
+  if (archiveBackupBusy.value) return
+  archiveBackupBusy.value = 'backup'
+  vaultError.value = null
+  try {
+    const result = await window.cairnCodex.createArchiveBackup()
+    if (result.backup) {
+      vaultMessage.value = `Verified archive backup created with ${result.backup.vaultItemCount.toLocaleString()} stored copies.`
+    }
+    await refreshArchiveBackupStatus()
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    archiveBackupBusy.value = null
+  }
+}
+
+async function exportArchiveBackup(): Promise<void> {
+  if (archiveBackupBusy.value) return
+  archiveBackupBusy.value = 'export'
+  vaultError.value = null
+  try {
+    const result = await window.cairnCodex.exportArchiveBackup()
+    if (!result.canceled && result.path) {
+      vaultMessage.value = `Verified archive backup exported to ${result.path}.`
+    }
+    await refreshArchiveBackupStatus()
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    archiveBackupBusy.value = null
+  }
+}
+
+async function restoreArchiveBackup(): Promise<void> {
+  if (archiveBackupBusy.value) return
+  archiveBackupBusy.value = 'restore'
+  vaultError.value = null
+  try {
+    const result = await window.cairnCodex.restoreArchiveBackup()
+    if (!result.canceled && result.restarting) {
+      vaultMessage.value = 'Backup verified. Cairn is restarting to restore the archive.'
+    }
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    archiveBackupBusy.value = null
+  }
+}
+
+async function openArchiveBackupDirectory(): Promise<void> {
+  const error = await window.cairnCodex.openArchiveBackupDirectory()
+  if (error) vaultError.value = `Windows could not open Cairn's archive backup folder: ${error}`
 }
 
 async function importFromItemAssistant(): Promise<void> {
@@ -3023,7 +3149,7 @@ async function pollLiveLifecycle(): Promise<void> {
 }
 
 async function syncLiveMode(): Promise<void> {
-  if (liveStatus.value?.state !== 'ready' || liveSyncInFlight || vaultBusy.value) return
+  if (liveSyncInFlight || vaultBusy.value) return
   liveSyncInFlight = true
   const showActivity = activeView.value === 'vault' || activeView.value === 'supplies'
   if (showActivity) liveSyncing.value = true
@@ -3553,6 +3679,7 @@ function showItemVersion(item: CollectionItem): void {
   if (!counterpart) return
   cancelTooltipHide()
   tooltipDetailsHeld.value = false
+  tooltipCopyAffixes.value = null
   tooltipRecord.value = counterpart.record
   resetTooltipScroll()
 }
@@ -3842,12 +3969,19 @@ function matchesLevel(level: number, expression: string): boolean {
   return level === target
 }
 
-function queueTooltip(item: CollectionItem, event: MouseEvent | FocusEvent): void {
+function queueTooltip(
+  item: CollectionItem,
+  event: MouseEvent | FocusEvent,
+  copy?: Pick<ObservedStashItem, 'prefixRecord' | 'suffixRecord'>
+): void {
   cancelTooltipHide()
   cancelTooltip()
   positionTooltip(event)
   tooltipTimer = setTimeout(() => {
     tooltipDetailsHeld.value = false
+    tooltipCopyAffixes.value = copy
+      ? { prefixRecord: copy.prefixRecord, suffixRecord: copy.suffixRecord }
+      : null
     tooltipRecord.value = item.record
     resetTooltipScroll()
   }, 180)
@@ -3900,6 +4034,7 @@ function hideTooltip(): void {
   cancelTooltip()
   cancelTooltipHide()
   tooltipRecord.value = null
+  tooltipCopyAffixes.value = null
   tooltipDetailsHeld.value = false
 }
 
@@ -4951,6 +5086,7 @@ function formatPercentile(value: number | null | undefined): string {
           <option value="legendary">Legendary</option>
           <option value="epic">Epic</option>
           <option value="mi">Monster Infrequent</option>
+          <option value="double-rare">Double rare MIs</option>
           <option value="rare">Rare items</option>
           <option value="recipe">Craftable from recipe</option>
         </select>
@@ -5569,6 +5705,13 @@ function formatPercentile(value: number | null | undefined): string {
             <button v-if="miWorkshopQuery" type="button" aria-label="Clear Workshop search" @click="miWorkshopQuery = ''">×</button>
           </label>
           <label>
+            <span>Affix quality</span>
+            <select v-model="miAffixFilter">
+              <option value="all">All combinations</option>
+              <option value="double-rare">Double rares only</option>
+            </select>
+          </label>
+          <label>
             <span>Compare copies by</span>
             <select v-model="miComparisonMetric">
               <optgroup label="Roll quality">
@@ -5603,7 +5746,20 @@ function formatPercentile(value: number | null | undefined): string {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in miWorkshopRows" :key="`${row.base.record}|${row.prefix}|${row.suffix}`" @click="openItem(row.base)">
+              <tr
+                v-for="row in miWorkshopRows"
+                :key="`${row.base.record}|${row.prefix}|${row.suffix}`"
+                role="button"
+                tabindex="0"
+                aria-describedby="item-tooltip"
+                @mouseenter="queueTooltip(row.base, $event, row.leader)"
+                @mousemove="moveTooltip"
+                @mouseleave="scheduleTooltipHide"
+                @focus="queueTooltip(row.base, $event, row.leader)"
+                @blur="scheduleTooltipHide"
+                @click="openItem(row.base)"
+                @keydown.enter="openItem(row.base)"
+              >
                 <td>
                   <span class="mi-base-cell">
                     <img v-if="itemIconUrl(row.base)" :src="itemIconUrl(row.base)!" alt="" />
@@ -5629,7 +5785,7 @@ function formatPercentile(value: number | null | undefined): string {
                 </td>
               </tr>
               <tr v-if="miWorkshopRows.length === 0">
-                <td colspan="6" class="skill-empty">{{ miWorkshopQuery ? `No stored MI matches “${miWorkshopQuery}”.` : 'Archive a Monster Infrequent to start building the Workshop.' }}</td>
+                <td colspan="6" class="skill-empty">{{ miWorkshopQuery ? `No stored MI matches “${miWorkshopQuery}”.` : miAffixFilter === 'double-rare' ? 'No stored MI has both a rare prefix and a rare suffix.' : 'Archive a Monster Infrequent to start building the Workshop.' }}</td>
               </tr>
             </tbody>
           </table>
@@ -5828,6 +5984,43 @@ function formatPercentile(value: number | null | undefined): string {
               <div><dt>Modes</dt><dd>{{ gdiaImportResult.sourceSoftcoreItems }} SC · {{ gdiaImportResult.sourceHardcoreItems }} HC</dd></div>
               <div><dt>Pending queue</dt><dd>{{ gdiaImportResult.sourceQueueItems }}</dd></div>
             </dl>
+          </article>
+
+          <article class="settings-card archive-protection-settings">
+            <p class="section-label">Archive protection</p>
+            <h3>Verified rotating backups</h3>
+            <p>Cairn keeps up to 12 verified snapshots after archive changes, plus three emergency pre-restore snapshots. Backups contain the Codex database only; Grim Dawn saves and stashes remain separate.</p>
+            <div v-if="archiveBackupStatus?.latest" class="archive-backup-latest">
+              <span class="status-dot" />
+              <div>
+                <strong>Last verified {{ formatBackupDate(archiveBackupStatus.latest.createdAtUtc) }}</strong>
+                <small>
+                  {{ archiveBackupStatus.latest.vaultItemCount.toLocaleString() }} stored copies ·
+                  {{ formatBackupSize(archiveBackupStatus.latest.sizeBytes) }} ·
+                  {{ archiveBackupStatus.latest.reason }}
+                </small>
+              </div>
+            </div>
+            <div v-else class="archive-backup-latest empty">
+              <span class="status-dot dim" />
+              <div><strong>No verified backup yet</strong><small>Cairn will create one automatically, or you can start one now.</small></div>
+            </div>
+            <small v-if="archiveBackupStatus">
+              {{ archiveBackupStatus.backups.length }} rotating backup{{ archiveBackupStatus.backups.length === 1 ? '' : 's' }} retained locally.
+            </small>
+            <div class="archive-backup-actions">
+              <button class="settings-action" type="button" :disabled="Boolean(archiveBackupBusy)" @click="createArchiveBackup">
+                {{ archiveBackupBusy === 'backup' ? 'Verifying backup…' : 'Back up now' }}
+              </button>
+              <button class="settings-action" type="button" :disabled="Boolean(archiveBackupBusy)" @click="exportArchiveBackup">
+                {{ archiveBackupBusy === 'export' ? 'Exporting…' : 'Export backup…' }}
+              </button>
+              <button class="settings-action danger" type="button" :disabled="Boolean(archiveBackupBusy)" @click="restoreArchiveBackup">
+                {{ archiveBackupBusy === 'restore' ? 'Verifying restore…' : 'Restore backup…' }}
+              </button>
+              <button class="settings-action" type="button" :disabled="Boolean(archiveBackupBusy)" @click="openArchiveBackupDirectory">Open backup folder</button>
+            </div>
+            <small>Restore is staged for restart and first preserves the current archive as an emergency backup.</small>
           </article>
 
           <article class="settings-card">
@@ -6510,7 +6703,7 @@ function formatPercentile(value: number | null | undefined): string {
           <div>
             <h3>
               <span v-if="tooltipItem.upgradeRecord || tooltipItem.baseVersionRecord" class="awakening-sigil tooltip-awakening-sigil"><i /></span>
-              {{ tooltipItem.name }}
+              {{ tooltipDisplayName }}
             </h3>
             <p v-if="tooltipItem.upgradeRecord" class="awakening-copy">Can be upgraded by Ashes of Awakening.</p>
             <p v-else-if="tooltipItem.baseVersionRecord" class="awakening-copy">Awakened with Ashes of Awakening.</p>
@@ -6629,6 +6822,49 @@ function formatPercentile(value: number | null | undefined): string {
             </p>
           </section>
         </template>
+
+        <section
+          v-for="affix in tooltipAffixes"
+          :key="`tooltip-affix:${affix.record}`"
+          class="tooltip-section tooltip-affix"
+          :class="affix.rarity"
+        >
+          <h4>{{ affix.kind === 'prefix' ? 'Prefix' : 'Suffix' }} · {{ affix.name }}</h4>
+          <template v-if="affix.presentation?.sections.some((section) => section.lines.length)">
+            <div
+              v-for="section in affix.presentation?.sections ?? []"
+              :key="`${affix.record}:${section.kind}:${section.heading ?? 'base'}`"
+              class="tooltip-affix-section"
+              :class="`section-${section.kind}`"
+            >
+              <h5 v-if="section.heading">{{ section.heading }}</h5>
+              <p
+                v-for="(line, index) in section.lines"
+                :key="`${line.label}:${index}`"
+                :class="`tone-${line.tone}`"
+              >
+                {{ formatPresentationLine(line) }}
+              </p>
+            </div>
+          </template>
+          <p v-else class="tooltip-affix-empty">This affix changes non-rollable item rules rather than visible stats.</p>
+          <div v-if="affix.presentation?.grantedSkill" class="tooltip-affix-section granted-skill">
+            <h5>
+              {{ affix.presentation.grantedSkill.name }}
+              <span v-if="affix.presentation.grantedSkill.trigger">({{ affix.presentation.grantedSkill.trigger }})</span>
+            </h5>
+            <p v-if="affix.presentation.grantedSkill.description" class="skill-description">
+              {{ affix.presentation.grantedSkill.description }}
+            </p>
+            <p
+              v-for="(line, index) in affix.presentation.grantedSkill.lines"
+              :key="`${line.label}:${index}`"
+              :class="`tone-${line.tone}`"
+            >
+              {{ formatPresentationLine(line) }}
+            </p>
+          </div>
+        </section>
 
         <section v-if="tooltipItem.acquisition?.sources.length" class="tooltip-section tooltip-acquisition">
           <h4>Acquisition</h4>

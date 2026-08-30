@@ -9,6 +9,59 @@ import type {
 } from '@shared/contracts'
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 10
+
+export interface ValidatedCollectionDatabase {
+  schemaVersion: number
+  vaultItemCount: number
+}
+
+export function validateCollectionDatabase(path: string): ValidatedCollectionDatabase {
+  const database = new DatabaseSync(path, { readOnly: true })
+  try {
+    const integrity = database.prepare('PRAGMA quick_check').all() as Array<Record<string, unknown>>
+    const messages = integrity.flatMap((row) => Object.values(row).map(String))
+    if (messages.length !== 1 || messages[0]?.toLowerCase() !== 'ok') {
+      throw new Error(`SQLite quick_check failed: ${messages.join('; ') || 'unknown error'}`)
+    }
+    const version = database.prepare('PRAGMA user_version').get() as { user_version: number }
+    if (Number(version.user_version) > CURRENT_COLLECTION_SCHEMA_VERSION) {
+      throw new Error(
+        `Archive schema ${version.user_version} is newer than this Cairn Codex build supports.`
+      )
+    }
+    const tables = database.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table' AND name = 'vault_item'
+    `).get() as { count: number }
+    if (Number(tables.count) !== 1) {
+      throw new Error('The selected file is not a Cairn Codex archive database.')
+    }
+    const vault = database.prepare('SELECT COUNT(*) AS count FROM vault_item').get() as {
+      count: number
+    }
+    return {
+      schemaVersion: Number(version.user_version),
+      vaultItemCount: Number(vault.count)
+    }
+  } finally {
+    database.close()
+  }
+}
+
+export function checkpointClosedCollectionDatabase(path: string): void {
+  const database = new DatabaseSync(path)
+  try {
+    const rows = database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').all() as Array<{
+      busy?: number
+    }>
+    if (rows.some((row) => Number(row.busy ?? 0) !== 0)) {
+      throw new Error('The current archive could not be checkpointed before restore.')
+    }
+  } finally {
+    database.close()
+  }
+}
 
 function summarizeSupplies(supplies: CollectionItem[]): CollectionSnapshot['supplySummary'] {
   return {
@@ -78,15 +131,33 @@ function vaultPayloadFingerprint(payload: unknown): string {
 
 export class CollectionDatabase {
   private readonly database: DatabaseSync
+  private readonly path: string
 
   constructor(path: string) {
+    this.path = path
     this.database = new DatabaseSync(path)
     this.database.exec('PRAGMA foreign_keys = ON')
     this.database.exec('PRAGMA synchronous = FULL')
     if (path !== ':memory:') {
       this.database.exec('PRAGMA journal_mode = WAL')
+      // Archive backups checkpoint explicitly before copying the stable main file.
+      // Keeping automatic checkpoints disabled prevents later writes from changing
+      // that file while the asynchronous copy is in progress; they remain in WAL.
+      this.database.exec('PRAGMA wal_autocheckpoint = 0')
     }
     this.migrate()
+  }
+
+  checkpointForArchiveBackup(): void {
+    if (this.path === ':memory:') {
+      throw new Error('An in-memory collection database cannot be backed up.')
+    }
+    const rows = this.database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').all() as Array<{
+      busy?: number
+    }>
+    if (rows.some((row) => Number(row.busy ?? 0) !== 0)) {
+      throw new Error('The archive database is busy and could not be checkpointed safely.')
+    }
   }
 
   getDiagnosticSummary(): CollectionDatabaseDiagnosticSummary {
@@ -1002,7 +1073,7 @@ export class CollectionDatabase {
   private migrate(): void {
     let version = (this.database.prepare('PRAGMA user_version').get() as { user_version: number })
       .user_version
-    if (version > 10) {
+    if (version > CURRENT_COLLECTION_SCHEMA_VERSION) {
       throw new Error(
         'Collection database version ' + version + ' is newer than this app supports.'
       )

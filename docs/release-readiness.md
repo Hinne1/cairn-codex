@@ -45,7 +45,8 @@ updates are deliberately deferred until after the beta has real users.
       source hash change, interrupted batch, and stale queue receipt.
 - [x] Verify that an uncertain write remains recoverable and is never reported as
       an ordinary success or ordinary failure.
-- [x] Verify backup discovery and document a user-facing recovery procedure.
+- [x] Verify rotating archive snapshots, staged restore, emergency pre-restore
+      preservation, backup discovery, and the user-facing recovery procedure.
 - [ ] Run a duplication audit across retries and application restarts.
 
 Detailed automated evidence and the per-build manual live checklist live in

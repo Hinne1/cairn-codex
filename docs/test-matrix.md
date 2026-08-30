@@ -20,6 +20,7 @@ a supported game installation and records the manual live-transfer results here.
 | Generated personal/special delivery journal | desktop smoke | Committed and rejected outcomes retained; queue identity persisted before acknowledgement |
 | Lost helper response after a queued write | desktop smoke | Retained as `needs_recovery`; later writes blocked |
 | Database integrity after uncertain outcome | `PRAGMA quick_check` in desktop smoke | Passed |
+| Archive backup, rotation, and restart restore | disposable on-disk archive in desktop smoke | Verified snapshot hashes and manifests; selected prior state restored; emergency pre-restore copy retained; invalid pending request quarantined without replacing the current archive |
 | Archive roll cache and pinned-best persistence | desktop smoke | Passed |
 | All discovered stash serializer round trips | desktop smoke | 6 passed |
 | Representative ingest plans | desktop smoke | 5 passed without writing game files |
@@ -40,7 +41,8 @@ a supported game installation and records the manual live-transfer results here.
 
 The 2026-08-30 installed-game run indexed one installation, two save locations,
 six transfer stashes, and 5,525 catalog items. It analyzed 97 owned copies and
-withheld no roll scores as untrusted.
+withheld no roll scores as untrusted. The same run completed the isolated archive
+backup/restore round trip without touching the user archive or game files.
 
 ## Manual live-transfer gates
 

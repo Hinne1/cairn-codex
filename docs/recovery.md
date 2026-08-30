@@ -17,6 +17,9 @@ an outcome that does not match the game:
 
 - `cairn-codex.sqlite3` and its WAL files contain archive state and the operation
   journal.
+- `archive-backups` contains rotating, SHA-256 recorded SQLite snapshots. Cairn
+  runs `PRAGMA quick_check` before publishing each one and retains up to twelve
+  ordinary snapshots plus three emergency pre-restore snapshots.
 - `backups` contains verified pre-write transfer-stash snapshots for offline
   operations.
 - `live-receipts` contains acknowledged live-ingest and live-return evidence.
@@ -28,6 +31,27 @@ An item is released from the archive only after its exact operation receives and
 verifies the expected commit evidence. A helper timeout after a write request is
 therefore treated as uncertain and retained for recovery, not casually rolled
 back in the database.
+
+## Codex Archive backup and restore
+
+Open **Settings → Archive protection** to create a verified backup, export a
+portable `.sqlite3` copy, open the rotating-backup directory, or restore a
+backup. Cairn also schedules a backup after archive ingest/retrieval and keeps a
+daily startup snapshot when no recent snapshot exists.
+
+A restore is never performed against the open database. Cairn verifies and
+hashes the selected file, stages it, and restarts. Before replacement on the
+next launch it checkpoints and verifies the current archive into a separate
+emergency snapshot. The replacement is copied and checked again before being
+atomically moved into place; a failed replacement leaves the former archive in
+place. If the staged source disappears or changes before restart, Cairn
+quarantines the failed request and opens the untouched current archive instead
+of retrying indefinitely. Restoring the Codex Archive does not alter Grim Dawn
+saves or stashes.
+
+Do not restore while Settings reports unresolved transfer operations. Export
+diagnostics and audit those operations first so newer transfer evidence is not
+hidden by an older database state.
 
 ## Offline stash restore
 

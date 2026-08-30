@@ -3,6 +3,11 @@ export const IPC_CHANNELS = {
   setZoomFactor: 'app:set-zoom-factor',
   exportDiagnostics: 'app:export-diagnostics',
   openDataDirectory: 'app:open-data-directory',
+  getArchiveBackupStatus: 'app:get-archive-backup-status',
+  createArchiveBackup: 'app:create-archive-backup',
+  exportArchiveBackup: 'app:export-archive-backup',
+  restoreArchiveBackup: 'app:restore-archive-backup',
+  openArchiveBackupDirectory: 'app:open-archive-backup-directory',
   importGdiaDatabase: 'app:import-gdia-database',
   getRecoveryStatus: 'app:get-recovery-status',
   getCachedCollection: 'collection:get-cached',
@@ -42,6 +47,32 @@ export interface DiagnosticExportResult {
   path: string | null
 }
 
+export interface ArchiveBackupEntry {
+  id: string
+  fileName: string
+  createdAtUtc: string
+  reason: string
+  sha256: string
+  sizeBytes: number
+  schemaVersion: number
+  vaultItemCount: number
+  verified: boolean
+}
+
+export interface ArchiveBackupStatus {
+  backupDirectory: string
+  backups: ArchiveBackupEntry[]
+  latest: ArchiveBackupEntry | null
+  pendingRestore: boolean
+}
+
+export interface ArchiveBackupActionResult {
+  canceled: boolean
+  backup: ArchiveBackupEntry | null
+  path: string | null
+  restarting: boolean
+}
+
 export interface GdiaImportResult {
   canceled: boolean
   sourcePath: string | null
@@ -72,6 +103,11 @@ export interface CairnCodexApi {
   setZoomFactor: (factor: number) => Promise<number>
   exportDiagnostics: () => Promise<DiagnosticExportResult>
   openDataDirectory: () => Promise<string>
+  getArchiveBackupStatus: () => Promise<ArchiveBackupStatus>
+  createArchiveBackup: () => Promise<ArchiveBackupActionResult>
+  exportArchiveBackup: () => Promise<ArchiveBackupActionResult>
+  restoreArchiveBackup: () => Promise<ArchiveBackupActionResult>
+  openArchiveBackupDirectory: () => Promise<string>
   importGdiaDatabase: () => Promise<GdiaImportResult>
   getRecoveryStatus: () => Promise<RecoveryStatus>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>

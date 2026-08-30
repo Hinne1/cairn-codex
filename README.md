@@ -1,251 +1,274 @@
-# Cairn Codex
+<p align="center">
+  <img src="build/icon.svg" width="104" alt="Cairn Codex icon">
+</p>
 
-A local-first Pokedex-style collection manager for Grim Dawn Epic, Legendary,
-and Monster Infrequent items.
+<h1 align="center">Cairn Codex</h1>
 
-> **Pre-release software.** Cairn Codex is an unofficial community project and
-> is not affiliated with or endorsed by Crate Entertainment. It does not bundle
-> Grim Dawn databases, maps, or item art; those are read from the user's locally
-> installed game.
+<p align="center">
+  A local-first collection atlas, item archive, and build-planning companion for
+  <strong>Grim Dawn</strong>.
+</p>
+
+<p align="center">
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4?logo=windows">
+  <img alt="Electron" src="https://img.shields.io/badge/Electron-43-47848F?logo=electron">
+  <img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript">
+  <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-D8A63B">
+</p>
+
+> [!WARNING]
+> Cairn Codex is pre-release software. It is an unofficial community project
+> and is not affiliated with or endorsed by Crate Entertainment. Live transfers
+> are experimental and deliberately fail closed on unknown game builds.
+
+![Cairn Codex collection progress with a Grim Dawn-style item tooltip](docs/images/collection-and-tooltip.png)
+
+## What is Cairn Codex?
+
+Cairn Codex answers two questions that a physical stash is bad at answering:
+
+1. **What have I found?** Track Epics, Legendaries, sets, Monster Infrequents,
+   affixes, recipes, components, consumables, and reusable faction supplies.
+2. **What can I build with it?** Search every item stat and skill modifier,
+   compare exact copies, explore skill support, and turn a character into a
+   level-ordered shopping list.
+
+The archive is designed around collection semantics rather than infinite-stash
+semantics. Every real copy keeps its seed, affixes, rolls, pin state, and transfer
+history, while the browser presents a clean canonical entry for each base item.
+
+### Highlights
+
+- **Pokédex-style completion:** collection totals by rarity, slot, set, MI base,
+  affix, recipe, component, consumable, and reusable supply.
+- **Game-native presentation:** locally extracted item art, rarity colors,
+  roll ranges, granted skills, set bonuses, acquisition sources, and scrollable
+  Grim Dawn-style tooltips.
+- **Full-text and structured search:** names, flavor text, stats, skills, sets,
+  item types, content packs, and level expressions such as `level:>=75`.
+- **Exact copy comparison:** seed-applied values, affixes, pet bonuses,
+  percentile breakdowns, automatic best-copy selection, and user-pinned picks.
+- **Build research:** Skill Explorer, Leveling Planner, MI Workshop, Stash
+  Oracle, collection-farming recommendations, and collection trivia.
+- **Account knowledge:** learned recipes, craftable set pieces, components,
+  writs, mandates, merits, warrants, augments, and movement runes.
+- **Item Assistant migration:** verified, repeatable import of Softcore and
+  Hardcore copies plus retained incoming queue items.
+- **Local-first:** no account, cloud service, telemetry, or bundled game data.
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/set-collection.png" alt="Cairn Codex set collection">
+      <br><strong>Set collection</strong> — completion, level, crafting, awakening,
+      owned pieces, and every threshold bonus.
+    </td>
+    <td width="50%">
+      <img src="docs/images/skill-explorer.png" alt="Cairn Codex Skill Explorer">
+      <br><strong>Skill Explorer</strong> — ranks, conversions, special modifiers,
+      item level, ownership, and acquisition details.
+    </td>
+  </tr>
+</table>
+
+## Safety model
+
+Cairn treats save mutation as a transaction, not a file-copy shortcut.
+
+- Browsing and indexing are read-only by default.
+- Every closed-game stash write is backed up, source-hash checked, written beside
+  the target, flushed, reparsed, verified, and replaced atomically.
+- Live mode never rewrites the stash file while Grim Dawn is open. A separate,
+  opt-in, fingerprint-allowlisted adapter delivers and ingests items in game
+  memory using durable queue receipts.
+- Multi-item operations are individually acknowledged. Unacknowledged copies
+  remain stored if the destination fills or an outcome becomes uncertain.
+- An operation journal, automatic backups, receipts, and quarantine records make
+  interrupted work recoverable and auditable.
+
+Read the [write transaction design](docs/architecture/write-transactions.md),
+[live adapter design](docs/architecture/live-game-adapter.md), and
+[recovery guide](docs/recovery.md) before modifying transfer code.
 
 ## Installing a release build
 
-1. Download either the per-user Setup executable or the portable Windows x64 ZIP,
-   plus the `.sha256` file from the same release.
-2. Verify the chosen artifact with `Get-FileHash <file> -Algorithm SHA256`.
-3. Run Setup, or extract the complete portable folder and run `Cairn Codex.exe`.
-   Do not run it inside the ZIP or move the executable away from `resources`.
+Cairn Codex currently targets 64-bit Windows.
 
-The unsigned beta may show a Windows SmartScreen warning. Cairn needs no separate
-Node.js or .NET installation. The first catalog scan can take a while because it
-indexes the locally installed game; subsequent starts use an invalidated cache.
+1. Download the per-user Setup executable or portable Windows x64 ZIP from the
+   release, together with its `.sha256` file.
+2. Verify the artifact:
 
-Collection browsing is read-only. Live transfers are opt-in and remain blocked
-for unknown Grim Dawn or native-adapter fingerprints. See the maintained
-[compatibility matrix](docs/compatibility.md) before testing transfers.
+   ```powershell
+   Get-FileHash .\Cairn-Codex-*.exe -Algorithm SHA256
+   # or
+   Get-FileHash .\Cairn-Codex-*.zip -Algorithm SHA256
+   ```
 
-## Product direction
+3. Run Setup, or extract the complete portable folder and launch
+   `Cairn Codex.exe`. Do not run it inside the ZIP or separate the executable
+   from its `resources` directory.
 
-- Show both lifetime discovery and currently available collection completion by
-  rarity, slot, level, and set.
-- Keep every owned item instance while presenting one canonical entry per base item.
-- Track an automatically selected best roll and an optional user-pinned favorite.
-- Ingest and retrieve real items through Grim Dawn's transfer stash.
-- Unlock writs, mandates, augments, and movement runes once, then dispense
-  single copies without consuming the archived template when Infinite Supplies
-  is enabled.
-- Track Monster Infrequent bases by level tier plus discovered prefix/suffix affixes.
-- Build a level-ordered character shopping list from any selected subset of skills.
+The unsigned beta may trigger Windows SmartScreen. A release build is
+self-contained and requires neither Node.js nor a separately installed .NET
+runtime. The first game-data index can take roughly a minute on the current test
+machine; subsequent cached starts are normally a few seconds.
 
-## Architecture
+Collection browsing works without live mode. Consult the maintained
+[compatibility matrix](docs/compatibility.md) before enabling transfers.
 
-Live-game mutation is a separate, opt-in Cairn-owned adapter derived from GDIA; see
-[`docs/architecture/live-game-adapter.md`](docs/architecture/live-game-adapter.md).
+### Migrating from Grim Dawn Item Assistant
 
-```text
-Vue 3 + TypeScript renderer
-          |
-    typed Electron IPC
-          |
-Electron main process --- SQLite
-          |
-   JSON messages over stdio
-          |
-small .NET helper containing the minimum reused GDIA parser/serializer code
-          |
- Grim Dawn game database and transfer stash files
-```
+Open **Settings → Import from Item Assistant** and select Item Assistant's
+`userdata.db`. Cairn creates and hash-verifies an immutable backup before reading
+the source, imports SC and HC copies plus retained incoming queue receipts, and
+skips copies already present in the archive. The import is safe to repeat and
+never modifies or deletes Item Assistant data.
 
-The .NET helper owns the Grim Dawn binary-format boundary and performs complete,
-verified Grim Dawn file transactions. The Electron main process owns application
-lifecycle, file watching, SQLite persistence, and operation orchestration. The
-renderer has no direct filesystem or database access.
+Close Item Assistant during migration so its database cannot change while the
+verified backup is being created.
 
-Write eligibility is represented by separate adapters. Atomic transfer-stash
-file writes require Grim Dawn to be closed. An explicit per-session live adapter
-uses a bundled, fingerprint-allowlisted hook and injector to perform the transfer
-inside game memory. Item Assistant is not required; if it is still installed, it
-must remain closed while Cairn Codex owns that hook and queue.
+## Building from source
 
-### Migrating from Item Assistant
+### Prerequisites
 
-Open **Settings → Import from Item Assistant** and choose Item Assistant's
-`userdata.db`. Cairn creates and hash-verifies an immutable backup before it
-reads anything, imports both Softcore and Hardcore copies plus retained incoming
-queue receipts, and skips copies already present in the Codex Archive. The
-operation never modifies or deletes Item Assistant data and is safe to repeat.
-Close Item Assistant during the migration so its database cannot change while
-the verified backup is being created.
+- Windows 10 or 11, x64
+- [Git for Windows](https://git-scm.com/download/win)
+- [Node.js 22 or newer](https://nodejs.org/)
+- [.NET SDK 10](https://dotnet.microsoft.com/download)
+- A local Grim Dawn installation for installed-game scans and desktop smoke tests
 
-## Initial support scope
+The ordinary TypeScript build and CI safety tests do not require personal save
+data. Cairn never expects game archives or saves to be committed to the repo.
 
-- Personal, local-first Windows application.
-- English item data.
-- Vanilla Grim Dawn plus locally installed official expansions.
-- Local save data; broader save-location support can be added when needed.
-- Epic, Legendary, Monster Infrequent, and named green skill-support bases;
-  affix combinations are managed separately in the Workshop.
-- Reusable faction writs/mandates and equipment augments/movement runes.
+### Install dependencies and verify
 
-## Milestones
-
-1. **Read-only scanner**
-   - Locate supported Grim Dawn installations and save locations.
-   - Parse the game database into a canonical item catalog.
-   - Parse transfer stashes without modifying them.
-   - Display collection totals, item tiles, sets, and owned copies.
-2. **Ingest**
-   - Import an item from a designated transfer-stash tab.
-   - Persist its complete serialized representation before removing it.
-   - Verify backups and round-trip serialization before enabling the operation.
-3. **Retrieve**
-   - Place a selected owned instance into a designated retrieval tab.
-   - Refuse unsafe writes, preserve backups, and verify the resulting stash.
-4. **Collection intelligence**
-   - Roll breakdowns and aggregate auto-best scoring.
-   - Pinned-best selection.
-   - Advanced filters, comparisons, and collection presentation.
-
-These four milestones are implemented. The desktop Vault screen exposes the
-journaled ingest and retrieval flows: choose a transfer stash, stage supported
-items in its final tab, and explicitly confirm the operation. Retrieval remains
-deliberately conservative and requires that final tab to be empty.
-
-The Transfers screen keeps consumable account supplies separate from equipment.
-Ingesting a writ, mandate, augment, or movement rune records it as a reusable
-unlock. Each dispense writes one unit into the game and returns the stored row
-to its available state only after the normal backup/receipt verification has
-completed; the original stack size is never duplicated. Settings can disable
-Infinite Supplies, in which case returning a supply consumes its archived stack
-while retaining its lifetime collection entry.
-
-The collection browser also extracts item art from the installed game archives,
-uses Grim Dawn rarity colors, and builds game-style catalog tooltips from the
-local ARZ/tag data. Catalog tooltips show possible base-item ranges (for example,
-`40% – 60% Fire Damage`); the copy-comparison drawer remains the place for actual
-seed-applied values.
-
-Search is full-text across item names, sets, stats, skill bonuses, granted-skill
-names, and descriptions. Bare terms can be combined, and the following scoped
-forms are supported: `name:`, `set:`, `skill:`, `slot:`, `type:`, `rarity:`,
-`pack:`, and numeric level expressions such as `level:>=75`.
-
-MI acquisition sources are resolved from the installed ARZ by following the full
-item -> loot-table -> monster graph. Cairn also indexes placed game records from
-the highest installed `Levels.arc`, associates them with named map regions, and
-shows the result in item tooltips. The catalog and map index are cached locally;
-database/map timestamps invalidate them after a game update, stash timestamps
-trigger an inventory refresh, and Settings offers a manual rebuild command.
-
-The Leveling Planner merges all selected skills into one list of supporting MIs,
-Epics, Legendaries, and faction rares up to a configurable level cap (70 by
-default). Faction-table traversal preserves the required faction and reputation
-tier. Deterministic blueprint recipes are joined to the account's read-only
-`formulas.*` indexes, with separate Softcore and Hardcore learned states. Its MI
-Atlas can show only the selected build's sources or every MI under
-the current cap, using corrected MAP9 world-region origins plus an area list;
-points represent source regions rather than invented exact monster coordinates.
-
-## Safety invariants
-
-- Read-only is the default mode.
-- Every write requires an explicit permit from the configured safety gate.
-- Closed-game mode never writes a transfer-stash file while Grim Dawn runs.
-- Live mode never rewrites the transfer-stash file; it uses an explicit,
-  version-reported in-memory hook handshake and durable queue receipts.
-- Multi-item live returns are serialized into individually acknowledged commits;
-  a full destination stops the batch without releasing unacknowledged copies.
-- Never read or write the transfer stash while another stash tool is running.
-- Before every write, make a restorable snapshot and validate the source hash.
-- Serialize to a temporary file beside the target, flush it, parse and verify
-  it, then replace the target atomically.
-- Retain timestamped automatic backups independently of the atomic replacement
-  fallback.
-- Keep a durable operation journal for ingest and retrieval.
-- Never delete the only persisted representation of an item as part of a failed
-  or unverified operation.
-
-GDIA's apparent live stash reads and writes do not come from ordinary concurrent
-file access: its injected native hook intercepts incoming items and recreates
-outgoing items inside the running game. Cairn Codex keeps that adapter outside
-the collection database and file-transaction core and only enables it after an
-explicit confirmation for the current game session.
-
-## Reused code
-
-The transfer-stash and game-database access layer will be reduced from the
-MIT-licensed [Grim Dawn Item Assistant](https://github.com/marius00/iagd).
-Copied files must retain their original copyright and license notices. A source
-manifest will record the upstream commit and local modifications.
-
-## Development
-
-Prerequisites:
-
-- Node.js 22 or newer.
-- .NET SDK 10.
-
-Install and verify the Electron application:
+From a PowerShell prompt in the cloned repository:
 
 ```powershell
-npm.cmd install
-npm.cmd run typecheck
-npm.cmd run build
-npm.cmd run test:discovery
+npm.cmd ci
+npm.cmd run verify
+```
+
+`verify` performs the repository/provenance audit, production TypeScript/Vue
+build, .NET helper build, atomic-write self-test, native live-queue serializer
+self-test, and isolated discovery tests.
+
+Run the deeper installed-game desktop smoke suite with:
+
+```powershell
 npm.cmd run smoke:desktop
 ```
 
-Run the desktop application in development mode:
+It reads the installed game and discovered stashes but uses an in-memory Codex
+database and disposable transaction fixtures. It does not perform a live transfer.
+
+### Development mode
 
 ```powershell
 npm.cmd run dev
 ```
 
-Build the Grim Dawn helper:
+The renderer uses Vue 3 and TypeScript through Electron Vite. The helper can be
+built independently:
 
 ```powershell
 dotnet build .\src\helper\CairnCodex.GrimDawn\CairnCodex.GrimDawn.csproj
 ```
 
-Build a directly launchable Windows folder:
+### Build a portable Windows application
 
 ```powershell
 npm.cmd run package:win
 ```
 
-Then run `dist\package\Cairn Codex-win32-x64\Cairn Codex.exe`. Keep the rest of that
-folder beside the executable; it contains Electron and the Grim Dawn helper.
+Launch:
 
-The release harness also includes isolated environment, migration, and UI
-performance diagnostics under `scripts/`. They write only below `local-cache`
-and can be pointed at copied/closed profiles; they never need to mutate a Grim
-Dawn installation or save.
+```text
+dist\package\Cairn Codex-win32-x64\Cairn Codex.exe
+```
 
-Create the versioned unsigned ZIP, checksum, and release manifest from a clean
-worktree with:
+The package contains Electron and a self-contained .NET helper. Keep the entire
+generated directory together.
+
+### Build release artifacts
+
+From a clean worktree:
 
 ```powershell
 npm.cmd run package:release
 ```
 
-The renderer communicates only through the narrow API exposed by the preload
-script. The helper's versioned newline-JSON protocol is documented in
-[`docs/architecture/helper-protocol.md`](docs/architecture/helper-protocol.md).
-Collection persistence and its lifetime-discovery boundary are documented in
-[`docs/architecture/collection-schema.md`](docs/architecture/collection-schema.md).
+This produces the unsigned installer, portable ZIP, SHA-256 file, and manifest
+under `dist\release`. The release harness audits package contents and native
+fingerprints before emitting artifacts. See the [release readiness checklist](docs/release-readiness.md)
+and [test matrix](docs/test-matrix.md) for the remaining manual live gates.
 
-## Local data and recovery
+## Architecture
 
-Cairn stores its archive, settings, game-data cache, operation journal, live
-receipts, quarantine, and automatic backups under `%APPDATA%\cairn-codex`.
-Settings can open that directory and export a small diagnostic report that omits
-item payloads and save contents.
+```text
+Vue 3 + TypeScript renderer
+            │
+      typed Electron IPC
+            │
+Electron main process ─── SQLite archive
+            │
+    newline-JSON over stdio
+            │
+small .NET parser / serializer helper
+            │
+Grim Dawn ARZ, ARC, saves, and transfer stashes
+```
 
-If a transfer result is uncertain, stop transferring, close Grim Dawn, preserve
-the entire directory, and consult [recovery guidance](docs/recovery.md). Do not
-post character saves, stash files, or the archive database in a public issue.
+The renderer has no direct filesystem or database access. Electron owns the
+application lifecycle, SQLite persistence, caches, watching, and operation
+orchestration. The helper owns the Grim Dawn binary-format boundary.
 
-## License
+Useful design references:
 
-Cairn Codex is distributed under the MIT License. Imported and bundled
-dependencies retain their own notices in `THIRD_PARTY_NOTICES.md`.
+- [Collection schema and discovery semantics](docs/architecture/collection-schema.md)
+- [Helper protocol](docs/architecture/helper-protocol.md)
+- [Character import](docs/architecture/character-import.md)
+- [Formula and recipe import](docs/architecture/formula-import.md)
+- [Live adapter compatibility history](docs/live-hook-compatibility.md)
+
+## Local data and privacy
+
+Cairn stores its archive, settings, caches, operation journal, receipts,
+quarantine, and backups under `%APPDATA%\cairn-codex`. Settings can open that
+directory and export a diagnostic report that omits item payloads and save data.
+
+Do not attach character saves, stash files, the archive database, crash dumps,
+or raw live-queue files to a public issue. Follow the [recovery guide](docs/recovery.md)
+when a transfer outcome is uncertain.
+
+## Support scope
+
+- English item data
+- Vanilla Grim Dawn and locally installed official expansions
+- Local Windows saves and discovered Steam/GOG installations
+- Epic, Legendary, Monster Infrequent, and named green skill-support bases
+- Prefix/suffix discovery and MI copy comparison
+- Reusable faction supplies and finite stackable consumables
+
+Unknown game and native-adapter fingerprints remain read-only until explicitly
+verified. Code signing and automatic updates are intentionally deferred for the
+first private beta.
+
+## Contributing
+
+Bug reports, focused UX feedback, parser fixtures, and carefully scoped pull
+requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting
+changes—save-data safety and repository privacy checks are mandatory.
+
+## Attribution and license
+
+The minimum transfer-stash, game-database, and native-adapter layer is derived
+from the MIT-licensed [Grim Dawn Item Assistant](https://github.com/marius00/iagd).
+The pinned upstream inventory and local modifications are documented in
+[docs/upstream/gdia.md](docs/upstream/gdia.md), `native/patches`, source headers,
+and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Cairn Codex is distributed under the [MIT License](LICENSE). Grim Dawn names,
+item data, and artwork belong to their respective owners; the application reads
+them from the user's installed game and does not distribute the game database.

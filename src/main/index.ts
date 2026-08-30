@@ -3229,7 +3229,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
   const captureStartedAt = Date.now()
   const interactionTimings: Record<string, number> = {}
   try {
-    window.setContentSize(1440, 1000)
+    const requestedHeight = Number.parseInt(
+      process.env.CAIRN_CODEX_SCREENSHOT_HEIGHT ?? '',
+      10
+    )
+    const screenshotHeight = Number.isFinite(requestedHeight)
+      ? Math.min(Math.max(requestedHeight, 720), 2400)
+      : 1000
+    window.setContentSize(1440, screenshotHeight)
     for (let attempt = 0; attempt < 240; attempt += 1) {
       const scanError = await window.webContents.executeJavaScript(
         "document.querySelector('.scan-error')?.textContent"

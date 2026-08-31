@@ -177,13 +177,7 @@ internal static partial class ItemPresentationBuilder
         if (flavorText is not null) searchParts.Add(flavorText);
         searchParts.AddRange(sections.Select(section => section.Heading).OfType<string>());
         searchParts.AddRange(sections.SelectMany(section => section.Lines).Select(SearchLine));
-        if (grantedSkill is not null)
-        {
-            searchParts.Add(grantedSkill.Name);
-            if (grantedSkill.Description is not null) searchParts.Add(grantedSkill.Description);
-            if (grantedSkill.Trigger is not null) searchParts.Add(grantedSkill.Trigger);
-            searchParts.AddRange(grantedSkill.Lines.Select(SearchLine));
-        }
+        if (grantedSkill is not null) AddGrantedSkillSearchParts(grantedSkill, searchParts);
         return new ItemPresentation(
             flavorText,
             sections,
@@ -211,11 +205,13 @@ internal static partial class ItemPresentationBuilder
             var petBecameActive = IsTierValueActive(record, "petBonusLevel", level) &&
                 !IsTierValueActive(record, "petBonusLevel", level - 1);
             var petLines = petBecameActive ? BuildSetPetLines(record, data) : [];
-            var skillBecameActive = IsTierValueActive(record, "itemSkillLevel", level) &&
+            var modifiersBecameActive = IsTierValueActive(record, "itemSkillModifierControl", level) &&
+                !IsTierValueActive(record, "itemSkillModifierControl", level - 1);
+            var grantedSkillBecameActive = IsTierValueActive(record, "itemSkillLevel", level) &&
                 !IsTierValueActive(record, "itemSkillLevel", level - 1);
             var skillModifiers = new List<ItemPresentationSection>();
-            if (skillBecameActive) AddSkillModifiers(record, data, skillModifiers);
-            var grantedSkill = skillBecameActive ? BuildGrantedSkill(record, data) : null;
+            if (modifiersBecameActive) AddSkillModifiers(record, data, skillModifiers);
+            var grantedSkill = grantedSkillBecameActive ? BuildGrantedSkill(record, data) : null;
             if (newLines.Length > 0 || petLines.Count > 0 || skillModifiers.Count > 0 || grantedSkill is not null)
                 tiers.Add(new ItemSetBonusTier(
                     level,
@@ -227,7 +223,7 @@ internal static partial class ItemPresentationBuilder
         }
         return new ItemSetPresentation(
             Resolve(record.Text("setName"), data.Tags) ?? HumanizePath(path),
-            Resolve(record.Text("setDescription"), data.Tags),
+            TrimQuotes(Resolve(record.Text("setDescription"), data.Tags)),
             members,
             tiers);
     }
@@ -550,12 +546,27 @@ internal static partial class ItemPresentationBuilder
         var level = Math.Max(1, RecordInteger(item, "itemSkillLevelEq") ??
             RecordInteger(item, "itemSkillLevel") ?? 1);
         var trigger = ResolveTrigger(item.Text("itemSkillAutoController"), skill, level);
+        var lines = BuildGrantedSkillLines(skill, data, level, includeModifierMechanics: false);
+        var rootSkill = data.Records.TryGetValue(skillPath, out var rootSource)
+            ? rootSource.Record
+            : skill;
+        var linkedSkills = BuildLinkedGrantedSkills(rootSkill, data, level);
+        return new ItemGrantedSkillPresentation(name, description, trigger, lines, linkedSkills);
+    }
+
+    private static IReadOnlyList<ItemPresentationLine> BuildGrantedSkillLines(
+        ArzRecord skill,
+        ItemPresentationSource data,
+        int level,
+        bool includeModifierMechanics)
+    {
         var lines = new List<ItemPresentationLine>();
         if (NumberAt(skill, "skillManaCost", level) is { } energy)
             lines.Add(Line("Energy Cost", energy, null));
         if (NumberAt(skill, "skillCooldownTime", level) is { } cooldown)
             lines.Add(Line("Skill Recharge", cooldown, null, "s"));
-        if (NumberAt(skill, "skillActiveDuration", level) is { } duration)
+        if ((NumberAt(skill, "skillActiveDuration", level) ??
+             NumberAt(skill, "spawnObjectsTimeToLive", level)) is { } duration)
             lines.Add(Line("Duration", duration, null, "s"));
         if (NumberAt(skill, "skillTargetRadius", level) is { } radius)
             lines.Add(Line("Target Area", radius, null, "m"));
@@ -568,7 +579,78 @@ internal static partial class ItemPresentationBuilder
         AddFlatDamage(skill, lines, "standard", level);
         AddDurationDamage(skill, lines, "standard", level);
         AddSimpleStats(skill, lines, "standard", level);
-        return new ItemGrantedSkillPresentation(name, description, trigger, lines);
+        AddRetaliation(skill, lines, level);
+        AddConversions(skill, lines, level: level);
+        if (includeModifierMechanics)
+        {
+            AddSkillModifierSpecialStats(skill, lines);
+            AddSkillModifierMechanics(skill, data, lines, includeGeometry: false);
+        }
+        return lines.Distinct().ToArray();
+    }
+
+    private static IReadOnlyList<ItemGrantedSkillPresentation> BuildLinkedGrantedSkills(
+        ArzRecord rootSkill,
+        ItemPresentationSource data,
+        int level)
+    {
+        var spawnPath = TextAt(rootSkill, "spawnObjects", level);
+        if (spawnPath is null || !data.Records.TryGetValue(spawnPath, out var spawnSource)) return [];
+
+        var spawn = spawnSource.Record;
+        var candidates = new List<(string Path, int Level)>();
+        void AddCandidate(string? path, int skillLevel)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            var normalizedLevel = Math.Max(1, skillLevel);
+            var existingIndex = candidates.FindIndex(candidate =>
+                string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase));
+            if (existingIndex >= 0)
+            {
+                if (normalizedLevel > candidates[existingIndex].Level)
+                    candidates[existingIndex] = (path, normalizedLevel);
+                return;
+            }
+            candidates.Add((path, normalizedLevel));
+        }
+
+        for (var index = 1; index <= 16; index++)
+        {
+            var path = spawn.Text("skillName" + index);
+            var skillLevel = checked((int)Math.Round(spawn.Number("skillLevel" + index) ?? 1));
+            AddCandidate(path, skillLevel);
+        }
+        AddCandidate(spawn.Text("initialSkillName"), 1);
+        AddCandidate(spawn.Text("attackSkillName"), 1);
+
+        var linked = new List<ItemGrantedSkillPresentation>();
+        foreach (var candidate in candidates)
+        {
+            if (!TryResolveDisplaySkill(candidate.Path, data, out var displaySkill) ||
+                (displaySkill.Number("isPetDisplayable") ?? 0) <= 0)
+                continue;
+            var name = Resolve(displaySkill.Text("skillDisplayName"), data.Tags) ??
+                HumanizePath(candidate.Path);
+            var description = Resolve(displaySkill.Text("skillBaseDescription"), data.Tags);
+            var lines = BuildGrantedSkillLines(
+                displaySkill,
+                data,
+                candidate.Level,
+                includeModifierMechanics: true);
+            linked.Add(new ItemGrantedSkillPresentation(name, description, null, lines, []));
+        }
+        return linked;
+    }
+
+    private static void AddGrantedSkillSearchParts(
+        ItemGrantedSkillPresentation skill,
+        List<string> parts)
+    {
+        parts.Add(skill.Name);
+        if (skill.Description is not null) parts.Add(skill.Description);
+        if (skill.Trigger is not null) parts.Add(skill.Trigger);
+        parts.AddRange(skill.Lines.Select(SearchLine));
+        foreach (var linked in skill.LinkedSkills) AddGrantedSkillSearchParts(linked, parts);
     }
 
     private static void AddSkillModifiers(
@@ -670,8 +752,21 @@ internal static partial class ItemPresentationBuilder
     private static void AddSkillModifierMechanics(
         ArzRecord record,
         ItemPresentationSource data,
-        List<ItemPresentationLine> lines)
+        List<ItemPresentationLine> lines,
+        bool includeGeometry = true)
     {
+        var changedPets = record.Values.GetValueOrDefault("petChanges")?
+            .Select(value => value.Text)
+            .OfType<string>()
+            .Where(path => path.Length > 0)
+            .ToArray() ?? [];
+        if (changedPets.Any(path =>
+                data.Records.TryGetValue(path, out var source) &&
+                string.Equals(source.Record.Type, "PetPlayerScaling", StringComparison.OrdinalIgnoreCase)))
+        {
+            lines.Add(Line("Scales with player bonuses instead of Pet Bonuses", null, null));
+        }
+
         AddExactPercent(record, lines, "weaponDamagePct", "Weapon Damage");
         AddExactPercent(record, lines, "skillChanceWeight", "Chance on Default Weapon Attack", showPositive: true);
         AddExactPercent(record, lines, "projectilePiercing", "Chance to Pass Through Enemies");
@@ -679,12 +774,15 @@ internal static partial class ItemPresentationBuilder
 
         if (record.Number("offensiveDamageMultModifier") is { } totalDamage && Math.Abs(totalDamage) > 0.001)
             lines.Add(Line($"Total Damage Modified by {Format(totalDamage)}%", null, null));
-        if (record.Number("skillTargetNumber") is { } targets && Math.Abs(targets) > 0.001)
-            lines.Add(Line("Target Maximum", Math.Abs(targets), null, prefix: targets < 0 ? "−" : "+"));
-        if (record.Number("skillTargetAngle") is { } angle && Math.Abs(angle) > 0.001)
-            lines.Add(Line("Attack Arc", Math.Abs(angle), null, "°", prefix: angle < 0 ? "−" : "+"));
-        if (record.Number("skillTargetRadius") is { } radius && Math.Abs(radius) > 0.001)
-            lines.Add(Line("Target Area", Math.Abs(radius), null, "m", prefix: radius < 0 ? "−" : "+"));
+        if (includeGeometry)
+        {
+            if (record.Number("skillTargetNumber") is { } targets && Math.Abs(targets) > 0.001)
+                lines.Add(Line("Target Maximum", Math.Abs(targets), null, prefix: targets < 0 ? "−" : "+"));
+            if (record.Number("skillTargetAngle") is { } angle && Math.Abs(angle) > 0.001)
+                lines.Add(Line("Attack Arc", Math.Abs(angle), null, "°", prefix: angle < 0 ? "−" : "+"));
+            if (record.Number("skillTargetRadius") is { } radius && Math.Abs(radius) > 0.001)
+                lines.Add(Line("Target Area", Math.Abs(radius), null, "m", prefix: radius < 0 ? "−" : "+"));
+        }
         if (record.Number("projectileLaunchNumber") is { } projectiles && Math.Abs(projectiles) > 0.001)
             lines.Add(Line(Math.Abs(projectiles) == 1 ? "Projectile" : "Projectiles", Math.Abs(projectiles), null,
                 prefix: projectiles < 0 ? "−" : "+"));
@@ -813,8 +911,12 @@ internal static partial class ItemPresentationBuilder
             "Alternate projectile effects");
         AddVisualOverride(record, lines, ["targetFxPakOverride"], "Alternate impact effects");
         AddVisualOverride(record, lines, ["waveFxPakOverride"], "Alternate wave effects");
+        AddVisualOverride(record, lines, ["lineEffectOverride"], "Alternate line effects");
         AddVisualOverride(record, lines, ["lightningOverride"], "Alternate lightning effects");
-        AddVisualOverride(record, lines, ["particleEffect1Override"], "Alternate particle effects");
+        AddVisualOverride(record, lines, ["particleEffect1Override", "particleEffect2Override"],
+            "Alternate particle effects");
+        AddVisualOverride(record, lines, ["warmUpEffectName"], "Alternate warm-up effects");
+        AddVisualOverride(record, lines, ["charFxPakOtherNames"], "Alternate character effects");
         AddVisualOverride(record, lines, ["fxChanges"], "Alternate skill effects");
     }
 
@@ -1016,6 +1118,13 @@ internal static partial class ItemPresentationBuilder
         return numbers[Math.Clamp(level - 1, 0, numbers.Length - 1)];
     }
 
+    private static string? TextAt(ArzRecord record, string field, int level)
+    {
+        if (!record.Values.TryGetValue(field, out var values)) return null;
+        var text = values.Select(value => value.Text).Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+        return text.Length == 0 ? null : text[Math.Clamp(level - 1, 0, text.Length - 1)];
+    }
+
     private static int? RecordInteger(ArzRecord record, string field)
     {
         if (record.Number(field) is { } number)
@@ -1120,7 +1229,8 @@ internal sealed record ItemGrantedSkillPresentation(
     string Name,
     string? Description,
     string? Trigger,
-    IReadOnlyList<ItemPresentationLine> Lines);
+    IReadOnlyList<ItemPresentationLine> Lines,
+    IReadOnlyList<ItemGrantedSkillPresentation> LinkedSkills);
 internal sealed record ItemSetPresentation(
     string Name,
     string? Description,

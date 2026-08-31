@@ -471,6 +471,13 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-card li em.awakening { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 .set-card li.missing { color: #656158; }
 .set-card li.missing button > span { color: #565249; }
+.set-member-fx { display: grid; gap: 5px; margin-top: 12px; padding: 10px; border: 1px solid rgba(78, 139, 137, .34); border-radius: 5px; background: rgba(27, 64, 62, .14); }
+.set-member-fx h4 { margin: 0 0 2px; color: #76c8c0; font: 500 11px Georgia, serif; letter-spacing: .04em; text-transform: uppercase; }
+.set-member-fx button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 8px; border: 0; border-radius: 4px; color: #a5d4cf; background: rgba(35, 74, 71, .22); cursor: pointer; text-align: left; }
+.set-member-fx button:hover { background: rgba(49, 96, 92, .34); }
+.set-member-fx button strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.set-member-fx button span { color: #7db8b3; font-size: 10px; }
+.set-member-fx button small { grid-column: 1 / -1; color: #71918d; font-size: 9px; font-style: italic; }
 .set-bonus-tiers { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #39342b; }
 .set-bonus-tiers section { color: #938b7d; }
 .set-bonus-tiers section.unlocked { color: #bfa675; }
@@ -487,6 +494,10 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-tier-group.skill-bonus p { color: #879daf; }
 .set-tier-group.visual-bonus h5 { color: #79c8c1; }
 .set-tier-group.visual-bonus p { color: #8ab9b3; font-style: italic; }
+.linked-granted-skill { margin: 8px 0 0 10px; padding: 8px 0 0 10px; border-top: 1px solid rgba(85, 168, 255, .18); border-left: 1px solid rgba(85, 168, 255, .24); }
+.linked-granted-skill h5, .linked-granted-skill h6 { margin: 0 0 3px; color: #67b4ff; font-size: 13px; font-weight: 500; }
+.linked-granted-skill .skill-description { margin-left: 0; }
+.linked-granted-skill p { margin-left: 0 !important; }
 
 .pagination { display: flex; align-items: center; justify-content: center; gap: 18px; padding-top: 28px; }
 .pagination button { min-width: 92px; padding: 9px 12px; border: 1px solid #433d31; border-radius: 5px; color: #b7aa8c; background: #24211b; cursor: pointer; }

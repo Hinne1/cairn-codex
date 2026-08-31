@@ -532,6 +532,7 @@ export interface ItemGrantedSkillPresentation {
   description: string | null
   trigger: string | null
   lines: ItemPresentationLine[]
+  linkedSkills: ItemGrantedSkillPresentation[]
 }
 
 export interface ItemSetPresentation {

@@ -20,6 +20,7 @@ import type {
   DismantlingPreview,
   GdiaImportResult,
   GrimDawnDiscovery,
+  ItemGrantedSkillPresentation,
   ItemPresentation,
   ItemPresentationLine,
   ItemRollAnalysis,
@@ -3978,10 +3979,7 @@ function setSearchText(item: CollectionItem): string {
       section.heading,
       ...section.lines.map((line) => line.label)
     ]),
-    tier.grantedSkill?.name,
-    tier.grantedSkill?.description,
-    tier.grantedSkill?.trigger,
-    ...(tier.grantedSkill?.lines.map((line) => line.label) ?? [])
+    ...grantedSkillSearchParts(tier.grantedSkill)
   ]).filter(Boolean).join(' ')
   setSearchTextCache.set(presentation, text)
   return text
@@ -4007,10 +4005,7 @@ function itemSearchEverything(item: CollectionItem, document: ItemSearchDocument
           section.heading,
           ...section.lines.map((line) => formatPresentationLine(line))
         ]),
-        tier.grantedSkill?.name,
-        tier.grantedSkill?.description,
-        tier.grantedSkill?.trigger,
-        ...(tier.grantedSkill?.lines.map((line) => formatPresentationLine(line)) ?? [])
+        ...grantedSkillSearchParts(tier.grantedSkill)
       ]
     ) ?? [])
   ]
@@ -4048,19 +4043,36 @@ function skillSearchText(item: CollectionItem): string {
   return [
     ...skillLines,
     ...modifierSkills,
-    granted?.name,
-    granted?.description,
-    granted?.trigger,
-    ...((granted?.lines ?? []).map((line) => line.label))
+    ...grantedSkillSearchParts(granted)
   ]
     .filter(Boolean)
     .join(' ')
 }
 
-function setHasVisualChanges(set: CollectionSet): boolean {
-  return (set.items[0]?.setPresentation?.tiers ?? []).some((tier) =>
-    (tier.skillModifiers ?? []).some((section) => section.kind === 'visual-modifier')
+function grantedSkillSearchParts(skill: ItemGrantedSkillPresentation | null | undefined): string[] {
+  if (!skill) return []
+  return [
+    skill.name,
+    skill.description,
+    skill.trigger,
+    ...skill.lines.map((line) => formatPresentationLine(line)),
+    ...(skill.linkedSkills ?? []).flatMap((linked) => grantedSkillSearchParts(linked))
+  ].filter((value): value is string => Boolean(value))
+}
+
+function setMemberVisualChanges(set: CollectionSet) {
+  return set.items.flatMap((item) =>
+    (item.presentation?.sections ?? [])
+      .filter((section) => section.kind === 'visual-modifier')
+      .map((section) => ({ item, section }))
   )
+}
+
+function setHasVisualChanges(set: CollectionSet): boolean {
+  return setMemberVisualChanges(set).length > 0 ||
+    (set.items[0]?.setPresentation?.tiers ?? []).some((tier) =>
+      (tier.skillModifiers ?? []).some((section) => section.kind === 'visual-modifier')
+    )
 }
 
 function matchesLevel(level: number, expression: string): boolean {
@@ -6799,6 +6811,25 @@ function formatPercentile(value: number | null | undefined): string {
               </button>
             </li>
           </ul>
+          <section v-if="setMemberVisualChanges(set).length" class="set-member-fx">
+            <h4>Member item FX</h4>
+            <button
+              v-for="change in setMemberVisualChanges(set)"
+              :key="`${change.item.record}:${change.section.heading}`"
+              type="button"
+              aria-describedby="item-tooltip"
+              @mouseenter="queueTooltip(change.item, $event)"
+              @mousemove="moveTooltip"
+              @mouseleave="scheduleTooltipHide"
+              @focus="queueTooltip(change.item, $event)"
+              @blur="scheduleTooltipHide"
+              @click="openItem(change.item)"
+            >
+              <strong>{{ change.item.name }}</strong>
+              <span>{{ change.section.heading?.replace(' · Visual transformation', '') }}</span>
+              <small>{{ change.section.lines.map((line) => formatPresentationLine(line)).join(' · ') }}</small>
+            </button>
+          </section>
           <div v-if="set.items[0]?.setPresentation?.tiers.length" class="set-bonus-tiers">
             <section
               v-for="tier in set.items[0]?.setPresentation?.tiers"
@@ -6835,6 +6866,17 @@ function formatPercentile(value: number | null | undefined): string {
                 <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
                   {{ formatPresentationLine(line) }}
                 </p>
+                <div
+                  v-for="linked in tier.grantedSkill.linkedSkills ?? []"
+                  :key="linked.name"
+                  class="linked-granted-skill"
+                >
+                  <h6>{{ linked.name }}</h6>
+                  <p v-if="linked.description">{{ linked.description }}</p>
+                  <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
+                    {{ formatPresentationLine(line) }}
+                  </p>
+                </div>
               </div>
             </section>
           </div>
@@ -7017,6 +7059,17 @@ function formatPercentile(value: number | null | undefined): string {
                 <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
                   {{ formatPresentationLine(line) }}
                 </p>
+                <div
+                  v-for="linked in tier.grantedSkill.linkedSkills ?? []"
+                  :key="linked.name"
+                  class="linked-granted-skill"
+                >
+                  <h6>{{ linked.name }}</h6>
+                  <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
+                  <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
+                    {{ formatPresentationLine(line) }}
+                  </p>
+                </div>
               </div>
             </div>
           </section>
@@ -7039,6 +7092,17 @@ function formatPercentile(value: number | null | undefined): string {
             >
               {{ formatPresentationLine(line) }}
             </p>
+            <div
+              v-for="linked in tooltipItem.presentation.grantedSkill.linkedSkills ?? []"
+              :key="linked.name"
+              class="linked-granted-skill"
+            >
+              <h5>{{ linked.name }}</h5>
+              <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
+              <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
+                {{ formatPresentationLine(line) }}
+              </p>
+            </div>
           </section>
         </template>
 
@@ -7082,6 +7146,17 @@ function formatPercentile(value: number | null | undefined): string {
             >
               {{ formatPresentationLine(line) }}
             </p>
+            <div
+              v-for="linked in affix.presentation.grantedSkill.linkedSkills ?? []"
+              :key="linked.name"
+              class="linked-granted-skill"
+            >
+              <h6>{{ linked.name }}</h6>
+              <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
+              <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
+                {{ formatPresentationLine(line) }}
+              </p>
+            </div>
           </div>
         </section>
 

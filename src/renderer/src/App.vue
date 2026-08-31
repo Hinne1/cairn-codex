@@ -341,6 +341,10 @@ const miWorkshopQuery = ref('')
 const miAffixFilter = ref<MiAffixFilter>('all')
 const miComparisonMetric = ref<MiMetricKey>('overall')
 const miComparisonDirection = ref<SortDirection>('desc')
+const miWorkshopQueryInput = ref<HTMLInputElement | null>(null)
+const miAffixFilterSelect = ref<HTMLSelectElement | null>(null)
+const miComparisonMetricSelect = ref<HTMLSelectElement | null>(null)
+const miComparisonDirectionSelect = ref<HTMLSelectElement | null>(null)
 const canNavigateBack = ref(false)
 const canNavigateForward = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
@@ -1918,6 +1922,18 @@ function updateHistoryButtons(): void {
   canNavigateForward.value = appHistoryIndex < appHistoryMaximum
 }
 
+function syncMiWorkshopControlElements(): void {
+  if (activeView.value !== 'mi-workshop') return
+  if (miWorkshopQueryInput.value) miWorkshopQueryInput.value.value = miWorkshopQuery.value
+  if (miAffixFilterSelect.value) miAffixFilterSelect.value.value = miAffixFilter.value
+  if (miComparisonMetricSelect.value) miComparisonMetricSelect.value.value = miComparisonMetric.value
+  if (miComparisonDirectionSelect.value) miComparisonDirectionSelect.value.value = miComparisonDirection.value
+}
+
+function handlePageShow(): void {
+  void nextTick(syncMiWorkshopControlElements)
+}
+
 function handleAppHistory(event: PopStateEvent): void {
   const state = event.state as AppHistoryState | null
   if (!state?.cairnCodex) return
@@ -1929,12 +1945,15 @@ function handleAppHistory(event: PopStateEvent): void {
   query.value = state.query
   ownership.value = state.ownership
   rarityFilter.value = state.rarityFilter
-  miWorkshopQuery.value = state.miWorkshopQuery
+  miWorkshopQuery.value = state.miWorkshopQuery ?? ''
   miAffixFilter.value = state.miAffixFilter ?? 'all'
-  miComparisonMetric.value = state.miComparisonMetric
-  miComparisonDirection.value = state.miComparisonDirection
+  miComparisonMetric.value = state.miComparisonMetric ?? 'overall'
+  miComparisonDirection.value = state.miComparisonDirection ?? 'desc'
   updateHistoryButtons()
-  void nextTick(() => { restoringAppHistory = false })
+  void nextTick(() => {
+    syncMiWorkshopControlElements()
+    restoringAppHistory = false
+  })
 }
 
 function navigateAppHistory(direction: 'back' | 'forward'): void {
@@ -2073,6 +2092,7 @@ watch(selectedStashPath, async (path) => {
 
 watch(activeView, async (view) => {
   await nextTick()
+  syncMiWorkshopControlElements()
   window.scrollTo({ top: 0, behavior: 'auto' })
   if (view === 'vault' || view === 'supplies' || view === 'dismantling') {
     await refreshVault()
@@ -2104,6 +2124,7 @@ onMounted(async () => {
   appHistoryReady = true
   updateHistoryButtons()
   window.addEventListener('popstate', handleAppHistory)
+  window.addEventListener('pageshow', handlePageShow)
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
@@ -2151,6 +2172,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('popstate', handleAppHistory)
+  window.removeEventListener('pageshow', handlePageShow)
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('keyup', handleTooltipKeyUp)
   window.removeEventListener('wheel', handleZoomWheel)
@@ -5822,19 +5844,19 @@ function formatPercentile(value: number | null | undefined): string {
         <div class="mi-workshop-controls">
           <label class="mi-workshop-search">
             <span>Search workshop</span>
-            <input v-model="miWorkshopQuery" type="search" placeholder="Base, affix, stat, skill…" />
+            <input ref="miWorkshopQueryInput" v-model="miWorkshopQuery" type="search" autocomplete="off" placeholder="Base, affix, stat, skill…" />
             <button v-if="miWorkshopQuery" type="button" aria-label="Clear Workshop search" @click="miWorkshopQuery = ''">×</button>
           </label>
           <label>
             <span>Affix quality</span>
-            <select v-model="miAffixFilter">
+            <select ref="miAffixFilterSelect" v-model="miAffixFilter" autocomplete="off">
               <option value="all">All combinations</option>
               <option value="double-rare">Double rares only</option>
             </select>
           </label>
           <label>
             <span>Compare copies by</span>
-            <select v-model="miComparisonMetric">
+            <select ref="miComparisonMetricSelect" v-model="miComparisonMetric" autocomplete="off">
               <optgroup label="Roll quality">
                 <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
               </optgroup>
@@ -5848,7 +5870,7 @@ function formatPercentile(value: number | null | undefined): string {
           </label>
           <label>
             <span>Order</span>
-            <select v-model="miComparisonDirection">
+            <select ref="miComparisonDirectionSelect" v-model="miComparisonDirection" autocomplete="off">
               <option value="desc">Highest first</option>
               <option value="asc">Lowest first</option>
             </select>

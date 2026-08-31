@@ -3579,6 +3579,27 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        const miWorkshopQuery = process.env.CAIRN_CODEX_SCREENSHOT_MI_QUERY
+        const miAffixFilter = process.env.CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER
+        const miNativeRestore = process.env.CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE === '1'
+        if (miWorkshopQuery || miAffixFilter) {
+          await window.webContents.executeJavaScript(`
+            (async () => {
+              const input = document.querySelector('.mi-workshop-search input')
+              if (input && ${JSON.stringify(Boolean(miWorkshopQuery))}) {
+                input.value = ${JSON.stringify(miWorkshopQuery ?? '')}
+                if (!${JSON.stringify(miNativeRestore)}) input.dispatchEvent(new Event('input', { bubbles: true }))
+              }
+              const select = document.querySelector('.mi-workshop-controls select')
+              if (select && ${JSON.stringify(Boolean(miAffixFilter))}) {
+                select.value = ${JSON.stringify(miAffixFilter ?? 'all')}
+                if (!${JSON.stringify(miNativeRestore)}) select.dispatchEvent(new Event('change', { bubbles: true }))
+              }
+              if (${JSON.stringify(miNativeRestore)}) window.dispatchEvent(new PageTransitionEvent('pageshow'))
+              await new Promise((resolve) => setTimeout(resolve, 150))
+            })()
+          `)
+        }
         const scrollTarget = process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET
         if (scrollTarget) {
           await window.webContents.executeJavaScript(`
@@ -3624,6 +3645,13 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           cards: document.querySelectorAll('.item-card').length,
           sets: document.querySelectorAll('.set-card').length,
           copyCards: document.querySelectorAll('.copy-card').length,
+          miRows: [...document.querySelectorAll('.mi-table tbody tr')].map((row) => ({
+            text: row.textContent?.replace(/\s+/g, ' ').trim(),
+            prefixClass: row.children[2]?.className,
+            suffixClass: row.children[3]?.className
+          })),
+          miQuery: document.querySelector('.mi-workshop-search input')?.value,
+          miAffixFilter: document.querySelector('.mi-workshop-controls select')?.value,
           drawer: document.querySelector('.item-drawer h2')?.textContent?.trim(),
           tooltip: document.querySelector('.game-tooltip')?.textContent?.trim(),
           tooltipRect: (() => {

@@ -752,6 +752,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .copy-item-heading h3 { overflow-wrap: anywhere; margin: 1px 0 3px; color: #58b9ef; font: 500 19px/1.08 Georgia, serif; }
 .copy-item-heading.legendary h3 { color: #c157f4; }
 .copy-item-heading.mi h3, .copy-item-heading.rare h3 { color: #72d05e; }
+.copy-colored-name { display: flex; flex-wrap: wrap; column-gap: .28em; }
+.copy-colored-name .copy-name-affix.magical { color: #e6c75f; }
+.copy-colored-name .copy-name-affix.rare { color: #72d05e; }
 .copy-item-heading > div > small { color: #d6b96f; font: 11px Georgia, serif; text-transform: capitalize; }
 .copy-score { display: flex; align-items: baseline; gap: 9px; }
 .copy-score strong.unscored { color: #8b8271; font-size: 20px; }
@@ -764,12 +767,16 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .copy-selected-metric span { font-size: 9px; }
 .copy-card > header .copy-selected-metric strong { color: #a9ce91; font: 600 12px Inter, sans-serif; }
 .stored-badge { display: inline-flex; margin-left: 5px; padding: 3px 6px; border: 1px solid #59603b; border-radius: 999px; color: #b8ca74; background: #25291c; font-size: 8px; letter-spacing: .08em; vertical-align: middle; }
+.double-rare-icon { width: 20px; height: 20px; margin: -5px 0 -5px 5px; object-fit: contain; image-rendering: auto; vertical-align: middle; filter: drop-shadow(0 1px 2px #000); }
+.double-rare-badge { display: inline-flex; margin-left: 5px; padding: 3px 6px; border: 1px solid #47763d; border-radius: 999px; color: #91df78; background: #1a2c18; font-size: 8px; letter-spacing: .08em; vertical-align: middle; }
 .copy-affixes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .copy-affixes > button { display: grid; gap: 3px; padding: 8px 10px; border: 1px solid #363229; border-radius: 5px; background: #171613; cursor: pointer; text-align: left; }
 .copy-affixes > button:hover:not(:disabled), .copy-affixes > button.active { border-color: #796038; background: #292116; }
 .copy-affixes > button:disabled { cursor: default; opacity: .7; }
 .copy-affixes small { color: #6e675b; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
 .copy-affixes strong { overflow: hidden; color: #c9b78f !important; font: 500 11px Inter, sans-serif !important; text-overflow: ellipsis; white-space: nowrap; }
+.copy-affixes > button.magical strong { color: #e6c75f !important; }
+.copy-affixes > button.rare strong { color: #72d05e !important; }
 .copy-affixes em { color: #665f54; font-size: 8px; font-style: normal; }
 .copy-card.reference .copy-affixes em { color: #967c4c; }
 .copy-affix-detail { display: grid; gap: 9px; padding: 12px; border: 1px solid #57503e; border-radius: 6px; background: #0e0e0c; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
@@ -778,6 +785,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .copy-affix-detail > header span { display: grid; gap: 2px; }
 .copy-affix-detail > header small { color: #6d665a; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
 .copy-affix-detail > header strong { color: #e3db83 !important; font: 500 15px Georgia, serif !important; }
+.copy-affix-detail.rare > header strong { color: #72d05e !important; }
 .copy-affix-detail > header button { padding: 0 4px; border: 0; color: #796f60; background: transparent; cursor: pointer; font-size: 16px; }
 .copy-affix-section { display: grid; gap: 2px; padding-top: 7px; border-top: 1px solid #29261f; }
 .copy-affix-section h4 { margin: 0 0 3px; color: #d4b55e; font: 500 11px Georgia, serif; }

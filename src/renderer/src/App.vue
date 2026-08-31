@@ -4285,6 +4285,16 @@ function copyAffixName(record: string, emptyLabel: string): string {
     record.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.dbr$/i, '') ?? record
 }
 
+function copyAffixRarity(record: string): 'magical' | 'rare' | null {
+  if (!record) return null
+  return affixByRecord.value.get(record.toLocaleLowerCase())?.rarity ?? null
+}
+
+function copyAffixRarityLabel(record: string): string {
+  const rarity = copyAffixRarity(record)
+  return rarity === 'magical' ? 'Magic' : rarity === 'rare' ? 'Rare' : 'Unknown rarity'
+}
+
 function copyAffixKey(copy: ObservedStashItem, record: string): string {
   return `${copy.instanceKey ?? `${copy.sourcePath}:${copy.tabIndex}:${copy.itemIndex}`}|${record}`
 }
@@ -4591,15 +4601,6 @@ function humanStatName(field: string): string {
     defensiveElementalResistance: 'Elemental resistance'
   }
   return names[field] ?? field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (value) => value.toUpperCase())
-}
-
-function copyDisplayName(copy: ObservedStashItem): string {
-  if (!selectedItem.value) return 'Stored item'
-  return [
-    copy.prefixRecord ? copyAffixName(copy.prefixRecord, '') : '',
-    selectedItem.value.name,
-    copy.suffixRecord ? copyAffixName(copy.suffixRecord, '') : ''
-  ].filter(Boolean).join(' ')
 }
 
 function formatRollValue(value: number): string {
@@ -7286,8 +7287,31 @@ function formatPercentile(value: number | null | undefined): string {
                     <p>
                       {{ copy.instanceKey === comparisonReferenceCopy?.instanceKey ? 'Reference copy' : `Copy ${index + 1}` }}
                       <span v-if="vaultCopyForObserved(copy)" class="stored-badge">Stored</span>
+                      <img
+                        v-if="selectedItem.rarity === 'mi' && isDoubleRareMiCopy(copy) && snapshot?.uiIcons?.doubleRareMi"
+                        class="double-rare-icon"
+                        :src="`cairn-icon://asset/${snapshot.uiIcons.doubleRareMi}.png`"
+                        alt="Double rare"
+                        title="Double rare Monster Infrequent"
+                      />
+                      <span
+                        v-else-if="selectedItem.rarity === 'mi' && isDoubleRareMiCopy(copy)"
+                        class="double-rare-badge"
+                      >Double rare</span>
                     </p>
-                    <h3>{{ copyDisplayName(copy) }}</h3>
+                    <h3 class="copy-colored-name">
+                      <span
+                        v-if="copy.prefixRecord"
+                        class="copy-name-affix"
+                        :class="copyAffixRarity(copy.prefixRecord)"
+                      >{{ copyAffixName(copy.prefixRecord, '') }}</span>
+                      <span class="copy-name-base">{{ selectedItem.name }}</span>
+                      <span
+                        v-if="copy.suffixRecord"
+                        class="copy-name-affix"
+                        :class="copyAffixRarity(copy.suffixRecord)"
+                      >{{ copyAffixName(copy.suffixRecord, '') }}</span>
+                    </h3>
                     <small>{{ rarityLabel(selectedItem) }} · {{ itemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
                   </div>
                 </div>
@@ -7314,17 +7338,17 @@ function formatPercentile(value: number | null | undefined): string {
                   <button
                     type="button"
                     :disabled="!copy.prefixRecord"
-                    :class="{ active: copyAffixIsOpen(copy, copy.prefixRecord) }"
+                    :class="[copyAffixRarity(copy.prefixRecord), { active: copyAffixIsOpen(copy, copy.prefixRecord) }]"
                     :title="copy.prefixRecord ? 'Show this prefix’s bonuses' : 'This copy has no prefix'"
                     @click="toggleCopyAffix(copy, copy.prefixRecord)"
-                  ><small>Prefix</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong><em>{{ copyAffixDelta(copy, 'prefix') }}</em></button>
+                  ><small>Prefix · {{ copyAffixRarityLabel(copy.prefixRecord) }}</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong><em>{{ copyAffixDelta(copy, 'prefix') }}</em></button>
                   <button
                     type="button"
                     :disabled="!copy.suffixRecord"
-                    :class="{ active: copyAffixIsOpen(copy, copy.suffixRecord) }"
+                    :class="[copyAffixRarity(copy.suffixRecord), { active: copyAffixIsOpen(copy, copy.suffixRecord) }]"
                     :title="copy.suffixRecord ? 'Show this suffix’s bonuses' : 'This copy has no suffix'"
                     @click="toggleCopyAffix(copy, copy.suffixRecord)"
-                  ><small>Suffix</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong><em>{{ copyAffixDelta(copy, 'suffix') }}</em></button>
+                  ><small>Suffix · {{ copyAffixRarityLabel(copy.suffixRecord) }}</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong><em>{{ copyAffixDelta(copy, 'suffix') }}</em></button>
                 </div>
                 <section
                   v-if="activeCopyAffix && activeCopyAffixTarget && [copy.prefixRecord, copy.suffixRecord].includes(activeCopyAffixTarget.record) && copyAffixIsOpen(copy, activeCopyAffixTarget.record)"

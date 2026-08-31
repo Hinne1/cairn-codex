@@ -86,7 +86,9 @@ internal static class ItemIconExtractor
     // disguised set is stored under storyelement/sign records and points at four
     // perfectly valid textures in Level Art.arc instead. Search both asset homes
     // in content-pack precedence order rather than special-casing those records.
-    private static readonly string[] TextureArchiveNames = ["Items.arc", "Level Art.arc"];
+    // UI.arc also contains game-native item markers such as the double-rare badge;
+    // keeping it in the same on-demand extractor avoids redistributing game art.
+    private static readonly string[] TextureArchiveNames = ["Items.arc", "Level Art.arc", "UI.arc"];
 
     private static string NormalizePath(string value) => value.Replace('\\', '/').TrimStart('/');
 }

@@ -50,7 +50,8 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
-const CATALOG_PRESENTATION_VERSION = 31
+const CATALOG_PRESENTATION_VERSION = 32
+const DOUBLE_RARE_MI_BITMAP = 'character/item_doubleraremonsterinfrequent.tex'
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 const SAHDINAS_MEMENTO = {
@@ -1444,6 +1445,7 @@ async function attachItemIcons(
         .filter((bitmap): bitmap is string => Boolean(bitmap))
     )
   ]
+  bitmaps.push(DOUBLE_RARE_MI_BITMAP)
   const extraction = await helper.request<ItemIconExtractionResult>('extract-item-icons', {
     installationPath: installation.path,
     outputDirectory: join(app.getPath('userData'), 'item-icons'),
@@ -1472,7 +1474,10 @@ async function attachItemIcons(
     materials: (snapshot.materials ?? []).map((item) => ({
       ...item,
       iconKey: item.bitmap ? (keys.get(item.bitmap.toLocaleLowerCase()) ?? null) : null
-    }))
+    })),
+    uiIcons: {
+      doubleRareMi: keys.get(DOUBLE_RARE_MI_BITMAP.toLocaleLowerCase()) ?? ''
+    }
   }
 }
 

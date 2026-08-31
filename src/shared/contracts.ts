@@ -401,6 +401,7 @@ export interface CollectionSnapshot {
   plannerItems?: CollectionItem[]
   supplies?: CollectionItem[]
   materials?: CollectionItem[]
+  uiIcons?: Record<string, string>
   accountStores?: ScannedAccountStore[]
   skillMasteries?: Record<string, string>
   skillClassNames?: Record<string, string>

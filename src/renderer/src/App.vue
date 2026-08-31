@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import {
   buildStashOracle,
   type OracleReadiness,
@@ -46,6 +47,8 @@ type SetFeatureFilter = 'all' | 'visual'
 type SetSortMode = 'completion' | 'level' | 'name'
 type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
+type SkillRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
+type MiSortMode = 'metric' | 'level' | 'name' | 'copies'
 type TransferMode = 'live' | 'offline'
 type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
@@ -70,6 +73,13 @@ interface AppHistoryState {
   miAffixFilter: MiAffixFilter
   miComparisonMetric: MiMetricKey
   miComparisonDirection: SortDirection
+  miSortMode: MiSortMode
+  skillItemQuery: string
+  skillScope: SkillScope
+  skillRarityFilter: SkillRarityFilter
+  skillSlotFilter: string
+  skillSort: SkillSort
+  skillSortDirection: SortDirection
 }
 
 interface TooltipAffix {
@@ -250,6 +260,9 @@ const skillScope = ref<SkillScope>(
 )
 const skillSort = ref<SkillSort>('amount')
 const skillSortDirection = ref<SortDirection>('desc')
+const skillItemQuery = ref('')
+const skillRarityFilter = ref<SkillRarityFilter>('all')
+const skillSlotFilter = ref('all')
 const skillPickerOpen = ref(false)
 const skillPickerIndex = ref(0)
 const plannerProfiles = ref<PlannerProfile[]>(readStoredPlannerProfiles())
@@ -341,10 +354,11 @@ const miWorkshopQuery = ref('')
 const miAffixFilter = ref<MiAffixFilter>('all')
 const miComparisonMetric = ref<MiMetricKey>('overall')
 const miComparisonDirection = ref<SortDirection>('desc')
-const miWorkshopQueryInput = ref<HTMLInputElement | null>(null)
+const miSortMode = ref<MiSortMode>('metric')
 const miAffixFilterSelect = ref<HTMLSelectElement | null>(null)
 const miComparisonMetricSelect = ref<HTMLSelectElement | null>(null)
 const miComparisonDirectionSelect = ref<HTMLSelectElement | null>(null)
+const miSortModeSelect = ref<HTMLSelectElement | null>(null)
 const canNavigateBack = ref(false)
 const canNavigateForward = ref(false)
 const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
@@ -1278,7 +1292,22 @@ const skillItemRows = computed(() => {
     return false
   })
   rows.push(...miByBase.values())
-  return rows.sort((left, right) => {
+  const needle = normalizeLoose(skillItemQuery.value)
+  return rows
+    .filter((row) => skillRarityFilter.value === 'all' || row.item.rarity === skillRarityFilter.value)
+    .filter((row) => skillSlotFilter.value === 'all' || row.item.slot === skillSlotFilter.value)
+    .filter((row) => !needle || normalizeLoose([
+      row.item.name,
+      row.item.rarity,
+      row.item.slot,
+      row.item.levelRequirement,
+      row.amount,
+      row.conversionTarget,
+      row.conversionDetails,
+      row.special,
+      presentationSearchText(row.item.presentation)
+    ].join(' ')).includes(needle))
+    .sort((left, right) => {
     let comparison = 0
     if (skillSort.value === 'amount') {
       const leftHasModifier = left.conversionDetails.length > 0 || left.special.length > 0 ? 1 : 0
@@ -1294,6 +1323,10 @@ const skillItemRows = computed(() => {
     return skillSortDirection.value === 'asc' ? comparison : -comparison
   })
 })
+
+const skillSlotOptions = computed(() => [...new Set(
+  plannerCatalogItems.value.map((item) => item.slot).filter(Boolean)
+)].sort((left, right) => left.localeCompare(right)))
 
 const farmTargets = computed<FarmTarget[]>(() => {
   if (!snapshot.value) return []
@@ -1584,7 +1617,7 @@ const miWorkshopRows = computed(() => {
   return [...grouped.values()]
     .map((group) => {
       const copies = group.copies.sort((left, right) =>
-        compareCopiesByMiMetric(left, right, miComparisonMetric.value, miComparisonDirection.value)
+        compareCopiesByMiMetric(left, right, miComparisonMetric.value, 'desc')
       )
       return {
         ...group,
@@ -1610,15 +1643,27 @@ const miWorkshopRows = computed(() => {
     ].join(' ')).includes(needle))
     .sort(
       (left, right) => {
-        const leftValue = left.selectedMetric.value
-        const rightValue = right.selectedMetric.value
-        if (leftValue !== null || rightValue !== null) {
-          if (leftValue === null) return 1
-          if (rightValue === null) return -1
-          if (leftValue !== rightValue) return (leftValue - rightValue) * direction
+        if (miSortMode.value === 'metric') {
+          const leftValue = left.selectedMetric.value
+          const rightValue = right.selectedMetric.value
+          if (leftValue !== null || rightValue !== null) {
+            if (leftValue === null) return 1
+            if (rightValue === null) return -1
+            if (leftValue !== rightValue) return (leftValue - rightValue) * direction
+          }
+        }
+        if (miSortMode.value === 'level' && left.base.levelRequirement !== right.base.levelRequirement) {
+          return (left.base.levelRequirement - right.base.levelRequirement) * direction
+        }
+        if (miSortMode.value === 'name') {
+          const byName = left.base.name.localeCompare(right.base.name)
+          if (byName !== 0) return byName * direction
+        }
+        if (miSortMode.value === 'copies' && left.copies.length !== right.copies.length) {
+          return (left.copies.length - right.copies.length) * direction
         }
         return left.base.name.localeCompare(right.base.name) ||
-        left.base.levelRequirement - right.base.levelRequirement ||
+        (left.base.levelRequirement - right.base.levelRequirement) ||
         left.prefix.localeCompare(right.prefix) ||
         left.suffix.localeCompare(right.suffix)
       }
@@ -1913,7 +1958,14 @@ function currentAppHistoryState(index = appHistoryIndex): AppHistoryState {
     miWorkshopQuery: miWorkshopQuery.value,
     miAffixFilter: miAffixFilter.value,
     miComparisonMetric: miComparisonMetric.value,
-    miComparisonDirection: miComparisonDirection.value
+    miComparisonDirection: miComparisonDirection.value,
+    miSortMode: miSortMode.value,
+    skillItemQuery: skillItemQuery.value,
+    skillScope: skillScope.value,
+    skillRarityFilter: skillRarityFilter.value,
+    skillSlotFilter: skillSlotFilter.value,
+    skillSort: skillSort.value,
+    skillSortDirection: skillSortDirection.value
   }
 }
 
@@ -1924,10 +1976,10 @@ function updateHistoryButtons(): void {
 
 function syncMiWorkshopControlElements(): void {
   if (activeView.value !== 'mi-workshop') return
-  if (miWorkshopQueryInput.value) miWorkshopQueryInput.value.value = miWorkshopQuery.value
   if (miAffixFilterSelect.value) miAffixFilterSelect.value.value = miAffixFilter.value
   if (miComparisonMetricSelect.value) miComparisonMetricSelect.value.value = miComparisonMetric.value
   if (miComparisonDirectionSelect.value) miComparisonDirectionSelect.value.value = miComparisonDirection.value
+  if (miSortModeSelect.value) miSortModeSelect.value.value = miSortMode.value
 }
 
 function handlePageShow(): void {
@@ -1949,6 +2001,13 @@ function handleAppHistory(event: PopStateEvent): void {
   miAffixFilter.value = state.miAffixFilter ?? 'all'
   miComparisonMetric.value = state.miComparisonMetric ?? 'overall'
   miComparisonDirection.value = state.miComparisonDirection ?? 'desc'
+  miSortMode.value = state.miSortMode ?? 'metric'
+  skillItemQuery.value = state.skillItemQuery ?? ''
+  skillScope.value = state.skillScope ?? 'all'
+  skillRarityFilter.value = state.skillRarityFilter ?? 'all'
+  skillSlotFilter.value = state.skillSlotFilter ?? 'all'
+  skillSort.value = state.skillSort ?? 'amount'
+  skillSortDirection.value = state.skillSortDirection ?? 'desc'
   updateHistoryButtons()
   void nextTick(() => {
     syncMiWorkshopControlElements()
@@ -2006,7 +2065,7 @@ watch([activeView, selectedRecord], () => {
   updateHistoryButtons()
 }, { flush: 'post' })
 watch(
-  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection],
+  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection],
   () => {
     if (!appHistoryReady || restoringAppHistory) return
     window.history.replaceState(currentAppHistoryState(), '')
@@ -2064,6 +2123,10 @@ watch(transferMode, () => {
   selectedSupplyIds.value = []
   vaultError.value = null
   vaultMessage.value = null
+})
+watch(supplyCategory, () => {
+  supplySlotFilter.value = 'all'
+  selectedSupplyIds.value = []
 })
 watch(supplySlotFilter, () => {
   selectedSupplyIds.value = []
@@ -5182,83 +5245,99 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
       </nav>
 
-      <section v-if="snapshot && (activeView === 'collection' || activeView === 'sets' || activeView === 'materials')" class="filter-bar" aria-label="Collection filters">
-        <label class="search-field">
-          <span class="sr-only">Search collection</span>
-          <input
-            v-model="query"
-            type="search"
-            placeholder="Search names, stats, skills…  (try skill:wendigo)"
-          />
-        </label>
-        <div v-if="activeView === 'collection' || activeView === 'materials'" class="segmented-control" aria-label="Collection status filter">
-          <button
-            v-for="option in (['all', 'owned', 'missing'] as OwnershipFilter[])"
-            :key="option"
-            type="button"
-            :class="{ active: ownership === option }"
-            @click="ownership = option"
-          >
-            {{ option === 'all' ? 'All' : option === 'owned' ? 'Collected' : 'Missing' }}
-          </button>
-        </div>
-        <div v-else-if="activeView === 'sets'" class="segmented-control set-progress-filter" aria-label="Set completion filter">
-          <button
-            v-for="option in (['all', 'complete', 'progress', 'unstarted'] as SetProgressFilter[])"
-            :key="option"
-            type="button"
-            :class="{ active: setProgressFilter === option }"
-            @click="setProgressFilter = option"
-          >
-            {{ option === 'all' ? 'All sets' : option === 'progress' ? 'In progress' : option === 'unstarted' ? 'Unstarted' : 'Complete' }}
-          </button>
-        </div>
-        <div v-if="activeView === 'materials'" class="segmented-control" aria-label="Material category">
-          <button type="button" :class="{ active: materialCategory === 'all' }" @click="materialCategory = 'all'">All</button>
-          <button type="button" :class="{ active: materialCategory === 'component' }" @click="materialCategory = 'component'">Components</button>
-          <button type="button" :class="{ active: materialCategory === 'material' }" @click="materialCategory = 'material'">Materials</button>
-          <button type="button" :class="{ active: materialCategory === 'potion-formula' }" @click="materialCategory = 'potion-formula'">Potion formulas</button>
-        </div>
-        <select v-if="activeView === 'sets'" v-model="rarityFilter" aria-label="Set rarity">
-          <option value="all">All set rarities</option>
-          <option value="legendary">Legendary sets</option>
-          <option value="epic">Epic sets</option>
-        </select>
-        <select v-else-if="activeView !== 'materials'" v-model="rarityFilter" aria-label="Rarity">
-          <option value="all">All rarities</option>
-          <option value="legendary">Legendary</option>
-          <option value="epic">Epic</option>
-          <option value="mi">Monster Infrequent</option>
-          <option value="double-rare">Double rare MIs</option>
-          <option value="rare">Rare items</option>
-          <option value="recipe">Craftable from recipe</option>
-        </select>
-        <select v-if="activeView === 'sets'" v-model="setFeatureFilter" aria-label="Set feature">
-          <option value="all">All set effects</option>
-          <option value="visual">Visual transformations</option>
-        </select>
-        <select v-if="activeView === 'collection' || activeView === 'materials'" v-model="sortMode" aria-label="Sort collection">
-          <option value="recent">Recently collected</option>
-          <option value="completion">Collected status</option>
-          <option value="name">Name</option>
-          <option value="level">Level</option>
-          <option value="roll">Best roll</option>
-        </select>
-        <select v-if="activeView === 'collection' || activeView === 'materials'" v-model="sortDirection" class="sort-direction" aria-label="Sort direction">
-          <option value="asc">↑ Ascending</option>
-          <option value="desc">↓ Descending</option>
-        </select>
-        <select v-if="activeView === 'sets'" v-model="setSortMode" aria-label="Sort sets">
-          <option value="completion">Completion</option>
-          <option value="level">Required level</option>
-          <option value="name">Name</option>
-        </select>
-        <select v-if="activeView === 'sets'" v-model="setSortDirection" class="sort-direction" aria-label="Set sort direction">
-          <option value="asc">↑ Ascending</option>
-          <option value="desc">↓ Descending</option>
-        </select>
-        <span class="result-count">{{ displayedResultCount.toLocaleString() }} results</span>
-      </section>
+      <ExplorerToolbar
+        v-if="snapshot && (activeView === 'collection' || activeView === 'sets' || activeView === 'materials')"
+        class="collection-explorer-toolbar"
+        v-model="query"
+        :search-label="activeView === 'sets' ? 'Search sets' : activeView === 'materials' ? 'Search components & consumables' : 'Search collection'"
+        placeholder="Name, stat, skill… (try skill:wendigo)"
+        :result-count="displayedResultCount"
+        :result-label="activeView === 'sets' ? 'sets' : 'results'"
+      >
+        <template #filters>
+          <label v-if="activeView === 'collection' || activeView === 'materials'">
+            <span>Collection status</span>
+            <select v-model="ownership" autocomplete="off">
+              <option value="all">All items</option>
+              <option value="owned">Collected</option>
+              <option value="missing">Missing</option>
+            </select>
+          </label>
+          <label v-if="activeView === 'sets'">
+            <span>Set progress</span>
+            <select v-model="setProgressFilter" autocomplete="off">
+              <option value="all">All sets</option>
+              <option value="complete">Complete</option>
+              <option value="progress">In progress</option>
+              <option value="unstarted">Unstarted</option>
+            </select>
+          </label>
+          <label v-if="activeView === 'materials'">
+            <span>Category</span>
+            <select v-model="materialCategory" autocomplete="off">
+              <option value="all">All materials</option>
+              <option value="component">Components</option>
+              <option value="material">Materials</option>
+              <option value="potion-formula">Potion formulas</option>
+            </select>
+          </label>
+          <label v-if="activeView === 'sets'">
+            <span>Rarity</span>
+            <select v-model="rarityFilter" autocomplete="off">
+              <option value="all">All set rarities</option>
+              <option value="legendary">Legendary sets</option>
+              <option value="epic">Epic sets</option>
+            </select>
+          </label>
+          <label v-else-if="activeView !== 'materials'">
+            <span>Rarity</span>
+            <select v-model="rarityFilter" autocomplete="off">
+              <option value="all">All rarities</option>
+              <option value="legendary">Legendary</option>
+              <option value="epic">Epic</option>
+              <option value="mi">Monster Infrequent</option>
+              <option value="double-rare">Double rare MIs</option>
+              <option value="rare">Rare items</option>
+              <option value="recipe">Craftable from recipe</option>
+            </select>
+          </label>
+          <label v-if="activeView === 'sets'">
+            <span>Special feature</span>
+            <select v-model="setFeatureFilter" autocomplete="off">
+              <option value="all">All set effects</option>
+              <option value="visual">Visual transformations</option>
+            </select>
+          </label>
+        </template>
+        <template #sort>
+          <label>
+            <span>Sort by</span>
+            <select v-if="activeView === 'sets'" v-model="setSortMode" autocomplete="off">
+              <option value="completion">Completion</option>
+              <option value="level">Required level</option>
+              <option value="name">Name</option>
+            </select>
+            <select v-else v-model="sortMode" autocomplete="off">
+              <option value="recent">Recently collected</option>
+              <option value="completion">Collected status</option>
+              <option value="name">Name</option>
+              <option value="level">Level</option>
+              <option value="roll">Best roll</option>
+            </select>
+          </label>
+          <label>
+            <span>Order</span>
+            <select v-if="activeView === 'sets'" v-model="setSortDirection" autocomplete="off">
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+            <select v-else v-model="sortDirection" autocomplete="off">
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </label>
+        </template>
+      </ExplorerToolbar>
 
       <section v-if="activeView === 'skills'" class="skill-explorer" aria-label="Skill item explorer">
         <header class="skill-explorer-heading">
@@ -5266,10 +5345,6 @@ function formatPercentile(value: number | null | undefined): string {
             <p class="section-label">Build research prototype</p>
             <h2>Items for a skill</h2>
             <p>Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, and level requirements.</p>
-          </div>
-          <div class="skill-scope segmented-control" aria-label="Skill item scope">
-            <button type="button" :class="{ active: skillScope === 'archive' }" @click="skillScope = 'archive'">My Archive</button>
-            <button type="button" :class="{ active: skillScope === 'all' }" @click="skillScope = 'all'">All catalog items</button>
           </div>
         </header>
         <div class="skill-picker">
@@ -5320,11 +5395,62 @@ function formatPercentile(value: number | null | undefined): string {
               <small v-if="skillSuggestions.length === 0">No indexed skill matches that text.</small>
             </span>
           </div>
-          <div class="skill-match-count">
-            <strong>{{ skillItemRows.length }}</strong>
-            <span>matching items</span>
-          </div>
         </div>
+        <ExplorerToolbar
+          class="skill-explorer-toolbar"
+          v-model="skillItemQuery"
+          search-label="Search matching items"
+          placeholder="Item, slot, modifier, damage type…"
+          :result-count="skillItemRows.length"
+          result-label="matching items"
+        >
+          <template #filters>
+            <label>
+              <span>Availability</span>
+              <select v-model="skillScope" autocomplete="off">
+                <option value="all">All catalog items</option>
+                <option value="archive">My Archive</option>
+              </select>
+            </label>
+            <label>
+              <span>Rarity</span>
+              <select v-model="skillRarityFilter" autocomplete="off">
+                <option value="all">All rarities</option>
+                <option value="legendary">Legendary</option>
+                <option value="epic">Epic</option>
+                <option value="mi">Monster Infrequent</option>
+                <option value="rare">Rare</option>
+              </select>
+            </label>
+            <label>
+              <span>Slot</span>
+              <select v-model="skillSlotFilter" autocomplete="off">
+                <option value="all">All slots</option>
+                <option v-for="slot in skillSlotOptions" :key="slot" :value="slot">{{ slot }}</option>
+              </select>
+            </label>
+          </template>
+          <template #sort>
+            <label>
+              <span>Sort by</span>
+              <select v-model="skillSort" autocomplete="off">
+                <option value="amount">Ranks & modifiers</option>
+                <option value="item">Item name</option>
+                <option value="slot">Slot</option>
+                <option value="conversion">Conversion target</option>
+                <option value="special">Special modifier</option>
+                <option value="level">Required level</option>
+              </select>
+            </label>
+            <label>
+              <span>Order</span>
+              <select v-model="skillSortDirection" autocomplete="off">
+                <option value="desc">Highest first</option>
+                <option value="asc">Lowest first</option>
+              </select>
+            </label>
+          </template>
+        </ExplorerToolbar>
         <div class="skill-table-wrap">
           <table class="skill-table">
             <thead>
@@ -5369,7 +5495,13 @@ function formatPercentile(value: number | null | undefined): string {
                 <td>{{ row.special || '—' }}</td>
                 <td>{{ row.item.levelRequirement }}</td>
               </tr>
-              <tr v-if="skillItemRows.length === 0"><td colspan="7" class="skill-empty">No matching items in this scope.</td></tr>
+              <tr v-if="skillItemRows.length === 0">
+                <td colspan="7" class="skill-empty">
+                  {{ skillItemQuery || skillRarityFilter !== 'all' || skillSlotFilter !== 'all'
+                    ? 'No items match the current search and filters.'
+                    : 'No matching items in this availability scope.' }}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -5841,41 +5973,57 @@ function formatPercentile(value: number | null | undefined): string {
           <span><strong>{{ snapshot?.affixSummary.collected ?? 0 }}</strong> affixes discovered</span>
           <span><strong>{{ miWorkshopRows.length }}</strong> combinations retained</span>
         </div>
-        <div class="mi-workshop-controls">
-          <label class="mi-workshop-search">
-            <span>Search workshop</span>
-            <input ref="miWorkshopQueryInput" v-model="miWorkshopQuery" type="search" autocomplete="off" placeholder="Base, affix, stat, skill…" />
-            <button v-if="miWorkshopQuery" type="button" aria-label="Clear Workshop search" @click="miWorkshopQuery = ''">×</button>
-          </label>
-          <label>
-            <span>Affix quality</span>
-            <select ref="miAffixFilterSelect" v-model="miAffixFilter" autocomplete="off">
-              <option value="all">All combinations</option>
-              <option value="double-rare">Double rares only</option>
-            </select>
-          </label>
-          <label>
-            <span>Compare copies by</span>
-            <select ref="miComparisonMetricSelect" v-model="miComparisonMetric" autocomplete="off">
-              <optgroup label="Roll quality">
-                <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
-              </optgroup>
-              <optgroup label="Item stats">
-                <option v-for="option in miMetricOptions.item" :key="option.key" :value="option.key">{{ option.label }}</option>
-              </optgroup>
-              <optgroup label="Bonus to All Pets">
-                <option v-for="option in miMetricOptions.pet" :key="option.key" :value="option.key">{{ option.label }}</option>
-              </optgroup>
-            </select>
-          </label>
-          <label>
-            <span>Order</span>
-            <select ref="miComparisonDirectionSelect" v-model="miComparisonDirection" autocomplete="off">
-              <option value="desc">Highest first</option>
-              <option value="asc">Lowest first</option>
-            </select>
-          </label>
-        </div>
+        <ExplorerToolbar
+          class="mi-explorer-toolbar"
+          v-model="miWorkshopQuery"
+          search-label="Search workshop"
+          placeholder="Base, affix, stat, skill…"
+          :result-count="miWorkshopRows.length"
+          result-label="affix combinations"
+          tone="green"
+        >
+          <template #filters>
+            <label>
+              <span>Affix quality</span>
+              <select ref="miAffixFilterSelect" v-model="miAffixFilter" autocomplete="off">
+                <option value="all">All combinations</option>
+                <option value="double-rare">Double rares only</option>
+              </select>
+            </label>
+            <label>
+              <span>Compare copies by</span>
+              <select ref="miComparisonMetricSelect" v-model="miComparisonMetric" autocomplete="off">
+                <optgroup label="Roll quality">
+                  <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
+                </optgroup>
+                <optgroup label="Item stats">
+                  <option v-for="option in miMetricOptions.item" :key="option.key" :value="option.key">{{ option.label }}</option>
+                </optgroup>
+                <optgroup label="Bonus to All Pets">
+                  <option v-for="option in miMetricOptions.pet" :key="option.key" :value="option.key">{{ option.label }}</option>
+                </optgroup>
+              </select>
+            </label>
+          </template>
+          <template #sort>
+            <label>
+              <span>Sort by</span>
+              <select ref="miSortModeSelect" v-model="miSortMode" autocomplete="off">
+                <option value="metric">Selected comparison</option>
+                <option value="level">Required level</option>
+                <option value="name">MI name</option>
+                <option value="copies">Stored copies</option>
+              </select>
+            </label>
+            <label>
+              <span>Order</span>
+              <select ref="miComparisonDirectionSelect" v-model="miComparisonDirection" autocomplete="off">
+                <option value="desc">Highest first</option>
+                <option value="asc">Lowest first</option>
+              </select>
+            </label>
+          </template>
+        </ExplorerToolbar>
         <div class="mi-table-wrap">
           <table class="mi-table">
             <thead>
@@ -5947,21 +6095,36 @@ function formatPercentile(value: number | null | undefined): string {
             <small>{{ supplyAccessSummary }}</small>
           </div>
         </header>
-        <div class="supply-toolbar">
-          <div class="segmented-control" aria-label="Supply category">
-            <button type="button" :class="{ active: supplyCategory === 'writs' }" @click="supplyCategory = 'writs'; supplySlotFilter = 'all'; selectedSupplyIds = []">Boosts, merits & consumables</button>
-            <button type="button" :class="{ active: supplyCategory === 'augments' }" @click="supplyCategory = 'augments'; selectedSupplyIds = []">Augments & runes</button>
-          </div>
-          <div v-if="supplyCategory === 'augments'" class="segmented-control supply-slot-filter" aria-label="Compatible equipment slot">
-            <button type="button" :class="{ active: supplySlotFilter === 'all' }" @click="supplySlotFilter = 'all'">All slots</button>
-            <button type="button" :class="{ active: supplySlotFilter === 'weapon' }" @click="supplySlotFilter = 'weapon'">Weapons</button>
-            <button type="button" :class="{ active: supplySlotFilter === 'armor' }" @click="supplySlotFilter = 'armor'">Armor</button>
-            <button type="button" :class="{ active: supplySlotFilter === 'jewelry' }" @click="supplySlotFilter = 'jewelry'">Jewelry</button>
-          </div>
-          <input v-model="reusableSupplyQuery" type="search" placeholder="Filter names, effects, factions…" />
-          <button type="button" :disabled="!visibleSupplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>
-          <button v-if="supplyCategory === 'writs'" type="button" :disabled="vaultBusy || !supplyVaultItems.length" @click="dispenseAllWrits">Dispense all unlocked faction boosts</button>
-        </div>
+        <ExplorerToolbar
+          v-model="reusableSupplyQuery"
+          search-label="Search supplies"
+          placeholder="Name, effect, faction…"
+          :result-count="supplyVaultItems.length"
+          result-label="available supplies"
+        >
+          <template #filters>
+            <label>
+              <span>Category</span>
+              <select v-model="supplyCategory" autocomplete="off">
+                <option value="writs">Boosts, merits & consumables</option>
+                <option value="augments">Augments & runes</option>
+              </select>
+            </label>
+            <label v-if="supplyCategory === 'augments'">
+              <span>Compatible slot</span>
+              <select v-model="supplySlotFilter" autocomplete="off">
+                <option value="all">All slots</option>
+                <option value="weapon">Weapons</option>
+                <option value="armor">Armor</option>
+                <option value="jewelry">Jewelry</option>
+              </select>
+            </label>
+          </template>
+          <template #actions>
+            <button type="button" :disabled="!visibleSupplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>
+            <button v-if="supplyCategory === 'writs'" type="button" :disabled="vaultBusy || !supplyVaultItems.length" @click="dispenseAllWrits">Dispense all unlocked boosts</button>
+          </template>
+        </ExplorerToolbar>
         <div class="supply-status">
           <span :class="'state-' + connectionColorState">{{ transferMode === 'live' ? gameConnectionLabel : writeSafety?.permitted ? 'Offline staging ready' : 'Offline staging locked' }}</span>
           <div class="segmented-control" aria-label="Supply transfer method">
@@ -6038,24 +6201,39 @@ function formatPercentile(value: number | null | undefined): string {
           </article>
         </div>
 
-        <div class="dismantling-toolbar">
-          <input v-model="dismantlingQuery" type="search" placeholder="Filter item, base, prefix, or suffix…" />
-          <select v-model="dismantlingMode" aria-label="Game mode">
-            <option value="all">Hardcore + Softcore</option>
-            <option value="hardcore">Hardcore</option>
-            <option value="softcore">Softcore</option>
-          </select>
-          <select v-model="dismantlingRarity" aria-label="Rarity">
-            <option value="all">All eligible rarities</option>
-            <option value="legendary">Legendary</option>
-            <option value="epic">Epic</option>
-            <option value="mi">Monster Infrequent</option>
-            <option value="rare">Rare</option>
-          </select>
-          <button type="button" @click="selectVisibleDismantlingCandidates">Select visible</button>
-          <button type="button" title="Keeps the highest-scored or newest copy of each base; skips socketed and augmented extras." @click="selectRedundantDismantlingCandidates">Select safe duplicates</button>
-          <button type="button" :disabled="selectedDismantlingIds.length === 0" @click="selectedDismantlingIds = []">Clear</button>
-        </div>
+        <ExplorerToolbar
+          v-model="dismantlingQuery"
+          search-label="Search candidates"
+          placeholder="Item, base, prefix, suffix…"
+          :result-count="filteredDismantlingCandidates.length"
+          result-label="candidate copies"
+        >
+          <template #filters>
+            <label>
+              <span>Game mode</span>
+              <select v-model="dismantlingMode" autocomplete="off">
+                <option value="all">Hardcore + Softcore</option>
+                <option value="hardcore">Hardcore</option>
+                <option value="softcore">Softcore</option>
+              </select>
+            </label>
+            <label>
+              <span>Rarity</span>
+              <select v-model="dismantlingRarity" autocomplete="off">
+                <option value="all">All eligible rarities</option>
+                <option value="legendary">Legendary</option>
+                <option value="epic">Epic</option>
+                <option value="mi">Monster Infrequent</option>
+                <option value="rare">Rare</option>
+              </select>
+            </label>
+          </template>
+          <template #actions>
+            <button type="button" @click="selectVisibleDismantlingCandidates">Select visible</button>
+            <button type="button" title="Keeps the highest-scored or newest copy of each base; skips socketed and augmented extras." @click="selectRedundantDismantlingCandidates">Select safe duplicates</button>
+            <button type="button" :disabled="selectedDismantlingIds.length === 0" @click="selectedDismantlingIds = []">Clear</button>
+          </template>
+        </ExplorerToolbar>
 
         <div class="dismantling-layout">
           <section class="dismantling-candidates">
@@ -6133,15 +6311,25 @@ function formatPercentile(value: number | null | undefined): string {
           </div>
           <strong>{{ farmTargets.length }} useful areas</strong>
         </header>
-        <div class="farming-toolbar">
-          <input v-model="farmingQuery" type="search" placeholder="Filter item, monster, or area…" />
-          <select v-model="farmingRarity" aria-label="Rarity">
-            <option value="all">All tracked rarities</option>
-            <option value="mi">Monster Infrequents</option>
-            <option value="epic">Epics</option>
-            <option value="legendary">Legendaries</option>
-          </select>
-        </div>
+        <ExplorerToolbar
+          v-model="farmingQuery"
+          search-label="Search farming targets"
+          placeholder="Item, monster, area…"
+          :result-count="farmTargets.length"
+          result-label="useful areas"
+        >
+          <template #filters>
+            <label>
+              <span>Rarity</span>
+              <select v-model="farmingRarity" autocomplete="off">
+                <option value="all">All tracked rarities</option>
+                <option value="mi">Monster Infrequents</option>
+                <option value="epic">Epics</option>
+                <option value="legendary">Legendaries</option>
+              </select>
+            </label>
+          </template>
+        </ExplorerToolbar>
         <div class="farm-list">
           <article v-for="(target, index) in farmTargets" :key="target.key">
             <span class="farm-rank">{{ index + 1 }}</span>

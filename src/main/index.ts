@@ -3542,9 +3542,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         const skillScope = process.env.CAIRN_CODEX_SCREENSHOT_SKILL_SCOPE
         if (skillScope) {
           await window.webContents.executeJavaScript(`
-            [...document.querySelectorAll('.skill-scope button')]
-              .find((button) => button.textContent?.trim() === ${JSON.stringify(skillScope)})
-              ?.click()
+            (() => {
+              const select = document.querySelector('.skill-explorer-toolbar .explorer-toolbar-filters select')
+              if (!select) return
+              select.value = ${JSON.stringify(skillScope === 'My Archive' ? 'archive' : 'all')}
+              select.dispatchEvent(new Event('change', { bubbles: true }))
+            })()
           `)
         }
         const skillQuery = process.env.CAIRN_CODEX_SCREENSHOT_SKILL_QUERY
@@ -3568,7 +3571,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           interactionTimings.searchMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
-              const input = document.querySelector('.search-field input')
+              const input = document.querySelector('.explorer-search input, .search-field input')
               if (input) {
                 input.value = ${JSON.stringify(query)}
                 input.dispatchEvent(new Event('input', { bubbles: true }))
@@ -3585,12 +3588,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         if (miWorkshopQuery || miAffixFilter) {
           await window.webContents.executeJavaScript(`
             (async () => {
-              const input = document.querySelector('.mi-workshop-search input')
+              const input = document.querySelector('.mi-explorer-toolbar .explorer-search input')
               if (input && ${JSON.stringify(Boolean(miWorkshopQuery))}) {
                 input.value = ${JSON.stringify(miWorkshopQuery ?? '')}
                 if (!${JSON.stringify(miNativeRestore)}) input.dispatchEvent(new Event('input', { bubbles: true }))
               }
-              const select = document.querySelector('.mi-workshop-controls select')
+              const select = document.querySelector('.mi-explorer-toolbar .explorer-toolbar-filters select')
               if (select && ${JSON.stringify(Boolean(miAffixFilter))}) {
                 select.value = ${JSON.stringify(miAffixFilter ?? 'all')}
                 if (!${JSON.stringify(miNativeRestore)}) select.dispatchEvent(new Event('change', { bubbles: true }))
@@ -3641,7 +3644,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         await new Promise((resolve) => setTimeout(resolve, 1000))
         const renderedState = await window.webContents.executeJavaScript(`({
           heading: document.querySelector('.hero h2')?.textContent,
-          results: document.querySelector('.result-count')?.textContent,
+          results: document.querySelector('.explorer-result-count, .result-count')?.textContent,
           cards: document.querySelectorAll('.item-card').length,
           sets: document.querySelectorAll('.set-card').length,
           copyCards: document.querySelectorAll('.copy-card').length,

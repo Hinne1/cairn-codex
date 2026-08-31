@@ -11,13 +11,20 @@ const appPath = resolve(argument('--app') ?? 'dist/win-unpacked/Cairn Codex.exe'
 const baseDatabase = argument('--base-db')
 const baseProfile = argument('--base-profile')
 const query = argument('--query') ?? 'wendigo'
+const category = argument('--category')
+const miAffixFilter = argument('--mi-affix-filter')
+const miNativeRestore = process.argv.includes('--mi-native-restore')
+const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
+  .toLocaleLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-|-$/g, '')
 if (!baseDatabase && !baseProfile) {
   throw new Error('Pass --base-profile or --base-db with a closed/read-only Cairn snapshot.')
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
 const profileRoot = resolve(testRoot, 'profile')
-const screenshotPath = resolve(testRoot, 'collection.png')
+const screenshotPath = resolve(testRoot, `${screenshotName || 'collection'}.png`)
 const reportPath = resolve(testRoot, 'performance.json')
 await rm(testRoot, { recursive: true, force: true })
 if (baseProfile) {
@@ -32,6 +39,10 @@ const env = {
   CAIRN_CODEX_SCREENSHOT_PATH: screenshotPath,
   CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN: '0',
   CAIRN_CODEX_SCREENSHOT_QUERY: query,
+  ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
+  ...(miAffixFilter ? { CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER: miAffixFilter } : {}),
+  ...(miNativeRestore ? { CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE: '1' } : {}),
+  ...(category && category !== 'Collection' ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
   CAIRN_CODEX_PERF_REPORT_PATH: reportPath
 }
 const child = spawn(appPath, [`--user-data-dir=${profileRoot}`], {
@@ -69,6 +80,9 @@ console.log(JSON.stringify({
   readyMs: report.readyMs,
   searchMsIncludingDebounce: report.interactions?.searchMs,
   query,
+  category: category ?? 'Collection',
+  miAffixFilter: miAffixFilter ?? null,
+  miNativeRestore,
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,
   screenshotPath,

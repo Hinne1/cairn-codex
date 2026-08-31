@@ -13,6 +13,7 @@ const baseProfile = argument('--base-profile')
 const query = argument('--query') ?? 'wendigo'
 const category = argument('--category')
 const miAffixFilter = argument('--mi-affix-filter')
+const expectedMiRows = argument('--expected-mi-rows')
 const miNativeRestore = process.argv.includes('--mi-native-restore')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
@@ -74,6 +75,18 @@ try {
   child.kill()
 }
 const itemCount = Number(String(report.renderedState?.results ?? '').replace(/[^0-9]/g, ''))
+if (expectedMiRows !== null) {
+  const expected = Number(expectedMiRows)
+  const rendered = report.renderedState?.miRows?.length ?? 0
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new Error(`--expected-mi-rows must be a non-negative integer; received ${expectedMiRows}.`)
+  }
+  if (rendered !== expected || itemCount !== expected) {
+    throw new Error(
+      `MI result mismatch: counter reported ${itemCount}, but ${rendered} rows rendered; expected ${expected}.`
+    )
+  }
+}
 console.log(JSON.stringify({
   passed: true,
   source: resolve(baseProfile ?? baseDatabase),

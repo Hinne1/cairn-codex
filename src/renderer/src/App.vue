@@ -1674,6 +1674,7 @@ const miWorkshopRows = computed(() => {
       .map((item) => [item.record.toLocaleLowerCase(), item])
   )
   const grouped = new Map<string, {
+    key: string
     base: CollectionItem
     prefix: string
     prefixRarity: 'magical' | 'rare' | null
@@ -1693,6 +1694,7 @@ const miWorkshopRows = computed(() => {
     if (existing) existing.copies.push(copy)
     else {
       grouped.set(key, {
+        key,
         base,
         prefix: prefix?.name ?? (copy.prefixRecord ? copy.prefixRecord.split('/').at(-1) ?? copy.prefixRecord : 'No prefix'),
         prefixRarity: prefix?.rarity ?? null,
@@ -6265,7 +6267,7 @@ function formatPercentile(value: number | null | undefined): string {
             <tbody>
               <tr
                 v-for="row in miWorkshopRows"
-                :key="`${row.base.record}|${row.prefix}|${row.suffix}`"
+                :key="row.key"
                 role="button"
                 tabindex="0"
                 aria-describedby="item-tooltip"

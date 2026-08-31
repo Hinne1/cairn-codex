@@ -22,6 +22,7 @@ export const IPC_CHANNELS = {
   inspectWriteSafety: 'vault:inspect-write-safety',
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
+  previewDismantling: 'vault:preview-dismantling',
   ingestStagingTab: 'vault:ingest-staging-tab',
   retrieveVaultItems: 'vault:retrieve-items',
   inspectLiveGame: 'live:inspect',
@@ -122,6 +123,7 @@ export interface CairnCodexApi {
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>
+  previewDismantling: (vaultItemIds: string[]) => Promise<DismantlingPreview>
   ingestStagingTab: (path: string) => Promise<IngestResult>
   retrieveVaultItems: (path: string, vaultItemIds: string[]) => Promise<RetrievalResult>
   inspectLiveGame: () => Promise<LiveGameStatus>
@@ -238,6 +240,8 @@ export interface VaultListItem {
   name: string
   rarity: CollectionItemRarity
   slot: string
+  levelRequirement: number
+  itemLevel: number
   catalogued: boolean
   reusable: boolean
   isHardcore: boolean
@@ -246,10 +250,50 @@ export interface VaultListItem {
   stackCount: number
   prefixRecord: string
   suffixRecord: string
+  componentRecord: string
+  augmentRecord: string
+  ascendant: boolean
   instanceKey: string
   rollAnalysis: ItemRollAnalysis | null
   ingestedAtUtc: string
   retrievedAtUtc: string | null
+}
+
+export interface DismantlingPreview {
+  ruleRecord: string
+  contentPack: string
+  itemCount: number
+  dynamiteCost: number
+  ironCost: number
+  scrapMinimum: number
+  scrapMaximum: number
+  scrapExpected: number
+  scrapOutcomes: DismantlingScrapOutcome[]
+  rewards: DismantlingRewardPreview[]
+  items: DismantlingItemPreview[]
+}
+
+export interface DismantlingScrapOutcome {
+  count: number
+  probability: number
+}
+
+export interface DismantlingRewardPreview {
+  record: string
+  name: string
+  category: 'component' | 'material' | 'other'
+  expectedCount: number
+  chanceAtLeastOne: number
+}
+
+export interface DismantlingItemPreview {
+  vaultItemId: string
+  name: string
+  rarity: string
+  itemLevel: number
+  ironCost: number
+  bonusChance: number
+  bonusTableRecord: string | null
 }
 
 export interface IngestResult {

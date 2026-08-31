@@ -710,6 +710,8 @@ export class CollectionDatabase {
           catalog_item.name,
           catalog_item.rarity,
           catalog_item.slot,
+          catalog_item.level_requirement,
+          catalog_item.item_level,
           catalog_item.content_pack
         FROM vault_item
         JOIN catalog_item ON catalog_item.record = vault_item.base_record
@@ -726,6 +728,8 @@ export class CollectionDatabase {
       name: string
       rarity: 'epic' | 'legendary' | 'mi' | 'rare' | 'faction' | 'supply'
       slot: string
+      level_requirement: number
+      item_level: number
       content_pack: string
       is_hardcore: number
       reusable: number
@@ -738,6 +742,10 @@ export class CollectionDatabase {
         stackCount?: number
         prefixRecord?: string
         suffixRecord?: string
+        materiaRecord?: string
+        enchantmentRecord?: string
+        ascendantRecord?: string
+        ascendantRecord2H?: string
       }
       return {
         id: row.id,
@@ -745,6 +753,8 @@ export class CollectionDatabase {
         name: row.name,
         rarity: row.rarity,
         slot: row.slot,
+        levelRequirement: row.level_requirement,
+        itemLevel: row.item_level,
         catalogued: row.content_pack !== 'cairn-quarantine',
         reusable: row.reusable === 1,
         isHardcore: row.is_hardcore === 1,
@@ -753,6 +763,9 @@ export class CollectionDatabase {
         stackCount: Math.max(1, payload.stackCount ?? 1),
         prefixRecord: payload.prefixRecord ?? '',
         suffixRecord: payload.suffixRecord ?? '',
+        componentRecord: payload.materiaRecord ?? '',
+        augmentRecord: payload.enchantmentRecord ?? '',
+        ascendant: Boolean(payload.ascendantRecord || payload.ascendantRecord2H),
         instanceKey: vaultPayloadFingerprint(payload),
         rollAnalysis: row.roll_json ? JSON.parse(row.roll_json) as ItemRollAnalysis : null,
         ingestedAtUtc: row.ingested_at_utc,

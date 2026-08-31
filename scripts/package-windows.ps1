@@ -1,7 +1,12 @@
+param(
+  [ValidatePattern('^[^\\/:*?"<>|]+$')]
+  [string] $PackageDirectoryName = 'Cairn Codex-win32-x64'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$packageRoot = Join-Path $projectRoot 'dist\package\Cairn Codex-win32-x64'
+$packageRoot = Join-Path (Join-Path $projectRoot 'dist\package') $PackageDirectoryName
 $electronRoot = Join-Path $projectRoot 'node_modules\electron\dist'
 $helperProject = Join-Path $projectRoot 'src\helper\CairnCodex.GrimDawn\CairnCodex.GrimDawn.csproj'
 $helperPublish = Join-Path $projectRoot 'dist\helper-win-x64'

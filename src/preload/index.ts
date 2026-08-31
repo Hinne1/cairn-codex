@@ -8,6 +8,7 @@ import {
   type CharacterSaveProfile,
   type CollectionSnapshot,
   type DiagnosticExportResult,
+  type DismantlingPreview,
   type GdiaImportResult,
   type GrimDawnDiscovery,
   type IngestResult,
@@ -69,6 +70,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.inspectStagingTab, { path }) as Promise<StagingTabInspection>,
   listVaultItems: () =>
     ipcRenderer.invoke(IPC_CHANNELS.listVaultItems) as Promise<VaultListItem[]>,
+  previewDismantling: (vaultItemIds) =>
+    ipcRenderer.invoke(IPC_CHANNELS.previewDismantling, { vaultItemIds }) as Promise<DismantlingPreview>,
   ingestStagingTab: (path) =>
     ipcRenderer.invoke(IPC_CHANNELS.ingestStagingTab, { path }) as Promise<IngestResult>,
   retrieveVaultItems: (path, vaultItemIds) =>

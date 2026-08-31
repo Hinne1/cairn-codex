@@ -41,6 +41,7 @@ while ((line = Console.ReadLine()) is not null)
                     ?? throw new ArgumentException("An installation path is required."))),
             "list-characters" => ListCharacters(request),
             "build-item-catalog" => BuildItemCatalog(request),
+            "simulate-dismantling" => SimulateDismantling(request),
             "resolve-archive-items" => ResolveArchiveItems(request),
             "inspect-game-record" => InspectGameRecord(request),
             "inspect-game-records" => InspectGameRecords(request),
@@ -154,6 +155,15 @@ HelperResponse BuildItemCatalog(HelperRequest request)
     var parameters = request.Params?.Deserialize<BuildItemCatalogRequest>(jsonOptions)
         ?? throw new JsonException("build-item-catalog requires an installationPath parameter.");
     return HelperResponse.Success(request.Id, ItemCatalogBuilder.Build(parameters.InstallationPath));
+}
+
+HelperResponse SimulateDismantling(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<SimulateDismantlingRequest>(jsonOptions)
+        ?? throw new JsonException("simulate-dismantling requires installationPath and items parameters.");
+    return HelperResponse.Success(
+        request.Id,
+        DismantlingSimulator.Simulate(parameters.InstallationPath, parameters.Items));
 }
 
 HelperResponse ResolveArchiveItems(HelperRequest request)
@@ -388,6 +398,9 @@ HelperResponse AnalyzeItemRolls(HelperRequest request)
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);
+internal sealed record SimulateDismantlingRequest(
+    string InstallationPath,
+    DismantlingInputItem[] Items);
 internal sealed record ResolveArchiveItemsRequest(string InstallationPath, string[] Records);
 internal sealed record InspectGameRecordRequest(string InstallationPath, string Record);
 internal sealed record InspectArchiveTextRequest(

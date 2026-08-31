@@ -10,6 +10,7 @@ import {
   type CharacterSaveProfile,
   type CollectionBasis,
   type CollectionSnapshot,
+  type DismantlingPreview,
   type GrimDawnDiscovery,
   type GdiaImportResult,
   type IngestResult,
@@ -672,6 +673,35 @@ function registerIpcHandlers(
     IPC_CHANNELS.listVaultItems,
     (_event, input?: { isHardcore?: boolean }): VaultListItem[] =>
       database.listVaultItems(input?.isHardcore)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.previewDismantling,
+    async (_event, input: { vaultItemIds: string[] }): Promise<DismantlingPreview> => {
+      const requestedIds = input.vaultItemIds ?? []
+      if (new Set(requestedIds).size !== requestedIds.length) {
+        throw new Error('Duplicate dismantling candidate IDs are not allowed.')
+      }
+      const byId = new Map(database.listVaultItems().map((item) => [item.id, item]))
+      const items = requestedIds.map((id) => {
+        const item = byId.get(id)
+        if (!item || item.state !== 'ingested' || !item.catalogued || item.reusable ||
+          !['epic', 'legendary', 'mi', 'rare'].includes(item.rarity)) {
+          throw new Error(`Archive copy is not eligible for dismantling preview: ${id}`)
+        }
+        return {
+          vaultItemId: item.id,
+          name: item.name,
+          rarity: item.rarity,
+          itemLevel: item.itemLevel,
+          ascendant: item.ascendant
+        }
+      })
+      const discovered = latestCollection?.discovery ??
+        await helper.request<GrimDawnDiscovery>('discover-grim-dawn')
+      const installationPath = discovered.installations[0]?.path
+      if (!installationPath) throw new Error('No Grim Dawn installation is available.')
+      return helper.request<DismantlingPreview>('simulate-dismantling', { installationPath, items })
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.ingestStagingTab,
@@ -3471,6 +3501,33 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (toggle?.getAttribute('aria-expanded') === 'false') toggle.click()
             })()
           `)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_DISMANTLING_PREVIEW === '1') {
+          await window.webContents.executeJavaScript(`
+            [...document.querySelectorAll('.dismantling-toolbar button')]
+              .find((button) => button.textContent?.trim() === 'Select safe duplicates')
+              ?.click()
+          `)
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          await window.webContents.executeJavaScript(
+            "document.querySelector('.dismantling-run')?.click()"
+          )
+          let previewCompleted = false
+          for (let attempt = 0; attempt < 120; attempt += 1) {
+            const previewError = await window.webContents.executeJavaScript(
+              "document.querySelector('.dismantling-error')?.textContent"
+            )
+            if (previewError) throw new Error('Dismantling preview failed: ' + previewError)
+            const previewReady = await window.webContents.executeJavaScript(
+              "Boolean(document.querySelector('.dismantling-costs'))"
+            )
+            if (previewReady) {
+              previewCompleted = true
+              break
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250))
+          }
+          if (!previewCompleted) throw new Error('Dismantling preview timed out.')
         }
         if (process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_MAP === '1') {
           await window.webContents.executeJavaScript(

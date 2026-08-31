@@ -19,8 +19,17 @@ Tool-specific selectors and unusual controls belong in the toolbar slots. They s
 reimplement its outer layout, input styling, focus treatment, clear button, result count, or
 responsive breakpoints.
 
-Collection, Sets, Components & Consumables, Skill Explorer, MI Workshop, Supplies,
-Collection Farming, and Dismantling Lab currently use this contract.
+Collection, Sets, Components & Consumables, Skill Explorer, Stash Oracle, both Leveling
+Planner result modes, MI Workshop, Supplies, Collection Farming, Dismantling Lab, and the
+Transfers archive browser currently use this contract. Settings and configuration forms do not
+use an explorer toolbar because they do not represent a searchable result set.
+
+## Tool headers
+
+Specialist workspaces use `src/renderer/src/components/ToolHeader.vue` for their eyebrow,
+title, explanation, optional status summary, and primary view controls. Tone variants may carry
+the workspace's identity, but spacing, hierarchy, typography, and responsive behavior stay
+shared. Do not add another workspace-specific heading shell.
 
 ## Search and filter semantics
 
@@ -44,7 +53,7 @@ behave identically everywhere.
 
 ## Adding a workspace
 
-1. Use the standard tool heading.
+1. Use `ToolHeader` for the workspace heading.
 2. Use `ExplorerToolbar` if the result set is searchable or filterable.
 3. Keep query, filters, sorting, and result count reactive from the same source of truth.
 4. Route item hover/focus through the global tooltip pipeline.

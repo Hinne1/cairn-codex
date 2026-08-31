@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
+import ToolHeader from './components/ToolHeader.vue'
 import {
   buildStashOracle,
   type OracleReadiness,
@@ -49,6 +50,11 @@ type SkillScope = 'archive' | 'all'
 type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
 type SkillRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
 type MiSortMode = 'metric' | 'level' | 'name' | 'copies'
+type OracleSortMode = 'score' | 'name' | 'class' | 'readiness'
+type PlannerSortMode = 'level' | 'name' | 'rarity'
+type PlannerMapSortMode = 'items' | 'name' | 'level'
+type VaultRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
+type VaultSortMode = 'recent' | 'name' | 'level' | 'roll'
 type TransferMode = 'live' | 'offline'
 type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
@@ -80,6 +86,29 @@ interface AppHistoryState {
   skillSlotFilter: string
   skillSort: SkillSort
   skillSortDirection: SortDirection
+  oracleQuery: string
+  oracleClass: string
+  oracleStyle: OracleStyle
+  oracleReadiness: 'all' | OracleReadiness
+  oracleMinimumLevel: number
+  oracleMaximumLevel: number
+  oracleSortMode: OracleSortMode
+  oracleSortDirection: SortDirection
+  plannerQuery: string
+  plannerOwnership: OwnershipFilter
+  plannerShowIgnored: boolean
+  plannerSortMode: PlannerSortMode
+  plannerSortDirection: SortDirection
+  plannerDisplay: PlannerDisplay
+  atlasRegionQuery: string
+  plannerMapScope: PlannerMapScope
+  plannerMapSortMode: PlannerMapSortMode
+  plannerMapSortDirection: SortDirection
+  vaultQuery: string
+  vaultRarityFilter: VaultRarityFilter
+  vaultSortMode: VaultSortMode
+  vaultSortDirection: SortDirection
+  transferMode: TransferMode
 }
 
 interface TooltipAffix {
@@ -278,8 +307,12 @@ const plannerMinimumLevelDraft = ref(plannerMinimumLevel.value)
 const plannerLevelCapDraft = ref(plannerLevelCap.value)
 const plannerDisplay = ref<PlannerDisplay>(readStoredPlannerDisplay())
 const plannerMapScope = ref<PlannerMapScope>('selected')
+const plannerMapSortMode = ref<PlannerMapSortMode>('items')
+const plannerMapSortDirection = ref<SortDirection>('desc')
 const plannerQuery = ref('')
 const plannerOwnership = ref<OwnershipFilter>('all')
+const plannerSortMode = ref<PlannerSortMode>('level')
+const plannerSortDirection = ref<SortDirection>('asc')
 const plannerIgnoredRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-ignored-records'))
 const plannerFavoriteRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-favorite-records'))
 const plannerShowIgnored = ref(false)
@@ -289,6 +322,8 @@ const oracleReadiness = ref<'all' | OracleReadiness>('all')
 const oracleMinimumLevel = ref(readStoredNumber('cairn-codex-oracle-minimum-level', 65, 1, 100))
 const oracleMaximumLevel = ref(readStoredNumber('cairn-codex-oracle-maximum-level', 100, 1, 100))
 const oracleQuery = ref('')
+const oracleSortMode = ref<OracleSortMode>('score')
+const oracleSortDirection = ref<SortDirection>('desc')
 const oracleVisibleCount = ref(12)
 const discoveredCharacters = ref<CharacterSaveProfile[]>([])
 const characterImportOpen = ref(false)
@@ -306,6 +341,10 @@ const staging = ref<StagingTabInspection | null>(null)
 const writeSafety = ref<WriteSafetyStatus | null>(null)
 const selectedStashPath = ref(localStorage.getItem('cairn-codex-retrieval-stash') ?? '')
 const selectedVaultIds = ref<string[]>([])
+const vaultQuery = ref('')
+const vaultRarityFilter = ref<VaultRarityFilter>('all')
+const vaultSortMode = ref<VaultSortMode>('recent')
+const vaultSortDirection = ref<SortDirection>('desc')
 const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
@@ -409,15 +448,40 @@ const activeTransferHardcore = computed(() =>
     ? liveStatus.value.isHardcore
     : targetStash.value?.isHardcore
 )
-const availableVaultItems = computed(() =>
-  vaultItems.value.filter(
-    (item) =>
-      item.catalogued &&
-      item.rarity !== 'supply' &&
-      item.state === 'ingested' &&
-      item.isHardcore === activeTransferHardcore.value
-  )
-)
+const transferableVaultItems = computed(() => vaultItems.value.filter(
+  (item) =>
+    item.catalogued &&
+    item.rarity !== 'supply' &&
+    item.state === 'ingested' &&
+    item.isHardcore === activeTransferHardcore.value
+))
+const availableVaultItems = computed(() => {
+  const needle = normalizeLoose(vaultQuery.value)
+  const direction = vaultSortDirection.value === 'asc' ? 1 : -1
+  return transferableVaultItems.value
+    .filter((item) => vaultRarityFilter.value === 'all' || item.rarity === vaultRarityFilter.value)
+    .filter((item) => !needle || normalizeLoose([
+      item.name,
+      item.baseRecord,
+      item.prefixRecord,
+      item.suffixRecord,
+      item.slot,
+      item.rarity,
+      item.itemLevel,
+      item.seed
+    ].join(' ')).includes(needle))
+    .sort((left, right) => {
+      let comparison = 0
+      if (vaultSortMode.value === 'name') comparison = left.name.localeCompare(right.name)
+      else if (vaultSortMode.value === 'level') comparison = left.itemLevel - right.itemLevel
+      else if (vaultSortMode.value === 'roll') {
+        comparison = (left.rollAnalysis?.overallEstimatedPercentile ?? -1) -
+          (right.rollAnalysis?.overallEstimatedPercentile ?? -1)
+      } else comparison = Date.parse(left.ingestedAtUtc) - Date.parse(right.ingestedAtUtc)
+      if (comparison === 0) comparison = left.name.localeCompare(right.name)
+      return comparison * direction
+    })
+})
 const dismantlingCandidates = computed(() =>
   vaultItems.value.filter((item) =>
     item.catalogued &&
@@ -1237,21 +1301,33 @@ const oracleCandidates = computed(() => oracleClass.value === 'all'
   : allOracleCandidates.value.filter((candidate) => normalizeLoose(candidate.className) === normalizeLoose(oracleClass.value)))
 const filteredOracleCandidates = computed(() => {
   const needle = normalizeLoose(oracleQuery.value)
-  return oracleCandidates.value.filter((candidate) => {
-    if (oracleReadiness.value !== 'all' && candidate.readiness !== oracleReadiness.value) return false
-    if (!needle) return true
-    return normalizeLoose([
-      candidate.title,
-      candidate.skill,
-      candidate.damageType,
-      candidate.style,
-      candidate.className,
-      ...candidate.masteries,
-      ...candidate.relatedSkills,
-      ...candidate.sets.map((set) => set.name),
-      ...candidate.evidence.flatMap((evidence) => [evidence.item.name, ...evidence.reasons])
-    ].join(' ')).includes(needle)
-  })
+  const direction = oracleSortDirection.value === 'asc' ? 1 : -1
+  const readinessRank: Record<OracleReadiness, number> = { ready: 3, near: 2, wildcard: 1 }
+  return oracleCandidates.value
+    .filter((candidate) => {
+      if (oracleReadiness.value !== 'all' && candidate.readiness !== oracleReadiness.value) return false
+      if (!needle) return true
+      return normalizeLoose([
+        candidate.title,
+        candidate.skill,
+        candidate.damageType,
+        candidate.style,
+        candidate.className,
+        ...candidate.masteries,
+        ...candidate.relatedSkills,
+        ...candidate.sets.map((set) => set.name),
+        ...candidate.evidence.flatMap((evidence) => [evidence.item.name, ...evidence.reasons])
+      ].join(' ')).includes(needle)
+    })
+    .sort((left, right) => {
+      let comparison = 0
+      if (oracleSortMode.value === 'name') comparison = left.title.localeCompare(right.title)
+      else if (oracleSortMode.value === 'class') comparison = left.className.localeCompare(right.className)
+      else if (oracleSortMode.value === 'readiness') comparison = readinessRank[left.readiness] - readinessRank[right.readiness]
+      else comparison = left.score - right.score
+      if (comparison === 0) comparison = left.title.localeCompare(right.title)
+      return comparison * direction
+    })
 })
 const visibleOracleCandidates = computed(() => filteredOracleCandidates.value.slice(0, oracleVisibleCount.value))
 const oracleReadinessCounts = computed(() => ({
@@ -1386,10 +1462,17 @@ const plannerCandidateRows = computed(() => plannerCatalogItems.value
       .map(formatPresentationLine)
     return matches.length > 0 ? [{ item, matches, petBonuses }] : []
   })
-  .sort((left, right) =>
-    left.item.levelRequirement - right.item.levelRequirement ||
-    left.item.name.localeCompare(right.item.name)
-  ))
+  .sort((left, right) => {
+    const direction = plannerSortDirection.value === 'asc' ? 1 : -1
+    const rarityRank: Record<string, number> = { legendary: 5, epic: 4, mi: 3, faction: 2, rare: 1 }
+    let comparison = 0
+    if (plannerSortMode.value === 'name') comparison = left.item.name.localeCompare(right.item.name)
+    else if (plannerSortMode.value === 'rarity') {
+      comparison = (rarityRank[left.item.rarity] ?? 0) - (rarityRank[right.item.rarity] ?? 0)
+    } else comparison = left.item.levelRequirement - right.item.levelRequirement
+    if (comparison === 0) comparison = left.item.name.localeCompare(right.item.name)
+    return comparison * direction
+  }))
 
 const plannerRows = computed(() => plannerCandidateRows.value.filter(({ item }) => {
   const ignored = plannerIgnoredRecordSet.value.has(plannerRecordKey(item))
@@ -1446,14 +1529,21 @@ const unlocatedPlannerMiItems = computed(() =>
 
 const visibleAtlasRegions = computed(() => {
   const needle = normalizeLoose(atlasRegionQuery.value)
-  if (!needle) return atlasRegions.value
-  return atlasRegions.value.filter((region) =>
-    normalizeLoose([
-      region.name,
-      ...region.items.map((item) => item.name),
-      ...region.items.flatMap((item) => item.acquisition?.sources ?? [])
-    ].join(' ')).includes(needle)
-  )
+  const direction = plannerMapSortDirection.value === 'asc' ? 1 : -1
+  return atlasRegions.value
+    .filter((region) => !needle || normalizeLoose([
+        region.name,
+        ...region.items.map((item) => item.name),
+        ...region.items.flatMap((item) => item.acquisition?.sources ?? [])
+      ].join(' ')).includes(needle))
+    .sort((left, right) => {
+      let comparison = 0
+      if (plannerMapSortMode.value === 'name') comparison = left.name.localeCompare(right.name)
+      else if (plannerMapSortMode.value === 'level') comparison = left.minimumItemLevel - right.minimumItemLevel
+      else comparison = left.items.length - right.items.length
+      if (comparison === 0) comparison = left.name.localeCompare(right.name)
+      return comparison * direction
+    })
 })
 
 const atlasMapPins = computed(() => {
@@ -1965,7 +2055,30 @@ function currentAppHistoryState(index = appHistoryIndex): AppHistoryState {
     skillRarityFilter: skillRarityFilter.value,
     skillSlotFilter: skillSlotFilter.value,
     skillSort: skillSort.value,
-    skillSortDirection: skillSortDirection.value
+    skillSortDirection: skillSortDirection.value,
+    oracleQuery: oracleQuery.value,
+    oracleClass: oracleClass.value,
+    oracleStyle: oracleStyle.value,
+    oracleReadiness: oracleReadiness.value,
+    oracleMinimumLevel: oracleMinimumLevel.value,
+    oracleMaximumLevel: oracleMaximumLevel.value,
+    oracleSortMode: oracleSortMode.value,
+    oracleSortDirection: oracleSortDirection.value,
+    plannerQuery: plannerQuery.value,
+    plannerOwnership: plannerOwnership.value,
+    plannerShowIgnored: plannerShowIgnored.value,
+    plannerSortMode: plannerSortMode.value,
+    plannerSortDirection: plannerSortDirection.value,
+    plannerDisplay: plannerDisplay.value,
+    atlasRegionQuery: atlasRegionQuery.value,
+    plannerMapScope: plannerMapScope.value,
+    plannerMapSortMode: plannerMapSortMode.value,
+    plannerMapSortDirection: plannerMapSortDirection.value,
+    vaultQuery: vaultQuery.value,
+    vaultRarityFilter: vaultRarityFilter.value,
+    vaultSortMode: vaultSortMode.value,
+    vaultSortDirection: vaultSortDirection.value,
+    transferMode: transferMode.value
   }
 }
 
@@ -2008,6 +2121,29 @@ function handleAppHistory(event: PopStateEvent): void {
   skillSlotFilter.value = state.skillSlotFilter ?? 'all'
   skillSort.value = state.skillSort ?? 'amount'
   skillSortDirection.value = state.skillSortDirection ?? 'desc'
+  oracleQuery.value = state.oracleQuery ?? ''
+  oracleClass.value = state.oracleClass ?? 'all'
+  oracleStyle.value = state.oracleStyle ?? 'all'
+  oracleReadiness.value = state.oracleReadiness ?? 'all'
+  oracleMinimumLevel.value = state.oracleMinimumLevel ?? 65
+  oracleMaximumLevel.value = state.oracleMaximumLevel ?? 100
+  oracleSortMode.value = state.oracleSortMode ?? 'score'
+  oracleSortDirection.value = state.oracleSortDirection ?? 'desc'
+  plannerQuery.value = state.plannerQuery ?? ''
+  plannerOwnership.value = state.plannerOwnership ?? 'all'
+  plannerShowIgnored.value = state.plannerShowIgnored ?? false
+  plannerSortMode.value = state.plannerSortMode ?? 'level'
+  plannerSortDirection.value = state.plannerSortDirection ?? 'asc'
+  plannerDisplay.value = state.plannerDisplay ?? 'list'
+  atlasRegionQuery.value = state.atlasRegionQuery ?? ''
+  plannerMapScope.value = state.plannerMapScope ?? 'selected'
+  plannerMapSortMode.value = state.plannerMapSortMode ?? 'items'
+  plannerMapSortDirection.value = state.plannerMapSortDirection ?? 'desc'
+  vaultQuery.value = state.vaultQuery ?? ''
+  vaultRarityFilter.value = state.vaultRarityFilter ?? 'all'
+  vaultSortMode.value = state.vaultSortMode ?? 'recent'
+  vaultSortDirection.value = state.vaultSortDirection ?? 'desc'
+  transferMode.value = state.transferMode ?? 'live'
   updateHistoryButtons()
   void nextTick(() => {
     syncMiWorkshopControlElements()
@@ -2065,7 +2201,7 @@ watch([activeView, selectedRecord], () => {
   updateHistoryButtons()
 }, { flush: 'post' })
 watch(
-  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection],
+  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection, plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerDisplay, atlasRegionQuery, plannerMapScope, plannerMapSortMode, plannerMapSortDirection, vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, transferMode],
   () => {
     if (!appHistoryReady || restoringAppHistory) return
     window.history.replaceState(currentAppHistoryState(), '')
@@ -5340,13 +5476,11 @@ function formatPercentile(value: number | null | undefined): string {
       </ExplorerToolbar>
 
       <section v-if="activeView === 'skills'" class="skill-explorer" aria-label="Skill item explorer">
-        <header class="skill-explorer-heading">
-          <div>
-            <p class="section-label">Build research prototype</p>
-            <h2>Items for a skill</h2>
-            <p>Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, and level requirements.</p>
-          </div>
-        </header>
+        <ToolHeader
+          eyebrow="Build research prototype"
+          title="Items for a skill"
+          description="Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, and level requirements."
+        />
         <div class="skill-picker">
           <div class="skill-combobox" @focusout="handleSkillPickerFocusOut">
             <label for="skill-picker-input">Skill</label>
@@ -5508,52 +5642,80 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'oracle'" class="stash-oracle" aria-label="Stash Oracle build recommendations">
-        <header class="tool-heading oracle-heading">
-          <div>
-            <p class="section-label">Archetype assembler</p>
-            <h2>What build is your stash trying to make you play?</h2>
-            <p>Cairn follows the mechanical evidence: archived skill modifiers, conversions, set progress, high-level MIs, and the slots those items need. Every recommendation shows its work.</p>
-          </div>
-          <button type="button" class="oracle-surprise" @click="surpriseMeWithOracle">Surprise me</button>
-        </header>
+        <ToolHeader
+          eyebrow="Archetype assembler"
+          title="What build is your stash trying to make you play?"
+          description="Cairn follows the mechanical evidence: archived skill modifiers, conversions, set progress, high-level MIs, and the slots those items need. Every recommendation shows its work."
+          tone="ember"
+        />
 
-        <div class="oracle-controls">
-          <label>
-            <span>Class</span>
-            <select v-model="oracleClass">
-              <option value="all">Any class</option>
-              <option v-for="className in oracleClassOptions" :key="className" :value="className">{{ className }}</option>
-            </select>
-          </label>
-          <label>
-            <span>Build style</span>
-            <select v-model="oracleStyle">
-              <option value="all">Any style</option>
-              <option value="pets">Pets</option>
-              <option value="caster">Caster</option>
-              <option value="weapon">Weapon</option>
-              <option value="retaliation">Retaliation</option>
-            </select>
-          </label>
-          <label class="oracle-level-control">
-            <span>Item level</span>
-            <span><input v-model.number="oracleMinimumLevel" type="number" min="1" :max="oracleMaximumLevel" aria-label="Minimum item level" /><b>to</b><input v-model.number="oracleMaximumLevel" type="number" :min="oracleMinimumLevel" max="100" aria-label="Maximum item level" /></span>
-          </label>
-          <label class="oracle-search">
-            <span>Find an archetype</span>
-            <input v-model="oracleQuery" type="search" placeholder="Skill, damage type, set, item…" />
-          </label>
-        </div>
-
-        <div class="oracle-readiness-bar">
-          <div class="segmented-control" aria-label="Build readiness">
-            <button type="button" :class="{ active: oracleReadiness === 'all' }" @click="oracleReadiness = 'all'">All <small>{{ oracleCandidates.length }}</small></button>
-            <button type="button" :class="{ active: oracleReadiness === 'ready' }" @click="oracleReadiness = 'ready'">Ready now <small>{{ oracleReadinessCounts.ready }}</small></button>
-            <button type="button" :class="{ active: oracleReadiness === 'near' }" @click="oracleReadiness = 'near'">Nearly there <small>{{ oracleReadinessCounts.near }}</small></button>
-            <button type="button" :class="{ active: oracleReadiness === 'wildcard' }" @click="oracleReadiness = 'wildcard'">Wild cards <small>{{ oracleReadinessCounts.wildcard }}</small></button>
-          </div>
-          <p>Scores measure archived mechanical support and equipability—not whether a build is fashionable.</p>
-        </div>
+        <ExplorerToolbar
+          v-model="oracleQuery"
+          class="oracle-explorer-toolbar"
+          search-label="Search archetypes"
+          placeholder="Skill, damage type, set, item…"
+          :result-count="filteredOracleCandidates.length"
+          result-label="build archetypes"
+        >
+          <template #filters>
+            <label>
+              <span>Class</span>
+              <select v-model="oracleClass" autocomplete="off">
+                <option value="all">Any class</option>
+                <option v-for="className in oracleClassOptions" :key="className" :value="className">{{ className }}</option>
+              </select>
+            </label>
+            <label>
+              <span>Build style</span>
+              <select v-model="oracleStyle" autocomplete="off">
+                <option value="all">Any style</option>
+                <option value="pets">Pets</option>
+                <option value="caster">Caster</option>
+                <option value="weapon">Weapon</option>
+                <option value="retaliation">Retaliation</option>
+              </select>
+            </label>
+            <label>
+              <span>Readiness</span>
+              <select v-model="oracleReadiness" autocomplete="off">
+                <option value="all">All ({{ oracleCandidates.length }})</option>
+                <option value="ready">Ready now ({{ oracleReadinessCounts.ready }})</option>
+                <option value="near">Nearly there ({{ oracleReadinessCounts.near }})</option>
+                <option value="wildcard">Wild cards ({{ oracleReadinessCounts.wildcard }})</option>
+              </select>
+            </label>
+            <label class="explorer-range-control">
+              <span>Item level</span>
+              <span>
+                <input v-model.number="oracleMinimumLevel" type="number" min="1" :max="oracleMaximumLevel" aria-label="Minimum item level" />
+                <b>to</b>
+                <input v-model.number="oracleMaximumLevel" type="number" :min="oracleMinimumLevel" max="100" aria-label="Maximum item level" />
+              </span>
+            </label>
+          </template>
+          <template #sort>
+            <label>
+              <span>Sort by</span>
+              <select v-model="oracleSortMode" autocomplete="off">
+                <option value="score">Stash fit</option>
+                <option value="readiness">Readiness</option>
+                <option value="name">Build name</option>
+                <option value="class">Class</option>
+              </select>
+            </label>
+            <label>
+              <span>Order</span>
+              <select v-model="oracleSortDirection" autocomplete="off">
+                <option value="desc">Highest first</option>
+                <option value="asc">Lowest first</option>
+              </select>
+            </label>
+          </template>
+          <template #actions>
+            <button type="button" @click="surpriseMeWithOracle">Surprise me</button>
+          </template>
+        </ExplorerToolbar>
+        <p class="explorer-context-note">Scores measure archived mechanical support and equipability—not whether a build is fashionable.</p>
 
         <div v-if="visibleOracleCandidates.length" class="oracle-grid">
           <article
@@ -5638,18 +5800,20 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'planner'" class="leveling-planner" aria-label="Character leveling shopping list">
-        <header class="planner-heading">
-          <div>
-            <p class="section-label">Character shopping list</p>
-            <h2>Leveling Planner</h2>
-            <p>Pick the skills your character actually uses. Cairn merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route.</p>
-          </div>
-          <div class="segmented-control planner-display" aria-label="Planner display">
-            <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">Table</button>
-            <button type="button" :class="{ active: plannerDisplay === 'grid' }" @click="plannerDisplay = 'grid'">Cards</button>
-            <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI sources</button>
-          </div>
-        </header>
+        <ToolHeader
+          eyebrow="Character shopping list"
+          title="Leveling Planner"
+          description="Pick the skills your character actually uses. Cairn merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route."
+          tone="blue"
+        >
+          <template #aside>
+            <div class="segmented-control planner-display" aria-label="Planner display">
+              <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">Table</button>
+              <button type="button" :class="{ active: plannerDisplay === 'grid' }" @click="plannerDisplay = 'grid'">Cards</button>
+              <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI sources</button>
+            </div>
+          </template>
+        </ToolHeader>
 
         <div class="planner-controls">
           <div class="planner-profile-control">
@@ -5747,17 +5911,49 @@ function formatPercentile(value: number | null | undefined): string {
         </div>
 
         <template v-if="plannerDisplay !== 'map'">
-          <div class="planner-filterbar">
-            <input v-model="plannerQuery" type="search" placeholder="Filter items, monsters, areas… (try zarias)" />
-            <div class="segmented-control" aria-label="Archive ownership">
-              <button type="button" :class="{ active: plannerOwnership === 'all' }" @click="plannerOwnership = 'all'">All</button>
-              <button type="button" :class="{ active: plannerOwnership === 'owned' }" @click="plannerOwnership = 'owned'">In Archive</button>
-              <button type="button" :class="{ active: plannerOwnership === 'missing' }" @click="plannerOwnership = 'missing'">Not archived</button>
-            </div>
-            <button type="button" class="planner-ignored-filter" :class="{ active: plannerShowIgnored }" @click="plannerShowIgnored = !plannerShowIgnored">
-              {{ plannerShowIgnored ? 'Back to list' : `Ignored (${plannerIgnoredRecords.length})` }}
-            </button>
-          </div>
+          <ExplorerToolbar
+            v-model="plannerQuery"
+            class="planner-explorer-toolbar"
+            search-label="Search shopping list"
+            placeholder="Item, monster, area… (try zarias)"
+            :result-count="plannerRows.length"
+            result-label="relevant item tiers"
+          >
+            <template #filters>
+              <label>
+                <span>Archive status</span>
+                <select v-model="plannerOwnership" autocomplete="off">
+                  <option value="all">All items</option>
+                  <option value="owned">In Archive</option>
+                  <option value="missing">Not archived</option>
+                </select>
+              </label>
+              <label>
+                <span>List</span>
+                <select v-model="plannerShowIgnored" autocomplete="off">
+                  <option :value="false">Shopping list</option>
+                  <option :value="true">Ignored bases ({{ plannerIgnoredRecords.length }})</option>
+                </select>
+              </label>
+            </template>
+            <template #sort>
+              <label>
+                <span>Sort by</span>
+                <select v-model="plannerSortMode" autocomplete="off">
+                  <option value="level">Required level</option>
+                  <option value="name">Item name</option>
+                  <option value="rarity">Rarity</option>
+                </select>
+              </label>
+              <label>
+                <span>Order</span>
+                <select v-model="plannerSortDirection" autocomplete="off">
+                  <option value="asc">Lowest first</option>
+                  <option value="desc">Highest first</option>
+                </select>
+              </label>
+            </template>
+          </ExplorerToolbar>
           <div class="planner-summary">
             <span><strong>{{ plannerRows.length }}</strong> relevant item tiers</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'mi').length }}</strong> MIs</span>
@@ -5877,14 +6073,42 @@ function formatPercentile(value: number | null | undefined): string {
         </template>
 
         <template v-else>
-          <div class="planner-map-toolbar">
-            <div class="segmented-control" aria-label="MI map scope">
-              <button type="button" :class="{ active: plannerMapScope === 'selected' }" @click="plannerMapScope = 'selected'">Selected build</button>
-              <button type="button" :class="{ active: plannerMapScope === 'all' }" @click="plannerMapScope = 'all'">All MI tiers</button>
-            </div>
-            <input v-model="atlasRegionQuery" type="search" placeholder="Filter areas, MIs, or monsters…" />
-            <span>{{ plannerMiItems.length }} MI tiers · {{ visibleAtlasRegions.length }} areas<span v-if="unlocatedPlannerMiItems.length"> · {{ unlocatedPlannerMiItems.length }} unlocated</span></span>
-          </div>
+          <ExplorerToolbar
+            v-model="atlasRegionQuery"
+            class="planner-map-explorer-toolbar"
+            search-label="Search MI sources"
+            placeholder="Area, MI, monster…"
+            :result-count="visibleAtlasRegions.length"
+            result-label="source areas"
+          >
+            <template #filters>
+              <label>
+                <span>Catalog scope</span>
+                <select v-model="plannerMapScope" autocomplete="off">
+                  <option value="selected">Selected build</option>
+                  <option value="all">All MI tiers</option>
+                </select>
+              </label>
+            </template>
+            <template #sort>
+              <label>
+                <span>Sort by</span>
+                <select v-model="plannerMapSortMode" autocomplete="off">
+                  <option value="items">Matching MI tiers</option>
+                  <option value="level">Earliest item level</option>
+                  <option value="name">Area name</option>
+                </select>
+              </label>
+              <label>
+                <span>Order</span>
+                <select v-model="plannerMapSortDirection" autocomplete="off">
+                  <option value="desc">Highest first</option>
+                  <option value="asc">Lowest first</option>
+                </select>
+              </label>
+            </template>
+          </ExplorerToolbar>
+          <p class="explorer-context-note">{{ plannerMiItems.length }} MI tiers indexed<span v-if="unlocatedPlannerMiItems.length"> · {{ unlocatedPlannerMiItems.length }} unlocated</span></p>
           <section class="planner-world-map" aria-label="Cairn item source map">
             <header>
               <span><strong>Campaign source map</strong><small>Positions come directly from Grim Dawn's world-region coordinates.</small></span>
@@ -5957,17 +6181,19 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'mi-workshop'" class="mi-workshop" aria-label="Monster Infrequent workshop">
-        <header class="mi-workshop-heading">
-          <div>
-            <p class="section-label">Monster Infrequent research</p>
-            <h2>MI Workshop</h2>
-            <p>Physical copies retain their exact level tier here regardless of the completion-counting preference. Affix combinations are grouped below, with the strongest rolled copy leading each group.</p>
-          </div>
-          <label class="reserve-toggle">
-            <input v-model="showMiReserves" type="checkbox" />
-            Show archived copies
-          </label>
-        </header>
+        <ToolHeader
+          eyebrow="Monster Infrequent research"
+          title="MI Workshop"
+          description="Physical copies retain their exact level tier here regardless of the completion-counting preference. Affix combinations are grouped below, with the strongest rolled copy leading each group."
+          tone="green"
+        >
+          <template #aside>
+            <label class="reserve-toggle">
+              <input v-model="showMiReserves" type="checkbox" />
+              Show archived copies
+            </label>
+          </template>
+        </ToolHeader>
         <div class="mi-workshop-summary">
           <span><strong>{{ rarity('mi')?.collected ?? 0 }}</strong> {{ miCountingMode === 'base' ? 'MI bases collected' : 'MI tiers collected' }}</span>
           <span><strong>{{ snapshot?.affixSummary.collected ?? 0 }}</strong> affixes discovered</span>
@@ -6084,17 +6310,18 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'supplies'" class="supplies-workspace" aria-label="Reusable supplies">
-        <header class="tool-heading">
-          <div>
-            <p class="section-label">Reusable collection</p>
-            <h2>Supplies</h2>
-            <p>Archived faction boosts, difficulty merits, Nemesis warrants, and runes are reusable. Soulbound augments unlock per character from that character's faction reputation.</p>
-          </div>
-          <div class="tool-heading-summary">
-            <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</strong>
-            <small>{{ supplyAccessSummary }}</small>
-          </div>
-        </header>
+        <ToolHeader
+          eyebrow="Reusable collection"
+          title="Supplies"
+          description="Archived faction boosts, difficulty merits, Nemesis warrants, and runes are reusable. Soulbound augments unlock per character from that character's faction reputation."
+        >
+          <template #aside>
+            <div class="tool-heading-summary">
+              <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</strong>
+              <small>{{ supplyAccessSummary }}</small>
+            </div>
+          </template>
+        </ToolHeader>
         <ExplorerToolbar
           v-model="reusableSupplyQuery"
           search-label="Search supplies"
@@ -6177,14 +6404,13 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'dismantling'" class="dismantling-workspace" aria-label="Read-only dismantling simulator">
-        <header class="tool-heading dismantling-heading">
-          <div>
-            <p class="section-label">Inventor research · read only</p>
-            <h2>Dismantling Lab</h2>
-            <p>Select exact archived copies and preview what Grim Dawn's installed dismantling tables can produce. Nothing here changes the archive, game, Iron, Dynamite, components, or materials.</p>
-          </div>
-          <span class="read-only-seal">No write path</span>
-        </header>
+        <ToolHeader
+          eyebrow="Inventor research · read only"
+          title="Dismantling Lab"
+          description="Select exact archived copies and preview what Grim Dawn's installed dismantling tables can produce. Nothing here changes the archive, game, Iron, Dynamite, components, or materials."
+        >
+          <template #aside><span class="read-only-seal">No write path</span></template>
+        </ToolHeader>
 
         <div class="dismantling-resource-gaps">
           <article>
@@ -6303,14 +6529,13 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'farming'" class="farming-workspace" aria-label="Collection farming planner">
-        <header class="tool-heading">
-          <div>
-            <p class="section-label">Collection completion</p>
-            <h2>Where should I farm?</h2>
-            <p>Areas are ranked by how many currently missing item bases their indexed enemies can drop.</p>
-          </div>
-          <strong>{{ farmTargets.length }} useful areas</strong>
-        </header>
+        <ToolHeader
+          eyebrow="Collection completion"
+          title="Where should I farm?"
+          description="Areas are ranked by how many currently missing item bases their indexed enemies can drop."
+        >
+          <template #aside><strong>{{ farmTargets.length }} useful areas</strong></template>
+        </ToolHeader>
         <ExplorerToolbar
           v-model="farmingQuery"
           search-label="Search farming targets"
@@ -6350,13 +6575,11 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'settings'" class="settings-workspace" aria-label="Cairn Codex settings">
-        <header class="settings-heading">
-          <div>
-            <p class="section-label">Settings</p>
-            <h2>Collection and transfer behavior</h2>
-            <p>Long-lived choices live here. Search, filters, and sorting remain workspace controls.</p>
-          </div>
-        </header>
+        <ToolHeader
+          eyebrow="Settings"
+          title="Collection and transfer behavior"
+          description="Long-lived choices live here. Search, filters, and sorting remain workspace controls."
+        />
 
         <div class="settings-grid">
           <article class="settings-card">
@@ -6608,19 +6831,15 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'vault'" class="vault-workspace" aria-label="Item vault">
-        <header class="vault-heading">
-          <div>
-            <p class="section-label">Transfers</p>
-            <h2>Move items without losing them.</h2>
-            <p>
-              Live transfers operate while Grim Dawn is running. Offline staging provides the
-              same verified archive and retrieval workflow directly against the shared stash file.
-            </p>
-          </div>
-          <button type="button" :disabled="vaultBusy" @click="refreshVault">
-            {{ vaultBusy ? 'Working…' : 'Recheck' }}
-          </button>
-        </header>
+        <ToolHeader
+          eyebrow="Transfers"
+          title="Move items without losing them."
+          description="Live transfers operate while Grim Dawn is running. Offline staging provides the same verified archive and retrieval workflow directly against the shared stash file."
+        >
+          <template #aside>
+            <button type="button" :disabled="vaultBusy" @click="refreshVault">{{ vaultBusy ? 'Working…' : 'Recheck' }}</button>
+          </template>
+        </ToolHeader>
 
         <nav class="transfer-mode-tabs" aria-label="Transfer method">
           <button type="button" :class="{ active: transferMode === 'live' }" @click="transferMode = 'live'">
@@ -6633,56 +6852,49 @@ function formatPercentile(value: number | null | undefined): string {
           </button>
         </nav>
 
-        <article v-if="false" class="vault-panel reusable-supplies-panel">
-          <header>
-            <div>
-              <p>Stored supplies</p>
-              <h3>Faction boosts, difficulty merits, Nemesis warrants, augments, and runes</h3>
-            </div>
-            <strong>{{ supplyVaultItems.length }}</strong>
-          </header>
-          <p class="panel-help">
-            <template v-if="infiniteSupplies">
-              Ingest one supply to unlock it. Each dispense creates one usable copy while keeping the template safely available in Cairn.
-            </template>
-            <template v-else>
-              Infinite supplies are disabled. Returning a supply consumes its stored stack; collection history remains tracked.
-            </template>
-          </p>
-          <input
-            v-model="reusableSupplyQuery"
-            class="vault-search"
-            type="search"
-            placeholder="Filter unlocked supplies…"
-          />
-          <div v-if="supplyVaultItems.length" class="vault-item-list selectable reusable-supply-list">
-            <label v-for="item in supplyVaultItems" :key="item.id" class="vault-row">
-              <input
-                type="checkbox"
-                :checked="selectedSupplyIds.includes(item.id)"
-                :disabled="vaultBusy"
-                @change="toggleSupply(item.id)"
-              />
-              <div>
-                <strong>{{ item.name }}</strong>
-                <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.slot === 'rune' ? 'movement rune' : item.slot }}</small>
-              </div>
-              <span class="reusable-mark">{{ item.reusable ? '∞' : 'stored' }}</span>
+        <ExplorerToolbar
+          v-model="vaultQuery"
+          class="vault-explorer-toolbar"
+          search-label="Search stored copies"
+          placeholder="Item, affix, slot, seed…"
+          :result-count="availableVaultItems.length"
+          result-label="stored copies"
+        >
+          <template #filters>
+            <label>
+              <span>Rarity</span>
+              <select v-model="vaultRarityFilter" autocomplete="off">
+                <option value="all">All rarities</option>
+                <option value="legendary">Legendary</option>
+                <option value="epic">Epic</option>
+                <option value="mi">Monster Infrequent</option>
+                <option value="rare">Rare</option>
+              </select>
             </label>
-          </div>
-          <div v-else class="vault-empty">
-            {{ reusableSupplyQuery ? 'No stored supplies match this filter.' : 'No supplies stored for this mode yet.' }}
-          </div>
-          <button
-            class="vault-action"
-            :class="{ 'live-action': transferMode === 'live' }"
-            type="button"
-            :disabled="vaultBusy || selectedSupplyIds.length === 0 || (transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
-            @click="retrieveSupplies"
-          >
-            {{ vaultBusy ? 'Verifying…' : selectedSupplyIds.length ? `${infiniteSupplies ? 'Dispense' : 'Return'} ${selectedSupplyIds.length} selected` : 'Select supplies' }}
-          </button>
-        </article>
+          </template>
+          <template #sort>
+            <label>
+              <span>Sort by</span>
+              <select v-model="vaultSortMode" autocomplete="off">
+                <option value="recent">Recently archived</option>
+                <option value="name">Item name</option>
+                <option value="level">Item level</option>
+                <option value="roll">Overall roll quality</option>
+              </select>
+            </label>
+            <label>
+              <span>Order</span>
+              <select v-model="vaultSortDirection" autocomplete="off">
+                <option value="desc">Highest first</option>
+                <option value="asc">Lowest first</option>
+              </select>
+            </label>
+          </template>
+          <template #actions>
+            <button type="button" :disabled="availableVaultItems.length === 0" @click="selectedVaultIds = availableVaultItems.map((item) => item.id)">Select visible</button>
+            <button type="button" :disabled="selectedVaultIds.length === 0" @click="selectedVaultIds = []">Clear</button>
+          </template>
+        </ExplorerToolbar>
 
         <template v-if="transferMode === 'live'">
         <section class="live-mode-card" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
@@ -6810,7 +7022,7 @@ function formatPercentile(value: number | null | undefined): string {
           <button
             class="vault-action live-action"
             type="button"
-            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0 || selectedVaultIds.some((id) => !availableVaultItems.some((item) => item.id === id))"
+            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0 || selectedVaultIds.some((id) => !transferableVaultItems.some((item) => item.id === id))"
             @click="retrieveSelectedLive"
           >
             {{ vaultBusy ? 'Waiting for game…' : selectedVaultIds.length ? `Return ${selectedVaultIds.length} selected live` : 'Select stored copies' }}

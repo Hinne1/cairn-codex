@@ -1973,6 +1973,106 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
       ]
     }
   }
+  if (name === 'mi-workshop') {
+    const fixture = createScreenshotCollectionFixture('search-help')
+    const template = fixture.items[0]!
+    const bases = Array.from({ length: 6 }, (_, index): CollectionItem => ({
+      ...template,
+      record: `records/items/synthetic/mi_base_${index}.dbr`,
+      name: ['Bloodsworn Repeater', 'Yeti Horn', 'Leafmane Trophy', 'Voidplume Crest', 'Korvan Gaze', 'Ugdenbog Edge'][index]!,
+      rarity: 'mi',
+      itemClass: index % 2 === 0 ? 'weapon_sword' : 'armor_medal',
+      slot: index % 2 === 0 ? 'sword' : 'medal',
+      levelRequirement: 35 + index * 12,
+      itemLevel: 35 + index * 12,
+      availableCount: 12,
+      analyzedCopyCount: 12,
+      bestRollPercentile: 94 - index * 4,
+      discovered: true,
+      presentation: {
+        ...template.presentation!,
+        searchText: `synthetic monster infrequent ${index % 2 === 0 ? 'physical damage' : 'vitality damage'}`
+      }
+    }))
+    const prefixes = Array.from({ length: 12 }, (_, index) => ({
+      key: `synthetic-prefix-${index}`,
+      name: ['Void-Touched', 'Subjugator\'s', 'Glacial', 'Impervious', 'Devouring', 'Thunderstruck'][index % 6]! + (index >= 6 ? ' Prime' : ''),
+      kind: 'prefix' as const,
+      rarity: index % 3 === 0 ? 'magical' as const : 'rare' as const,
+      records: [`records/items/synthetic/prefix_${index}.dbr`],
+      availableCount: 6
+    }))
+    const suffixes = Array.from({ length: 12 }, (_, index) => ({
+      key: `synthetic-suffix-${index}`,
+      name: ['of Alacrity', 'of Binding', 'of Frostbite', 'of the Cabal', 'of Corrupted Peaks', 'of Scorching'][index % 6]! + (index >= 6 ? ' Prime' : ''),
+      kind: 'suffix' as const,
+      rarity: index % 4 === 0 ? 'magical' as const : 'rare' as const,
+      records: [`records/items/synthetic/suffix_${index}.dbr`],
+      availableCount: 6
+    }))
+    const observedItems = Array.from({ length: 72 }, (_, index): ObservedStashItem => {
+      const base = bases[Math.floor(index / 12)]!
+      const prefix = prefixes[index % 12]!
+      const suffix = suffixes[(index * 5) % 12]!
+      const percentile = 20 + (index * 17) % 79
+      return {
+        sourcePath: `fixture://mi-workshop/${index}`,
+        tabIndex: Math.floor(index / 24),
+        itemIndex: index % 24,
+        baseRecord: base.record,
+        prefixRecord: prefix.records[0]!,
+        suffixRecord: suffix.records[0]!,
+        modifierRecord: '',
+        transmuteRecord: '',
+        seed: 1_000_000 + index,
+        materiaRecord: '',
+        relicCompletionBonusRecord: '',
+        relicSeed: 0,
+        enchantmentRecord: '',
+        ascendantRecord: '',
+        ascendantRecord2H: '',
+        enchantmentSeed: 0,
+        materiaCombines: 0,
+        stackCount: 1,
+        rerolls: 0,
+        affixRerolls: 0,
+        instanceKey: `fixture-mi-${index}`,
+        rollAnalysis: {
+          modelVersion: 4,
+          baseRecord: base.record,
+          prefixRecord: prefix.records[0]!,
+          suffixRecord: suffix.records[0]!,
+          seed: 1_000_000 + index,
+          supported: true,
+          trusted: true,
+          reason: null,
+          percentileSampleSize: 1_000,
+          overallEstimatedPercentile: percentile,
+          baseEstimatedPercentile: Math.max(1, percentile - 7),
+          prefixEstimatedPercentile: Math.min(99, percentile + 5),
+          suffixEstimatedPercentile: Math.max(1, percentile - 3),
+          stats: [{
+            field: 'offensivePhysicalModifier',
+            value: 80 + index,
+            rollable: true,
+            observedMinimum: 75,
+            observedMaximum: 155,
+            estimatedPercentile: percentile
+          }],
+          petStats: [],
+          unmodeledFields: []
+        }
+      }
+    })
+    return {
+      ...fixture,
+      observedItems,
+      items: bases,
+      rarities: [{ rarity: 'mi', total: bases.length, collected: bases.length, availableCopies: observedItems.length }],
+      affixes: [...prefixes, ...suffixes],
+      affixSummary: { total: prefixes.length + suffixes.length, collected: prefixes.length + suffixes.length, availableCopies: observedItems.length * 2 }
+    }
+  }
   if (name !== 'search-help') throw new Error(`Unknown screenshot fixture: ${name}`)
   return {
     catalogPresentationVersion: CATALOG_PRESENTATION_VERSION,
@@ -5301,6 +5401,33 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD === '1') {
+          interactionTimings.boundedKeyboardMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const rows = [...document.querySelectorAll('.mi-table-results .bounded-results-item')]
+              if (rows.length < 2) throw new Error('Bounded keyboard verification needs at least two mounted rows.')
+              rows[0].focus()
+              rows[0].dispatchEvent(new FocusEvent('focus'))
+              for (let attempt = 0; attempt < 20 && !document.querySelector('.game-tooltip'); attempt += 1) {
+                await wait(25)
+              }
+              if (document.activeElement !== rows[0]) throw new Error('The first bounded row did not receive focus.')
+              if (!document.querySelector('.game-tooltip')) throw new Error('Focused MI row did not open the shared item tooltip.')
+              rows[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              await wait(20)
+              if (document.activeElement !== rows[1]) throw new Error('ArrowDown did not move focus to the next bounded row.')
+              rows[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+              await wait(20)
+              if (document.activeElement !== rows.at(-1)) throw new Error('End did not move focus to the last mounted row.')
+              rows.at(-1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+              await wait(20)
+              if (document.activeElement !== rows[0]) throw new Error('Home did not restore focus to the first mounted row.')
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_DISMANTLING_PREVIEW === '1') {
           await window.webContents.executeJavaScript(`
             [...document.querySelectorAll('.dismantling-toolbar button')]
@@ -5681,10 +5808,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           cards: document.querySelectorAll('.item-card').length,
           sets: document.querySelectorAll('.set-card').length,
           copyCards: document.querySelectorAll('.copy-card').length,
-          vaultRows: document.querySelectorAll('.vault-item-list .vault-row').length,
+          vaultRows: document.querySelectorAll('.quarantine-results .vault-row, .vault-item-list .vault-row').length,
           operationRows: document.querySelectorAll('.operation-history-row').length,
           plannerRows: document.querySelectorAll('.planner-table tbody tr').length,
-          miRows: [...document.querySelectorAll('.mi-table tbody tr')].map((row) => ({
+          miRows: [...document.querySelectorAll('.mi-table-results .mi-table-row')].map((row) => ({
             text: row.textContent?.replace(/\s+/g, ' ').trim(),
             prefixClass: row.children[2]?.className,
             suffixClass: row.children[3]?.className

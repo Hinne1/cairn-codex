@@ -3,6 +3,7 @@ import {
   BackgroundJobCanceledError,
   BackgroundJobCoordinator,
   isBackgroundJobId,
+  runGlobalRollHydration,
   TrailingJobQueue
 } from '../src/main/background-jobs.ts'
 import { BACKGROUND_JOB_KINDS } from '../src/shared/background-jobs.ts'
@@ -79,21 +80,11 @@ let releaseHydration
 const hydrationGate = new Promise((resolve) => { releaseHydration = resolve })
 let hydrationExecutions = 0
 const hydrateForCaller = async (projection) => {
-  const shared = coordinator.run({
-    kind: 'roll-hydration',
-    dedupeKey: 'roll-hydration:all-modes',
-    stage: 'queued',
-    progress: { ...progress, unit: 'items', label: 'Hydrate all archive modes' },
-    supportsCancellation: true,
-    completedStage: 'complete',
-    failedStage: 'failed',
-    canceledStage: 'canceled'
-  }, async () => {
+  return runGlobalRollHydration(coordinator, async () => {
     hydrationExecutions += 1
     await hydrationGate
     return { processed: 12, pending: 0 }
-  }, (result) => ({ summary: 'Hydration complete.', metrics: result }))
-  return { ...await shared.result, projection }
+  }, (result) => ({ ...result, projection }))
 }
 const softcoreHydration = hydrateForCaller('softcore selection')
 const hardcoreHydration = hydrateForCaller('hardcore selection')

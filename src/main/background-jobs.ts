@@ -284,6 +284,39 @@ export class BackgroundJobCoordinator {
   }
 }
 
+export async function runGlobalRollHydration<
+  T extends { processed: number; pending: number },
+  R
+>(
+  jobs: BackgroundJobCoordinator,
+  operation: (context: BackgroundJobContext<'roll-hydration'>) => Promise<T>,
+  projectForCaller: (result: T) => Promise<R> | R
+): Promise<R> {
+  const shared = jobs.run({
+    kind: 'roll-hydration',
+    dedupeKey: 'roll-hydration:all-modes',
+    stage: 'queued',
+    progress: {
+      completed: 0,
+      total: null,
+      percent: null,
+      unit: 'items',
+      label: 'Rate archived item rolls',
+      detail: 'Preparing bounded analysis batches.'
+    },
+    canCancel: true,
+    supportsCancellation: true,
+    boundary: 'before the next analysis batch',
+    completedStage: 'complete',
+    failedStage: 'failed',
+    canceledStage: 'canceled'
+  }, operation, (result) => ({
+    summary: 'Archived roll hydration settled.',
+    metrics: { processed: result.processed, pending: result.pending }
+  }))
+  return projectForCaller(await shared.result)
+}
+
 export class TrailingJobQueue<T> {
   private active: Promise<void> | null = null
   private trailing: T | null = null

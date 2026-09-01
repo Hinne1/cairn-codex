@@ -67,6 +67,7 @@ import {
   BackgroundJobCanceledError,
   BackgroundJobCoordinator,
   isBackgroundJobId,
+  runGlobalRollHydration,
   TrailingJobQueue
 } from './background-jobs'
 
@@ -1421,28 +1422,10 @@ function registerIpcHandlers(
           snapshot: await presentCollection(helper, database, projected, 'archive')
         }
       }
-      const hydration = jobs.run({
-        kind: 'roll-hydration',
-        dedupeKey: 'roll-hydration:all-modes',
-        stage: 'queued',
-        progress: {
-          completed: 0,
-          total: null,
-          percent: null,
-          unit: 'items',
-          label: 'Rate archived item rolls',
-          detail: 'Preparing bounded analysis batches.'
-        },
-        canCancel: true,
-        supportsCancellation: true,
-        boundary: 'before the next analysis batch',
-        completedStage: 'complete',
-        failedStage: 'failed',
-        canceledStage: 'canceled'
-      }, async (job) => runDiagnosticOperation(
+      return runGlobalRollHydration(jobs, async (job) => runDiagnosticOperation(
         'background-job',
         'archive-roll-hydration',
-        async (): Promise<ArchiveRollHydrationResult | null> => {
+        async (): Promise<ArchiveRollHydrationResult> => {
           // Hydration owns one global candidate domain. Caller-specific SC/HC
           // projection happens only after the shared analysis job settles.
           const mode: boolean | undefined = undefined
@@ -1515,16 +1498,10 @@ function registerIpcHandlers(
         { batchLimit: 256 },
         (result) => ({ processed: result?.processed ?? 0, pending: result?.pending ?? 0 }),
         job.correlationId
-      ), (result) => ({
-        summary: 'Archived roll hydration settled.',
-        metrics: { processed: result?.processed ?? 0, pending: result?.pending ?? 0 }
-      }))
-      const result = await hydration.result
-      if (!result) return null
-      return {
+      ), async (result) => ({
         ...result,
         snapshot: await presentCollection(helper, database, projected, 'archive')
-      }
+      }))
     }
   )
   ipcMain.handle(

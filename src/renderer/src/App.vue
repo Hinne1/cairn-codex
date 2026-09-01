@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
+import { createNotificationService, type AppNotification } from './notification-service'
 import { searchGuidance } from './search-guidance'
 import {
   ONBOARDING_STEP_COUNT,
@@ -282,7 +283,9 @@ const archiveRollHydrationCompleted = ref(0)
 const archiveRollHydrationTotal = ref(0)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
 const startupPhaseStatus = ref<StartupStatus | null>(null)
-const scanError = ref<string | null>(null)
+const notifications = createNotificationService()
+const currentNotification = notifications.current
+const notificationAnnouncement = notifications.announcement
 const cacheIssue = ref<string | null>(null)
 const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
   appInitializing.value && !snapshot.value
@@ -428,8 +431,6 @@ const onboardingDialog = ref<HTMLElement | null>(null)
 const recoveryStatus = ref<RecoveryStatus | null>(null)
 const vaultBusy = ref(false)
 const sahdinaRecoveryBusy = ref<'shared-stash' | 'character-inventory' | null>(null)
-const vaultError = ref<string | null>(null)
-const vaultMessage = ref<string | null>(null)
 const liveStatus = ref<LiveGameStatus | null>(null)
 const headerCharacters = ref<CharacterSaveProfile[]>([])
 const liveIssues = ref<string[]>([])
@@ -475,9 +476,6 @@ let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 let liveSyncInFlight = false
-let vaultErrorTimer: ReturnType<typeof setTimeout> | null = null
-let vaultMessageTimer: ReturnType<typeof setTimeout> | null = null
-let scanErrorTimer: ReturnType<typeof setTimeout> | null = null
 let vaultPageTimer: ReturnType<typeof setTimeout> | null = null
 let vaultPageRequestId = 0
 let appHistoryReady = false
@@ -2306,8 +2304,6 @@ watch(transferMode, () => {
   vaultPage.value = 1
   vaultQuarantinePage.value = 1
   selectedSupplyIds.value = []
-  vaultError.value = null
-  vaultMessage.value = null
 })
 watch([vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, activeTransferHardcore], () => {
   vaultPage.value = 1
@@ -2370,21 +2366,6 @@ watch(activeView, async (view) => {
     await refreshVault()
     if (view !== 'dismantling') await pollLiveLifecycle()
   }
-})
-
-watch(vaultError, (message) => {
-  if (vaultErrorTimer) clearTimeout(vaultErrorTimer)
-  if (message) vaultErrorTimer = setTimeout(() => { vaultError.value = null }, 12_000)
-})
-
-watch(vaultMessage, (message) => {
-  if (vaultMessageTimer) clearTimeout(vaultMessageTimer)
-  if (message) vaultMessageTimer = setTimeout(() => { vaultMessage.value = null }, 7_000)
-})
-
-watch(scanError, (message) => {
-  if (scanErrorTimer) clearTimeout(scanErrorTimer)
-  if (message) scanErrorTimer = setTimeout(() => { scanError.value = null }, 12_000)
 })
 
 watch([onboardingOpen, appInitializing], async ([open, initializing]) => {
@@ -2495,9 +2476,7 @@ onBeforeUnmount(() => {
   cancelTooltipHide()
   if (liveSyncTimer) clearInterval(liveSyncTimer)
   if (liveLifecycleTimer) clearInterval(liveLifecycleTimer)
-  if (vaultErrorTimer) clearTimeout(vaultErrorTimer)
-  if (vaultMessageTimer) clearTimeout(vaultMessageTimer)
-  if (scanErrorTimer) clearTimeout(scanErrorTimer)
+  notifications.clear()
   if (searchQueryTimer) clearTimeout(searchQueryTimer)
   if (vaultPageTimer) clearTimeout(vaultPageTimer)
   cancelSearchDocumentWarmup()
@@ -2512,7 +2491,7 @@ async function scanCollection(startupRun = false, hydrateAfter = true): Promise<
   })
   scanActivity.value = 'collection'
   scanning.value = true
-  scanError.value = null
+  clearScanProblem()
   let shouldHydrate = false
   if (startupRun) await reportStartupPhase('scan-started')
   try {
@@ -2532,7 +2511,7 @@ async function scanCollection(startupRun = false, hydrateAfter = true): Promise<
       if (current) applySnapshot(current)
     }
   } catch (error) {
-    scanError.value = error instanceof Error ? error.message : 'Collection scan failed.'
+    reportScanProblem(error instanceof Error ? error.message : 'Collection scan failed.')
   } finally {
     scanning.value = false
     if (startupRun) await reportStartupPhase('scan-settled')
@@ -2544,17 +2523,15 @@ async function scanCollection(startupRun = false, hydrateAfter = true): Promise<
 async function rebuildGameDataIndex(): Promise<void> {
   scanActivity.value = 'game-data'
   scanning.value = true
-  vaultError.value = null
-  vaultMessage.value = null
   try {
     const result = await window.cairnCodex.rebuildGameDataIndex(
       [...enabledStashPaths.value],
       collectionBasis.value
     )
     applySnapshot(result)
-    vaultMessage.value = 'Game-data and map location indexes rebuilt from the installed Grim Dawn files.'
+    reportSuccess('Game-data and map location indexes rebuilt from the installed Grim Dawn files.')
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     scanning.value = false
   }
@@ -2562,12 +2539,11 @@ async function rebuildGameDataIndex(): Promise<void> {
 
 async function exportDiagnostics(): Promise<void> {
   diagnosticsBusy.value = true
-  vaultError.value = null
   try {
     const result = await window.cairnCodex.exportDiagnostics()
-    if (!result.canceled) vaultMessage.value = `Redacted support bundle saved to ${result.path}.`
+    if (!result.canceled) reportSuccess(`Redacted support bundle saved to ${result.path}.`)
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     diagnosticsBusy.value = false
   }
@@ -2576,14 +2552,13 @@ async function exportDiagnostics(): Promise<void> {
 async function setDebugLogging(enabled: boolean): Promise<void> {
   if (debugLoggingBusy.value) return
   debugLoggingBusy.value = true
-  vaultError.value = null
   try {
     debugLoggingStatus.value = await window.cairnCodex.setDebugLogging(enabled)
-    vaultMessage.value = enabled
+    reportSuccess(enabled
       ? `Debug logging enabled for up to ${debugLoggingStatus.value.maxAgeDays} days.`
-      : 'Debug logging disabled; standard bounded diagnostics remain active.'
+      : 'Debug logging disabled; standard bounded diagnostics remain active.')
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     debugLoggingBusy.value = false
   }
@@ -2591,7 +2566,7 @@ async function setDebugLogging(enabled: boolean): Promise<void> {
 
 async function openDataDirectory(): Promise<void> {
   const error = await window.cairnCodex.openDataDirectory()
-  if (error) vaultError.value = `Windows could not open Cairn's data folder: ${error}`
+  if (error) reportTransferProblem(`Windows could not open Cairn's data folder: ${error}`)
 }
 
 async function refreshArchiveBackupStatus(): Promise<void> {
@@ -2616,15 +2591,14 @@ function formatBackupSize(value: number): string {
 async function createArchiveBackup(): Promise<void> {
   if (archiveBackupBusy.value) return
   archiveBackupBusy.value = 'backup'
-  vaultError.value = null
   try {
     const result = await window.cairnCodex.createArchiveBackup()
     if (result.backup) {
-      vaultMessage.value = `Verified archive backup created with ${result.backup.vaultItemCount.toLocaleString()} stored copies.`
+      reportSuccess(`Verified archive backup created with ${result.backup.vaultItemCount.toLocaleString()} stored copies.`)
     }
     await refreshArchiveBackupStatus()
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     archiveBackupBusy.value = null
   }
@@ -2633,15 +2607,14 @@ async function createArchiveBackup(): Promise<void> {
 async function exportArchiveBackup(): Promise<void> {
   if (archiveBackupBusy.value) return
   archiveBackupBusy.value = 'export'
-  vaultError.value = null
   try {
     const result = await window.cairnCodex.exportArchiveBackup()
     if (!result.canceled && result.path) {
-      vaultMessage.value = `Verified archive backup exported to ${result.path}.`
+      reportSuccess(`Verified archive backup exported to ${result.path}.`)
     }
     await refreshArchiveBackupStatus()
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     archiveBackupBusy.value = null
   }
@@ -2650,14 +2623,13 @@ async function exportArchiveBackup(): Promise<void> {
 async function restoreArchiveBackup(): Promise<void> {
   if (archiveBackupBusy.value) return
   archiveBackupBusy.value = 'restore'
-  vaultError.value = null
   try {
     const result = await window.cairnCodex.restoreArchiveBackup()
     if (!result.canceled && result.restarting) {
-      vaultMessage.value = 'Backup verified. Cairn is restarting to restore the archive.'
+      reportSuccess('Backup verified. Cairn is restarting to restore the archive.')
     }
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     archiveBackupBusy.value = null
   }
@@ -2665,13 +2637,12 @@ async function restoreArchiveBackup(): Promise<void> {
 
 async function openArchiveBackupDirectory(): Promise<void> {
   const error = await window.cairnCodex.openArchiveBackupDirectory()
-  if (error) vaultError.value = `Windows could not open Cairn's archive backup folder: ${error}`
+  if (error) reportTransferProblem(`Windows could not open Cairn's archive backup folder: ${error}`)
 }
 
 async function importFromItemAssistant(): Promise<GdiaImportResult | null> {
   if (gdiaImportBusy.value) return null
   gdiaImportBusy.value = true
-  vaultError.value = null
   gdiaImportResult.value = null
   try {
     const result = await window.cairnCodex.importGdiaDatabase()
@@ -2682,12 +2653,12 @@ async function importFromItemAssistant(): Promise<GdiaImportResult | null> {
       localStorage.setItem('cairn-codex-collection-basis', 'archive')
     }
     await loadSelectedSources()
-    vaultMessage.value = result.importedItems > 0
+    reportSuccess(result.importedItems > 0
       ? `Imported ${result.importedItems} Item Assistant ${result.importedItems === 1 ? 'copy' : 'copies'} into the Codex Archive.`
-      : `Item Assistant import found no new copies; ${result.duplicateItems} were already archived.`
+      : `Item Assistant import found no new copies; ${result.duplicateItems} were already archived.`)
     return result
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
     return null
   } finally {
     gdiaImportBusy.value = false
@@ -2740,9 +2711,68 @@ function chooseEmptyArchive(): void {
   setOnboardingStep(2)
 }
 
+function reportTransferProblem(message: string): void {
+  notifications.notify({
+    key: 'transfer-problem',
+    title: 'Transfer problem',
+    message,
+    severity: 'error',
+    timeoutMs: null
+  })
+}
+
+function reportSuccess(message: string): void {
+  notifications.notify({
+    key: 'operation-success',
+    title: 'Done',
+    message,
+    severity: 'success'
+  })
+}
+
+function clearScanProblem(): void {
+  notifications.dismissByKey('collection-scan')
+}
+
+function reportScanProblem(message: string): void {
+  notifications.notify({
+    key: 'collection-scan',
+    title: 'Collection scan',
+    message,
+    severity: 'warning',
+    timeoutMs: 12_000
+  })
+}
+
+function syncRecoveryNotification(): void {
+  if (!recoveryStatus.value?.requiresAttention) {
+    notifications.dismissByKey('recovery-attention')
+    return
+  }
+  const count = recoveryStatus.value.operations.length
+  notifications.notify({
+    key: 'recovery-attention',
+    title: 'Recovery attention required',
+    message: `${count} transfer operation${count === 1 ? '' : 's'} need audit before more writes.`,
+    severity: 'warning',
+    timeoutMs: null,
+    dismissible: false,
+    action: { id: 'open-recovery', label: 'Review', dismisses: false }
+  })
+}
+
+function handleNotificationAction(notification: AppNotification): void {
+  if (notification.action?.id === 'open-recovery') {
+    activeView.value = 'settings'
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }
+  if (notification.action?.dismisses !== false) notifications.dismiss(notification.id)
+}
+
 async function refreshRecoveryStatus(): Promise<void> {
   try {
     recoveryStatus.value = await window.cairnCodex.getRecoveryStatus()
+    syncRecoveryNotification()
   } catch {
     // Collection browsing remains available even if diagnostics cannot load.
   }
@@ -3161,13 +3191,12 @@ async function refreshHeaderCharacters(): Promise<void> {
 async function setInfiniteSupplies(enabled: boolean): Promise<void> {
   if (infiniteSuppliesBusy.value) return
   infiniteSuppliesBusy.value = true
-  vaultError.value = null
   try {
     infiniteSupplies.value = await window.cairnCodex.setInfiniteSupplies(enabled)
     selectedSupplyIds.value = []
     await refreshVault()
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     infiniteSuppliesBusy.value = false
   }
@@ -3186,8 +3215,6 @@ async function recoverSahdinasMemento(destination: 'shared-stash' | 'character-i
 
   vaultBusy.value = true
   sahdinaRecoveryBusy.value = destination
-  vaultError.value = null
-  vaultMessage.value = null
   try {
     const result = await window.cairnCodex.recoverSahdinasMemento(
       destination,
@@ -3196,9 +3223,9 @@ async function recoverSahdinasMemento(destination: 'shared-stash' | 'character-i
     const deliveredTo = result.destination === 'character-inventory'
       ? `${result.activeCharacter}'s inventory`
       : liveStatus.value?.depositTabDescription ?? 'the shared stash'
-    vaultMessage.value = `${result.name} recovered to ${deliveredTo}.`
+    reportSuccess(`${result.name} recovered to ${deliveredTo}.`)
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     sahdinaRecoveryBusy.value = null
     vaultBusy.value = false
@@ -3230,9 +3257,9 @@ async function approveCurrentGameBuild(): Promise<void> {
   vaultBusy.value = true
   try {
     liveStatus.value = await window.cairnCodex.approveLiveGameBuild()
-    vaultMessage.value = 'Approved exact Game.dll ' + connectionFingerprint.value + '. Connect and perform a disposable round-trip test.'
+    reportSuccess('Approved exact Game.dll ' + connectionFingerprint.value + '. Connect and perform a disposable round-trip test.')
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   } finally {
     vaultBusy.value = false
   }
@@ -3530,7 +3557,6 @@ function preferredStashPath(value: CollectionSnapshot): string {
 }
 
 async function refreshVault(): Promise<void> {
-  vaultError.value = null
   try {
     const [summary, safety, live] = await Promise.allSettled([
       window.cairnCodex.getVaultSummary(),
@@ -3551,7 +3577,7 @@ async function refreshVault(): Promise<void> {
       await refreshFullVaultItems()
     }
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   }
 }
 
@@ -3624,7 +3650,7 @@ async function refreshVaultPages(): Promise<void> {
     const currentIds = new Set([...stored.items, ...quarantine.items].map((item) => item.id))
     selectedVaultIds.value = selectedVaultIds.value.filter((id) => currentIds.has(id))
   } catch (error) {
-    if (requestId === vaultPageRequestId) vaultError.value = readableError(error)
+    if (requestId === vaultPageRequestId) reportTransferProblem(readableError(error))
   } finally {
     if (requestId === vaultPageRequestId) vaultPageLoading.value = false
   }
@@ -3686,16 +3712,15 @@ async function startLiveMode(): Promise<void> {
   if (!confirmed) return
   manualDisconnectProcessId.value = null
   vaultBusy.value = true
-  vaultError.value = null
   try {
     liveStatus.value = await window.cairnCodex.startLiveGame()
     if (liveStatus.value.state === 'ready') {
-      vaultMessage.value = 'Live mode connected. Put an Epic, Legendary, or Monster Infrequent into the final shared stash tab to archive it instantly.'
+      reportSuccess('Live mode connected. Put an Epic, Legendary, or Monster Infrequent into the final shared stash tab to archive it instantly.')
     } else {
-      vaultError.value = liveStatus.value.detail
+      reportTransferProblem(liveStatus.value.detail)
     }
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
     liveStatus.value = await window.cairnCodex.inspectLiveGame()
   } finally {
     vaultBusy.value = false
@@ -3714,7 +3739,7 @@ async function stopLiveMode(): Promise<void> {
   try {
     liveStatus.value = await window.cairnCodex.stopLiveGame()
     liveIssues.value = []
-    vaultMessage.value = 'Live mode disconnected.'
+    reportSuccess('Live mode disconnected.')
   } catch (error) {
     liveIssues.value = [readableError(error)]
   } finally {
@@ -3747,7 +3772,7 @@ async function pollLiveLifecycle(): Promise<void> {
     ) {
       current = await window.cairnCodex.startLiveGame()
       if (current.state === 'ready' && previousState !== 'ready') {
-        vaultMessage.value = 'Auto-connected to Grim Dawn. Live ingest is watching the configured stash tab.'
+        reportSuccess('Auto-connected to Grim Dawn. Live ingest is watching the configured stash tab.')
       }
     }
     liveStatus.value = current
@@ -3789,7 +3814,7 @@ async function syncLiveMode(): Promise<void> {
     if (JSON.stringify(liveIssues.value) !== JSON.stringify(result.issues)) liveIssues.value = result.issues
     if (result.ingested.length > 0) {
       applyLiveIngests(result.ingested)
-      vaultMessage.value = `Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`
+      reportSuccess(`Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`)
       await refreshVault()
       void hydrateArchiveRolls()
     }
@@ -3817,19 +3842,17 @@ async function retrieveSelectedLive(): Promise<void> {
   )
   if (!confirmed) return
   vaultBusy.value = true
-  vaultError.value = null
-  vaultMessage.value = null
   try {
     const result = await window.cairnCodex.retrieveLiveVaultItems([...selectedVaultIds.value])
     applyLiveRetrievals(result.retrieved)
-    vaultMessage.value = result.issues.length
+    reportSuccess(result.issues.length
       ? `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}; stopped safely: ${result.issues[0]}`
-      : `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn${reusable ? '; the unlocks remain in Cairn.' : '.'}`
+      : `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn${reusable ? '; the unlocks remain in Cairn.' : '.'}`)
     const retrievedIds = new Set(result.retrieved.map((item) => item.vaultItemId))
     selectedVaultIds.value = selectedVaultIds.value.filter((id) => !retrievedIds.has(id))
     await refreshVault()
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
     await refreshVault()
   } finally {
     vaultBusy.value = false
@@ -3842,7 +3865,7 @@ async function retrieveSupplies(): Promise<void> {
   const factionAugments = selected.filter((item) => item.source === 'faction')
   const archived = selected.filter((item) => item.source === 'archive')
   if (factionAugments.length > 0 && transferMode.value !== 'live') {
-    vaultError.value = 'Soulbound augments require a live Grim Dawn connection and are delivered to the active character.'
+    reportTransferProblem('Soulbound augments require a live Grim Dawn connection and are delivered to the active character.')
     return
   }
   if (factionAugments.length > 0) {
@@ -3853,8 +3876,6 @@ async function retrieveSupplies(): Promise<void> {
     )
     if (!confirmed) return
     vaultBusy.value = true
-    vaultError.value = null
-    vaultMessage.value = null
     try {
       const result = await window.cairnCodex.dispenseLiveAugments(
         factionAugments.map((item) => item.record),
@@ -3863,11 +3884,11 @@ async function retrieveSupplies(): Promise<void> {
       const delivered = new Set(result.dispensed.map((item) => `augment:${item.record}`))
       selectedSupplyIds.value = selectedSupplyIds.value.filter((id) => !delivered.has(id))
       const deliveredNames = result.dispensed.map((item) => item.name).join(', ')
-      vaultMessage.value = result.issues.length
+      reportSuccess(result.issues.length
         ? `Delivered ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} to ${result.activeCharacter} (${deliveredNames}); stopped safely: ${result.issues[0]}`
-        : `Delivered exactly ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} directly to ${result.activeCharacter}: ${deliveredNames}.`
+        : `Delivered exactly ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} directly to ${result.activeCharacter}: ${deliveredNames}.`)
     } catch (error) {
-      vaultError.value = readableError(error)
+      reportTransferProblem(readableError(error))
       return
     } finally {
       vaultBusy.value = false
@@ -4078,7 +4099,7 @@ async function refreshStaging(): Promise<void> {
     staging.value = await window.cairnCodex.inspectStagingTab(selectedStashPath.value)
   } catch (error) {
     staging.value = null
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
   }
 }
 
@@ -4089,15 +4110,13 @@ async function ingestStagingTab(): Promise<void> {
   )
   if (!confirmed) return
   vaultBusy.value = true
-  vaultError.value = null
-  vaultMessage.value = null
   try {
     const result = await window.cairnCodex.ingestStagingTab(selectedStashPath.value)
-    vaultMessage.value = `Safely ingested ${result.ingested.length} item${result.ingested.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`
+    reportSuccess(`Safely ingested ${result.ingested.length} item${result.ingested.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`)
     await scanCollection()
     await refreshVault()
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
     await refreshVault()
   } finally {
     vaultBusy.value = false
@@ -4116,21 +4135,19 @@ async function retrieveSelected(): Promise<void> {
     : `Retrieve ${selectedVaultIds.value.length} item${selectedVaultIds.value.length === 1 ? '' : 's'} into the empty final shared stash tab? A verified backup will be created first.`)
   if (!confirmed) return
   vaultBusy.value = true
-  vaultError.value = null
-  vaultMessage.value = null
   try {
     const result = await window.cairnCodex.retrieveVaultItems(
       selectedStashPath.value,
       selectedVaultIds.value
     )
     selectedVaultIds.value = []
-    vaultMessage.value = reusable
+    reportSuccess(reusable
       ? `Dispensed ${result.retrieved.length} reusable ${result.retrieved.length === 1 ? 'supply' : 'supplies'}; the unlocks remain in Cairn. Backup: ${result.backupPath}`
-      : `Safely retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`
+      : `Safely retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`)
     await scanCollection()
     await refreshVault()
   } catch (error) {
-    vaultError.value = readableError(error)
+    reportTransferProblem(readableError(error))
     await refreshVault()
   } finally {
     vaultBusy.value = false
@@ -5350,25 +5367,28 @@ function formatPercentile(value: number | null | undefined): string {
       </div>
     </header>
 
-    <aside class="growl-stack" aria-live="polite" aria-label="Notifications">
-      <article v-if="recoveryStatus?.requiresAttention" class="growl warning">
-        <span>
-          <strong>Recovery attention required</strong>
-          {{ recoveryStatus.operations.length }} transfer operation{{ recoveryStatus.operations.length === 1 ? '' : 's' }} need audit before more writes.
-        </span>
-        <button type="button" aria-label="Open recovery settings" @click="activeView = 'settings'">Review</button>
-      </article>
-      <article v-if="vaultError" class="growl error">
-        <span><strong>Transfer problem</strong>{{ vaultError }}</span>
-        <button type="button" aria-label="Dismiss notification" @click="vaultError = null">×</button>
-      </article>
-      <article v-if="scanError" class="growl error">
-        <span><strong>Collection scan</strong>{{ scanError }}</span>
-        <button type="button" aria-label="Dismiss notification" @click="scanError = null">×</button>
-      </article>
-      <article v-if="vaultMessage" class="growl success">
-        <span><strong>Done</strong>{{ vaultMessage }}</span>
-        <button type="button" aria-label="Dismiss notification" @click="vaultMessage = null">×</button>
+    <p
+      v-if="notificationAnnouncement"
+      :key="notificationAnnouncement.id"
+      class="visually-hidden"
+      :role="notificationAnnouncement.assertive ? 'alert' : 'status'"
+    >{{ notificationAnnouncement.text }}</p>
+    <aside v-if="currentNotification" class="growl-stack" aria-label="Notification">
+      <article class="growl" :class="currentNotification.severity">
+        <span><strong>{{ currentNotification.title }}</strong>{{ currentNotification.message }}</span>
+        <div class="growl-actions">
+          <button
+            v-if="currentNotification.action"
+            type="button"
+            @click="handleNotificationAction(currentNotification)"
+          >{{ currentNotification.action.label }}</button>
+          <button
+            v-if="currentNotification.dismissible"
+            type="button"
+            aria-label="Dismiss notification"
+            @click="notifications.dismiss(currentNotification.id)"
+          >×</button>
+        </div>
       </article>
     </aside>
 

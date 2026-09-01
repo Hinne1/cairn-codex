@@ -17,6 +17,7 @@
     "test:discovery": "node ./scripts/test-discovery.mjs",
     "test:diagnostics": "node --experimental-strip-types ./scripts/test-diagnostics.mjs",
     "test:onboarding": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-onboarding.mjs",
+    "test:notifications": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-notifications.mjs",
     "test:gdia-backup": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-gdia-backup.mjs",
     "audit:repo": "node ./scripts/audit-repository.mjs",
     "package:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1",
@@ -26,7 +27,7 @@
     "test:release-local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-release.ps1",
     "preview": "electron-vite preview",
     "smoke:desktop": "npm run build:helper && npm run build && node ./scripts/smoke-desktop.mjs",
-    "verify": "npm run audit:repo && npm run build && npm run build:helper && npm run test:helper && npm run test:discovery && npm run test:diagnostics && npm run test:gdia-backup && npm run test:onboarding",
+    "verify": "npm run audit:repo && npm run build && npm run build:helper && npm run test:helper && npm run test:discovery && npm run test:diagnostics && npm run test:gdia-backup && npm run test:onboarding && npm run test:notifications",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json"

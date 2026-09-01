@@ -589,7 +589,8 @@ function registerIpcHandlers(
         importedItems: 0,
         duplicateItems: 0,
         unsupportedItems: 0,
-        backupPath: null
+        backupPath: null,
+        backupReused: false
       }
     }
     const result = await runDiagnosticOperation(
@@ -621,7 +622,8 @@ function registerIpcHandlers(
       importedItems: result.importedIds.length,
       duplicateItems: result.duplicateIds.length,
       unsupportedItems: result.unsupportedIds.length,
-      backupPath: result.backupPath
+      backupPath: result.backupPath,
+      backupReused: result.backupReused
     }
   })
   ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => {

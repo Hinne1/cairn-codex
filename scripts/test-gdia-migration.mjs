@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -122,7 +122,12 @@ if (await sha256(sourceDatabasePath) !== sourceHash) {
   throw new Error('Item Assistant source database changed during the migration test.')
 }
 const backups = (await readdir(backupDirectory)).filter((name) => name.endsWith('.bak'))
-if (backups.length < 2) throw new Error('Each migration run did not retain a verified source backup.')
+if (backups.length !== 1) throw new Error('The unchanged repeat import did not reuse one verified source backup.')
+const backupPath = join(backupDirectory, backups[0])
+const backupManifest = JSON.parse(await readFile(`${backupPath}.json`, 'utf8'))
+if (backupManifest.sourceSha256 !== sourceHash || await sha256(backupPath) !== sourceHash) {
+  throw new Error('The retained source backup or manifest failed content verification.')
+}
 
 console.log(JSON.stringify({
   passed: true,
@@ -134,6 +139,7 @@ console.log(JSON.stringify({
   unsupportedSkipped: 1,
   repeatCreatedDuplicates: false,
   verifiedBackups: backups.length,
+  unchangedBackupReused: true,
   sourcePreserved: true,
   firstDurationMs,
   repeatDurationMs

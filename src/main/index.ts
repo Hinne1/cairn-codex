@@ -5133,7 +5133,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const back = waitForPopState()
               window.history.back()
               await back
-              if (activeSection() !== 'Retrieve') throw new Error('Back did not restore Retrieve.')
+              if (activeSection() !== 'Ingest history') throw new Error('Back did not restore Ingest history.')
               const forward = waitForPopState()
               window.history.forward()
               await forward

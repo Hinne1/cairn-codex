@@ -197,8 +197,8 @@ instead of silently returning misleading results.
 | MI Workshop | `name`, `slot`, `level`, `prefix`, `suffix`, `affix`, `skill`, `damage`, `stat`, `copies` | `level`, `copies` |
 | Supplies | `name`, `category`, `effect`, `faction`, `slot`, `source`, `mode`, `eligible` | — |
 | Dismantling Lab | `name`, `base`, `prefix`, `suffix`, `affix`, `rarity`, `mode`, `level` | `level` |
-| Stored copies and Quarantine | `name`, `base`, `prefix`, `suffix`, `affix`, `slot`, `rarity`, `level`, `seed`, `mode`, `pack` | `level`, `seed` |
-| Ingestion and Retrieval history | `item`, `name`, `base`, `seed`, `outcome`, `state`, `id`, `mode`, `source`, `time` | `seed` |
+| Quarantined items | `name`, `base`, `prefix`, `suffix`, `affix`, `slot`, `rarity`, `level`, `seed`, `mode`, `pack` | `level`, `seed` |
+| Ingest and Dispense history | `item`, `name`, `base`, `seed`, `outcome`, `state`, `id`, `mode`, `source`, `time` | `seed` |
 
 Leveling Planner also accepts `location:` as an alias for `area:`. Collection accepts
 `class:` as an alias for `type:`.

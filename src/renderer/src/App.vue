@@ -226,18 +226,19 @@ interface WorkspaceToolDefinition {
   id: WorkspaceToolId
   label: string
   detail: string
+  experimental?: boolean
 }
 
 const workspaceToolDefinitions: WorkspaceToolDefinition[] = [
   { id: 'sets', label: 'Sets', detail: 'Set completion, bonuses, recipes, and visual modifiers.' },
   { id: 'materials', label: 'Components & Consumables', detail: 'Components, crafting materials, and consumable formulas.' },
   { id: 'skills', label: 'Skill Explorer', detail: 'Every item that ranks, converts, or otherwise modifies a skill.' },
-  { id: 'oracle', label: 'Stash Oracle', detail: 'Build archetypes suggested by the items already in your archive.' },
+  { id: 'oracle', label: 'Stash Oracle', detail: 'Build archetypes suggested by the items already in your archive.', experimental: true },
   { id: 'planner', label: 'Leveling Planner', detail: 'Character shopping lists and leveling routes.' },
   { id: 'mi-workshop', label: 'MI Workshop', detail: 'Stored Monster Infrequents, affixes, and stat comparisons.' },
   { id: 'supplies', label: 'Supplies', detail: 'Reusable boosts, merits, warrants, augments, and runes.' },
   { id: 'farming', label: 'Collection Farming', detail: 'Areas ranked by potential collection progress.' },
-  { id: 'dismantling', label: 'Dismantling Lab', detail: 'Read-only Inventor cost and material-yield simulation.' },
+  { id: 'dismantling', label: 'Dismantling Lab', detail: 'Read-only Inventor cost and material-yield simulation.', experimental: true },
   { id: 'trivia', label: 'Collection Trivia', detail: 'Roll, duplicate, and collection curiosities.' },
   { id: 'todo', label: 'To-do', detail: 'Your small in-app task list.' }
 ]
@@ -350,6 +351,7 @@ const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
 const supplySlotFilter = ref<SupplySlotFilter>('all')
 const supplyVisibleCount = ref(60)
+const experimentalToolsEnabled = ref(readStoredExperimentalToolsEnabled())
 const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>(readStoredWorkspaceToolIds())
 const toolSettingsOpen = ref(false)
 const materialCategory = ref<MaterialCategory>('all')
@@ -693,6 +695,9 @@ const quarantinedVaultItems = computed(() =>
 )
 const retrievedVaultItems = computed(() =>
   vaultItems.value.filter((item) => item.state === 'retrieved')
+)
+const archivedCopyCount = computed(() =>
+  vaultItems.value.filter((item) => item.state === 'ingested').length
 )
 const stashChoices = computed(() => snapshot.value?.availableStashes ?? snapshot.value?.scannedStashes ?? [])
 const activeSourceCount = computed(() => snapshot.value?.scannedStashes.length ?? 0)
@@ -2867,6 +2872,17 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   return stored === null ? fallback : stored === 'true'
 }
 
+function readStoredExperimentalToolsEnabled(): boolean {
+  const key = 'cairn-codex-experimental-tools'
+  const stored = localStorage.getItem(key)
+  if (stored !== null) return stored === 'true'
+  // Preserve tools that existing installs already exposed, while keeping them
+  // opt-in for genuinely new profiles.
+  const enabled = localStorage.getItem('cairn-codex-workspace-tools-version') !== null
+  localStorage.setItem(key, String(enabled))
+  return enabled
+}
+
 function readStoredWorkspaceToolIds(): WorkspaceToolId[] {
   try {
     const parsed = JSON.parse(localStorage.getItem('cairn-codex-visible-workspace-tools') ?? 'null') as unknown
@@ -2887,7 +2903,20 @@ function readStoredWorkspaceToolIds(): WorkspaceToolId[] {
 }
 
 function workspaceToolVisible(id: WorkspaceToolId): boolean {
+  const definition = workspaceToolDefinitions.find((tool) => tool.id === id)
+  return workspaceToolIdSet.value.has(id) && (!definition?.experimental || experimentalToolsEnabled.value)
+}
+
+function workspaceToolSelected(id: WorkspaceToolId): boolean {
   return workspaceToolIdSet.value.has(id)
+}
+
+function setExperimentalToolsEnabled(enabled: boolean): void {
+  experimentalToolsEnabled.value = enabled
+  localStorage.setItem('cairn-codex-experimental-tools', String(enabled))
+  if (!enabled && (activeView.value === 'oracle' || activeView.value === 'dismantling')) {
+    activeView.value = 'collection'
+  }
 }
 
 function setWorkspaceToolVisible(id: WorkspaceToolId, visible: boolean): void {
@@ -5022,10 +5051,11 @@ function formatPercentile(value: number | null | undefined): string {
           <label v-for="tool in workspaceToolDefinitions" :key="tool.id" class="settings-toggle compact">
             <input
               type="checkbox"
-              :checked="workspaceToolVisible(tool.id)"
+              :checked="tool.experimental && !experimentalToolsEnabled ? false : workspaceToolSelected(tool.id)"
+              :disabled="tool.experimental && !experimentalToolsEnabled"
               @change="setWorkspaceToolVisible(tool.id, ($event.target as HTMLInputElement).checked)"
             />
-            <span><strong>{{ tool.label }}</strong><small>{{ tool.detail }}</small></span>
+            <span><strong>{{ tool.label }}{{ tool.experimental ? ' · Experimental' : '' }}</strong><small>{{ tool.detail }}</small></span>
           </label>
         </div>
         <footer>
@@ -5141,7 +5171,8 @@ function formatPercentile(value: number | null | undefined): string {
               {{ sourceModeLabel }} ·
               {{ snapshot?.contentPacks.length ?? 0 }} content packs ·
               {{ snapshot?.scannedStashes.length ?? 0 }} transfer stashes ·
-              {{ snapshot?.items.length.toLocaleString() ?? 0 }} catalog entries
+              {{ snapshot?.items.length.toLocaleString() ?? 0 }} catalog entries ·
+              {{ archivedCopyCount.toLocaleString() }} archived copies
             </template>
             <template v-else>
               Locating Grim Dawn, its item database, and transfer stashes.
@@ -5153,7 +5184,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
       </section>
 
-      <section v-if="snapshot" class="completion-tracker" aria-label="Collection completion">
+      <section v-if="snapshot && activeView !== 'vault' && activeView !== 'settings'" class="completion-tracker" aria-label="Collection completion">
         <header>
           <div><p class="section-label">Collection progress</p><strong>{{ allItemSummary.collected }} / {{ allItemSummary.total }} tracked entries</strong></div>
           <button type="button" :aria-expanded="!trackerCollapsed" @click="toggleTracker">{{ trackerCollapsed ? 'Show trackers' : 'Hide trackers' }}</button>
@@ -5327,11 +5358,11 @@ function formatPercentile(value: number | null | undefined): string {
           <small>A live inventory of physical copies currently present in the selected Grim Dawn stash files.</small>
         </button>
       </section>
-      <header v-if="snapshot" class="workspace-launcher-heading">
+      <header v-if="snapshot && activeView !== 'vault' && activeView !== 'settings'" class="workspace-launcher-heading">
         <div><p class="section-label">Tools</p><small>Keep this workspace as focused—or as gloriously cluttered—as you like.</small></div>
         <button type="button" @click="toolSettingsOpen = true">Customize tools</button>
       </header>
-      <nav v-if="snapshot" class="workspace-tabs" aria-label="Cairn Codex workspace">
+      <nav v-if="snapshot && activeView !== 'vault' && activeView !== 'settings'" class="workspace-tabs" aria-label="Cairn Codex workspace">
         <button type="button" :class="{ active: activeView === 'collection' }" @click="activeView = 'collection'">
           <span>Collection</span><small>Items and copies</small>
         </button>
@@ -6624,14 +6655,23 @@ function formatPercentile(value: number | null | undefined): string {
               </div>
             </header>
             <p>Collection remains the permanent home view. Choose which specialist tools appear below the progress tracker.</p>
+            <label class="settings-toggle experimental-tools-toggle">
+              <input
+                type="checkbox"
+                :checked="experimentalToolsEnabled"
+                @change="setExperimentalToolsEnabled(($event.target as HTMLInputElement).checked)"
+              />
+              <span><strong>Enable experimental tools</strong><small>Shows Stash Oracle and the read-only Dismantling Lab. Their recommendations and simulations are explicitly provisional.</small></span>
+            </label>
             <div class="workspace-tool-options">
               <label v-for="tool in workspaceToolDefinitions" :key="tool.id" class="settings-toggle compact">
                 <input
                   type="checkbox"
-                  :checked="workspaceToolVisible(tool.id)"
+                  :checked="tool.experimental && !experimentalToolsEnabled ? false : workspaceToolSelected(tool.id)"
+                  :disabled="tool.experimental && !experimentalToolsEnabled"
                   @change="setWorkspaceToolVisible(tool.id, ($event.target as HTMLInputElement).checked)"
                 />
-                <span><strong>{{ tool.label }}</strong><small>{{ tool.detail }}</small></span>
+                <span><strong>{{ tool.label }}{{ tool.experimental ? ' · Experimental' : '' }}</strong><small>{{ tool.detail }}</small></span>
               </label>
             </div>
           </article>

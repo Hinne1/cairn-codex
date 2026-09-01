@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 const options = parseOptions(process.argv.slice(2))
+const requestedItems = positiveInteger(options.items ?? '4', '--items')
 const projectRoot = resolve(import.meta.dirname, '..')
 const appPath = resolveRequired(options.app, '--app')
 const baseDatabasePath = resolveRequired(options['base-db'], '--base-db')
@@ -70,31 +71,49 @@ const insert = source.prepare(`
     AscendantAffixNameRecord, AscendantAffix2hNameRecord, RerollsUsed, AffixRerollsUsed
   ) VALUES (?, ?, '', '', '', '', ?, '', '', 0, '', 0, 0, 0, 1, ?, ?, '', '', 0, 0)
 `)
-insert.run(900001, records[0], 3100000001, 0, Date.now() - 3000)
-insert.run(900002, records[1], 3100000002, 1, Date.now() - 2000)
-insert.run(900003, records[2], 3100000003, 1, Date.now() - 1000)
-insert.run(900004, 'records/cairn-test/unsupported-item.dbr', 3100000004, 0, Date.now())
+const databaseItemCount = requestedItems - 1
+source.exec('BEGIN IMMEDIATE')
+for (let index = 0; index < databaseItemCount; index += 1) {
+  insert.run(
+    700000000 + index,
+    records[index % records.length],
+    3100000000 + index,
+    index % 2 === 0 ? 1 : 0,
+    Date.now() - (databaseItemCount - index) * 1000
+  )
+}
+insert.run(799999999, 'records/cairn-test/unsupported-item.dbr', 3199999999, 0, Date.now())
+source.exec('COMMIT')
 source.close()
 
 const queueFields = [
-  '18', '0', records[3], '', '', '3100000005', '0', '', '', '0', '', '0', '', '', '', '', '0', '1'
+  '18', '0', records[3], '', '', '3200000000', '0', '', '', '0', '', '0', '', '', '', '', '0', '1'
 ]
 await writeFile(join(queueDirectory, 'pending-test.csv'), queueFields.join(';') + '\r\n', 'utf8')
 const sourceHash = await sha256(sourceDatabasePath)
 
+const firstStarted = performance.now()
 runImport('first')
+const firstDurationMs = Math.round(performance.now() - firstStarted)
 const first = inspectTarget()
-if (first.vault - baselineVault !== 4) {
-  throw new Error(`First import added ${first.vault - baselineVault} copies; expected 4.`)
+if (first.vault - baselineVault !== requestedItems) {
+  throw new Error(`First import added ${first.vault - baselineVault} copies; expected ${requestedItems}.`)
 }
-if (first.journal - baselineJournal !== 4) {
-  throw new Error(`First import added ${first.journal - baselineJournal} journals; expected 4.`)
+if (first.journal - baselineJournal !== requestedItems) {
+  throw new Error(`First import added ${first.journal - baselineJournal} journals; expected ${requestedItems}.`)
 }
-if (first.softcore !== 2 || first.hardcore !== 2) {
-  throw new Error(`Mixed-mode import mismatch: ${first.softcore} SC / ${first.hardcore} HC.`)
+const expectedHardcore = Math.ceil(databaseItemCount / 2)
+const expectedSoftcore = Math.floor(databaseItemCount / 2) + 1
+if (first.softcore !== expectedSoftcore || first.hardcore !== expectedHardcore) {
+  throw new Error(
+    `Mixed-mode import mismatch: ${first.softcore} SC / ${first.hardcore} HC; ` +
+    `expected ${expectedSoftcore} SC / ${expectedHardcore} HC.`
+  )
 }
 
+const repeatStarted = performance.now()
 runImport('repeat')
+const repeatDurationMs = Math.round(performance.now() - repeatStarted)
 const repeated = inspectTarget()
 if (repeated.vault !== first.vault || repeated.journal !== first.journal) {
   throw new Error('Repeated migration created duplicate vault items or journals.')
@@ -107,6 +126,7 @@ if (backups.length < 2) throw new Error('Each migration run did not retain a ver
 
 console.log(JSON.stringify({
   passed: true,
+  requestedItems,
   imported: first.vault - baselineVault,
   softcore: first.softcore,
   hardcore: first.hardcore,
@@ -114,7 +134,9 @@ console.log(JSON.stringify({
   unsupportedSkipped: 1,
   repeatCreatedDuplicates: false,
   verifiedBackups: backups.length,
-  sourcePreserved: true
+  sourcePreserved: true,
+  firstDurationMs,
+  repeatDurationMs
 }, null, 2))
 
 function runImport(label) {
@@ -141,15 +163,19 @@ function inspectTarget() {
     const modes = database.prepare(`
       SELECT is_hardcore AS hardcore, COUNT(*) AS count
       FROM vault_item
-      WHERE id LIKE 'gdia-90000%' OR CAST(serialized_item AS TEXT) LIKE '%3100000005%'
+      WHERE (
+        id LIKE 'gdia-%'
+        AND CAST(substr(id, 6, instr(substr(id, 6), '-') - 1) AS INTEGER)
+          BETWEEN 700000000 AND ?
+      ) OR CAST(serialized_item AS TEXT) LIKE '%3200000000%'
       GROUP BY is_hardcore
-    `).all()
+    `).all(700000000 + databaseItemCount - 1)
     return {
       vault: count(database, 'vault_item'),
       journal: count(database, 'operation_journal'),
       softcore: Number(modes.find((row) => Number(row.hardcore) === 0)?.count ?? 0),
       hardcore: Number(modes.find((row) => Number(row.hardcore) === 1)?.count ?? 0),
-      queue: Number(database.prepare("SELECT COUNT(*) AS count FROM vault_item WHERE CAST(serialized_item AS TEXT) LIKE '%3100000005%'").get().count)
+      queue: Number(database.prepare("SELECT COUNT(*) AS count FROM vault_item WHERE CAST(serialized_item AS TEXT) LIKE '%3200000000%'").get().count)
     }
   } finally {
     database.close()
@@ -174,6 +200,14 @@ function parseOptions(args) {
 function resolveRequired(value, name) {
   if (!value) throw new Error(`${name} is required.`)
   return resolve(value)
+}
+
+function positiveInteger(value, name) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100_000) {
+    throw new Error(`${name} must be an integer from 1 to 100000.`)
+  }
+  return parsed
 }
 
 function assertInsideProject(path, root) {

@@ -20,7 +20,7 @@ tester; **P1** is beta-quality work; **P2** is longer-term architecture or produ
 | DIAG-01 | P0 | planned | Add structured rotating application logs and a one-click support bundle. | A tester can export redacted logs, app/game/helper versions, hashes, job timings, last navigation/action, database integrity, and operation correlation IDs without exposing item payloads or character names. |
 | IMPORT-01 | P0 | planned | Add an Item Assistant preflight and progress flow. | Before import, show source path, copy count, SC/HC split, unsupported estimate, backup size, required free space, and destination mode; during import, show named progress stages and a durable result. |
 | IMPORT-02 | P0 | planned | Deduplicate and retain Item Assistant source backups by content hash. | Repeating an unchanged import does not retain another full `userdata.db`; retention is bounded and every retained backup remains hash-verifiable. |
-| ONBOARD-01 | P0 | planned | Add guided first-run onboarding. | A new user can locate Grim Dawn, choose “Import Item Assistant” or “Start empty,” understand archive versus live transfer, and reach Collection without reading the README. The tour can be skipped and reopened. |
+| ONBOARD-01 | P0 | done | Add guided first-run onboarding. | A new user can locate Grim Dawn, choose “Import Item Assistant” or “Start empty,” understand archive versus live transfer, and reach Collection without reading the README. The tour can be skipped and reopened. |
 | RECOVERY-01 | P0 | planned | Perform and record the remaining live-transfer release matrix. | Full target, repeated submit, Cairn exit, stale receipt, and unsupported-build tests have explicit results for the shipped hashes. |
 
 ### Measured 20k findings (2026-09-01)

@@ -2543,6 +2543,7 @@ watch([plannerMapScope, plannerMinimumLevel, plannerLevelCap, plannerSkills], ()
   selectedAtlasRegion.value = null
 })
 watch(visibleAtlasRegions, (regions) => {
+  if (restoringAppHistory) return
   if (!regions.some((region) => region.key === selectedAtlasRegion.value)) {
     selectedAtlasRegion.value = regions[0]?.key ?? null
   }
@@ -6931,6 +6932,7 @@ function formatPercentile(value: number | null | undefined): string {
                 v-for="region in visibleAtlasRegions"
                 :key="region.key"
                 type="button"
+                :data-region-key="region.key"
                 :class="{ active: selectedAtlasRegion === region.key }"
                 @click="selectedAtlasRegion = region.key"
               >

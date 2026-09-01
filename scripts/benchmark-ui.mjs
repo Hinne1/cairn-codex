@@ -182,36 +182,64 @@ const child = spawn(appPath, [
 })
 let stdout = ''
 let stderr = ''
+let childError = null
 child.stdout.on('data', (chunk) => { stdout += chunk })
 child.stderr.on('data', (chunk) => { stderr += chunk })
+child.on('error', (error) => { childError = error })
 
-let report
-for (let attempt = 0; attempt < (hydrateAllModes ? 480 : 240); attempt += 1) {
+async function terminateChildTree() {
+  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return
   try {
-    report = JSON.parse(await readFile(reportPath, 'utf8'))
-    break
+    execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
   } catch {
-    if (child.exitCode !== null && child.exitCode !== 0) {
-      throw new Error(`Benchmark app exited ${child.exitCode}.\n${stdout}\n${stderr}`)
+    child.kill()
+  }
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const closed = await new Promise((resolveExit) => {
+    const onClose = () => {
+      clearTimeout(timer)
+      resolveExit(true)
     }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 500))
+    const timer = setTimeout(() => {
+      child.off('close', onClose)
+      resolveExit(false)
+    }, 2_000)
+    child.once('close', onClose)
+  })
+  if (!closed && child.exitCode === null && child.signalCode === null) {
+    throw new Error(`Benchmark process tree ${child.pid} did not stop within 2000 ms.`)
   }
 }
-if (!report) throw new Error(`Benchmark timed out.\n${stdout}\n${stderr}`)
+
+let report
+let executionError = null
 try {
-  execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
-} catch {
-  child.kill()
+  for (let attempt = 0; attempt < (hydrateAllModes ? 480 : 240); attempt += 1) {
+    try {
+      report = JSON.parse(await readFile(reportPath, 'utf8'))
+      break
+    } catch {
+      if (childError) throw childError
+      if (child.exitCode !== null && child.exitCode !== 0) {
+        throw new Error(`Benchmark app exited ${child.exitCode}.\n${stdout}\n${stderr}`)
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 500))
+    }
+  }
+  if (!report) throw new Error(`Benchmark timed out.\n${stdout}\n${stderr}`)
+} catch (error) {
+  executionError = error
+} finally {
+  try {
+    await terminateChildTree()
+  } catch (cleanupError) {
+    if (executionError) {
+      throw new AggregateError([executionError, cleanupError], 'Benchmark failed and its process tree could not be cleaned up.')
+    }
+    throw cleanupError
+  }
 }
-if (child.exitCode === null) {
-  await new Promise((resolveExit) => {
-    const timer = setTimeout(resolveExit, 2_000)
-    child.once('close', () => {
-      clearTimeout(timer)
-      resolveExit()
-    })
-  })
-}
+if (executionError) throw executionError
 const itemCount = Number(String(report.renderedState?.results ?? '').replace(/[^0-9]/g, ''))
 const requestedViewport = {
   width: screenshotWidth ? Number(screenshotWidth) : 1440,

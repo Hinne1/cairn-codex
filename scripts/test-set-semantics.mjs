@@ -93,9 +93,19 @@ const semanticColors = [...tokenSource.matchAll(/--(?:gd-rarity|semantic)-[\w-]+
 assert(semanticColors.length >= 10, 'Expected every semantic tone to expose a hex token')
 for (const foreground of semanticColors) {
   for (const background of ['#11110f', '#2d252a']) {
-    assert(contrastRatio(foreground, background) >= 4.5,
-      `${foreground} must meet 4.5:1 contrast against ${background}`)
+    const badgeSurface = compositeHex(foreground, background, 0.12)
+    assert(contrastRatio(foreground, badgeSurface) >= 4.5,
+      `${foreground} must meet 4.5:1 contrast against its ${badgeSurface} composited badge surface`)
   }
+}
+
+function compositeHex(foreground, background, alpha) {
+  const foregroundChannels = hexChannels(foreground)
+  const backgroundChannels = hexChannels(background)
+  const channels = foregroundChannels.map((value, index) =>
+    Math.round(value * alpha + backgroundChannels[index] * (1 - alpha))
+  )
+  return `#${channels.map((value) => value.toString(16).padStart(2, '0')).join('')}`
 }
 
 function contrastRatio(foreground, background) {
@@ -105,11 +115,16 @@ function contrastRatio(foreground, background) {
 }
 
 function relativeLuminance(hex) {
-  const channels = hex.slice(1).match(/.{2}/g).map((value) => Number.parseInt(value, 16) / 255)
-  const [red, green, blue] = channels.map((value) =>
+  const [red, green, blue] = hexChannels(hex).map((value) =>
+    value / 255
+  ).map((value) =>
     value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
   )
   return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+function hexChannels(hex) {
+  return hex.slice(1).match(/.{2}/g).map((value) => Number.parseInt(value, 16))
 }
 
 console.log(JSON.stringify({

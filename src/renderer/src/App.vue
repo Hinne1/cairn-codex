@@ -11,6 +11,7 @@ import {
   type RendererFailureReport
 } from './renderer-recovery'
 import { searchGuidance } from './search-guidance'
+import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import {
   setCompletionCount,
   setItemBadges,
@@ -104,19 +105,6 @@ type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `item:${string}` |
 type WorkspaceToolId = 'sets' | 'materials' | 'skills' | 'oracle' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'dismantling' | 'trivia' | 'todo'
 type DismantlingModeFilter = 'all' | 'softcore' | 'hardcore'
 type DismantlingRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
-
-const collectionSearchFields = ['name', 'set', 'skill', 'damage', 'slot', 'type', 'rarity', 'pack', 'level', 'owned'] as const
-const setSearchFields = ['name', 'set', 'skill', 'damage', 'slot', 'rarity', 'pack', 'level', 'owned', 'complete', 'craftable', 'awakening', 'fx'] as const
-const skillItemSearchFields = ['name', 'skill', 'damage', 'stat', 'slot', 'rarity', 'level', 'conversion', 'owned'] as const
-const oracleSearchFields = ['name', 'class', 'mastery', 'skill', 'damage', 'style', 'set', 'item', 'readiness', 'score'] as const
-const plannerSearchFields = ['name', 'type', 'slot', 'rarity', 'skill', 'damage', 'source', 'area', 'level', 'owned'] as const
-const atlasSearchFields = ['name', 'area', 'item', 'monster', 'source', 'pack', 'level'] as const
-const miSearchFields = ['name', 'slot', 'level', 'prefix', 'suffix', 'affix', 'skill', 'damage', 'stat', 'copies'] as const
-const supplySearchFields = ['name', 'category', 'effect', 'faction', 'slot', 'source', 'mode', 'eligible'] as const
-const dismantlingSearchFields = ['name', 'base', 'prefix', 'suffix', 'affix', 'rarity', 'mode', 'level'] as const
-const farmingSearchFields = ['name', 'skill', 'damage', 'monster', 'source', 'area', 'rarity', 'level'] as const
-const vaultSearchFields = ['name', 'base', 'prefix', 'suffix', 'affix', 'slot', 'rarity', 'level', 'seed', 'mode', 'pack'] as const
-const historySearchFields = ['item', 'name', 'base', 'seed', 'outcome', 'state', 'id', 'mode', 'source', 'time'] as const
 
 interface AppHistoryState {
   cairnCodex: true
@@ -542,33 +530,21 @@ let appHistoryIndex = 0
 let appHistoryMaximum = 0
 const pageSize = 48
 
-const collectionSearchQuery = computed(() => compileSearchQuery(searchQuery.value, {
-  fields: collectionSearchFields,
-  aliases: { class: 'type' },
-  numericFields: ['level']
-}))
-const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, {
-  fields: setSearchFields,
-  numericFields: ['level']
-}))
-const skillItemsSearchQuery = computed(() => compileSearchQuery(skillItemQuery.value, { fields: skillItemSearchFields, numericFields: ['level'] }))
-const oracleStructuredQuery = computed(() => compileSearchQuery(oracleQuery.value, { fields: oracleSearchFields, numericFields: ['score'] }))
-const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, {
-  fields: plannerSearchFields,
-  aliases: { location: 'area' },
-  numericFields: ['level']
-}))
-const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, { fields: atlasSearchFields, numericFields: ['level'] }))
-const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, { fields: miSearchFields, numericFields: ['level', 'copies'] }))
-const supplyStructuredQuery = computed(() => compileSearchQuery(reusableSupplyQuery.value, { fields: supplySearchFields }))
-const dismantlingStructuredQuery = computed(() => compileSearchQuery(dismantlingQuery.value, { fields: dismantlingSearchFields, numericFields: ['level'] }))
-const farmingStructuredQuery = computed(() => compileSearchQuery(farmingQuery.value, { fields: farmingSearchFields, numericFields: ['level'] }))
-const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, { fields: vaultSearchFields, numericFields: ['level', 'seed'] }))
-const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, {
-  fields: historySearchFields,
-  aliases: { correlation: 'id', date: 'time' },
-  numericFields: ['seed']
-}))
+const collectionSearchQuery = computed(() => compileSearchQuery(
+  searchQuery.value,
+  searchQueryOptions(activeView.value === 'materials' ? searchSchemas.materials : searchSchemas.collection)
+))
+const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, searchQueryOptions(searchSchemas.sets)))
+const skillItemsSearchQuery = computed(() => compileSearchQuery(skillItemQuery.value, searchQueryOptions(searchSchemas.skillItems)))
+const oracleStructuredQuery = computed(() => compileSearchQuery(oracleQuery.value, searchQueryOptions(searchSchemas.oracle)))
+const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
+const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
+const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, searchQueryOptions(searchSchemas.miWorkshop)))
+const supplyStructuredQuery = computed(() => compileSearchQuery(reusableSupplyQuery.value, searchQueryOptions(searchSchemas.supplies)))
+const dismantlingStructuredQuery = computed(() => compileSearchQuery(dismantlingQuery.value, searchQueryOptions(searchSchemas.dismantling)))
+const farmingStructuredQuery = computed(() => compileSearchQuery(farmingQuery.value, searchQueryOptions(searchSchemas.farming)))
+const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, searchQueryOptions(searchSchemas.vault)))
+const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, searchQueryOptions(searchSchemas.history)))
 
 const archiveModeCount = computed(() =>
   [false, true].filter((isHardcore) => archiveModeEnabled(isHardcore)).length

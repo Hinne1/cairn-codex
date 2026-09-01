@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { compileSearchQuery, type SearchExpression } from '../shared/search-query.ts'
+import { searchQueryOptions, searchSchemas } from '../shared/search-schema.ts'
 import type {
   CollectionItem,
   CollectionSnapshot,
@@ -936,10 +937,7 @@ export class CollectionDatabase {
     }
     const query = request.query?.trim().toLocaleLowerCase() ?? ''
     if (query) {
-      const compiled = compileSearchQuery(query, {
-        fields: ['name', 'base', 'prefix', 'suffix', 'affix', 'slot', 'rarity', 'level', 'seed', 'mode', 'pack'],
-        numericFields: ['level', 'seed']
-      })
+      const compiled = compileSearchQuery(query, searchQueryOptions(searchSchemas.vault))
       if (compiled.error || !compiled.expression) throw new Error(compiled.error?.message ?? 'Invalid vault search query.')
       const payload = 'CAST(vault_item.serialized_item AS TEXT)'
       const prefix = `json_extract(${payload}, '$.prefixRecord')`
@@ -1038,11 +1036,7 @@ export class CollectionDatabase {
         ON direct_history_catalog.record = direct_history_item.base_record
     ` : ''
     if (query) {
-      const compiled = compileSearchQuery(query, {
-        fields: ['item', 'name', 'base', 'seed', 'outcome', 'state', 'id', 'mode', 'source', 'time'],
-        aliases: { correlation: 'id', date: 'time' },
-        numericFields: ['seed']
-      })
+      const compiled = compileSearchQuery(query, searchQueryOptions(searchSchemas.history))
       if (compiled.error || !compiled.expression) throw new Error(compiled.error?.message ?? 'Invalid operation-history search query.')
       const itemTerm = (
         field: string,

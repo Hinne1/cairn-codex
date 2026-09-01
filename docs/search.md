@@ -4,8 +4,37 @@ Cairn Codex uses the same search language throughout Collection, Sets, Skill Exp
 MI Workshop, Supplies, the planners, farming tools, and Transfers. Each workspace searches
 different fields, but the grammar is identical.
 
-Open **Search tips** beside any search box for examples tailored to the current workspace.
-This guide covers the complete language and provides recipes you can adapt.
+Open **Search tips** beside any search box for examples tailored to the current workspace, or
+choose **Advanced search** to build the same syntax with a form. This guide covers both paths
+and provides recipes you can adapt.
+
+## Visual query builder
+
+Choose **Advanced search** beside **Search tips** to add repeatable rules without memorizing
+field names or operators. The available fields and suggested values change with the active
+workspace. Select **All of these rules** for `AND`, or **Any of these rules** for `OR`; use
+**is not** to add an explicit exclusion. Numeric fields offer **is**, **at least**, and **at
+most**.
+
+The **Query preview** shows the exact text that will be placed in the normal search box. Apply
+runs it immediately, after which the text remains editable, copyable, and shareable. **Cancel**
+leaves the current search untouched, while **Reset** clears the builder draft.
+
+For example, these form rules:
+
+- Skill · exact phrase · `Wendigo Totem`
+- Level · at least · `75`
+- Rarity · is not · `epic`
+
+produce:
+
+```text
+skill:"Wendigo Totem" AND level:>=75 AND NOT rarity:epic
+```
+
+When an existing query contains nested or mixed Boolean groups the form cannot safely flatten,
+the dialog displays it as a **Preserved query**. Applying additional rules keeps that clause
+intact; nothing is silently removed. Use **Reset** only when you deliberately want to replace it.
 
 ## Quick start
 
@@ -205,5 +234,5 @@ flashing to an empty state.
 | `Unknown search field …` | `skills:wendigo` | Use a field supported by that workspace, such as `skill:`. |
 | `… needs a number` | `level:ancient` | Use a number or comparison, such as `level:>=75`. |
 
-For contributors, the shared parser and workspace integration contract are documented in
+For contributors, the shared schemas, parser, builder, and workspace integration contract are documented in
 [Workspace UI contract](architecture/workspace-ui.md).

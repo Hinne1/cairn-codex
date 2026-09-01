@@ -12,6 +12,8 @@ Searchable workspaces use `src/renderer/src/components/ExplorerToolbar.vue`.
 - Every search provides a short explanation of its indexed fields and click-to-apply examples
   through the shared `Search tips` disclosure. Examples must only advertise syntax and fields
   that the workspace actually supports.
+- Every search also exposes the shared `Advanced search` dialog. It emits canonical query text
+  into the normal search input and never owns a second filter state.
 - Filters describe which records are included.
 - Sort controls describe how the included records are ordered.
 - Batch actions come after filters and sorting.
@@ -42,9 +44,13 @@ shared. Do not add another workspace-specific heading shell.
 - Whitespace is implicit `AND`. Explicit `AND`, `OR`, parentheses, quoted
   phrases, `NOT`, and the `-term` shorthand are supported. Precedence is
   `NOT`, then `AND`, then `OR`.
-- Fields are declared per workspace and must be listed in that workspace's
-  Search tips. Unknown fields and invalid numeric comparisons produce an
-  inline error and preserve the unfiltered result surface while the user edits.
+- Fields, aliases, value kinds, common values, help, and builder controls come from
+  `src/shared/search-schema.ts`. Parser options and Search tips are derived from that schema;
+  workspace-local copies are not allowed. Unknown fields and invalid numeric comparisons
+  produce an inline error and preserve the unfiltered result surface while the user edits.
+- `src/shared/advanced-search.ts` translates between the shared expression tree and a flat rule
+  form. Syntax outside that form's representable subset stays visible as a preserved clause and
+  must never be silently discarded.
 - Numeric fields accept equality or `>=`, `<=`, `>`, and `<`. Boolean fields
   accept `true`/`false` and `yes`/`no`.
 - Large persisted collections use the same parsed expression tree translated
@@ -87,5 +93,5 @@ piece being discovered. Surfaces must name those qualifications explicitly.
 4. Route item hover/focus through the global tooltip pipeline.
 5. Add an isolated screenshot interaction for any new control shape.
 6. Verify keyboard focus, narrow layouts, empty results, and restored history state.
-7. Declare the workspace's search fields in its query compiler and document
-   meaningful examples in `src/renderer/src/search-guidance.ts`.
+7. Declare the workspace once in `src/shared/search-schema.ts`; parser options, Search tips, and
+   Advanced search controls must consume that same definition.

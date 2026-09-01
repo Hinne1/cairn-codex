@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict'
+import {
+  createBoundedResultWindow,
+  moveBoundedResultKey,
+  updateBoundedSelection
+} from '../src/renderer/src/bounded-results.ts'
+
+function generatedItems(count) {
+  return Array.from({ length: count }, (_, index) => ({ id: `item-${index}`, index }))
+}
+
+for (const count of [20_000, 50_000]) {
+  const items = generatedItems(count)
+  const first = createBoundedResultWindow({ items, getKey: (item) => item.id, page: 1, pageSize: 50 })
+  assert.equal(first.entries.length, 50, `${count.toLocaleString()} items mounted more than one page`)
+  assert.equal(first.entries[0].index, 0)
+  assert.equal(first.entries.at(-1).index, 49)
+  assert.equal(first.totalCount, count)
+  assert.equal(first.pageCount, count / 50)
+
+  const last = createBoundedResultWindow({ items, getKey: (item) => item.id, page: Number.MAX_SAFE_INTEGER, pageSize: 50 })
+  assert.equal(last.page, count / 50)
+  assert.equal(last.entries.length, 50)
+  assert.equal(last.entries.at(-1).index, count - 1)
+}
+
+const remote = createBoundedResultWindow({
+  items: generatedItems(120),
+  getKey: (item) => item.id,
+  page: 2,
+  pageSize: 50,
+  totalCount: 50_000,
+  remote: true
+})
+assert.equal(remote.entries.length, 50, 'Remote pages must remain bounded even if an endpoint over-delivers')
+assert.equal(remote.entries[0].index, 50)
+assert.equal(remote.pageCount, 1_000)
+
+assert.throws(() => createBoundedResultWindow({
+  items: [{ id: 'same' }, { id: 'same' }],
+  getKey: (item) => item.id
+}), /stable unique keys/i)
+
+const keys = ['a', 'b', 'c', 'd', 'e', 'f']
+assert.equal(moveBoundedResultKey(keys, 'c', 'first'), 'a')
+assert.equal(moveBoundedResultKey(keys, 'c', 'last'), 'f')
+assert.equal(moveBoundedResultKey(keys, 'c', 'previous'), 'b')
+assert.equal(moveBoundedResultKey(keys, 'c', 'next'), 'd')
+assert.equal(moveBoundedResultKey(keys, 'e', 'row-up', 2), 'c')
+assert.equal(moveBoundedResultKey(keys, 'b', 'row-down', 2), 'd')
+assert.equal(moveBoundedResultKey(keys, 'a', 'previous'), 'a')
+assert.equal(moveBoundedResultKey(keys, 'f', 'next'), 'f')
+assert.equal(moveBoundedResultKey([], null, 'next'), null)
+
+assert.deepEqual(updateBoundedSelection([], 'a', 'none'), [])
+assert.deepEqual(updateBoundedSelection(['a'], 'b', 'single'), ['b'])
+assert.deepEqual(updateBoundedSelection(['a'], 'b', 'multiple'), ['a', 'b'])
+assert.deepEqual(updateBoundedSelection(['a', 'b'], 'a', 'multiple'), ['b'])
+
+console.log('Bounded result contract passed for 20k and 50k generated collections; mounted entries remained capped at 50.')

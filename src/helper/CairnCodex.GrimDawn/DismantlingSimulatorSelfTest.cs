@@ -77,6 +77,29 @@ internal static class DismantlingSimulatorSelfTest
         }
         Check(rejectedUnsupportedEquation, "Unknown loot equations did not fail closed.");
 
+        var missingEquationRecords = new Dictionary<string, CatalogSourceRecord>(data.Records,
+            StringComparer.OrdinalIgnoreCase)
+        {
+            [DynamicTable] = Source(DynamicTable, "LootItemTable_DynWeight",
+                ("lootName1", Text(LowReward)),
+                ("lootWeight1", Number(100)),
+                ("minItemLevelEquation", Text("1")),
+                ("targetLevelEquation", Text("parentLevel")),
+                ("bellSlope", Number(100)))
+        };
+        Check(Rejects(data with { Records = missingEquationRecords }, "missing maxItemLevelEquation"),
+            "Missing dynamic-table equations did not fail closed.");
+
+        var missingReferenceRecords = new Dictionary<string, CatalogSourceRecord>(data.Records,
+            StringComparer.OrdinalIgnoreCase)
+        {
+            [MasterTable] = Source(MasterTable, "LootMasterTable",
+                ("lootName1", Text("records/test/missing-table.dbr")),
+                ("lootWeight1", Number(100)))
+        };
+        Check(Rejects(data with { Records = missingReferenceRecords }, "references a missing record"),
+            "Missing nested loot-table records did not fail closed.");
+
         return new DismantlingSimulatorSelfTestResult(
             true,
             assertions,
@@ -116,6 +139,8 @@ internal static class DismantlingSimulatorSelfTest
                 ("lootName1", Text(HighReward)),
                 ("lootWeight1", Number(100)),
                 ("disableLevelLimits", Number(1)),
+                ("minItemLevelEquation", Text("1")),
+                ("maxItemLevelEquation", Text("parentLevel")),
                 ("targetLevelEquation", Text("parentLevel")),
                 ("bellSlope", Number(100, 100, 100, 100, 100, 100))),
             [LowReward] = Source(LowReward, "Item", ("itemLevel", Number(1)), ("itemNameTag", Text("tagLow"))),
@@ -132,6 +157,22 @@ internal static class DismantlingSimulatorSelfTest
                 ["tagHigh"] = "High reward"
             },
             records);
+    }
+
+    private static bool Rejects(ItemCatalogData data, string expectedMessage)
+    {
+        try
+        {
+            DismantlingSimulator.Simulate(data,
+            [
+                new DismantlingInputItem("rare-rejected", "Rejected fixture", "rare", 1)
+            ]);
+            return false;
+        }
+        catch (InvalidDataException exception)
+        {
+            return exception.Message.Contains(expectedMessage, StringComparison.Ordinal);
+        }
     }
 
     private static CatalogSourceRecord Source(

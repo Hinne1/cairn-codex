@@ -53,7 +53,7 @@ try {
   const dismantling = await request('self-test-dismantling')
   if (
     !dismantling.passed ||
-    dismantling.assertions < 9 ||
+    dismantling.assertions < 11 ||
     !dismantling.levelLimitsPassed ||
     !dismantling.bellSlopePassed ||
     !dismantling.noDropPassed ||

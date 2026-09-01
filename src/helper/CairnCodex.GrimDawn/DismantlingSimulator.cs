@@ -125,7 +125,7 @@ internal static partial class DismantlingSimulator
         {
             if (!data.Records.TryGetValue(recordName, out var source))
             {
-                return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { [recordName] = 1 };
+                throw new InvalidDataException($"Dismantling loot graph references a missing record: {recordName}");
             }
 
             var record = source.Record;
@@ -196,13 +196,16 @@ internal static partial class DismantlingSimulator
         HashSet<string> ancestors)
     {
         var disableLevelLimits = (record.Number("disableLevelLimits") ?? 0) != 0;
+        var minimumEquation = RequiredEquation(record, "minItemLevelEquation");
+        var maximumEquation = RequiredEquation(record, "maxItemLevelEquation");
+        var targetEquation = RequiredEquation(record, "targetLevelEquation");
         var minimum = disableLevelLimits
             ? double.NegativeInfinity
-            : EvaluateEquation(record.Text("minItemLevelEquation") ?? "1", parentLevel);
+            : EvaluateEquation(minimumEquation, parentLevel);
         var maximum = disableLevelLimits
             ? double.PositiveInfinity
-            : EvaluateEquation(record.Text("maxItemLevelEquation") ?? "parentLevel", parentLevel);
-        var target = EvaluateEquation(record.Text("targetLevelEquation") ?? "parentLevel", parentLevel);
+            : EvaluateEquation(maximumEquation, parentLevel);
+        var target = EvaluateEquation(targetEquation, parentLevel);
         if (minimum > maximum)
         {
             throw new InvalidDataException(
@@ -262,6 +265,11 @@ internal static partial class DismantlingSimulator
         }
         return result;
     }
+
+    private static string RequiredEquation(ArzRecord record, string field) =>
+        record.Text(field) is { } expression && !string.IsNullOrWhiteSpace(expression)
+            ? expression
+            : throw new InvalidDataException($"Dynamic loot table {record.Name} is missing {field}.");
 
     private static double BellMultiplier(IReadOnlyList<double> bellSlope, double itemLevel, double targetLevel)
     {

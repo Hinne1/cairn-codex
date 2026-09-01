@@ -1,20 +1,4 @@
-export const RESETTABLE_UI_PREFERENCE_KEYS = [
-  'cairn-codex-zoom',
-  'cairn-codex-visible-workspace-tools',
-  'cairn-codex-workspace-tools-version',
-  'cairn-codex-experimental-tools',
-  'cairn-codex-tracker-collapsed',
-  'cairn-codex-tracker-layout-version',
-  'cairn-codex-show-legacy-scanner',
-  'cairn-codex-skill',
-  'cairn-codex-skill-scope',
-  'cairn-codex-oracle-class',
-  'cairn-codex-oracle-style',
-  'cairn-codex-oracle-minimum-level',
-  'cairn-codex-oracle-maximum-level',
-  'cairn-codex-planner-display',
-  'cairn-codex-mi-counting-mode'
-] as const
+import { createPreferenceRepository, type PreferenceStorage } from './preference-repository.ts'
 
 export interface RendererFailureReport {
   correlationId: string
@@ -25,9 +9,8 @@ export interface RendererFailureReport {
 
 export const RENDERER_FAILURE_EVENT = 'cairn-codex:renderer-failure'
 
-export function resetUiPreferences(storage: Pick<Storage, 'removeItem'>): number {
-  for (const key of RESETTABLE_UI_PREFERENCE_KEYS) storage.removeItem(key)
-  return RESETTABLE_UI_PREFERENCE_KEYS.length
+export function resetUiPreferences(storage: PreferenceStorage): number {
+  return createPreferenceRepository(storage).resetInterface()
 }
 
 export function rendererFailureReport(error: unknown, workspace: string): RendererFailureReport {

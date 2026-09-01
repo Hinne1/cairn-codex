@@ -26,6 +26,8 @@ export const IPC_CHANNELS = {
   setDebugLogging: 'settings:set-debug-logging',
   recordNavigation: 'diagnostics:record-navigation',
   reportRendererError: 'diagnostics:report-renderer-error',
+  reportPreferenceLoad: 'diagnostics:report-preference-load',
+  exportPreferences: 'settings:export-preferences',
   getStartupStatus: 'diagnostics:get-startup-status',
   reportStartupPhase: 'diagnostics:report-startup-phase',
   restartInSafeMode: 'recovery:restart-in-safe-mode',
@@ -70,6 +72,13 @@ export interface RendererErrorReport {
   workspace: string
   message: string
   stack: string | null
+}
+
+export interface PreferenceLoadReport {
+  source: 'fresh' | 'legacy' | 'stored'
+  migrated: boolean
+  schemaVersion: number
+  invalidFields: string[]
 }
 
 export interface DiagnosticExportResult {
@@ -232,6 +241,8 @@ export interface CairnCodexApi {
   setDebugLogging: (enabled: boolean) => Promise<DebugLoggingStatus>
   recordNavigation: (view: string) => Promise<void>
   reportRendererError: (report: RendererErrorReport) => Promise<void>
+  reportPreferenceLoad: (report: PreferenceLoadReport) => Promise<void>
+  exportPreferences: (serialized: string) => Promise<DiagnosticExportResult>
   getStartupStatus: () => Promise<StartupStatus>
   reportStartupPhase: (phase: StartupPhaseEvent) => Promise<StartupStatus>
   restartInSafeMode: () => Promise<void>

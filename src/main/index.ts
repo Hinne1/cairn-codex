@@ -14,6 +14,7 @@ import {
   type CollectionSnapshot,
   type DismantlingPreview,
   type DebugLoggingStatus,
+  type DiagnosticExportResult,
   type GrimDawnDiscovery,
   type GdiaImportProgress,
   type GdiaImportResult,
@@ -25,6 +26,7 @@ import {
   type LiveSupplyDispenseResult,
   type OperationHistoryPage,
   type OperationHistoryRequest,
+  type PreferenceLoadReport,
   type SpecialItemRecoveryResult,
   type SpecialRecoveryDestination,
   type MapRegionLocation,
@@ -726,6 +728,51 @@ function registerIpcHandlers(
         new Error(input.message),
         { correlationId: input.correlationId, workspace: input.workspace, stack: input.stack }
       )
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.reportPreferenceLoad,
+    (_event, input: PreferenceLoadReport): void => {
+      const sources = new Set(['fresh', 'legacy', 'stored'])
+      if (
+        !input || !sources.has(input.source) || typeof input.migrated !== 'boolean' ||
+        input.schemaVersion !== 1 || !Array.isArray(input.invalidFields) || input.invalidFields.length > 64 ||
+        !input.invalidFields.every((field) => typeof field === 'string' && /^[a-z][a-zA-Z0-9.[\]-]{0,99}$/.test(field))
+      ) {
+        throw new Error('Preference-load diagnostics are outside their safe bounds.')
+      }
+      const event = input.invalidFields.length ? 'preferences.recovered' : 'preferences.loaded'
+      const data = {
+        source: input.source,
+        migrated: input.migrated,
+        schemaVersion: input.schemaVersion,
+        invalidFields: input.invalidFields
+      }
+      if (input.invalidFields.length) diagnostics.warn('settings', event, data)
+      else diagnostics.info('settings', event, data)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.exportPreferences,
+    async (_event, input: { serialized: string }): Promise<DiagnosticExportResult> => {
+      if (!input || typeof input.serialized !== 'string' || input.serialized.length > 2 * 1024 * 1024) {
+        throw new Error('Preference export is outside its safe bounds.')
+      }
+      let parsed: unknown
+      try { parsed = JSON.parse(input.serialized) as unknown } catch { throw new Error('Preference export is not valid JSON.') }
+      if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 1) {
+        throw new Error('Preference export has an unsupported schema version.')
+      }
+      const stamp = new Date().toISOString().slice(0, 10)
+      const selection = await dialog.showSaveDialog({
+        title: 'Export Cairn Codex preferences',
+        defaultPath: join(app.getPath('documents'), `cairn-codex-preferences-${stamp}.json`),
+        filters: [{ name: 'Cairn Codex preferences', extensions: ['json'] }]
+      })
+      if (selection.canceled || !selection.filePath) return { canceled: true, path: null }
+      await writeFile(selection.filePath, input.serialized, 'utf8')
+      diagnostics.info('settings', 'preferences.exported', { schemaVersion: 1 })
+      return { canceled: false, path: selection.filePath }
     }
   )
   const restartWithSafeMode = (safe: boolean): void => {

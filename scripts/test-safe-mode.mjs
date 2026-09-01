@@ -8,10 +8,10 @@ import {
   StartupRecoveryService
 } from '../src/main/startup-recovery.ts'
 import {
-  RESETTABLE_UI_PREFERENCE_KEYS,
   rendererFailureReport,
   resetUiPreferences
 } from '../src/renderer/src/renderer-recovery.ts'
+import { createPreferenceRepository } from '../src/renderer/src/preference-repository.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'cairn-safe-mode-'))
 try {
@@ -66,22 +66,23 @@ try {
     removeItem(key) { this.values.delete(key) }
   }
   const storage = new MemoryStorage()
-  for (const key of RESETTABLE_UI_PREFERENCE_KEYS) storage.setItem(key, 'test')
-  const preserved = [
-    'cairn-codex-planner-profiles',
-    'cairn-codex-planner-ignored-records',
-    'cairn-codex-todos',
-    'cairn-codex-collection-basis',
-    'cairn-codex-source-paths-archive',
-    'cairn-codex-retrieval-stash',
-    'cairn-codex-auto-live-connect',
-    'cairn-codex-onboarding'
-  ]
-  for (const key of preserved) storage.setItem(key, 'preserved')
+  const repository = createPreferenceRepository(
+    storage,
+    () => '2026-09-01T08:00:00.000Z',
+    () => 'profile-safe-mode'
+  )
+  repository.update('workspace', { experimentalToolsEnabled: true, visibleTools: ['oracle'] })
+  repository.update('notes', { todos: [{ id: 'todo-1', text: 'Preserve me', done: false, createdAt: '2026-09-01T08:00:00.000Z' }] })
+  repository.update('sources', { collectionBasis: 'stashes', archivePaths: ['archive'], indexPaths: ['stash'] })
 
-  assert.equal(resetUiPreferences(storage), RESETTABLE_UI_PREFERENCE_KEYS.length)
-  for (const key of RESETTABLE_UI_PREFERENCE_KEYS) assert.equal(storage.getItem(key), null)
-  for (const key of preserved) assert.equal(storage.getItem(key), 'preserved')
+  assert.equal(resetUiPreferences(storage), 3)
+  const afterReset = createPreferenceRepository(storage).value
+  assert.equal(afterReset.workspace.experimentalToolsEnabled, false)
+  assert.deepEqual(afterReset.workspace.visibleTools.includes('sets'), true)
+  assert.equal(afterReset.notes.todos[0]?.text, 'Preserve me')
+  assert.equal(afterReset.sources.collectionBasis, 'stashes')
+  assert.deepEqual(afterReset.sources.archivePaths, ['archive'])
+  assert.deepEqual(afterReset.sources.indexPaths, ['stash'])
 
   const report = rendererFailureReport(new Error('Synthetic workspace failure'), 'MI Workshop')
   assert.match(report.correlationId, /^[0-9a-f-]{36}$/i)

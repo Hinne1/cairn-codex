@@ -1500,7 +1500,16 @@ function registerIpcHandlers(
   )
   ipcMain.handle(
     IPC_CHANNELS.getVaultSummary,
-    (): VaultSummary => database.getVaultSummary()
+    (): VaultSummary => {
+      const summary = database.getVaultSummary()
+      if (
+        process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
+        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'onboarding'
+      ) {
+        return { ...summary, total: 128, ingested: 128 }
+      }
+      return summary
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.previewDismantling,
@@ -1664,6 +1673,7 @@ function registerIpcHandlers(
 }
 
 function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
   if (name === 'sets-semantics') {
     const setPresentation = {
       name: 'Veil of the Cairn',
@@ -4886,7 +4896,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP ?? '0',
           10
         )
-        if (onboardingStep > 0 || process.env.CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING === '1') {
+        if (
+          process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP !== undefined ||
+          process.env.CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING === '1'
+        ) {
           for (let attempt = 0; attempt < 40; attempt += 1) {
             const mounted = await window.webContents.executeJavaScript(
               "Boolean(document.querySelector('.onboarding-dialog'))"
@@ -4896,12 +4909,42 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           }
         }
         for (let step = 0; step < onboardingStep; step += 1) {
-          await window.webContents.executeJavaScript(`
-            [...document.querySelectorAll('.onboarding-footer button')]
-              .find((button) => button.textContent?.trim() === 'Continue')
-              ?.click()
+          const advanced = await window.webContents.executeJavaScript(`
+            (() => {
+              const button = [...document.querySelectorAll('.onboarding-footer button')]
+                .find((candidate) => ['Continue', 'Continue without importing'].includes(candidate.textContent?.trim() ?? ''))
+              button?.click()
+              return Boolean(button)
+            })()
           `)
+          if (!advanced) throw new Error(`Onboarding could not advance from step ${step}.`)
           await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP !== undefined) {
+          const renderedOnboardingStep = await window.webContents.executeJavaScript(
+            "document.querySelector('.onboarding-dialog')?.getAttribute('data-onboarding-step')"
+          )
+          if (renderedOnboardingStep === null || Number(renderedOnboardingStep) !== onboardingStep) {
+            throw new Error(
+              `Onboarding screenshot requested step ${onboardingStep}, rendered ${renderedOnboardingStep ?? 'none'}.`
+            )
+          }
+          if (
+            onboardingStep === 1 &&
+            process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'onboarding'
+          ) {
+            let retainedCopyText = ''
+            for (let attempt = 0; attempt < 40; attempt += 1) {
+              retainedCopyText = await window.webContents.executeJavaScript(
+                "document.querySelector('.retained-count')?.textContent?.trim() ?? ''"
+              )
+              if (retainedCopyText) break
+              await new Promise((resolve) => setTimeout(resolve, 50))
+            }
+            if (retainedCopyText !== '128 archived copies') {
+              throw new Error(`Onboarding retained-copy evidence was not rendered; received ${retainedCopyText || 'none'}.`)
+            }
+          }
         }
         if (process.env.CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING === '1') {
           await window.webContents.executeJavaScript(`
@@ -5150,7 +5193,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         }
         await window.webContents.executeJavaScript(`
           (async () => {
-            document.querySelector('.onboarding-skip')?.click()
+            if (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP === undefined)}) {
+              document.querySelector('.onboarding-skip')?.click()
+            }
             await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
           })()
         `)

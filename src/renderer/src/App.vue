@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import FailureProbe from './components/FailureProbe.vue'
 import ItemAssistantImport from './components/ItemAssistantImport.vue'
+import OnboardingDialog from './components/OnboardingDialog.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import { createNotificationService, type AppNotification } from './notification-service'
@@ -27,6 +28,7 @@ import {
 } from './set-semantics'
 import {
   ONBOARDING_STEP_COUNT,
+  applyContinueWithoutImport,
   type OnboardingStatus
 } from './onboarding'
 import ToolHeader from './components/ToolHeader.vue'
@@ -400,6 +402,7 @@ const vaultSummary = ref<VaultSummary>({
   quarantined: 0,
   supplies: 0
 })
+const vaultSummaryStatus = ref<'loading' | 'ready' | 'unavailable'>('loading')
 const storedVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0, limit: 100 })
 const quarantineVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0, limit: 100 })
 const vaultPageLoading = ref(false)
@@ -457,7 +460,6 @@ const onboardingOpen = ref(
 )
 const onboardingStep = ref(initialOnboardingPreference.step)
 const onboardingStatus = ref<OnboardingStatus>(initialOnboardingPreference.status)
-const onboardingDialog = ref<HTMLElement | null>(null)
 const recoveryStatus = ref<RecoveryStatus | null>(null)
 const vaultBusy = ref(false)
 const sahdinaRecoveryBusy = ref<'shared-stash' | 'character-inventory' | null>(null)
@@ -493,7 +495,6 @@ const tooltipPosition = ref({ left: 0, top: 0 })
 const tooltipMaxHeight = computed(() => Math.max(180, window.innerHeight - tooltipPosition.value.top - 14))
 const onboardingInstallCount = computed(() => discovery.value?.installations.length ?? 0)
 const onboardingSaveCount = computed(() => discovery.value?.saveLocations.length ?? 0)
-const onboardingStepLabel = computed(() => `${onboardingStep.value + 1} / ${ONBOARDING_STEP_COUNT}`)
 const onboardingStatusLabel = computed(() => onboardingStatus.value === 'completed'
   ? 'Completed'
   : onboardingStatus.value === 'skipped'
@@ -2485,11 +2486,8 @@ watch(activeView, async (view) => {
   }
 })
 
-watch([onboardingOpen, appInitializing], async ([open, initializing]) => {
+watch([onboardingOpen, appInitializing], ([open, initializing]) => {
   document.body.classList.toggle('onboarding-active', open && !initializing)
-  if (!open || initializing) return
-  await nextTick()
-  onboardingDialog.value?.focus()
 })
 
 watch(safeModeOfferOpen, async (open) => {
@@ -2906,12 +2904,16 @@ async function handleOnboardingImportCompleted(result: GdiaImportResult): Promis
   setOnboardingStep(2)
 }
 
-function chooseEmptyArchive(): void {
-  if (collectionBasis.value !== 'archive') {
-    collectionBasis.value = 'archive'
-    preferenceRepository.update('sources', { collectionBasis: 'archive' })
-  }
-  setOnboardingStep(2)
+function continueWithoutImport(): void {
+  applyContinueWithoutImport({
+    updateCollectionBasis: (basis) => {
+      collectionBasis.value = basis
+      preferenceRepository.update('sources', { collectionBasis: basis })
+    },
+    updateOnboarding: (preference) => {
+      persistOnboarding(preference.status, preference.step)
+    }
+  })
 }
 
 function reportTransferProblem(message: string): void {
@@ -3604,8 +3606,13 @@ async function refreshVault(): Promise<void> {
       window.cairnCodex.inspectWriteSafety(),
       window.cairnCodex.inspectLiveGame()
     ])
-    if (summary.status === 'fulfilled') vaultSummary.value = summary.value
-    else console.warn('Archive summary could not be refreshed.', summary.reason)
+    if (summary.status === 'fulfilled') {
+      vaultSummary.value = summary.value
+      vaultSummaryStatus.value = 'ready'
+    } else {
+      vaultSummaryStatus.value = 'unavailable'
+      console.warn('Archive summary could not be refreshed.', summary.reason)
+    }
     if (safety.status === 'fulfilled') writeSafety.value = safety.value
     else console.warn('Offline write safety could not be refreshed.', safety.reason)
     if (live.status === 'fulfilled') liveStatus.value = live.value
@@ -5518,103 +5525,21 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
     </div>
 
-    <div v-if="onboardingOpen && !appInitializing" class="onboarding-backdrop">
-      <section
-        ref="onboardingDialog"
-        class="onboarding-dialog"
-        role="dialog"
-        tabindex="-1"
-        aria-modal="true"
-        aria-labelledby="onboarding-title"
-        aria-describedby="onboarding-description"
-      >
-        <header class="onboarding-header">
-          <div>
-            <p class="section-label">First-run guide · {{ onboardingStepLabel }}</p>
-            <h2 id="onboarding-title">Welcome to Cairn Codex</h2>
-            <p id="onboarding-description">A four-part tour of discovery, your archive, safe transfers, and the tools worth knowing first.</p>
-          </div>
-          <button type="button" class="onboarding-skip" @click="skipOnboarding">Skip for now</button>
-        </header>
-
-        <ol class="onboarding-progress" aria-label="Onboarding progress">
-          <li v-for="step in ONBOARDING_STEP_COUNT" :key="step" :class="{ active: onboardingStep === step - 1, done: onboardingStep > step - 1 }">
-            <span>{{ step }}</span>
-          </li>
-        </ol>
-
-        <div v-if="onboardingStep === 0" class="onboarding-page">
-          <p class="section-label">Game discovery</p>
-          <h3>First, make sure Cairn can see Grim Dawn.</h3>
-          <p>Cairn automatically checks Steam, extra Steam libraries, GOG, local saves, and cloud saves. You never need to paste a game path into the app.</p>
-          <div class="onboarding-discovery-grid">
-            <article :class="{ ready: onboardingInstallCount > 0 }">
-              <strong>{{ onboardingInstallCount }}</strong>
-              <span>installation{{ onboardingInstallCount === 1 ? '' : 's' }} found</span>
-            </article>
-            <article :class="{ ready: onboardingSaveCount > 0 }">
-              <strong>{{ onboardingSaveCount }}</strong>
-              <span>save location{{ onboardingSaveCount === 1 ? '' : 's' }} found</span>
-            </article>
-          </div>
-          <p v-if="onboardingInstallCount === 0" class="onboarding-callout warning">No installation is indexed yet. You can still use recovery and diagnostics; install or launch Grim Dawn, then use Settings → Rebuild game-data index.</p>
-          <p v-else class="onboarding-callout">Discovery is ready. The first game-data index can take a few minutes; later cached starts are much faster.</p>
-          <small>Physical-stash overrides are optional. Enable the Legacy Stash Scanner in Settings only when you deliberately want to choose individual SC/HC stash files.</small>
-        </div>
-
-        <div v-else-if="onboardingStep === 1" class="onboarding-page">
-          <p class="section-label">Choose your starting point</p>
-          <h3>Bring an archive—or start fresh.</h3>
-          <div class="onboarding-choice-grid">
-            <article>
-              <span class="choice-number">01</span>
-              <h4>Import Item Assistant</h4>
-              <p>Select Item Assistant's <code>userdata.db</code>. Cairn analyzes it, verifies a backup, preserves SC/HC identity, and skips copies already imported.</p>
-              <ItemAssistantImport compact :disabled="!snapshot" @completed="handleOnboardingImportCompleted" />
-              <small>Close Item Assistant before starting. Its source database is never modified.</small>
-            </article>
-            <article>
-              <span class="choice-number">02</span>
-              <h4>Start empty</h4>
-              <p>Begin with a clean Codex Archive. Items enter it only when you ingest them from Grim Dawn or use a verified offline transfer.</p>
-              <button type="button" @click="chooseEmptyArchive">Start with an empty archive</button>
-              <small>You can import Item Assistant later from Settings without creating duplicates.</small>
-            </article>
-          </div>
-        </div>
-
-        <div v-else-if="onboardingStep === 2" class="onboarding-page">
-          <p class="section-label">The important mental model</p>
-          <h3>Your collection is an archive, not a mirror.</h3>
-          <div class="onboarding-concept-grid">
-            <article><strong>Codex Archive</strong><p>Durably remembers ingested copies, rolls, affixes, and history even after an item returns to the game.</p></article>
-            <article><strong>Live transfer</strong><p>Uses the watched stash tabs while Grim Dawn runs. Every operation is journaled and must receive a matching receipt.</p></article>
-            <article><strong>Softcore / Hardcore</strong><p>Every copy keeps its mode. Cairn never mixes SC and HC in one retrieval, and archive scope can show either or both.</p></article>
-            <article><strong>Offline staging</strong><p>When the game is closed, Cairn can perform the same verified workflow against a selected shared stash.</p></article>
-          </div>
-          <p class="onboarding-callout">If a transfer is interrupted, Cairn pauses later writes until the durable queue outcome is reconciled. Browsing, Settings, recovery, and diagnostics remain available.</p>
-        </div>
-
-        <div v-else class="onboarding-page">
-          <p class="section-label">Safety and workspace</p>
-          <h3>You are ready. Two details are worth remembering.</h3>
-          <div class="onboarding-concept-grid final">
-            <article><strong>Verified backups</strong><p>Cairn rotates archive snapshots automatically. Settings can create, export, restore, and open their folder.</p></article>
-            <article><strong>Experimental tools</strong><p>Stash Oracle and Dismantling Lab are disabled for new profiles. Enable them in Settings when you want provisional recommendations or simulations.</p></article>
-            <article><strong>Customize the workspace</strong><p>Collection always remains available; specialist tools can be hidden or restored without losing their data.</p></article>
-            <article><strong>Get useful diagnostics</strong><p>Debug logging is opt-in and bounded. Exported support bundles redact paths, names, item payloads, saves, and credentials.</p></article>
-          </div>
-        </div>
-
-        <footer class="onboarding-footer">
-          <button type="button" class="secondary" @click="openOnboardingSettings">Recovery & diagnostics</button>
-          <span />
-          <button v-if="onboardingStep > 0" type="button" class="secondary" @click="setOnboardingStep(onboardingStep - 1)">Back</button>
-          <button v-if="onboardingStep === 0 || onboardingStep === 2" type="button" @click="setOnboardingStep(onboardingStep + 1)">Continue</button>
-          <button v-else-if="onboardingStep === ONBOARDING_STEP_COUNT - 1" type="button" @click="finishOnboarding">Finish tour</button>
-        </footer>
-      </section>
-    </div>
+    <OnboardingDialog
+      v-if="onboardingOpen && !appInitializing"
+      :step="onboardingStep"
+      :install-count="onboardingInstallCount"
+      :save-count="onboardingSaveCount"
+      :archived-copy-count="archivedCopyCount"
+      :archive-summary-status="vaultSummaryStatus"
+      :snapshot-available="Boolean(snapshot)"
+      @skip="skipOnboarding"
+      @settings="openOnboardingSettings"
+      @set-step="setOnboardingStep"
+      @continue-without-import="continueWithoutImport"
+      @finish="finishOnboarding"
+      @import-completed="handleOnboardingImportCompleted"
+    />
 
     <div v-if="toolSettingsOpen" class="tool-settings-backdrop" @click.self="toolSettingsOpen = false">
       <section class="tool-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="tool-settings-title">

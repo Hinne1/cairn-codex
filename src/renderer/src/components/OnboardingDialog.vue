@@ -88,8 +88,8 @@ function handleDialogKeydown(event: KeyboardEvent): void {
 
       <div v-if="step === 0" class="onboarding-page">
         <p class="section-label">Game discovery</p>
-        <h3>First, make sure Cairn can see Grim Dawn.</h3>
-        <p>Cairn automatically checks Steam, extra Steam libraries, GOG, local saves, and cloud saves. You never need to paste a game path into the app.</p>
+        <h3>First, make sure CC can see Grim Dawn.</h3>
+        <p>CC automatically checks Steam, extra Steam libraries, GOG, local saves, and cloud saves. You never need to paste a game path into the app.</p>
         <div class="onboarding-discovery-grid">
           <article :class="{ ready: installCount > 0 }">
             <strong>{{ installCount }}</strong>
@@ -121,7 +121,7 @@ function handleDialogKeydown(event: KeyboardEvent): void {
             <span class="choice-number">01</span>
             <p class="choice-kicker">Optional import</p>
             <h4>Import Item Assistant</h4>
-            <p>Select Item Assistant's <code>userdata.db</code>. Cairn analyzes it, verifies a backup, preserves SC/HC identity, and skips copies already imported.</p>
+            <p>Select Item Assistant's <code>userdata.db</code>. CC analyzes it, verifies a backup, preserves SC/HC identity, and skips copies already imported.</p>
             <ItemAssistantImport compact :disabled="!snapshotAvailable" @completed="emit('import-completed', $event)" />
             <small>Close Item Assistant before starting. Its source database is never modified.</small>
           </article>
@@ -129,10 +129,10 @@ function handleDialogKeydown(event: KeyboardEvent): void {
             <span class="choice-number">02</span>
             <p class="choice-kicker">No import</p>
             <h4>Continue without importing</h4>
-            <p v-if="archiveSummaryStatus === 'loading'">Cairn is checking your existing Codex Archive. You can continue now; the archive will not be changed.</p>
-            <p v-else-if="archiveSummaryStatus === 'unavailable'">Cairn could not read the archive count right now. Continuing still will not clear or replace the archive.</p>
+            <p v-if="archiveSummaryStatus === 'loading'">CC is checking your existing Codex Archive. You can continue now; the archive will not be changed.</p>
+            <p v-else-if="archiveSummaryStatus === 'unavailable'">CC could not read the archive count right now. Continuing still will not clear or replace the archive.</p>
             <p v-else-if="archivedCopyCount > 0"><strong class="retained-count">{{ archivedCopyCount.toLocaleString() }} archived {{ archivedCopyCount === 1 ? 'copy' : 'copies' }}</strong> will remain exactly where they are.</p>
-            <p v-else>Your Codex Archive currently has no stored copies. Cairn will simply continue without adding any.</p>
+            <p v-else>Your Codex Archive currently has no stored copies. CC will simply continue without adding any.</p>
             <ul class="onboarding-untouched-list">
               <li>Does not clear your Codex Archive</li>
               <li>Does not modify any stash or save</li>
@@ -148,17 +148,17 @@ function handleDialogKeydown(event: KeyboardEvent): void {
         <div class="onboarding-concept-grid">
           <article><strong>Codex Archive</strong><p>Durably remembers ingested copies, rolls, affixes, and history even after an item returns to the game.</p></article>
           <article><strong>Live transfer</strong><p>Uses the watched stash tabs while Grim Dawn runs. Every operation is journaled and must receive a matching receipt.</p></article>
-          <article><strong>Softcore / Hardcore</strong><p>Every copy keeps its mode. Cairn never mixes SC and HC in one retrieval, and archive scope can show either or both.</p></article>
-          <article><strong>Offline staging</strong><p>When the game is closed, Cairn can perform the same verified workflow against a selected shared stash.</p></article>
+          <article><strong>Softcore / Hardcore</strong><p>Every copy keeps its mode. CC never mixes SC and HC in one retrieval, and archive scope can show either or both.</p></article>
+          <article><strong>Offline staging</strong><p>When the game is closed, CC can perform the same verified workflow against a selected shared stash.</p></article>
         </div>
-        <p class="onboarding-callout">If a transfer is interrupted, Cairn pauses later writes until the durable queue outcome is reconciled. Browsing, Settings, recovery, and diagnostics remain available.</p>
+        <p class="onboarding-callout">If a transfer is interrupted, CC pauses later writes until the durable queue outcome is reconciled. Browsing, Settings, recovery, and diagnostics remain available.</p>
       </div>
 
       <div v-else class="onboarding-page">
         <p class="section-label">Safety and workspace</p>
         <h3>You are ready. Two details are worth remembering.</h3>
         <div class="onboarding-concept-grid final">
-          <article><strong>Verified backups</strong><p>Cairn rotates archive snapshots automatically. Settings can create, export, restore, and open their folder.</p></article>
+          <article><strong>Verified backups</strong><p>CC rotates archive snapshots automatically. Settings can create, export, restore, and open their folder.</p></article>
           <article><strong>Experimental tools</strong><p>Stash Oracle and Dismantling Lab are disabled for new profiles. Enable them in Settings when you want provisional recommendations or simulations.</p></article>
           <article><strong>Customize the workspace</strong><p>Collection always remains available; specialist tools can be hidden or restored without losing their data.</p></article>
           <article><strong>Get useful diagnostics</strong><p>Debug logging is opt-in and bounded. Exported support bundles redact paths, names, item payloads, saves, and credentials.</p></article>

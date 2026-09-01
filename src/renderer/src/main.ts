@@ -23,7 +23,7 @@ function renderRootRecovery(error: unknown, existingFailure?: RendererFailureRep
   recovery.setAttribute('role', 'alert')
   recovery.innerHTML = `
     <section>
-      <p class="section-label">Cairn recovery</p>
+      <p class="section-label">CC recovery</p>
       <h1>The interface could not start.</h1>
       <p class="root-recovery-message"></p>
       <p>Your archive and Grim Dawn files were not changed.</p>

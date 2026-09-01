@@ -49,6 +49,9 @@ part of the documented manual live matrix.
   verification, queue receipts, or journal transitions.
 - Treat SC and HC identity as part of every stored item and operation.
 - Keep full item serialization intact even when a UI feature uses only a subset.
+- Follow the [product naming convention](docs/product-copy.md) in user-facing copy:
+  use Cairn Codex as the product name, CC as the application actor, and Cairn only
+  for genuine Grim Dawn lore.
 - Do not commit extracted Grim Dawn databases, archives, icons, maps, saves,
   personal application data, credentials, or machine-specific paths.
 - Retain upstream copyright and MIT notices in reused GDIA-derived code.

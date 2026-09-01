@@ -58,7 +58,7 @@ function retry(): void {
     <p class="section-label">Workspace recovery</p>
     <h2 id="workspace-error-title">{{ workspace }} could not be displayed.</h2>
     <p>
-      Your archive was not changed. Cairn recorded a redacted diagnostic entry so this failure
+      Your archive was not changed. CC recorded a redacted diagnostic entry so this failure
       can be traced without including item payloads or character names.
     </p>
     <dl>

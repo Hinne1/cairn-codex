@@ -93,7 +93,7 @@ function formatDuration(milliseconds: number): string {
     <template v-if="!compact">
       <p class="section-label">Migration</p>
       <h3>Import from Item Assistant</h3>
-      <p>Choose Item Assistant's <code>userdata.db</code>. Cairn analyzes the source without changing it, shows the exact import plan for confirmation, then imports only from a verified immutable backup.</p>
+      <p>Choose Item Assistant's <code>userdata.db</code>. CC analyzes the source without changing it, shows the exact import plan for confirmation, then imports only from a verified immutable backup.</p>
     </template>
     <button class="settings-action" type="button" :disabled="busy || disabled" @click="startImport">
       {{ busy ? (progress?.label ?? 'Preparing import…') : 'Choose and analyze Item Assistant database…' }}

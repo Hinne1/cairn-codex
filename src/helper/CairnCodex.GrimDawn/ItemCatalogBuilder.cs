@@ -645,7 +645,7 @@ internal static class ItemCatalogBuilder
             ? "Valid Rare equipment base; archive storage is supported."
             : classification == "common"
                 ? "Ordinary Common equipment base with affixes; retained in recovery to avoid generic-Rare archive clutter."
-                : $"The {classification} base is outside Cairn's supported archive categories.";
+                : $"The {classification} base is outside CC's supported archive categories.";
 
         return new ResolvedArchiveItem(
             record.Name,

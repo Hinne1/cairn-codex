@@ -711,7 +711,7 @@ export class CollectionDatabase {
       }
       if (input.requireAllSupported && unsupportedIds.length > 0) {
         throw new Error(
-          `Migration contains ${unsupportedIds.length} item(s) outside the Cairn catalog: ${unsupportedIds.join(', ')}`
+          `Migration contains ${unsupportedIds.length} item(s) outside the CC catalog: ${unsupportedIds.join(', ')}`
         )
       }
       this.database.exec('COMMIT')

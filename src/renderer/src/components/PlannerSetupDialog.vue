@@ -285,7 +285,7 @@ function handleKeydown(event: KeyboardEvent): void {
 
       <div v-else class="planner-setup-page">
         <p class="section-label">Level range</p>
-        <h3>Which item tiers should Cairn recommend?</h3>
+        <h3>Which item tiers should CC recommend?</h3>
         <div class="planner-level-setup-grid">
           <label class="planner-setup-field"><span>Minimum item level</span><input v-model.number="minimumLevel" type="number" min="1" :max="levelCap" /></label>
           <label class="planner-setup-field"><span>Level cap</span><input v-model.number="levelCap" type="number" :min="minimumLevel" max="100" /></label>

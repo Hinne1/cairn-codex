@@ -861,9 +861,9 @@ function registerIpcHandlers(
       const confirmation = await dialog.showMessageBox({
         type: 'warning',
         title: 'Restore Cairn Codex archive?',
-        message: 'Cairn will verify this backup and restart to restore it.',
+        message: 'CC will verify this backup and restart to restore it.',
         detail:
-          'Before replacement, Cairn will preserve the current archive as a verified emergency backup. ' +
+          'Before replacement, CC will preserve the current archive as a verified emergency backup. ' +
           'Grim Dawn stash files are not changed.',
         buttons: ['Cancel', 'Restore and restart'],
         defaultId: 0,
@@ -922,7 +922,7 @@ function registerIpcHandlers(
     try {
     latestCollection ??= await readCollectionCache(collectionCachePath)
     if (!latestCollection) {
-      throw new Error('Let Cairn finish its initial game-data scan before importing Item Assistant.')
+      throw new Error('Let CC finish its initial game-data scan before importing Item Assistant.')
     }
     const defaultDatabase = join(
       process.env.LOCALAPPDATA ?? app.getPath('appData'),
@@ -967,7 +967,7 @@ function registerIpcHandlers(
       title: enoughSpace ? 'Import analyzed Item Assistant source?' : 'More free space is required',
       message: enoughSpace
         ? `${preflight.sourceItems.toLocaleString()} Item Assistant copies are ready for review.`
-        : 'Cairn cannot reserve the full verified import footprint.',
+        : 'CC cannot reserve the full verified import footprint.',
       detail: [
         `Source: ${preflight.sourcePath}`,
         `Copies: ${preflight.sourceItems.toLocaleString()} total · ${preflight.sourceSoftcoreItems.toLocaleString()} Softcore · ${preflight.sourceHardcoreItems.toLocaleString()} Hardcore`,
@@ -982,7 +982,7 @@ function registerIpcHandlers(
         `Destination: ${preflight.destinationMode}`,
         '',
         enoughSpace
-          ? 'After confirmation, Cairn runs the verified backup and archive commit to completion. The source remains unchanged.'
+          ? 'After confirmation, CC runs the verified backup and archive commit to completion. The source remains unchanged.'
           : 'Free space on the destination volume, then analyze the source again.'
       ].join('\n'),
       buttons: enoughSpace ? ['Cancel', 'Import analyzed source'] : ['Close'],
@@ -1065,7 +1065,7 @@ function registerIpcHandlers(
       publish({
         stage: 'failed',
         label: 'Import stopped safely',
-        detail: 'Cairn preserved the source and reported the failure without continuing.',
+        detail: 'CC preserved the source and reported the failure without continuing.',
         percent: 100,
         canCancel: false
       })
@@ -2139,7 +2139,7 @@ async function executeSahdinasMementoRecovery(
   let activeIsHardcore = status.isHardcore
   if (activeIsHardcore === null) {
     if (!activeCharacterName) {
-      throw new Error('Cairn could not identify the active character well enough to resolve Hardcore or Softcore mode.')
+      throw new Error('CC could not identify the active character well enough to resolve Hardcore or Softcore mode.')
     }
     const installationPath = collection.discovery.installations[0]?.path
     if (!installationPath) throw new Error('No Grim Dawn installation is available.')
@@ -2150,7 +2150,7 @@ async function executeSahdinasMementoRecovery(
     const matchingModes = [...new Set(matchingProfiles.map((profile) => profile.isHardcore))]
     if (matchingModes.length > 1) {
       throw new Error(
-        `Cairn found both Hardcore and Softcore saves named “${activeCharacterName}”. Rename one before using live recovery.`
+        `CC found both Hardcore and Softcore saves named “${activeCharacterName}”. Rename one before using live recovery.`
       )
     }
     activeIsHardcore = matchingModes[0] ?? null
@@ -2258,7 +2258,7 @@ async function executeLiveAugmentDispense(
   }
   const activeCharacterName = status.activeCharacterName ?? confirmedCharacterName
   if (!activeCharacterName) {
-    throw new Error('Cairn could not identify the active character. Reopen the Supplies view and try again.')
+    throw new Error('CC could not identify the active character. Reopen the Supplies view and try again.')
   }
 
   const installationPath = collection.discovery.installations[0]?.path
@@ -2275,7 +2275,7 @@ async function executeLiveAugmentDispense(
       const matchingModes = [...new Set(matchingProfiles.map((profile) => profile.isHardcore))]
       if (matchingModes.length > 1) {
         throw new Error(
-          `Cairn found both Hardcore and Softcore saves named “${activeCharacterName}”. Wait for the game-mode handshake or rename one before dispensing.`
+          `CC found both Hardcore and Softcore saves named “${activeCharacterName}”. Wait for the game-mode handshake or rename one before dispensing.`
         )
       }
       activeIsHardcore = matchingModes[0] ?? null
@@ -2293,7 +2293,7 @@ async function executeLiveAugmentDispense(
     throw new Error(`The active character “${activeCharacterName}” was not found in the parsed saves.`)
   }
   if (activeIsHardcore === null) {
-    throw new Error(`Cairn could not resolve whether “${activeCharacterName}” is Hardcore or Softcore.`)
+    throw new Error(`CC could not resolve whether “${activeCharacterName}” is Hardcore or Softcore.`)
   }
 
   const catalog = new Map(
@@ -2375,7 +2375,7 @@ async function executeLiveAugmentDispense(
       if (pending.size > 0) await new Promise((resolve) => setTimeout(resolve, 150))
     }
     if (pending.size > 0) {
-      throw new Error(`Timed out waiting for Grim Dawn to acknowledge ${pending.size} personal-inventory ${pending.size === 1 ? 'delivery' : 'deliveries'}. Do not retry until Cairn resolves the pending queue.`)
+      throw new Error(`Timed out waiting for Grim Dawn to acknowledge ${pending.size} personal-inventory ${pending.size === 1 ? 'delivery' : 'deliveries'}. Do not retry until CC resolves the pending queue.`)
     }
     if (dispensed.length === 0) {
       const rejection = new Error(issues[0] ?? 'No augments were delivered.')
@@ -4138,7 +4138,7 @@ async function runSmokeTest(
       })
       recoveryDatabase.markRetrievalNeedsRecovery(
         restartedOperationId,
-        new Error('Simulated Cairn exit after queueing.')
+        new Error('Simulated CC exit after queueing.')
       )
       let repeatedSubmitRejected = false
       try {
@@ -4190,7 +4190,7 @@ async function runSmokeTest(
         recoveryDatabase.getVaultItems([recoveryImport.importedIds[0]!], true)[0]?.state !== 'retrieved' ||
         recoveryDatabase.getRecoveryOperationCount() !== 0
       ) {
-        throw new Error('A deposited retrieval did not reconcile after a simulated Cairn restart.')
+        throw new Error('A deposited retrieval did not reconcile after a simulated CC restart.')
       }
 
       const generatedOperationId = randomUUID()
@@ -4716,7 +4716,7 @@ async function executeStagingTabIngest(
   const unsupported = staging.items.filter((item) => !item.supported)
   if (unsupported.length > 0) {
     throw new Error(
-      'The staging tab contains items that Cairn cannot archive: ' +
+      'The staging tab contains items that CC cannot archive: ' +
         unsupported.map((item) => item.name).join(', ')
     )
   }

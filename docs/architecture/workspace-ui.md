@@ -152,6 +152,23 @@ The tooltip remains global because only one hover target can be active at a time
 mouse-wheel scrolling, viewport placement, held details, affix composition, and item links must
 behave identically everywhere.
 
+## Workspace ownership and extraction
+
+`App.vue` is the application shell, not the long-term owner of tool-local query, filter, paging,
+grouping, or result markup. Extracted workspace routes own those concerns in a bounded component
+and a focused view-model module. The shell supplies immutable catalog data and narrow adapters
+for genuinely global behavior such as item presentation, tooltip routing, and opening the shared
+item drawer. Extracted workspaces must not create a second tooltip portal or reach through the
+preload boundary independently.
+
+Collection Farming is the first migrated route. `CollectionFarmingWorkspace.vue` owns edits to
+its search, rarity filter, page reset, and bounded result surface; `collection-farming.ts` owns
+deterministic missing-item grouping, filtering, deduplication, and ranking. `App.vue` supplies
+catalog items, the typed route-control snapshot used by global Back/Forward history, and the shared
+search-document, icon, content-pack label, tooltip, and item-drawer adapters. Restoring a typed route
+replaces the complete control snapshot, while user query or rarity edits reset paging inside the
+workspace. This is the reference seam for later incremental route extraction while #17 remains open.
+
 ## Semantic badges and Grim Dawn rarity
 
 Compact state labels use `src/renderer/src/components/SemanticBadge.vue` and the variables in

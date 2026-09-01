@@ -14,6 +14,6 @@ that same word as shorthand for the application.
 - Preserve code identifiers, executable names, file formats, and API names when
   changing them would alter a technical contract.
 
-`npm run test:copy-policy` scans renderer-visible renderer, main-process, and
-helper source. Standalone uses of “Cairn” fail unless their exact lore context is
-explicitly allowed by the test.
+`npm run test:copy-policy` scans renderer-visible renderer, main-process, helper,
+and CSS source. Every source line containing the standalone word “Cairn” must
+match an exact approved formal product-name or lore context.

@@ -98,7 +98,7 @@ type PlannerMapSortMode = 'items' | 'name' | 'level'
 type VaultRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
 type VaultSortMode = 'recent' | 'name' | 'level' | 'roll'
 type TransferMode = 'live' | 'offline'
-type TransferSection = 'retrieve' | 'ingestion-history' | 'retrieval-history' | 'quarantine'
+type TransferSection = 'ingest-history' | 'dispense-history' | 'quarantine'
 type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
 type SupplyCategory = 'writs' | 'augments'
@@ -385,7 +385,7 @@ const characterImportError = ref<string | null>(null)
 const atlasRegionQuery = ref('')
 const selectedAtlasRegion = ref<string | null>(null)
 const transferMode = ref<TransferMode>('live')
-const transferSection = ref<TransferSection>('retrieve')
+const transferSection = ref<TransferSection>('ingest-history')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
 const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
@@ -791,7 +791,7 @@ const operationHistoryPageCount = computed(() =>
   Math.max(1, Math.ceil(operationHistory.value.total / operationHistoryPageSize))
 )
 const activeHistoryKind = computed(() =>
-  transferSection.value === 'ingestion-history' ? 'ingest' as const : 'retrieve' as const
+  transferSection.value === 'ingest-history' ? 'ingest' as const : 'retrieve' as const
 )
 const archivedCopyCount = computed(() => vaultSummary.value.ingested)
 const stashChoices = computed(() => snapshot.value?.availableStashes ?? snapshot.value?.scannedStashes ?? [])
@@ -964,17 +964,6 @@ const consumableSummary = computed<CollectionRaritySummary>(() => {
     availableCopies: items.reduce((count, item) => count + item.availableCount, 0)
   }
 })
-const stagingHasUnsupported = computed(() => staging.value?.items.some((item) => !item.supported) ?? false)
-const ingestBlockedReason = computed(() => {
-  if (vaultBusy.value) return 'A Vault operation is already running.'
-  if (!writeSafety.value) return 'Checking whether stash writes are safe…'
-  if (!writeSafety.value.permitted) return writeSafety.value.reasons.join(' ') || 'Stash writes are locked.'
-  if (!staging.value) return 'Inspecting the final stash tab…'
-  if (staging.value.itemCount === 0) return 'Put at least one Epic, Legendary, or Monster Infrequent in the final stash tab.'
-  if (stagingHasUnsupported.value) return 'Remove unsupported items from the final stash tab first.'
-  return null
-})
-
 const categoryProgressByName = computed(() => {
   const progress = new Map<string, string>()
   if (!snapshot.value) {
@@ -1248,7 +1237,9 @@ const displayedResultCount = computed(() =>
   activeView.value === 'settings'
     ? 0
     : activeView.value === 'vault'
-    ? storedVaultPage.value.total
+    ? transferSection.value === 'quarantine'
+      ? quarantineVaultPage.value.total
+      : operationHistory.value.total
     : activeView.value === 'sets'
       ? visibleSets.value.length
       : filteredItems.value.length
@@ -2299,7 +2290,12 @@ function handleAppHistory(event: PopStateEvent): void {
   vaultSortMode.value = state.vaultSortMode ?? 'recent'
   vaultSortDirection.value = state.vaultSortDirection ?? 'desc'
   transferMode.value = state.transferMode ?? 'live'
-  transferSection.value = state.transferSection ?? 'retrieve'
+  const restoredTransferSection = String(state.transferSection ?? '')
+  transferSection.value = restoredTransferSection === 'dispense-history' || restoredTransferSection === 'retrieval-history'
+    ? 'dispense-history'
+    : restoredTransferSection === 'quarantine'
+      ? 'quarantine'
+      : 'ingest-history'
   transferHistoryQuery.value = state.transferHistoryQuery ?? ''
   transferHistoryOutcome.value = state.transferHistoryOutcome ?? 'all'
   transferHistoryPage.value = state.transferHistoryPage ?? 1
@@ -2424,7 +2420,7 @@ watch(transferMode, () => {
 watch(transferSection, (section) => {
   selectedVaultIds.value = []
   if (!restoringAppHistory) transferHistoryPage.value = 1
-  if (section === 'ingestion-history' || section === 'retrieval-history') scheduleOperationHistoryRefresh()
+  if (section === 'ingest-history' || section === 'dispense-history') scheduleOperationHistoryRefresh()
 })
 watch([transferHistoryQuery, transferHistoryOutcome], () => {
   transferHistoryPage.value = 1
@@ -3620,7 +3616,7 @@ async function refreshVault(): Promise<void> {
     if (activeView.value === 'vault') await refreshVaultPages()
     if (
       activeView.value === 'vault' &&
-      (transferSection.value === 'ingestion-history' || transferSection.value === 'retrieval-history')
+      (transferSection.value === 'ingest-history' || transferSection.value === 'dispense-history')
     ) await refreshOperationHistory()
     if (activeView.value === 'supplies' || activeView.value === 'dismantling') {
       await refreshFullVaultItems()
@@ -3659,7 +3655,7 @@ function scheduleVaultPageRefresh(): void {
 function scheduleOperationHistoryRefresh(): void {
   if (
     activeView.value !== 'vault' ||
-    (transferSection.value !== 'ingestion-history' && transferSection.value !== 'retrieval-history')
+    (transferSection.value !== 'ingest-history' && transferSection.value !== 'dispense-history')
   ) return
   if (operationHistoryTimer) clearTimeout(operationHistoryTimer)
   if (historyStructuredQuery.value.error) {
@@ -3674,7 +3670,7 @@ function scheduleOperationHistoryRefresh(): void {
 }
 
 async function refreshOperationHistory(): Promise<void> {
-  if (transferSection.value !== 'ingestion-history' && transferSection.value !== 'retrieval-history') return
+  if (transferSection.value !== 'ingest-history' && transferSection.value !== 'dispense-history') return
   if (historyStructuredQuery.value.error) return
   const requestId = ++operationHistoryRequestId
   operationHistoryLoading.value = true
@@ -4189,26 +4185,6 @@ async function refreshStaging(): Promise<void> {
   } catch (error) {
     staging.value = null
     reportTransferProblem(readableError(error))
-  }
-}
-
-async function ingestStagingTab(): Promise<void> {
-  if (!staging.value || staging.value.itemCount === 0 || vaultBusy.value) return
-  const confirmed = window.confirm(
-    `Ingest ${staging.value.itemCount} item${staging.value.itemCount === 1 ? '' : 's'} from the final shared stash tab? A verified backup will be created first.`
-  )
-  if (!confirmed) return
-  vaultBusy.value = true
-  try {
-    const result = await window.cairnCodex.ingestStagingTab(selectedStashPath.value)
-    reportSuccess(`Safely ingested ${result.ingested.length} item${result.ingested.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`)
-    await scanCollection()
-    await refreshVault()
-  } catch (error) {
-    reportTransferProblem(readableError(error))
-    await refreshVault()
-  } finally {
-    vaultBusy.value = false
   }
 }
 
@@ -7489,6 +7465,34 @@ function formatPercentile(value: number | null | undefined): string {
           </article>
 
           <article class="settings-card">
+            <p class="section-label">Lost quest-item recovery</p>
+            <h3>Sahdina’s Memento fixer</h3>
+            <p>Crate left this secret necklace sellable. Create exactly one clean replacement through Cairn’s verified live-delivery queue.</p>
+            <div class="settings-status">
+              <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
+              <span>
+                <strong>{{ liveStatus?.state === 'ready' ? 'Grim Dawn connected' : 'Live game required' }}</strong>
+                {{ liveStatus?.state === 'ready' ? 'Choose the active character inventory or verified shared-stash destination.' : 'Connect from the app header before recovering the item.' }}
+              </span>
+            </div>
+            <div class="interface-recovery-actions">
+              <button
+                class="settings-action"
+                type="button"
+                :disabled="vaultBusy || liveStatus?.state !== 'ready'"
+                @click="recoverSahdinasMemento('character-inventory')"
+              >{{ sahdinaRecoveryBusy === 'character-inventory' ? 'Delivering…' : 'Recover to inventory' }}</button>
+              <button
+                class="settings-action"
+                type="button"
+                :disabled="vaultBusy || liveStatus?.state !== 'ready'"
+                @click="recoverSahdinasMemento('shared-stash')"
+              >{{ sahdinaRecoveryBusy === 'shared-stash' ? 'Delivering…' : 'Recover to shared stash' }}</button>
+            </div>
+            <small>Use this only if the original secret quest item was accidentally sold or otherwise lost.</small>
+          </article>
+
+          <article class="settings-card">
             <p class="section-label">Support and recovery</p>
             <h3>Local diagnostics</h3>
             <div v-if="recoveryStatus?.requiresAttention" class="recovery-alert">
@@ -7533,8 +7537,8 @@ function formatPercentile(value: number | null | undefined): string {
       <section v-else-if="activeView === 'vault'" class="vault-workspace" aria-label="Item vault">
         <ToolHeader
           eyebrow="Transfers"
-          title="Move items without losing them."
-          description="Live transfers operate while Grim Dawn is running. Offline staging provides the same verified archive and retrieval workflow directly against the shared stash file."
+          title="Audit item movement and recover exceptions."
+          description="Ingest and dispense histories are read-only. Only quarantined copies can be selected and returned to Grim Dawn from this workspace."
         >
           <template #aside>
             <button type="button" :disabled="vaultBusy" @click="refreshVault">{{ vaultBusy ? 'Working…' : 'Recheck' }}</button>
@@ -7542,324 +7546,27 @@ function formatPercentile(value: number | null | undefined): string {
         </ToolHeader>
 
         <nav class="transfer-section-tabs" aria-label="Transfer workspace">
-          <button type="button" :class="{ active: transferSection === 'retrieve' }" @click="transferSection = 'retrieve'">
-            <strong>Retrieve</strong><small>{{ storedVaultPage.total.toLocaleString() }} stored</small>
+          <button type="button" :class="{ active: transferSection === 'ingest-history' }" @click="transferSection = 'ingest-history'">
+            <strong>Ingest history</strong><small>Read-only · items entering Cairn</small>
           </button>
-          <button type="button" :class="{ active: transferSection === 'ingestion-history' }" @click="transferSection = 'ingestion-history'">
-            <strong>Ingestion history</strong><small>Items entering Cairn</small>
-          </button>
-          <button type="button" :class="{ active: transferSection === 'retrieval-history' }" @click="transferSection = 'retrieval-history'">
-            <strong>Retrieval history</strong><small>Items returned to Grim Dawn</small>
+          <button type="button" :class="{ active: transferSection === 'dispense-history' }" @click="transferSection = 'dispense-history'">
+            <strong>Dispense history</strong><small>Read-only · items sent to Grim Dawn</small>
           </button>
           <button type="button" :class="{ active: transferSection === 'quarantine' }" @click="transferSection = 'quarantine'">
-            <strong>Quarantine</strong><small>{{ quarantineVaultPage.total.toLocaleString() }} awaiting review</small>
+            <strong>Quarantined items</strong><small>{{ quarantineVaultPage.total.toLocaleString() }} available for recovery</small>
           </button>
         </nav>
 
-        <template v-if="transferSection === 'retrieve'">
-        <nav class="transfer-mode-tabs" aria-label="Transfer method">
-          <button type="button" :class="{ active: transferMode === 'live' }" @click="transferMode = 'live'">
-            <span><strong>Live game</strong><small>Watched tabs while Grim Dawn is running</small></span>
-            <em :class="`state-${liveStatus?.state ?? 'unavailable'}`">{{ gameConnectionLabel }}</em>
-          </button>
-          <button type="button" :class="{ active: transferMode === 'offline' }" @click="transferMode = 'offline'">
-            <span><strong>Offline staging</strong><small>Atomic shared-stash file operations</small></span>
-            <em :class="{ ready: writeSafety?.permitted }">{{ writeSafety?.permitted ? 'Ready' : 'Locked' }}</em>
-          </button>
-        </nav>
 
-        <ExplorerToolbar
-          v-model="vaultQuery"
-          v-bind="searchGuidance.vault"
-          class="vault-explorer-toolbar"
-          search-label="Search stored copies"
-          placeholder="Item, affix, slot, seed…"
-          :result-count="storedVaultPage.total"
-          result-label="stored copies"
-          :loading="vaultPageLoading"
-          :search-error="searchErrorMessage(vaultStructuredQuery)"
-        >
-          <template #filters>
-            <label>
-              <span>Rarity</span>
-              <select v-model="vaultRarityFilter" autocomplete="off">
-                <option value="all">All rarities</option>
-                <option value="legendary">Legendary</option>
-                <option value="epic">Epic</option>
-                <option value="mi">Monster Infrequent</option>
-                <option value="rare">Rare</option>
-              </select>
-            </label>
-          </template>
-          <template #sort>
-            <label>
-              <span>Sort by</span>
-              <select v-model="vaultSortMode" autocomplete="off">
-                <option value="recent">Recently archived</option>
-                <option value="name">Item name</option>
-                <option value="level">Item level</option>
-                <option value="roll">Overall roll quality</option>
-              </select>
-            </label>
-            <label>
-              <span>Order</span>
-              <select v-model="vaultSortDirection" autocomplete="off">
-                <option value="desc">Highest first</option>
-                <option value="asc">Lowest first</option>
-              </select>
-            </label>
-          </template>
-          <template #actions>
-            <button type="button" :disabled="visibleAvailableVaultItems.length === 0" @click="selectedVaultIds = visibleAvailableVaultItems.map((item) => item.id)">Select visible</button>
-            <button type="button" :disabled="selectedVaultIds.length === 0" @click="selectedVaultIds = []">Clear</button>
-          </template>
-        </ExplorerToolbar>
-
-        <template v-if="transferMode === 'live'">
-        <section class="live-mode-card" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
-          <div class="live-mode-status">
-            <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
-            <div>
-              <p class="section-label">Live game adapter</p>
-              <h3>{{ liveStatus?.state === 'ready' ? 'Connected to Grim Dawn' : 'Optional live transfers' }}</h3>
-              <small>{{ liveStatus?.detail || 'Checking the bundled Cairn live adapter…' }}</small>
-              <small v-if="liveStatus?.hookVersion">Hook {{ liveStatus.hookVersion }}</small>
-            </div>
-          </div>
-          <div class="live-mode-actions">
-            <label class="live-auto-toggle">
-              <input
-                type="checkbox"
-                :checked="autoLiveConnect"
-                @change="setAutoLiveConnect(($event.target as HTMLInputElement).checked)"
-              />
-              <span>Auto-connect</span>
-            </label>
-            <button
-              v-if="liveStatus?.state !== 'ready'"
-              type="button"
-              :disabled="vaultBusy || liveLifecyclePolling || liveStatus?.state === 'unavailable' || liveStatus?.state === 'blocked'"
-              @click="startLiveMode"
-            >
-              {{ liveStatus?.state === 'connecting' ? 'Connecting…' : 'Enable live mode' }}
-            </button>
-            <button v-else type="button" :disabled="vaultBusy || liveLifecyclePolling" @click="stopLiveMode">
-              Disconnect
-            </button>
-          </div>
-          <div v-if="liveStatus?.state === 'ready'" class="live-ready-instructions">
-            <strong>{{ liveSyncing ? 'Checking queue…' : `Watching the ${liveStatus.ingestTabDescription}` }}</strong>
-            <small>Retrieval target: {{ liveStatus.depositTabDescription }}.</small>
-              <small>Place equipment, faction boosts, difficulty merits, Nemesis warrants, augments, or movement runes in the watched tab.</small>
-          </div>
-        </section>
-        <p v-for="issue in liveIssues" :key="issue" class="vault-notice error">{{ issue }}</p>
-
-        <article class="quest-recovery-panel">
-          <div class="quest-recovery-copy">
-            <p class="section-label">Lost quest-item recovery</p>
-            <h3>Sahdina's Memento fixer</h3>
-            <p>Crate left this secret necklace sellable. Create exactly one clean replacement through Cairn's verified live-delivery queue.</p>
-            <small>Item record: {{ "records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr" }}</small>
-          </div>
-          <div class="quest-recovery-actions">
-            <button
-              type="button"
-              :disabled="vaultBusy || liveStatus?.state !== 'ready'"
-              @click="recoverSahdinasMemento('character-inventory')"
-            >{{ sahdinaRecoveryBusy === 'character-inventory' ? 'Delivering…' : 'Recover to inventory' }}</button>
-            <button
-              type="button"
-              :disabled="vaultBusy || liveStatus?.state !== 'ready'"
-              @click="recoverSahdinasMemento('shared-stash')"
-            >{{ sahdinaRecoveryBusy === 'shared-stash' ? 'Delivering…' : 'Recover to shared stash' }}</button>
-          </div>
-        </article>
-
-        <article class="vault-panel live-stored-panel">
-          <header>
-            <div>
-              <p>Codex Archive</p>
-              <h3>Return a stored copy to the game</h3>
-            </div>
-            <strong>{{ storedVaultPage.total }}</strong>
-          </header>
-          <p class="panel-help">
-            Select one or more copies. Cairn sends them one at a time to {{ liveStatus?.depositTabDescription ?? 'the live deposit tab' }}
-            and commits each return only after the game acknowledges receipt.
+        <template v-if="transferSection === 'ingest-history' || transferSection === 'dispense-history'">
+          <p class="vault-notice">
+            Read-only audit trail. Historical operations cannot be selected, repeated, or changed here.
           </p>
-          <div v-if="storedVaultPage.total" class="vault-item-list selectable">
-            <label v-for="item in visibleAvailableVaultItems" :key="item.id" class="vault-row">
-              <input
-                type="checkbox"
-                :checked="selectedVaultIds.includes(item.id)"
-                :disabled="vaultBusy"
-                @change="toggleVaultItem(item.id)"
-              />
-              <div>
-                <strong>{{ item.name }}</strong>
-                <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.rarity }} · seed {{ item.seed }}</small>
-              </div>
-            </label>
-          </div>
-          <div v-else class="vault-empty">No archived items are waiting.</div>
-          <nav v-if="vaultPageCount > 1" class="pagination vault-pagination" aria-label="Stored copy pages">
-            <button type="button" :disabled="vaultPage === 1" @click="vaultPage -= 1">Previous</button>
-            <span>Page {{ vaultPage }} of {{ vaultPageCount }}</span>
-            <button type="button" :disabled="vaultPage === vaultPageCount" @click="vaultPage += 1">Next</button>
-          </nav>
-          <button
-            class="vault-action live-action"
-            type="button"
-            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0 || selectedVaultIds.some((id) => !transferableVaultItems.some((item) => item.id === id))"
-            @click="retrieveSelectedLive"
-          >
-            {{ vaultBusy ? 'Waiting for game…' : selectedVaultIds.length ? `Return ${selectedVaultIds.length} selected live` : 'Select stored copies' }}
-          </button>
-        </article>
-        </template>
-
-        <section v-if="false" class="source-selector" aria-label="Collection stash sources">
-          <header>
-            <div>
-              <p class="section-label">Collection sources</p>
-              <h3>Choose which stashes count.</h3>
-              <small>Hardcore and Softcore remain separate unless you explicitly select both.</small>
-            </div>
-            <div class="source-presets">
-              <button type="button" @click="selectSourceMode(false)">Softcore only</button>
-              <button type="button" @click="selectSourceMode(true)">Hardcore only</button>
-            </div>
-          </header>
-          <div class="source-options">
-            <label v-for="stash in stashChoices" :key="stash.path" class="source-option">
-              <input
-                type="checkbox"
-                :checked="enabledStashPaths.includes(stash.path)"
-                :disabled="enabledStashPaths.length === 1 && enabledStashPaths.includes(stash.path)"
-                @change="toggleCollectionSource(stash.path)"
-              />
-              <span :class="stash.isHardcore ? 'hardcore' : 'softcore'">
-                {{ stash.isHardcore ? 'HC' : 'SC' }}
-              </span>
-              <div>
-                <strong>{{ stash.modLabel || 'Base game' }}</strong>
-                <small>{{ stash.itemCount }} items · {{ stash.path }}</small>
-              </div>
-            </label>
-          </div>
-        </section>
-
-        <template v-if="transferMode === 'offline'">
-        <div class="vault-target">
-          <label>
-            <span>Shared stash</span>
-            <select v-model="selectedStashPath" :disabled="vaultBusy">
-              <option v-for="stash in stashChoices" :key="stash.path" :value="stash.path">
-                {{ stash.isHardcore ? 'Hardcore' : 'Softcore' }} · {{ stash.path }}
-              </option>
-            </select>
-          </label>
-          <div class="safety-state" :class="{ safe: writeSafety?.permitted }">
-            <span class="status-dot" :class="{ dim: !writeSafety?.permitted }" />
-            <div>
-              <strong>{{ writeSafety?.permitted ? 'Writes unlocked' : 'Writes locked' }}</strong>
-              <small v-if="writeSafety?.permitted">Grim Dawn and Item Assistant are closed.</small>
-              <small v-else>{{ writeSafety?.reasons.join(' ') || 'Checking running processes…' }}</small>
-            </div>
-          </div>
-        </div>
-
-        <div class="vault-columns">
-          <article class="vault-panel staging-panel">
-            <header>
-              <div>
-                <p>Final stash tab</p>
-                <h3>Staged for ingest</h3>
-              </div>
-              <strong>{{ staging?.itemCount ?? '—' }}</strong>
-            </header>
-            <p class="panel-help">
-              Put equipment or reusable supplies you want archived into tab
-              {{ staging ? staging.tabIndex + 1 : '—' }}.
-            </p>
-            <div v-if="staging?.items.length" class="vault-item-list">
-              <div
-                v-for="item in staging.items"
-                :key="`${item.itemIndex}:${item.seed}`"
-                class="vault-row"
-                :class="{ unsupported: !item.supported }"
-              >
-                <span class="item-rune">{{ item.supported ? '◆' : '!' }}</span>
-                <div>
-                  <strong>{{ item.name }}</strong>
-                  <small>Seed {{ item.seed }}{{ item.supported ? '' : ' · not supported by the Codex' }}</small>
-                </div>
-              </div>
-            </div>
-            <div v-else class="vault-empty">The staging tab is empty.</div>
-            <button
-              class="vault-action"
-              type="button"
-              :disabled="Boolean(ingestBlockedReason)"
-              :title="ingestBlockedReason ?? 'Archive the staged items in Cairn Codex.'"
-              @click="ingestStagingTab"
-            >
-              {{ vaultBusy ? 'Verifying…' : `Ingest ${staging?.itemCount ?? 0} staged` }}
-            </button>
-            <p v-if="ingestBlockedReason" class="action-blocked-reason">{{ ingestBlockedReason }}</p>
-          </article>
-
-          <article class="vault-panel">
-            <header>
-              <div>
-                <p>Codex vault</p>
-                <h3>Stored copies</h3>
-              </div>
-              <strong>{{ storedVaultPage.total }}</strong>
-            </header>
-            <p class="panel-help">
-              These copies are already part of the Codex Archive. Selecting one retrieves it out to the game; no filing step is required.
-            </p>
-            <div v-if="storedVaultPage.total" class="vault-item-list selectable">
-              <label v-for="item in visibleAvailableVaultItems" :key="item.id" class="vault-row">
-                <input
-                  type="checkbox"
-                  :checked="selectedVaultIds.includes(item.id)"
-                  :disabled="vaultBusy"
-                  @change="toggleVaultItem(item.id)"
-                />
-                <div>
-                  <strong>{{ item.name }}</strong>
-                  <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.rarity }} · seed {{ item.seed }}</small>
-                </div>
-              </label>
-            </div>
-            <div v-else class="vault-empty">No archived items are waiting.</div>
-            <nav v-if="vaultPageCount > 1" class="pagination vault-pagination" aria-label="Stored copy pages">
-              <button type="button" :disabled="vaultPage === 1" @click="vaultPage -= 1">Previous</button>
-              <span>Page {{ vaultPage }} of {{ vaultPageCount }}</span>
-              <button type="button" :disabled="vaultPage === vaultPageCount" @click="vaultPage += 1">Next</button>
-            </nav>
-            <button
-              class="vault-action"
-              type="button"
-              :disabled="vaultBusy || !writeSafety?.permitted || staging?.itemCount !== 0 || selectedVaultIds.length === 0"
-              @click="retrieveSelected"
-            >
-              {{ vaultBusy ? 'Verifying…' : `Retrieve ${selectedVaultIds.length} selected` }}
-            </button>
-          </article>
-        </div>
-        </template>
-        </template>
-
-        <template v-else-if="transferSection === 'ingestion-history' || transferSection === 'retrieval-history'">
           <ExplorerToolbar
             v-model="transferHistoryQuery"
             v-bind="searchGuidance.history"
             class="vault-explorer-toolbar"
-            :search-label="transferSection === 'ingestion-history' ? 'Search ingestion history' : 'Search retrieval history'"
+            :search-label="transferSection === 'ingest-history' ? 'Search ingest history' : 'Search dispense history'"
             placeholder="Item, seed, outcome, correlation ID…"
             :result-count="operationHistory.total"
             result-label="operations"
@@ -7879,7 +7586,7 @@ function formatPercentile(value: number | null | undefined): string {
             </template>
           </ExplorerToolbar>
 
-          <section class="operation-history" :aria-label="transferSection === 'ingestion-history' ? 'Ingestion history' : 'Retrieval history'">
+          <section class="operation-history" :aria-label="transferSection === 'ingest-history' ? 'Ingest history' : 'Dispense history'">
             <article v-for="operation in operationHistory.items" :key="operation.id" class="operation-history-row">
               <div class="operation-state" :class="`state-${operation.state}`">
                 <strong>{{ operation.state === 'committed' ? 'Completed' : operation.state === 'failed' ? 'Failed' : 'Needs attention' }}</strong>
@@ -7912,6 +7619,56 @@ function formatPercentile(value: number | null | undefined): string {
         </template>
 
         <template v-else>
+          <nav class="transfer-mode-tabs" aria-label="Quarantine return method">
+            <button type="button" :class="{ active: transferMode === 'live' }" @click="transferMode = 'live'">
+              <span><strong>Live game</strong><small>Return to the verified in-game deposit tab</small></span>
+              <em :class="`state-${liveStatus?.state ?? 'unavailable'}`">{{ gameConnectionLabel }}</em>
+            </button>
+            <button type="button" :class="{ active: transferMode === 'offline' }" @click="transferMode = 'offline'">
+              <span><strong>Offline stash</strong><small>Return through an atomic shared-stash write</small></span>
+              <em :class="{ ready: writeSafety?.permitted }">{{ writeSafety?.permitted ? 'Ready' : 'Locked' }}</em>
+            </button>
+          </nav>
+
+          <section v-if="transferMode === 'live'" class="live-mode-card" :class="`state-${liveStatus?.state ?? 'unavailable'}`">
+            <div class="live-mode-status">
+              <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
+              <div>
+                <p class="section-label">Quarantine destination</p>
+                <h3>{{ liveStatus?.state === 'ready' ? liveStatus.depositTabDescription : 'Connect to Grim Dawn' }}</h3>
+                <small>{{ liveStatus?.detail || 'Checking the verified live adapter…' }}</small>
+              </div>
+            </div>
+            <div class="live-mode-actions">
+              <button
+                v-if="liveStatus?.state !== 'ready'"
+                type="button"
+                :disabled="vaultBusy || liveLifecyclePolling || liveStatus?.state === 'unavailable' || liveStatus?.state === 'blocked'"
+                @click="startLiveMode"
+              >{{ liveStatus?.state === 'connecting' ? 'Connecting…' : 'Connect' }}</button>
+              <button v-else type="button" :disabled="vaultBusy || liveLifecyclePolling" @click="stopLiveMode">Disconnect</button>
+            </div>
+          </section>
+
+          <div v-else class="vault-target">
+            <label>
+              <span>Return to shared stash</span>
+              <select v-model="selectedStashPath" :disabled="vaultBusy">
+                <option v-for="stash in stashChoices" :key="stash.path" :value="stash.path">
+                  {{ stash.isHardcore ? 'Hardcore' : 'Softcore' }} · {{ stash.path }}
+                </option>
+              </select>
+            </label>
+            <div class="safety-state" :class="{ safe: writeSafety?.permitted }">
+              <span class="status-dot" :class="{ dim: !writeSafety?.permitted }" />
+              <div>
+                <strong>{{ writeSafety?.permitted ? 'Writes unlocked' : 'Writes locked' }}</strong>
+                <small v-if="writeSafety?.permitted">Grim Dawn and Item Assistant are closed.</small>
+                <small v-else>{{ writeSafety?.reasons.join(' ') || 'Checking running processes…' }}</small>
+              </div>
+            </div>
+          </div>
+
           <ExplorerToolbar
             v-model="vaultQuery"
             v-bind="searchGuidance.vault"
@@ -7922,7 +7679,12 @@ function formatPercentile(value: number | null | undefined): string {
             result-label="quarantined copies"
             :loading="vaultPageLoading"
             :search-error="searchErrorMessage(vaultStructuredQuery)"
-          />
+          >
+            <template #actions>
+              <button type="button" :disabled="visibleQuarantinedVaultItems.length === 0" @click="selectedVaultIds = visibleQuarantinedVaultItems.map((item) => item.id)">Select visible</button>
+              <button type="button" :disabled="selectedVaultIds.length === 0" @click="selectedVaultIds = []">Clear</button>
+            </template>
+          </ExplorerToolbar>
           <section class="vault-quarantine quarantine-workspace">
             <header>
               <div>
@@ -7944,10 +7706,21 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" :disabled="vaultQuarantinePage === vaultQuarantinePageCount" @click="vaultQuarantinePage += 1">Next</button>
             </nav>
             <div class="quarantine-actions">
-              <button type="button" :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0" @click="retrieveSelectedLive">Return selected live</button>
-              <button type="button" :disabled="vaultBusy || !writeSafety?.permitted || staging?.itemCount !== 0 || selectedVaultIds.length === 0" @click="retrieveSelected">Return selected offline</button>
+              <button
+                v-if="transferMode === 'live'"
+                type="button"
+                :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0"
+                @click="retrieveSelectedLive"
+              >{{ vaultBusy ? 'Waiting for game…' : `Return ${selectedVaultIds.length || ''} selected live` }}</button>
+              <button
+                v-else
+                type="button"
+                :disabled="vaultBusy || !writeSafety?.permitted || staging?.itemCount !== 0 || selectedVaultIds.length === 0"
+                @click="retrieveSelected"
+              >{{ vaultBusy ? 'Verifying…' : `Return ${selectedVaultIds.length || ''} selected offline` }}</button>
             </div>
-            <small>Live return uses the configured deposit tab. Offline return requires Grim Dawn and Item Assistant to be closed and the final shared stash tab to be empty.</small>
+            <small v-if="transferMode === 'live'">Live return commits each copy only after the game acknowledges receipt.</small>
+            <small v-else>Offline return requires Grim Dawn and Item Assistant to be closed and the final shared stash tab to be empty.</small>
           </section>
         </template>
       </section>

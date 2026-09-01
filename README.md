@@ -136,10 +136,13 @@ Cairn Codex currently targets 64-bit Windows.
    `Cairn Codex.exe`. Do not run it inside the ZIP or separate the executable
    from its `resources` directory.
 
-The unsigned beta may trigger Windows SmartScreen. A release build is
-self-contained and requires neither Node.js nor a separately installed .NET
-runtime. Initial startup can take a few minutes while Cairn indexes the installed
-game data.
+The unsigned beta may trigger Windows SmartScreen. A release build requires
+neither Node.js nor a separately installed .NET runtime. Setup also installs the
+bundled Microsoft Visual C++ x64 prerequisite needed by the optional live adapter.
+Portable users who have not already installed version 14.43 or newer can run
+`resources\prerequisites\vc_redist.x64.exe`; browsing remains available without
+it. Initial startup can take a few minutes while Cairn indexes the installed game
+data.
 
 Collection browsing works without live mode. Consult the maintained
 [compatibility matrix](docs/compatibility.md) before enabling transfers.

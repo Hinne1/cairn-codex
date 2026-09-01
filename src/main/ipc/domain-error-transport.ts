@@ -102,6 +102,7 @@ const policies: Record<IpcErrorDomain, DomainErrorPolicy> = {
     ],
     known: [
       known('live-transfers.disabled', 'Live transfers are currently disabled.', /live transfers are disabled/i),
+      known('live-transfers.prerequisite-missing', 'Install the bundled Microsoft Visual C++ x64 prerequisite before using live transfers.', /Microsoft Visual C\+\+.*Redistributable.*required.*live adapter/i, { retryable: true }),
       known('live-transfers.safety-gate', 'The live transfer safety check refused permission.', /write safety gate refused permission|unsupported.*(?:game|hook|injector|helper).*(?:hash|build|version)/i),
       known('live-transfers.recovery-required', 'A previous transfer needs recovery attention before another transfer can start.', /require recovery attention|pending live queue/i),
       known('live-transfers.game-not-ready', 'Grim Dawn is not ready for a live transfer.', /live game.*not ready|game is not ready|hook.*not (?:ready|available|connected)/i, { retryable: true }),

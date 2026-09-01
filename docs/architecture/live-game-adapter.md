@@ -74,3 +74,12 @@ diagnostics disclose the detected game version, Steam build, shortened
 `Game.dll` fingerprint, hook version, current state, and the recommended next
 action. This distinguishes an offline game from a new game patch that Cairn has
 deliberately blocked pending compatibility verification.
+
+The hook and injector use the Microsoft Visual C++ v14 runtime. Release packaging
+embeds Microsoft's signed x64 Redistributable, verifies that it is version 14.43 or
+newer, and records its exact version and SHA-256. The NSIS installer checks the
+machine-wide x64 runtime first and installs the bundled prerequisite only when the
+installed version is absent or too old. Portable packages retain the same verified
+prerequisite under `resources/prerequisites`; live mode reports a specific actionable
+status until it has been installed. Native hook, injector, and `Game.dll` allowlists
+remain independent and fail closed.

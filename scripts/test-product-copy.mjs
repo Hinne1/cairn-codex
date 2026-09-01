@@ -48,6 +48,7 @@ const allowedProductNameLines = new Set([
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::? $"User-approved exact Grim Dawn build {knownVersion} with verified Cairn Codex hook {hookVersion}."',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::: $"Verified Cairn Codex hook {hookVersion} for Grim Dawn {knownVersion}.",',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"Update Cairn Codex after a Grim Dawn patch. Until then, use Offline staging; do not bypass the compatibility check.");',
+  'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"the Cairn Codex live adapter. Re-run the Cairn Codex installer, or run the bundled " +',
   'src/helper/CairnCodex.GrimDawn/Gdia/Stash/Stash.cs::throw new InvalidOperationException("Account component and potion stores are read-only in Cairn Codex.");'
 ])
 

@@ -34,6 +34,9 @@ The measured evidence and product/architecture follow-up are tracked in
 - [x] TypeScript and Vue production builds pass.
 - [x] The packaged helper is self-contained and does not require a separately
       installed .NET runtime.
+- [x] The installer embeds and verifies the Microsoft-signed x64 Visual C++ runtime
+      required by the native hook/injector; portable builds retain the same explicit
+      prerequisite and diagnose it before live injection.
 - [x] CI builds both runtimes and runs the game-independent safety self-tests.
 - [x] A versioned ZIP and SHA-256 checksum are produced from a clean checkout.
 - [x] Package contents include the project license, third-party notices, and no

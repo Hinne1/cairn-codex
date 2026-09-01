@@ -143,8 +143,16 @@ try {
   $electronExe = Join-Path $packageRoot 'electron.exe'
   $appExe = Join-Path $packageRoot 'Cairn Codex.exe'
   Move-Item -LiteralPath $electronExe -Destination $appExe -Force
+  $appIcon = Join-Path $projectRoot 'build\icon.ico'
+  $resourceEditor = Join-Path $projectRoot 'node_modules\electron-winstaller\vendor\rcedit.exe'
+  if (-not (Test-Path -LiteralPath $resourceEditor)) {
+    throw "Windows resource editor is missing: $resourceEditor"
+  }
+  & $resourceEditor $appExe --set-icon $appIcon
+  if ($LASTEXITCODE -ne 0) { throw 'Could not apply the Cairn Codex icon to the portable executable.' }
 
   $resourcesRoot = Join-Path $packageRoot 'resources'
+  Copy-Item -LiteralPath $appIcon -Destination (Join-Path $resourcesRoot 'icon.ico') -Force
   $defaultApp = Join-Path $resourcesRoot 'default_app.asar'
   if (Test-Path -LiteralPath $defaultApp) {
     Remove-Item -LiteralPath $defaultApp -Force
@@ -169,6 +177,9 @@ try {
   Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $packageRoot 'LICENSE.CAIRN-CODEX.txt') -Force
   Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageRoot -Force
   Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $packageRoot -Force
+
+  & (Join-Path $PSScriptRoot 'test-app-icon.ps1') -ExecutablePath $appExe -IconPath $appIcon
+  if ($LASTEXITCODE -ne 0) { throw 'Portable executable icon verification failed.' }
 
   Write-Host ''
   Write-Host "Packaged Cairn Codex: $appExe"

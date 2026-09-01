@@ -5083,6 +5083,9 @@ async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void
     minHeight: 640,
     show: false,
     backgroundColor: '#10100f',
+    icon: app.isPackaged
+      ? join(process.resourcesPath, 'icon.ico')
+      : join(app.getAppPath(), 'build', 'icon.ico'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -6456,6 +6459,8 @@ registerPrimaryWindowLifecycle({
   createWindow: async () => { await createActivatedWindow?.() },
   platform: process.platform
 }, hasSingleInstanceLock)
+
+if (process.platform === 'win32') app.setAppUserModelId('com.hinnestolzenberg.cairncodex')
 
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return

@@ -20,6 +20,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destin
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $resolvedStage -Force
 New-Item -ItemType Directory -Path (Join-Path $resolvedStage 'build') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'build\icon.svg') -Destination (Join-Path $resolvedStage 'build\icon.svg') -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'build\icon.ico') -Destination (Join-Path $resolvedStage 'build\icon.ico') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'installer-prerequisites.nsh') -Destination (Join-Path $resolvedStage 'build\installer-prerequisites.nsh') -Force
 
 $source = Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
@@ -40,12 +41,13 @@ $stagePackage = [ordered]@{
     files = @('out/**/*', 'package.json')
     extraResources = @(
       [ordered]@{ from = 'helper'; to = 'helper' },
-      [ordered]@{ from = 'prerequisites'; to = 'prerequisites' }
+      [ordered]@{ from = 'prerequisites'; to = 'prerequisites' },
+      [ordered]@{ from = 'build/icon.ico'; to = 'icon.ico' }
     )
     extraFiles = @('LICENSE.CAIRN-CODEX.txt', 'THIRD_PARTY_NOTICES.md', 'README.md')
     win = [ordered]@{
       target = 'nsis'
-      icon = 'build/icon.svg'
+      icon = 'build/icon.ico'
       artifactName = 'Cairn-Codex-${version}-Setup.${ext}'
     }
     nsis = [ordered]@{
@@ -55,6 +57,9 @@ $stagePackage = [ordered]@{
       createDesktopShortcut = $true
       createStartMenuShortcut = $true
       shortcutName = 'Cairn Codex'
+      installerIcon = 'build/icon.ico'
+      uninstallerIcon = 'build/icon.ico'
+      installerHeaderIcon = 'build/icon.ico'
       deleteAppDataOnUninstall = $false
       include = 'build/installer-prerequisites.nsh'
     }

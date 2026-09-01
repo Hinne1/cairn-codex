@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
+import { searchGuidance } from './search-guidance'
 import ToolHeader from './components/ToolHeader.vue'
 import {
   buildStashOracle,
@@ -1425,12 +1426,19 @@ const skillSlotOptions = computed(() => [...new Set(
 const farmTargets = computed<FarmTarget[]>(() => {
   if (!snapshot.value) return []
   const query = farmingQuery.value.trim().toLocaleLowerCase()
+  const locationNeedle = normalizeLoose(query)
   const grouped = new Map<string, FarmTarget>()
   for (const item of snapshot.value.items) {
     if (isCollectionOwned(item)) continue
     if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
-    if (query && !matchesSearch(item, query)) continue
-    for (const location of item.acquisition?.locations ?? []) {
+    const locations = item.acquisition?.locations ?? []
+    const matchesLocation = locations.some((location) => normalizeLoose([
+      location.name,
+      location.routeName ?? '',
+      location.contentPack
+    ].join(' ')).includes(locationNeedle))
+    if (query && !matchesSearch(item, query) && !matchesLocation) continue
+    for (const location of locations) {
       const key = `${location.contentPack}:${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
       const existing = grouped.get(key)
       if (existing) {
@@ -5665,6 +5673,7 @@ function formatPercentile(value: number | null | undefined): string {
         v-if="snapshot && (activeView === 'collection' || activeView === 'sets' || activeView === 'materials')"
         class="collection-explorer-toolbar"
         v-model="query"
+        v-bind="activeView === 'sets' ? searchGuidance.sets : activeView === 'materials' ? searchGuidance.materials : searchGuidance.collection"
         :search-label="activeView === 'sets' ? 'Search sets' : activeView === 'materials' ? 'Search components & consumables' : 'Search collection'"
         placeholder="Name, stat, skill… (try skill:wendigo)"
         :result-count="displayedResultCount"
@@ -5813,6 +5822,7 @@ function formatPercentile(value: number | null | undefined): string {
         <ExplorerToolbar
           class="skill-explorer-toolbar"
           v-model="skillItemQuery"
+          v-bind="searchGuidance.skillItems"
           search-label="Search matching items"
           placeholder="Item, slot, modifier, damage type…"
           :result-count="skillItemRows.length"
@@ -5931,6 +5941,7 @@ function formatPercentile(value: number | null | undefined): string {
 
         <ExplorerToolbar
           v-model="oracleQuery"
+          v-bind="searchGuidance.oracle"
           class="oracle-explorer-toolbar"
           search-label="Search archetypes"
           placeholder="Skill, damage type, set, item…"
@@ -6193,6 +6204,7 @@ function formatPercentile(value: number | null | undefined): string {
         <template v-if="plannerDisplay !== 'map'">
           <ExplorerToolbar
             v-model="plannerQuery"
+            v-bind="searchGuidance.planner"
             class="planner-explorer-toolbar"
             search-label="Search shopping list"
             placeholder="Item, monster, area… (try zarias)"
@@ -6355,6 +6367,7 @@ function formatPercentile(value: number | null | undefined): string {
         <template v-else>
           <ExplorerToolbar
             v-model="atlasRegionQuery"
+            v-bind="searchGuidance.atlas"
             class="planner-map-explorer-toolbar"
             search-label="Search MI sources"
             placeholder="Area, MI, monster…"
@@ -6482,6 +6495,7 @@ function formatPercentile(value: number | null | undefined): string {
         <ExplorerToolbar
           class="mi-explorer-toolbar"
           v-model="miWorkshopQuery"
+          v-bind="searchGuidance.miWorkshop"
           search-label="Search workshop"
           placeholder="Base, affix, stat, skill…"
           :result-count="miWorkshopRows.length"
@@ -6604,6 +6618,7 @@ function formatPercentile(value: number | null | undefined): string {
         </ToolHeader>
         <ExplorerToolbar
           v-model="reusableSupplyQuery"
+          v-bind="searchGuidance.supplies"
           search-label="Search supplies"
           placeholder="Name, effect, faction…"
           :result-count="supplyVaultItems.length"
@@ -6709,6 +6724,7 @@ function formatPercentile(value: number | null | undefined): string {
 
         <ExplorerToolbar
           v-model="dismantlingQuery"
+          v-bind="searchGuidance.dismantling"
           search-label="Search candidates"
           placeholder="Item, base, prefix, suffix…"
           :result-count="filteredDismantlingCandidates.length"
@@ -6818,6 +6834,7 @@ function formatPercentile(value: number | null | undefined): string {
         </ToolHeader>
         <ExplorerToolbar
           v-model="farmingQuery"
+          v-bind="searchGuidance.farming"
           search-label="Search farming targets"
           placeholder="Item, monster, area…"
           :result-count="farmTargets.length"
@@ -7155,6 +7172,7 @@ function formatPercentile(value: number | null | undefined): string {
 
         <ExplorerToolbar
           v-model="vaultQuery"
+          v-bind="searchGuidance.vault"
           class="vault-explorer-toolbar"
           search-label="Search stored copies"
           placeholder="Item, affix, slot, seed…"

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 
 const props = withDefaults(defineProps<{
   modelValue: string
   searchLabel?: string
+  searchHelp: string
+  searchExamples: readonly string[]
   placeholder?: string
   resultCount?: number
   resultLabel?: string
@@ -23,10 +25,22 @@ const emit = defineEmits<{
 }>()
 
 const searchInput = ref<HTMLInputElement | null>(null)
+const searchHelpDetails = ref<HTMLDetailsElement | null>(null)
+const searchInputId = `explorer-search-${useId()}`
+const searchHelpId = `${searchInputId}-help`
 
 function syncSearchInput(): void {
   void nextTick(() => {
     if (searchInput.value) searchInput.value.value = props.modelValue
+  })
+}
+
+function applySearchExample(example: string): void {
+  emit('update:modelValue', example)
+  if (searchHelpDetails.value) searchHelpDetails.value.open = false
+  void nextTick(() => {
+    searchInput.value?.focus()
+    searchInput.value?.select()
   })
 }
 
@@ -40,14 +54,33 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
       <slot name="before" />
     </div>
 
-    <label class="explorer-search">
-      <span>{{ searchLabel }}</span>
+    <div class="explorer-search">
+      <div class="explorer-search-heading">
+        <label :for="searchInputId">{{ searchLabel }}</label>
+        <details ref="searchHelpDetails" class="explorer-search-help">
+          <summary :aria-label="`${searchLabel} help and examples`">Search tips</summary>
+          <div :id="searchHelpId" class="explorer-search-help-panel">
+            <p>{{ searchHelp }}</p>
+            <span>Try an example</span>
+            <div class="explorer-search-examples">
+              <button
+                v-for="example in searchExamples"
+                :key="example"
+                type="button"
+                @click="applySearchExample(example)"
+              >{{ example }}</button>
+            </div>
+          </div>
+        </details>
+      </div>
       <span class="explorer-search-input">
         <input
+          :id="searchInputId"
           ref="searchInput"
           :value="modelValue"
           type="search"
           autocomplete="off"
+          :aria-details="searchHelpId"
           :placeholder="placeholder"
           @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
         />
@@ -58,7 +91,7 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
           @click="emit('update:modelValue', '')"
         >×</button>
       </span>
-    </label>
+    </div>
 
     <div v-if="$slots.filters" class="explorer-toolbar-group explorer-toolbar-filters">
       <slot name="filters" />
@@ -107,15 +140,77 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
 
 .explorer-toolbar-before { flex: 1 0 100%; }
 .explorer-search { position: relative; display: grid; min-width: 240px; flex: 1 1 280px; gap: 5px; }
-.explorer-search > span:first-child,
+.explorer-search-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.explorer-search-heading > label,
 .explorer-toolbar :deep(label > span:first-child) {
   color: #807765;
   font-size: 8px;
   letter-spacing: .09em;
   text-transform: uppercase;
 }
-.tone-green .explorer-search > span:first-child,
+.tone-green .explorer-search-heading > label,
 .tone-green :deep(label > span:first-child) { color: #75816d; }
+.explorer-search-help { position: relative; }
+.explorer-search-help summary {
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: #a18e65;
+  cursor: pointer;
+  font-size: 8px;
+  letter-spacing: .06em;
+  list-style: none;
+  text-transform: uppercase;
+}
+.explorer-search-help summary::-webkit-details-marker { display: none; }
+.explorer-search-help summary:hover { color: #d3b777; }
+.explorer-search-help summary:focus-visible {
+  outline: 1px solid var(--explorer-focus);
+  outline-offset: 2px;
+}
+.explorer-search-help[open] summary { color: #d3b777; }
+.explorer-search-help-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(370px, calc(100vw - 48px));
+  padding: 12px;
+  border: 1px solid var(--explorer-border);
+  border-radius: 6px;
+  background: #191813;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .42);
+}
+.explorer-search-help-panel p {
+  margin: 0 0 10px;
+  color: #b5ab98;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.explorer-search-help-panel > span {
+  display: block;
+  margin-bottom: 6px;
+  color: #756e61;
+  font-size: 8px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.explorer-search-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.explorer-search-examples button {
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid #4b4231;
+  border-radius: 4px;
+  color: #d5ba7b;
+  background: #262117;
+  cursor: pointer;
+  font: 10px Consolas, monospace;
+  text-align: left;
+}
+.explorer-search-examples button:hover { border-color: var(--explorer-focus); background: #30281a; }
+.explorer-search-examples button:focus-visible {
+  outline: 2px solid var(--explorer-focus);
+  outline-offset: 1px;
+}
 .explorer-search-input { position: relative; display: block; }
 .explorer-search input,
 .explorer-toolbar :deep(select),

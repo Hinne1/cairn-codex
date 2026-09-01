@@ -156,7 +156,7 @@ for (const [token, background] of [
     id: `${token.slice(5)}-contrast-test`,
     name: `${token} contrast test`,
     colorScheme: 'dark',
-    tokens: { [token]: CAIRN_THEME_TOKENS[background] }
+    tokens: { [background]: CAIRN_THEME_TOKENS[token] }
   })
   assert.equal(hiddenRoleTheme.fallback, 'cairn', `${token} cannot disappear against ${background}`)
   assert.ok(hiddenRoleTheme.issues.some((issue) => issue.token === token))

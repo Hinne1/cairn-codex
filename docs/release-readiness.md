@@ -9,11 +9,11 @@ updates are deliberately deferred until after the beta has real users.
 Before sending a build to a new tester with a large Item Assistant archive:
 
 - [x] Import and repeat-import 20,000 synthetic mixed-mode copies without duplicates or source mutation.
-- [ ] Replace the current full-archive/24-copy roll-hydration loop with a bounded background job.
+- [x] Replace the current full-archive/24-copy roll-hydration loop with a bounded background job.
 - [x] Page Transfers, quarantine, and operation histories; never mount the full archive.
-- [ ] Persist redacted rotating logs and export them in a support bundle with correlation IDs.
-- [x] Provide Item Assistant import preflight, named progress, safe confirmation-only cancellation, and a durable summary. First-run guidance remains ONBOARD-01.
-- [ ] Deduplicate unchanged Item Assistant source backups and preflight free disk space.
+- [x] Persist redacted rotating logs and export them in a support bundle with correlation IDs.
+- [x] Provide Item Assistant import preflight, named progress, safe confirmation-only cancellation, a durable summary, and first-run guidance.
+- [x] Deduplicate unchanged Item Assistant source backups and preflight free disk space.
 
 The measured evidence and product/architecture follow-up are tracked in
 `docs/test-matrix.md` and `docs/roadmap.md`.
@@ -47,7 +47,7 @@ The measured evidence and product/architecture follow-up are tracked in
 - [x] Test Softcore-only, Hardcore-only, and both save populations.
 - [x] Test user-facing Item Assistant migration with SC-only, HC-only, mixed,
       repeated import, retained queue receipts, and unsupported catalog records.
-- [ ] Missing Grim Dawn, missing saves, or an unsupported game build produces an
+- [x] Missing Grim Dawn, missing saves, or an unsupported game build produces an
       actionable status rather than a blank or permanently loading application.
 - [x] Live transfers remain opt-in and fail closed for unknown binary hashes.
 
@@ -61,7 +61,7 @@ The measured evidence and product/architecture follow-up are tracked in
       an ordinary success or ordinary failure.
 - [x] Verify rotating archive snapshots, staged restore, emergency pre-restore
       preservation, backup discovery, and the user-facing recovery procedure.
-- [ ] Run a duplication audit across retries and application restarts.
+- [x] Run a duplication audit across retries and application restarts.
 
 Detailed automated evidence and the per-build manual live checklist live in
 `docs/test-matrix.md`.

@@ -5,6 +5,7 @@ import { arch, platform, release } from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron'
 import {
   IPC_CHANNELS,
+  type ArchiveBackupEntry,
   type ArchiveBackupActionResult,
   type ArchiveRollHydrationResult,
   type AppStatus,
@@ -62,6 +63,61 @@ import {
   redactDiagnosticValue
 } from './diagnostics'
 import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-recovery'
+import {
+  BackgroundJobCanceledError,
+  BackgroundJobCoordinator,
+  isBackgroundJobId,
+  runGlobalRollHydration,
+  TrailingJobQueue
+} from './background-jobs'
+
+function runArchiveBackupJob(
+  jobs: BackgroundJobCoordinator,
+  dedupeKey: string,
+  reason: string,
+  operation: () => Promise<ArchiveBackupEntry>
+) {
+  return jobs.run({
+    kind: 'archive-backup',
+    dedupeKey,
+    stage: 'queued',
+    progress: {
+      completed: 0,
+      total: 3,
+      percent: 0,
+      unit: 'steps',
+      label: 'Prepare archive backup',
+      detail: reason
+    },
+    canCancel: false,
+    boundary: null,
+    completedStage: 'complete',
+    failedStage: 'failed',
+    canceledStage: 'canceled'
+  }, async (job) => {
+    job.throwIfCancellationRequested()
+    job.update({
+      stage: 'checkpointing',
+      canCancel: false,
+      boundary: null,
+      progress: { completed: 1, label: 'Checkpoint archive', detail: 'Preparing a consistent database copy.' }
+    })
+    const backup = await operation()
+    job.update({
+      stage: 'verifying',
+      progress: { completed: 2, label: 'Verify archive backup', detail: 'The durable copy and manifest passed verification.' }
+    })
+    return backup
+  }, (backup) => ({
+    summary: 'Verified archive backup created.',
+    metrics: {
+      backupId: backup.id,
+      sizeBytes: backup.sizeBytes,
+      vaultItemCount: backup.vaultItemCount,
+      verified: backup.verified
+    }
+  }))
+}
 
 // Packaged GUI launches do not always have a durable console attached. Electron's
 // child processes can outlive a terminal or diagnostic launcher and inherit its
@@ -613,16 +669,14 @@ function registerIpcHandlers(
   database: CollectionDatabase,
   archiveBackups: ArchiveBackupService,
   diagnostics: DiagnosticLogger,
-  startupRecovery: StartupRecoveryService
+  startupRecovery: StartupRecoveryService,
+  jobs: BackgroundJobCoordinator
 ): () => Promise<void> {
   let writeQueue: Promise<void> = Promise.resolve()
   let latestCollection: CollectionSnapshot | null = null
-  let collectionScan: Promise<CollectionSnapshot> | null = null
-  let archiveRollHydrationBatch: Promise<ArchiveRollHydrationResult | null> | null = null
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
   const gdiaBackupDirectory = join(app.getPath('userData'), 'migrations', 'gdia')
-  let gdiaImportActive = false
   let gdiaImportProgress: GdiaImportProgress | null = null
   const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = writeQueue.then(operation, operation)
@@ -649,9 +703,9 @@ function registerIpcHandlers(
     event: string,
     operation: () => Promise<T>,
     startData?: Record<string, unknown>,
-    completedData?: (result: T) => Record<string, unknown>
+    completedData?: (result: T) => Record<string, unknown>,
+    correlationId: string = randomUUID()
   ): Promise<T> => {
-    const correlationId = randomUUID()
     const startedAt = diagnostics.operationStarted(scope, event, correlationId, startData)
     try {
       const result = await operation()
@@ -662,11 +716,37 @@ function registerIpcHandlers(
       throw error
     }
   }
-  const queueArchiveBackup = (reason: string): void => {
-    void runExclusive(() => archiveBackups.createBackup(reason)).catch((error) => {
-      console.error(`[archive-backup] ${reason} failed`, error)
+  const queuedArchiveBackups = new TrailingJobQueue<string>(async (queuedReason) => {
+    await runArchiveBackupJob(
+      jobs,
+      `archive-backup:auto:${randomUUID()}`,
+      queuedReason,
+      () => runExclusive(() => archiveBackups.createBackup(queuedReason))
+    ).result.catch((error) => {
+      console.error(`[archive-backup] ${queuedReason} failed`, error)
     })
+  })
+  const queueArchiveBackup = (reason: string): void => {
+    queuedArchiveBackups.enqueue(reason)
   }
+
+  const stopPublishingJobs = jobs.subscribe((job) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.backgroundJobChanged, job)
+      }
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.getBackgroundJobs, () => jobs.list())
+  ipcMain.handle(
+    IPC_CHANNELS.cancelBackgroundJob,
+    (_event, input: { id: string }) => {
+      if (!input || !isBackgroundJobId(input.id)) {
+        throw new Error('A valid background job ID is required.')
+      }
+      return jobs.requestCancellation(input.id)
+    }
+  )
 
   ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
     try {
@@ -807,12 +887,15 @@ function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.getArchiveBackupStatus, () => archiveBackups.getStatus())
   ipcMain.handle(
     IPC_CHANNELS.createArchiveBackup,
-    async (): Promise<ArchiveBackupActionResult> => ({
-      canceled: false,
-      backup: await runExclusive(() => archiveBackups.createBackup('manual backup')),
-      path: null,
-      restarting: false
-    })
+    async (): Promise<ArchiveBackupActionResult> => {
+      const backup = await runArchiveBackupJob(
+        jobs,
+        'archive-backup:create',
+        'manual backup',
+        () => runExclusive(() => archiveBackups.createBackup('manual backup'))
+      ).result
+      return { canceled: false, backup, path: null, restarting: false }
+    }
   )
   ipcMain.handle(
     IPC_CHANNELS.exportArchiveBackup,
@@ -826,7 +909,12 @@ function registerIpcHandlers(
       if (selection.canceled || !selection.filePath) {
         return { canceled: true, backup: null, path: null, restarting: false }
       }
-      const backup = await runExclusive(() => archiveBackups.exportBackup(selection.filePath!))
+      const backup = await runArchiveBackupJob(
+        jobs,
+        `archive-backup:export:${createHash('sha256').update(selection.filePath).digest('hex').slice(0, 16)}`,
+        'manual export',
+        () => runExclusive(() => archiveBackups.exportBackup(selection.filePath!))
+      ).result
       return {
         canceled: false,
         backup,
@@ -873,7 +961,12 @@ function registerIpcHandlers(
       if (confirmation.response !== 1) {
         return { canceled: true, backup: null, path: null, restarting: false }
       }
-      const backup = await runExclusive(() => archiveBackups.stageRestore(sourcePath))
+      const backup = await runArchiveBackupJob(
+        jobs,
+        `archive-backup:restore:${createHash('sha256').update(sourcePath).digest('hex').slice(0, 16)}`,
+        'stage archive restore',
+        () => runExclusive(() => archiveBackups.stageRestore(sourcePath))
+      ).result
       setTimeout(() => {
         app.relaunch()
         app.quit()
@@ -888,12 +981,35 @@ function registerIpcHandlers(
     readLastGdiaImportResult(gdiaBackupDirectory))
   ipcMain.handle(IPC_CHANNELS.getGdiaImportProgress, () => gdiaImportProgress)
   ipcMain.handle(IPC_CHANNELS.importGdiaDatabase, async (event): Promise<GdiaImportResult> => {
-    if (gdiaImportActive) throw new Error('An Item Assistant import is already in progress.')
-    gdiaImportActive = true
     const startedAt = Date.now()
+    const importJob = jobs.run({
+      kind: 'item-assistant-import',
+      dedupeKey: 'item-assistant-import:interactive',
+      stage: 'queued',
+      progress: {
+        completed: 0, total: 100, percent: 0, unit: 'steps',
+        label: 'Prepare Item Assistant source', detail: 'Waiting for source selection.'
+      },
+      canCancel: true,
+      supportsCancellation: true,
+      boundary: 'during source selection',
+      completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
+    }, async (job) => {
     const publish = (progress: GdiaImportProgress): void => {
       gdiaImportProgress = progress
       if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.gdiaImportProgress, progress)
+      job.update({
+        stage: progress.stage,
+        progress: {
+          completed: progress.percent,
+          total: 100,
+          percent: progress.percent,
+          label: progress.label,
+          detail: progress.detail
+        },
+        canCancel: progress.canCancel,
+        boundary: progress.canCancel ? 'before archive mutation' : null
+      })
     }
     const canceledResult = (sourcePath: string | null): GdiaImportResult => ({
       canceled: true,
@@ -940,9 +1056,11 @@ function registerIpcHandlers(
         { name: 'All files', extensions: ['*'] }
       ]
     })
+    job.throwIfCancellationRequested()
     const sourcePath = selection.filePaths[0]
     if (selection.canceled || !sourcePath) {
       publish({ stage: 'canceled', label: 'Import canceled', detail: 'No files were changed.', percent: 0, canCancel: false })
+      job.finishAsCanceled('canceled')
       return canceledResult(null)
     }
     publish({
@@ -990,8 +1108,10 @@ function registerIpcHandlers(
       cancelId: 0,
       noLink: true
     })
+    job.throwIfCancellationRequested()
     if (!enoughSpace || confirmation.response !== 1) {
       publish({ stage: 'canceled', label: 'Import canceled safely', detail: 'No files were changed.', percent: 25, canCancel: false })
+      job.finishAsCanceled('canceled')
       return canceledResult(sourcePath)
     }
     const stageProgress: Record<string, GdiaImportProgress> = {
@@ -1005,6 +1125,7 @@ function registerIpcHandlers(
       'import',
       'item-assistant',
       () => runExclusive(async () => {
+        job.throwIfCancellationRequested()
         const result = await migrateGdiaDatabase(
           database,
           sourcePath,
@@ -1049,7 +1170,8 @@ function registerIpcHandlers(
         importedItems: completed.result.importedIds.length,
         duplicateItems: completed.result.duplicateIds.length,
         unsupportedItems: completed.result.unsupportedIds.length
-      })
+      }),
+      job.correlationId
     )
     const { result, summary } = completed
     if (result.importedIds.length > 0) queueArchiveBackup('Item Assistant migration')
@@ -1062,6 +1184,16 @@ function registerIpcHandlers(
     })
     return summary
     } catch (error) {
+      if (error instanceof BackgroundJobCanceledError) {
+        publish({
+          stage: 'canceled',
+          label: 'Import canceled safely',
+          detail: 'No archive mutation started after the cancellation request.',
+          percent: gdiaImportProgress?.percent ?? 0,
+          canCancel: false
+        })
+        throw error
+      }
       publish({
         stage: 'failed',
         label: 'Import stopped safely',
@@ -1070,9 +1202,17 @@ function registerIpcHandlers(
         canCancel: false
       })
       throw error
-    } finally {
-      gdiaImportActive = false
     }
+    }, (result) => ({
+      summary: 'Item Assistant import complete.',
+      metrics: {
+        imported: result.importedItems,
+        duplicates: result.duplicateItems,
+        unsupported: result.unsupportedItems,
+        durationMs: result.durationMs
+      }
+    }))
+    return importJob.result
   })
   ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => runExclusive(async () => {
     await reconcileLiveRecoveryOperations(helper, database, diagnostics)
@@ -1271,93 +1411,129 @@ function registerIpcHandlers(
         latestCollection = createScreenshotCollectionFixture(screenshotFixture)
         return { processed: 0, pending: 0, snapshot: latestCollection }
       }
-      if (archiveRollHydrationBatch) return archiveRollHydrationBatch
-      const batch = runDiagnosticOperation(
+      latestCollection ??= await readCollectionCache(collectionCachePath)
+      if (!latestCollection) return null
+      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+      const installation = projected.discovery.installations[0]
+      if (!installation) {
+        return {
+          processed: 0,
+          pending: 0,
+          snapshot: await presentCollection(helper, database, projected, 'archive')
+        }
+      }
+      return runGlobalRollHydration(jobs, async (job) => runDiagnosticOperation(
         'background-job',
         'archive-roll-hydration',
-        async (): Promise<ArchiveRollHydrationResult | null> => {
-          latestCollection ??= await readCollectionCache(collectionCachePath)
-          if (!latestCollection) return null
-          const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-          const mode = lifetimeMode(projected)
-          const installation = projected.discovery.installations[0]
-          if (!installation) {
-            return {
-              processed: 0,
-              pending: 0,
-              snapshot: await presentCollection(helper, database, projected, 'archive')
-            }
-          }
-          const candidates = database.listArchiveRollAnalysisCandidates(
-            ROLL_ANALYSIS_VERSION,
-            256,
-            mode
-          )
-          if (candidates.length === 0) {
-            return {
-              processed: 0,
-              pending: 0,
-              snapshot: await presentCollection(helper, database, projected, 'archive')
-            }
-          }
-          const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
-            installationPath: installation.path,
-            items: candidates.map(({ payload }) => {
-              const item = payload as LiveVaultPayload
-              return {
-                baseRecord: item.baseRecord,
-                prefixRecord: item.prefixRecord,
-                suffixRecord: item.suffixRecord,
-                seed: item.seed
+        async (): Promise<ArchiveRollHydrationResult> => {
+          // Hydration owns one global candidate domain. Caller-specific SC/HC
+          // projection happens only after the shared analysis job settles.
+          const mode: boolean | undefined = undefined
+          const total = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
+          let processed = 0
+          let pending = total
+          job.update({ progress: { total, completed: 0 } })
+          while (pending > 0) {
+            job.safeBoundary('before the next analysis batch')
+            const candidates = database.listArchiveRollAnalysisCandidates(
+              ROLL_ANALYSIS_VERSION,
+              256,
+              mode
+            )
+            if (candidates.length === 0) break
+            job.update({
+              stage: 'analyzing',
+              canCancel: false,
+              boundary: null,
+              progress: {
+                completed: processed,
+                label: 'Analyze archived item rolls',
+                detail: `Processing a bounded batch of ${candidates.length} copies.`
               }
             })
-          })
-          if (analyzed.items.length !== candidates.length) {
-            throw new Error(
-              `Roll analysis returned ${analyzed.items.length} results for ${candidates.length} archived copies.`
-            )
+            const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
+              installationPath: installation.path,
+              items: candidates.map(({ payload }) => {
+                const item = payload as LiveVaultPayload
+                return {
+                  baseRecord: item.baseRecord,
+                  prefixRecord: item.prefixRecord,
+                  suffixRecord: item.suffixRecord,
+                  seed: item.seed
+                }
+              })
+            })
+            if (analyzed.items.length !== candidates.length) {
+              throw new Error(
+                `Roll analysis returned ${analyzed.items.length} results for ${candidates.length} archived copies.`
+              )
+            }
+            job.update({
+              stage: 'persisting',
+              progress: { label: 'Store roll ratings', detail: 'Committing this bounded batch.' }
+            })
+            await runExclusive(async () => {
+              database.setVaultRollAnalyses(
+                candidates.map((candidate, index) => ({
+                  id: candidate.id,
+                  rollAnalysis: analyzed.items[index]!
+                }))
+              )
+            })
+            processed += candidates.length
+            pending = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
+            job.update({
+              progress: { completed: processed, total: processed + pending },
+              canCancel: true,
+              boundary: 'before the next analysis batch'
+            })
+            if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
           }
-          await runExclusive(async () => {
-            database.setVaultRollAnalyses(
-              candidates.map((candidate, index) => ({
-                id: candidate.id,
-                rollAnalysis: analyzed.items[index]!
-              }))
-            )
-          })
-          const pending = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
           return {
-            processed: candidates.length,
+            processed,
             pending,
-            snapshot: pending === 0
-              ? await presentCollection(helper, database, projected, 'archive')
-              : null
+            snapshot: null
           }
         },
         { batchLimit: 256 },
-        (result) => ({ processed: result?.processed ?? 0, pending: result?.pending ?? 0 })
-      )
-      archiveRollHydrationBatch = batch
-      try {
-        return await batch
-      } finally {
-        if (archiveRollHydrationBatch === batch) archiveRollHydrationBatch = null
-      }
+        (result) => ({ processed: result?.processed ?? 0, pending: result?.pending ?? 0 }),
+        job.correlationId
+      ), async (result) => ({
+        ...result,
+        snapshot: await presentCollection(helper, database, projected, 'archive')
+      }))
     }
   )
   ipcMain.handle(
     IPC_CHANNELS.scanCollection,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
-      collectionScan ??= runDiagnosticOperation('background-job', 'collection-scan', async () => {
+      const scan = jobs.run({
+        kind: 'collection-scan',
+        dedupeKey: 'collection-scan:catalog',
+        stage: 'queued',
+        progress: {
+          completed: 0, total: 4, percent: 0, unit: 'steps',
+          label: 'Refresh collection', detail: 'Preparing the catalog scan.'
+        },
+        canCancel: false,
+        boundary: null,
+        completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
+      }, async (job) => runDiagnosticOperation('background-job', 'collection-scan', async () => {
         const startedAt = Date.now()
+        job.throwIfCancellationRequested()
+        job.update({
+          stage: 'scanning', canCancel: false, boundary: null,
+          progress: { completed: 0, label: 'Scan collection', detail: 'Reading installed game data and configured item sources.' }
+        })
         const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-        const withIcons = await attachItemIcons(helper, snapshot)
+        const withIcons = await attachItemIcons(helper, jobs, snapshot)
         const installationPath = withIcons.discovery.installations[0]?.path
         let withLocations = withIcons
         if (installationPath) {
           try {
             const locationIndex = await loadMapLocationIndex(
               helper,
+              jobs,
               mapLocationCachePath,
               installationPath
             )
@@ -1366,6 +1542,9 @@ function registerIpcHandlers(
             console.warn('Grim Dawn map locations could not be indexed.', error)
           }
         }
+        job.update({
+          stage: 'persisting', progress: { completed: 3, label: 'Store collection cache', detail: 'Committing the refreshed catalog.' }
+        })
         const persisted = {
           ...database.persistSnapshot(withLocations),
           catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
@@ -1378,10 +1557,11 @@ function registerIpcHandlers(
         catalogItems: result.items.length,
         observedItems: result.observedItems.length,
         warningCount: result.warnings.length
-      })).finally(() => {
-        collectionScan = null
-      })
-      const snapshot = await collectionScan
+      }), job.correlationId), (result) => ({
+        summary: 'Collection scan complete.',
+        metrics: { catalogItems: result.items.length, observedItems: result.observedItems.length }
+      }))
+      const snapshot = await scan.result
       const projected = projectCollectionSources(snapshot, input.sourcePaths)
       // A catalog refresh must resolve as soon as the browsable snapshot is ready.
       // Re-analyzing older archived rolls can take minutes after a game-data/schema
@@ -1393,29 +1573,54 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.rebuildGameDataIndex,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
-      return runDiagnosticOperation('background-job', 'game-data-rebuild', async () => {
+      const rebuild = jobs.run({
+        kind: 'game-data-rebuild',
+        dedupeKey: 'game-data-rebuild:catalog',
+        stage: 'queued',
+        progress: {
+          completed: 0, total: 4, percent: 0, unit: 'steps',
+          label: 'Rebuild game-data index', detail: 'Preparing a complete catalog rebuild.'
+        },
+        canCancel: false,
+        boundary: null,
+        completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
+      }, async (job) => runDiagnosticOperation('background-job', 'game-data-rebuild', async () => {
+        job.throwIfCancellationRequested()
+        job.update({
+          stage: 'scanning', canCancel: false, boundary: null,
+          progress: { label: 'Scan installed game data', detail: 'Building a fresh catalog from the installed archives.' }
+        })
         const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-        const withIcons = await attachItemIcons(helper, snapshot)
+        const withIcons = await attachItemIcons(helper, jobs, snapshot)
         const installationPath = withIcons.discovery.installations[0]?.path
         if (!installationPath) throw new Error('No Grim Dawn installation is available.')
         const locationIndex = await loadMapLocationIndex(
           helper,
+          jobs,
           mapLocationCachePath,
           installationPath,
           true
         )
+        job.update({
+          stage: 'persisting', progress: { completed: 3, label: 'Store rebuilt index', detail: 'Committing the refreshed catalog and map index.' }
+        })
         latestCollection = {
           ...database.persistSnapshot(attachMapLocations(withIcons, locationIndex)),
           catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
         }
         await writeCollectionCache(collectionCachePath, latestCollection)
-        const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-        return presentCollection(helper, database, projected, input.basis)
+        return latestCollection
       }, undefined, (result) => ({
         catalogItems: result.items.length,
         observedItems: result.observedItems.length,
         warningCount: result.warnings.length
+      }), job.correlationId), (result) => ({
+        summary: 'Game-data rebuild complete.',
+        metrics: { catalogItems: result.items.length, observedItems: result.observedItems.length }
       }))
+      const rebuilt = await rebuild.result
+      const projected = projectCollectionSources(rebuilt, input.sourcePaths)
+      return presentCollection(helper, database, projected, input.basis)
     }
   )
   ipcMain.handle(
@@ -1665,6 +1870,8 @@ function registerIpcHandlers(
       }), { destination: input.destination }, () => ({ deliveredItems: 1 }))
   )
   return async () => {
+    stopPublishingJobs()
+    await queuedArchiveBackups.flush()
     await writeQueue
     await archiveBackups.flush()
     diagnostics.info('startup', 'application.shutdown')
@@ -2527,6 +2734,7 @@ async function executeSingleLiveRetrieval(
 
 async function attachItemIcons(
   helper: GrimDawnHelperClient,
+  jobs: BackgroundJobCoordinator,
   snapshot: CollectionSnapshot
 ): Promise<CollectionSnapshot> {
   const installation = snapshot.discovery.installations[0]
@@ -2539,11 +2747,33 @@ async function attachItemIcons(
     )
   ]
   bitmaps.push(DOUBLE_RARE_MI_BITMAP)
-  const extraction = await helper.request<ItemIconExtractionResult>('extract-item-icons', {
-    installationPath: installation.path,
-    outputDirectory: join(app.getPath('userData'), 'item-icons'),
-    bitmaps
-  })
+  const bitmapFingerprint = createHash('sha256').update(JSON.stringify(bitmaps)).digest('hex').slice(0, 16)
+  const extraction = await jobs.run({
+    kind: 'icon-extraction',
+    dedupeKey: `icon-extraction:${bitmapFingerprint}`,
+    stage: 'queued',
+    progress: {
+      completed: 0, total: bitmaps.length, percent: 0, unit: 'items',
+      label: 'Extract item icons', detail: 'Preparing the requested icon set.'
+    },
+    canCancel: false,
+    boundary: null,
+    completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
+  }, async (job) => {
+    job.throwIfCancellationRequested()
+    job.update({
+      stage: 'extracting', canCancel: false, boundary: null,
+      progress: { label: 'Extract item icons', detail: 'Decoding item art from installed game archives.' }
+    })
+    return helper.request<ItemIconExtractionResult>('extract-item-icons', {
+      installationPath: installation.path,
+      outputDirectory: join(app.getPath('userData'), 'item-icons'),
+      bitmaps
+    })
+  }, (result) => ({
+    summary: 'Item icon extraction complete.',
+    metrics: { requested: bitmaps.length, extracted: result.icons.length, failures: result.failures.length }
+  })).result
   if (extraction.failures.length > 0) {
     console.warn('Some Grim Dawn item icons could not be decoded.', extraction.failures.slice(0, 10))
   }
@@ -2597,6 +2827,7 @@ async function readCollectionCache(path: string): Promise<CollectionSnapshot | n
 
 async function loadMapLocationIndex(
   helper: GrimDawnHelperClient,
+  jobs: BackgroundJobCoordinator,
   cachePath: string,
   installationPath: string,
   force = false
@@ -2605,10 +2836,37 @@ async function loadMapLocationIndex(
     const cached = await readMapLocationIndex(cachePath)
     if (cached && (await mapLocationIndexIsFresh(cached))) return cached
   }
-  const rebuilt = await helper.request<MapLocationIndex>('build-map-location-index', {
-    installationPath
-  })
-  await writeJsonCache(cachePath, rebuilt)
+  const installationKey = createHash('sha256').update(installationPath).digest('hex').slice(0, 16)
+  const rebuilt = await jobs.run({
+    kind: 'map-indexing',
+    dedupeKey: `map-indexing:${installationKey}`,
+    stage: 'queued',
+    progress: {
+      completed: 0, total: 2, percent: 0, unit: 'steps',
+      label: 'Build map location index', detail: 'Preparing installed map archives.'
+    },
+    canCancel: false,
+    boundary: null,
+    completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
+  }, async (job) => {
+    job.throwIfCancellationRequested()
+    job.update({
+      stage: 'indexing', canCancel: false, boundary: null,
+      progress: { label: 'Index map locations', detail: 'Resolving item sources against campaign regions.' }
+    })
+    const index = await helper.request<MapLocationIndex>('build-map-location-index', {
+      installationPath
+    })
+    job.update({
+      stage: 'persisting',
+      progress: { completed: 1, label: 'Store map location index', detail: 'Writing the bounded index cache.' }
+    })
+    await writeJsonCache(cachePath, index)
+    return index
+  }, (result) => ({
+    summary: 'Map location index complete.',
+    metrics: { regions: result.regionCount, placedRecords: result.placedRecordCount }
+  })).result
   console.log(
     `[map-index] ${rebuilt.regionCount} regions, ${rebuilt.placedRecordCount} placed game records`
   )
@@ -5684,11 +5942,37 @@ app.whenReady().then(async () => {
     databasePath,
     archiveBackupDirectory
   )
-  const flushIpcWrites = registerIpcHandlers(helper, database, archiveBackups, diagnostics, startupRecovery)
+  const jobs = new BackgroundJobCoordinator()
+  const flushIpcWrites = registerIpcHandlers(
+    helper,
+    database,
+    archiveBackups,
+    diagnostics,
+    startupRecovery,
+    jobs
+  )
   diagnostics.info('startup', 'ipc.registered')
   console.log('[startup] IPC handlers registered; creating the main window.')
   void createWindow(startupRecoveryStatus)
-  void archiveBackups.ensureStartupBackup()
+  void jobs.run({
+    kind: 'archive-backup',
+    dedupeKey: 'archive-backup:startup-check',
+    stage: 'queued',
+    progress: {
+      completed: 0, total: 1, percent: 0, unit: 'steps',
+      label: 'Check automatic archive backup', detail: 'Reviewing the latest verified backup age.'
+    },
+    canCancel: false,
+    boundary: null,
+    completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
+  }, async (job) => {
+    job.throwIfCancellationRequested()
+    job.update({ stage: 'checkpointing', canCancel: false, boundary: null })
+    return archiveBackups.ensureStartupBackup()
+  }, (backup) => ({
+    summary: backup ? 'Automatic archive backup created.' : 'Existing archive backup is current.',
+    metrics: { created: Boolean(backup), backupId: backup?.id ?? null }
+  })).result
     .then((backup) => {
       if (backup) console.log(`[archive-backup] verified ${backup.fileName}`)
     })

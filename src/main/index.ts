@@ -4896,7 +4896,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP ?? '0',
           10
         )
-        if (onboardingStep > 0 || process.env.CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING === '1') {
+        if (
+          process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP !== undefined ||
+          process.env.CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING === '1'
+        ) {
           for (let attempt = 0; attempt < 40; attempt += 1) {
             const mounted = await window.webContents.executeJavaScript(
               "Boolean(document.querySelector('.onboarding-dialog'))"
@@ -4921,7 +4924,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           const renderedOnboardingStep = await window.webContents.executeJavaScript(
             "document.querySelector('.onboarding-dialog')?.getAttribute('data-onboarding-step')"
           )
-          if (Number(renderedOnboardingStep) !== onboardingStep) {
+          if (renderedOnboardingStep === null || Number(renderedOnboardingStep) !== onboardingStep) {
             throw new Error(
               `Onboarding screenshot requested step ${onboardingStep}, rendered ${renderedOnboardingStep ?? 'none'}.`
             )

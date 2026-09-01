@@ -136,6 +136,7 @@ button, select { color: inherit; }
 .growl { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 12px 12px 12px 14px; border: 1px solid; border-radius: 7px; background: rgba(26,24,20,.97); box-shadow: 0 12px 34px rgba(0,0,0,.5); backdrop-filter: blur(12px); pointer-events: auto; animation: growl-in 180ms ease-out; }
 .growl span { display: grid; gap: 3px; color: #b7ad9b; font-size: 10px; line-height: 1.45; }
 .growl strong { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.growl-actions { display: flex; align-items: flex-start; gap: 4px; }
 .growl button { align-self: start; width: 24px; height: 24px; border: 0; border-radius: 4px; color: #8d8475; background: transparent; cursor: pointer; font-size: 17px; line-height: 1; }
 .growl button:hover { color: #e7d4aa; background: rgba(255,255,255,.06); }
 .growl.error { border-color: #704238; }
@@ -145,6 +146,7 @@ button, select { color: inherit; }
 .growl.warning { border-color: #80632e; }
 .growl.warning strong { color: #e0bd69; }
 .growl.warning button { width: auto; padding: 4px 7px; color: #d9bd7b; font-size: 10px; }
+.visually-hidden { position: fixed; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 
 .eyebrow, .section-label {
   margin: 0 0 5px;

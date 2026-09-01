@@ -69,7 +69,7 @@ internal sealed class LiveGameAdapter : IDisposable
         var stable = SerializeCsv(parsed.IsHardcore, parsed.Item);
         if (!parsed.IsHardcore || parsed.Item != sample || serialized != stable || serialized.Split(';').Length != 18)
         {
-            throw new InvalidDataException("The Cairn live queue serializer failed its round trip.");
+            throw new InvalidDataException("The CC live queue serializer failed its round trip.");
         }
         var receiptPath = Path.Combine(Path.GetTempPath(), $"cairn-live-receipt-{Guid.NewGuid():N}.csv");
         try
@@ -79,12 +79,12 @@ internal sealed class LiveGameAdapter : IDisposable
             File.WriteAllBytes(receiptPath, receiptBytes);
             if (!FileMatchesSemanticHash(receiptPath, semanticHash))
             {
-                throw new InvalidDataException("The Cairn live receipt did not match its operation payload.");
+                throw new InvalidDataException("The CC live receipt did not match its operation payload.");
             }
             File.WriteAllText(receiptPath, serialized.Replace("records/items/test.dbr", "records/items/other.dbr"));
             if (FileMatchesSemanticHash(receiptPath, semanticHash))
             {
-                throw new InvalidDataException("The Cairn live receipt accepted a different operation payload.");
+                throw new InvalidDataException("The CC live receipt accepted a different operation payload.");
             }
         }
         finally
@@ -92,14 +92,14 @@ internal sealed class LiveGameAdapter : IDisposable
             File.Delete(receiptPath);
         }
         var adapter = ResolveAdapterDirectory()
-            ?? throw new FileNotFoundException("The bundled Cairn live adapter is incomplete.");
+            ?? throw new FileNotFoundException("The bundled CC live adapter is incomplete.");
         var hookHash = Convert.ToHexStringLower(SHA256.HashData(
             File.ReadAllBytes(Path.Combine(adapter, "ItemAssistantHook_x64.dll"))));
         var injectorHash = Convert.ToHexStringLower(SHA256.HashData(
             File.ReadAllBytes(Path.Combine(adapter, "DllInjector64.exe"))));
         if (hookHash != VerifiedRetailHookSha256 || injectorHash != VerifiedInjectorSha256)
         {
-            throw new InvalidDataException("The bundled Cairn live adapter failed fingerprint verification.");
+            throw new InvalidDataException("The bundled CC live adapter failed fingerprint verification.");
         }
         var unsupportedBuildRejected = !VerifiedRetailGameDlls.ContainsKey(new string('0', 64)) &&
             !string.Equals(CrashingRetailHookSha256, VerifiedRetailHookSha256,
@@ -173,7 +173,7 @@ internal sealed class LiveGameAdapter : IDisposable
         if (!offlineRecoveryPassed || !staleReceiptRejected || !queuePathGuardPassed ||
             !multiItemPassed || !unsupportedBuildRejected)
         {
-            throw new InvalidDataException("The Cairn live recovery state machine failed its self-test.");
+            throw new InvalidDataException("The CC live recovery state machine failed its self-test.");
         }
         return new LiveQueueSelfTestResult(
             true, 18, sample.Seed, sample.AffixRerolls, hookHash, injectorHash,
@@ -220,8 +220,8 @@ internal sealed class LiveGameAdapter : IDisposable
                             : !compatible
                                 ? compatibility.Reason ?? "This game and hook combination has not been verified for live transfers."
                             : itemAssistant.Count > 0
-                                ? "Close Item Assistant before Cairn Codex owns the live queue."
-                                : "Compatible game process and Cairn live adapter found. Live mode is ready to connect.";
+                                ? "Close Item Assistant before CC owns the live queue."
+                                : "Compatible game process and CC live adapter found. Live mode is ready to connect.";
                 }
                 return new LiveGameStatus(
                     currentState,
@@ -269,7 +269,7 @@ internal sealed class LiveGameAdapter : IDisposable
             if (!injectionWasDeferred) return Inspect();
 
             // The hook can be injected before Grim Dawn has published its game-engine
-            // pointer. It then unloads cleanly, but the Cairn handshake window remains.
+            // pointer. It then unloads cleanly, but the CC handshake window remains.
             // Tear down that stale attempt so a manual or automatic retry performs a
             // real injection after the character enters the world.
             StopConnection();
@@ -297,7 +297,7 @@ internal sealed class LiveGameAdapter : IDisposable
             var injector = Path.Combine(adapterDirectory, "DllInjector64.exe");
             if (!File.Exists(hook) || !File.Exists(injector))
             {
-                throw new FileNotFoundException("The bundled Cairn hook or injector is missing.");
+                throw new FileNotFoundException("The bundled CC hook or injector is missing.");
             }
             var compatibility = GetCompatibility(game[0], hook);
             if (!compatibility.Verified)
@@ -319,7 +319,7 @@ internal sealed class LiveGameAdapter : IDisposable
             StartWindow();
             var existingHook = ProcessHasModule(game[0], hook);
             // The upstream worker caches its last host-window lookup for one second.
-            // Wait out that cache before waking it so a newly-created Cairn window
+            // Wait out that cache before waking it so a newly-created CC window
             // replaces a stale handle from a previous app process.
             if (existingHook) Thread.Sleep(1100);
             var existingWorker = existingHook && SignalHookWorker();
@@ -348,18 +348,18 @@ internal sealed class LiveGameAdapter : IDisposable
                 start.ArgumentList.Add("Grim Dawn.exe");
                 start.ArgumentList.Add(hook);
                 using var injection = Process.Start(start)
-                    ?? throw new InvalidOperationException("The Cairn live injector did not start.");
+                    ?? throw new InvalidOperationException("The CC live injector did not start.");
                 if (!injection.WaitForExit(5000))
                 {
                     try { injection.Kill(); } catch { }
-                    throw new IOException("The Cairn live injector did not finish within five seconds.");
+                    throw new IOException("The CC live injector did not finish within five seconds.");
                 }
                 injectorOutput = (injection.StandardOutput.ReadToEnd() + " " +
                     injection.StandardError.ReadToEnd()).Trim();
                 if (injection.ExitCode != 0)
                 {
                     throw new IOException(
-                        $"The Cairn live injector failed with exit code {injection.ExitCode}: {injectorOutput}");
+                        $"The CC live injector failed with exit code {injection.ExitCode}: {injectorOutput}");
                 }
             }
 
@@ -394,7 +394,7 @@ internal sealed class LiveGameAdapter : IDisposable
             }
             if (!string.Equals(status.HookSha256, VerifiedRetailHookSha256, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Only the bundled verified Cairn hook may be paired with a user-approved game build.");
+                throw new InvalidOperationException("Only the bundled verified CC hook may be paired with a user-approved game build.");
             }
             var path = Path.Combine(LiveDataDirectory(), "approved-game-dlls.json");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -599,7 +599,7 @@ internal sealed class LiveGameAdapter : IDisposable
             !fullPath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
         {
             throw new UnauthorizedAccessException(
-                "The retained live queue path is outside Cairn's outgoing queue.");
+                "The retained live queue path is outside CC's outgoing queue.");
         }
         return fullPath;
     }
@@ -735,7 +735,7 @@ internal sealed class LiveGameAdapter : IDisposable
             if (itemAssistant.Count > 0)
             {
                 throw new WriteSafetyException(
-                    "Item Assistant is running; Cairn will not consume its incoming queue.");
+                    "Item Assistant is running; CC will not consume its incoming queue.");
             }
         }
         finally
@@ -969,7 +969,7 @@ internal sealed class LiveGameAdapter : IDisposable
             // the exact Game.dll and hook fingerprints.
             var fingerprint = gameDllSha256 is null ? "unknown" : gameDllSha256[..Math.Min(12, gameDllSha256.Length)];
             return new LiveHookCompatibility(false,
-                $"This Grim Dawn build is new to Cairn (Game.dll {fingerprint}). Live injection is blocked until this exact build is verified. " +
+                $"This Grim Dawn build is new to CC (Game.dll {fingerprint}). Live injection is blocked until this exact build is verified. " +
                 "Closed-game transfers remain available.",
                 knownVersion, gameBuildId, gameDllSha256, gameDllLastWriteUtc, hookSha256,
                 "Update Cairn Codex after a Grim Dawn patch. Until then, use Offline staging; do not bypass the compatibility check.");
@@ -1080,7 +1080,7 @@ internal sealed class LiveGameAdapter : IDisposable
         windowReady?.Dispose();
         // The injected hook caches its host-window lookup for one second and only checks
         // it when the named worker event fires. Wait out that cache, then wake it after
-        // our window is gone so interception cannot remain active without Cairn running.
+        // our window is gone so interception cannot remain active without CC running.
         Thread.Sleep(1100);
         _ = SignalHookWorker();
         lock (sync)

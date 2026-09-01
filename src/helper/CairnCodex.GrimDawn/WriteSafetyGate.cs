@@ -18,7 +18,7 @@ internal static class WriteSafetyGate
         }
         if (itemAssistant.Count > 0)
         {
-            reasons.Add("Grim Dawn Item Assistant must be closed before Cairn Codex accesses its stash.");
+            reasons.Add("Grim Dawn Item Assistant must be closed before CC accesses its stash.");
         }
 
         return new WriteSafetyStatus(

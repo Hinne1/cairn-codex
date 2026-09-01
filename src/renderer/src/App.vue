@@ -867,14 +867,14 @@ const connectionRecommendation = computed(() => {
   if (manualDisconnectProcessId.value !== null) return 'Disconnected for this game session. Select Connect whenever you want to resume.'
   if (liveStatus.value?.recommendation) return liveStatus.value.recommendation
   if (liveStatus.value?.state === 'available') return 'Select Connect, or enable Auto-connect in Settings.'
-  return 'Start Grim Dawn and enter a character world. Cairn will detect it within ten seconds.'
+  return 'Start Grim Dawn and enter a character world. CC will detect it within ten seconds.'
 })
 const connectionFingerprint = computed(() => liveStatus.value?.gameDllSha256?.slice(0, 12) ?? null)
 const canApproveCurrentGameBuild = computed(() =>
   liveStatus.value?.state === 'unavailable' &&
   liveStatus.value.grimDawnProcessIds.length === 1 &&
   Boolean(liveStatus.value.gameDllSha256) &&
-  liveStatus.value.detail.includes('new to Cairn')
+  liveStatus.value.detail.includes('new to CC')
 )
 const collectionBasisLabel = computed(() =>
   collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Scanner'
@@ -1126,7 +1126,7 @@ const collectionTrivia = computed<CollectionTriviaFact[]>(() => {
     facts.push({
       id: 'copy-champion', eyebrow: 'Duplicate dynasty', value: `${copyChampion.availableCount}×`,
       title: copyChampion.name,
-      detail: `${Math.max(0, copyChampion.availableCount - 1)} copies beyond the first. Cairn respects the commitment.`,
+      detail: `${Math.max(0, copyChampion.availableCount - 1)} copies beyond the first. CC respects the commitment.`,
       tone: copyChampion.rarity === 'epic' ? 'blue' : copyChampion.rarity === 'mi' ? 'green' : 'gold',
       itemRecord: copyChampion.record
     })
@@ -2736,7 +2736,7 @@ async function restartInSafeMode(): Promise<void> {
   try {
     await window.cairnCodex.restartInSafeMode()
   } catch (error) {
-    reportTransferProblem(`Cairn could not restart in safe mode: ${readableError(error)}`)
+    reportTransferProblem(`CC could not restart in safe mode: ${readableError(error)}`)
     safeModeBusy.value = false
   }
 }
@@ -2747,7 +2747,7 @@ async function restartNormally(): Promise<void> {
   try {
     await window.cairnCodex.restartNormally()
   } catch (error) {
-    reportTransferProblem(`Cairn could not restart normally: ${readableError(error)}`)
+    reportTransferProblem(`CC could not restart normally: ${readableError(error)}`)
     safeModeBusy.value = false
   }
 }
@@ -2762,7 +2762,7 @@ function resetInterfacePreferences(): void {
   )
   if (!confirmed) return
   resetUiPreferences(localStorage)
-  reportSuccess('Reset interface preferences. Planner profiles, to-dos, sources, and archive data were preserved. Reloading Cairn…')
+  reportSuccess('Reset interface preferences. Planner profiles, to-dos, sources, and archive data were preserved. Reloading CC…')
   window.setTimeout(() => window.location.reload(), 250)
 }
 
@@ -2799,7 +2799,7 @@ async function setDebugLogging(enabled: boolean): Promise<void> {
 
 async function openDataDirectory(): Promise<void> {
   const error = await window.cairnCodex.openDataDirectory()
-  if (error) reportTransferProblem(`Windows could not open Cairn's data folder: ${error}`)
+  if (error) reportTransferProblem(`Windows could not open CC's data folder: ${error}`)
 }
 
 async function refreshArchiveBackupStatus(): Promise<void> {
@@ -2859,7 +2859,7 @@ async function restoreArchiveBackup(): Promise<void> {
   try {
     const result = await window.cairnCodex.restoreArchiveBackup()
     if (!result.canceled && result.restarting) {
-      reportSuccess('Backup verified. Cairn is restarting to restore the archive.')
+      reportSuccess('Backup verified. CC is restarting to restore the archive.')
     }
   } catch (error) {
     reportTransferProblem(readableError(error))
@@ -2870,7 +2870,7 @@ async function restoreArchiveBackup(): Promise<void> {
 
 async function openArchiveBackupDirectory(): Promise<void> {
   const error = await window.cairnCodex.openArchiveBackupDirectory()
-  if (error) reportTransferProblem(`Windows could not open Cairn's archive backup folder: ${error}`)
+  if (error) reportTransferProblem(`Windows could not open CC's archive backup folder: ${error}`)
 }
 
 async function handleGdiaImportCompleted(result: GdiaImportResult): Promise<void> {
@@ -3310,7 +3310,7 @@ async function approveCurrentGameBuild(): Promise<void> {
   if (!canApproveCurrentGameBuild.value || !connectionFingerprint.value || vaultBusy.value) return
   const confirmed = window.confirm(
     'Trust this exact Grim Dawn Game.dll (' + connectionFingerprint.value + ') for live injection?\n\n' +
-    'This is an advanced override. Cairn will still require its verified hook, but cannot prove that a new game patch kept the same internal ABI. Run one disposable ingest-and-return round trip before using valuable items.'
+    'This is an advanced override. CC will still require its verified hook, but cannot prove that a new game patch kept the same internal ABI. Run one disposable ingest-and-return round trip before using valuable items.'
   )
   if (!confirmed) return
   vaultBusy.value = true
@@ -3828,7 +3828,7 @@ async function buildDismantlingPreview(): Promise<void> {
 async function startLiveMode(): Promise<void> {
   if (vaultBusy.value) return
   const confirmed = window.confirm(
-    'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while Cairn owns the game hook.'
+    'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while CC owns the game hook.'
   )
   if (!confirmed) return
   manualDisconnectProcessId.value = null
@@ -3968,7 +3968,7 @@ async function retrieveSelectedLive(): Promise<void> {
     applyLiveRetrievals(result.retrieved)
     reportSuccess(result.issues.length
       ? `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}; stopped safely: ${result.issues[0]}`
-      : `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn${reusable ? '; the unlocks remain in Cairn.' : '.'}`)
+      : `${reusable ? 'Dispensed' : 'Live-retrieved'} ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'} into Grim Dawn${reusable ? '; the unlocks remain in CC.' : '.'}`)
     const retrievedIds = new Set(result.retrieved.map((item) => item.vaultItemId))
     selectedVaultIds.value = selectedVaultIds.value.filter((id) => !retrievedIds.has(id))
     await refreshVault()
@@ -3993,7 +3993,7 @@ async function retrieveSupplies(): Promise<void> {
     const names = factionAugments.map((item) => item.name)
     const manifest = names.map((name) => `• ${name}`).join('\n')
     const confirmed = window.confirm(
-      `Dispense exactly ${names.length} faction augment${names.length === 1 ? '' : 's'} directly to ${activeCharacter.value?.name ?? 'the active character'}?\n\n${manifest}\n\nCairn will re-check that character's current reputation first.`
+      `Dispense exactly ${names.length} faction augment${names.length === 1 ? '' : 's'} directly to ${activeCharacter.value?.name ?? 'the active character'}?\n\n${manifest}\n\nCC will re-check that character's current reputation first.`
     )
     if (!confirmed) return
     vaultBusy.value = true
@@ -4243,7 +4243,7 @@ async function retrieveSelected(): Promise<void> {
     )
     selectedVaultIds.value = []
     reportSuccess(reusable
-      ? `Dispensed ${result.retrieved.length} reusable ${result.retrieved.length === 1 ? 'supply' : 'supplies'}; the unlocks remain in Cairn. Backup: ${result.backupPath}`
+      ? `Dispensed ${result.retrieved.length} reusable ${result.retrieved.length === 1 ? 'supply' : 'supplies'}; the unlocks remain in CC. Backup: ${result.backupPath}`
       : `Safely retrieved ${result.retrieved.length} item${result.retrieved.length === 1 ? '' : 's'}. Backup: ${result.backupPath}`)
     await scanCollection()
     await refreshVault()
@@ -5554,9 +5554,9 @@ function formatPercentile(value: number | null | undefined): string {
         @keydown.tab="trapSafeModeFocus"
       >
         <p class="section-label">Startup recovery</p>
-        <h2 id="safe-mode-offer-title">Cairn has had trouble starting.</h2>
+        <h2 id="safe-mode-offer-title">CC has had trouble starting.</h2>
         <p id="safe-mode-offer-description">
-          Cairn did not reach a healthy startup {{ failedStartupCount }} times in a row. Safe mode
+          CC did not reach a healthy startup {{ failedStartupCount }} times in a row. Safe mode
           keeps the archive intact while hiding experimental tools and pausing automatic game connection.
         </p>
         <div class="safe-mode-offer-note">
@@ -5660,7 +5660,7 @@ function formatPercentile(value: number | null | undefined): string {
       <section class="todo-dialog" role="dialog" aria-modal="true" aria-labelledby="todo-title">
         <header>
           <div>
-            <p class="section-label">Cairn scratchpad</p>
+            <p class="section-label">CC scratchpad</p>
             <h2 id="todo-title">To-do list</h2>
           </div>
           <button type="button" class="todo-close" aria-label="Close to-do list" @click="todoOpen = false">×</button>
@@ -5911,7 +5911,7 @@ function formatPercentile(value: number | null | undefined): string {
           @click="setCollectionBasis('archive')"
         >
           <strong>Codex Archive</strong>
-          <small>Your durable Cairn collection. Counts copies stored by Cairn, even after they leave Grim Dawn.</small>
+          <small>Your durable CC collection. Counts copies stored by CC, even after they leave Grim Dawn.</small>
         </button>
         <button
           type="button"
@@ -6247,7 +6247,7 @@ function formatPercentile(value: number | null | undefined): string {
         <ToolHeader
           eyebrow="Archetype assembler"
           title="What build is your stash trying to make you play?"
-          description="Cairn follows the mechanical evidence: archived skill modifiers, conversions, set progress, high-level MIs, and the slots those items need. Every recommendation shows its work."
+          description="CC follows the mechanical evidence: archived skill modifiers, conversions, set progress, high-level MIs, and the slots those items need. Every recommendation shows its work."
           tone="ember"
         />
 
@@ -6407,7 +6407,7 @@ function formatPercentile(value: number | null | undefined): string {
         <ToolHeader
           eyebrow="Character shopping list"
           title="Leveling Planner"
-          description="Pick the skills your character actually uses. Cairn merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route."
+          description="Pick the skills your character actually uses. CC merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route."
           tone="blue"
         >
           <template #aside>
@@ -7020,11 +7020,11 @@ function formatPercentile(value: number | null | undefined): string {
         <div class="dismantling-resource-gaps">
           <article>
             <small>Iron Bits</small><strong>Balance not indexed</strong>
-            <p>Cairn can calculate the exact fee, but does not yet read or debit character money.</p>
+            <p>CC can calculate the exact fee, but does not yet read or debit character money.</p>
           </article>
           <article>
             <small>Dynamite</small><strong>Balance not indexed</strong>
-            <p>Account materials live outside the transfer tabs Cairn currently owns.</p>
+            <p>Account materials live outside the transfer tabs CC currently owns.</p>
           </article>
           <article>
             <small>Material store</small><strong>Untouched</strong>
@@ -7234,7 +7234,7 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" @click="setZoom(zoomFactor + 0.1)">+</button>
               <button type="button" @click="setZoom(1)">Reset</button>
             </div>
-            <small>Ctrl + mouse wheel works anywhere in Cairn.</small>
+            <small>Ctrl + mouse wheel works anywhere in CC.</small>
           </article>
 
           <article class="settings-card workspace-tool-settings">
@@ -7273,7 +7273,7 @@ function formatPercentile(value: number | null | undefined): string {
           <article class="settings-card archive-protection-settings">
             <p class="section-label">Archive protection</p>
             <h3>Verified rotating backups</h3>
-            <p>Cairn keeps up to 12 verified snapshots after archive changes, plus three emergency pre-restore snapshots. Backups contain the Codex database only; Grim Dawn saves and stashes remain separate.</p>
+            <p>CC keeps up to 12 verified snapshots after archive changes, plus three emergency pre-restore snapshots. Backups contain the Codex database only; Grim Dawn saves and stashes remain separate.</p>
             <div v-if="archiveBackupStatus?.latest" class="archive-backup-latest">
               <span class="status-dot" />
               <div>
@@ -7287,7 +7287,7 @@ function formatPercentile(value: number | null | undefined): string {
             </div>
             <div v-else class="archive-backup-latest empty">
               <span class="status-dot dim" />
-              <div><strong>No verified backup yet</strong><small>Cairn will create one automatically, or you can start one now.</small></div>
+              <div><strong>No verified backup yet</strong><small>CC will create one automatically, or you can start one now.</small></div>
             </div>
             <small v-if="archiveBackupStatus">
               {{ archiveBackupStatus.backups.length }} rotating backup{{ archiveBackupStatus.backups.length === 1 ? '' : 's' }} retained locally.
@@ -7432,7 +7432,7 @@ function formatPercentile(value: number | null | undefined): string {
           <article class="settings-card">
             <p class="section-label">Lost quest-item recovery</p>
             <h3>Sahdina’s Memento fixer</h3>
-            <p>Crate left this secret necklace sellable. Create exactly one clean replacement through Cairn’s verified live-delivery queue.</p>
+            <p>Crate left this secret necklace sellable. Create exactly one clean replacement through CC’s verified live-delivery queue.</p>
             <div class="settings-status">
               <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
               <span>
@@ -7512,7 +7512,7 @@ function formatPercentile(value: number | null | undefined): string {
 
         <nav class="transfer-section-tabs" aria-label="Transfer workspace">
           <button type="button" :class="{ active: transferSection === 'ingest-history' }" @click="transferSection = 'ingest-history'">
-            <strong>Ingest history</strong><small>Read-only · items entering Cairn</small>
+            <strong>Ingest history</strong><small>Read-only · items entering CC</small>
           </button>
           <button type="button" :class="{ active: transferSection === 'dispense-history' }" @click="transferSection = 'dispense-history'">
             <strong>Dispense history</strong><small>Read-only · items sent to Grim Dawn</small>
@@ -7657,7 +7657,7 @@ function formatPercentile(value: number | null | undefined): string {
                 <h3>{{ quarantineVaultPage.total }} non-catalog item{{ quarantineVaultPage.total === 1 ? '' : 's' }} safely stored</h3>
               </div>
             </header>
-            <p>Cairn retained these items because they could not safely join the collection catalog. Review the exact record and return only the copies you recognize.</p>
+            <p>CC retained these items because they could not safely join the collection catalog. Review the exact record and return only the copies you recognize.</p>
             <div v-if="visibleQuarantinedVaultItems.length" class="vault-item-list selectable">
               <label v-for="item in visibleQuarantinedVaultItems" :key="item.id" class="vault-row unsupported">
                 <input type="checkbox" :checked="selectedVaultIds.includes(item.id)" :disabled="vaultBusy" @change="toggleVaultItem(item.id)" />

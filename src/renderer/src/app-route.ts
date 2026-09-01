@@ -117,6 +117,7 @@ export type AppRoute =
       maximumLevel: number
       sort: OracleSortMode
       direction: SortDirection
+      page: number
     }>
   | RouteBase<'mi-workshop', {
       query: string
@@ -130,6 +131,8 @@ export type AppRoute =
       category: SupplyCategory
       slot: SupplySlotFilter
       query: string
+      mode: TransferMode
+      page: number
     }>
   | RouteBase<'farming', {
       query: string
@@ -291,7 +294,8 @@ export function parseAppRoute(value: unknown): AppRoute | null {
       query: stringValue(controls.query), characterClass: stringValue(controls.characterClass, 'all', 100),
       style: enumValue(controls.style, oracleStyles, 'all'), readiness: enumValue(controls.readiness, oracleReadiness, 'all'),
       minimumLevel: integerValue(controls.minimumLevel, 65, 1, 100), maximumLevel: integerValue(controls.maximumLevel, 100, 1, 100),
-      sort: enumValue(controls.sort, oracleSortModes, 'score'), direction: enumValue(controls.direction, directions, 'desc')
+      sort: enumValue(controls.sort, oracleSortModes, 'score'), direction: enumValue(controls.direction, directions, 'desc'),
+      page: integerValue(controls.page, 1, 1, 100_000)
     } }
     case 'mi-workshop': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       query: stringValue(controls.query), affix: enumValue(controls.affix, miAffixes, 'all'), metric: metricValue(controls.metric),
@@ -300,7 +304,8 @@ export function parseAppRoute(value: unknown): AppRoute | null {
     } }
     case 'supplies': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       category: enumValue(controls.category, supplyCategories, 'writs'), slot: enumValue(controls.slot, supplySlots, 'all'),
-      query: stringValue(controls.query)
+      query: stringValue(controls.query), mode: enumValue(controls.mode, transferModes, 'live'),
+      page: integerValue(controls.page, 1, 1, 100_000)
     } }
     case 'farming': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       query: stringValue(controls.query), rarity: enumValue(controls.rarity, rarityFilters, 'all'),

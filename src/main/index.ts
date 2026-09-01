@@ -5150,6 +5150,16 @@ async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void
 async function captureWindowWhenReady(window: BrowserWindow, path: string): Promise<void> {
   const captureStartedAt = Date.now()
   const interactionTimings: Record<string, number> = {}
+  let expectedRouteControls: Record<string, unknown> = {}
+  try {
+    const routeParameters = new URLSearchParams(
+      (process.env.CAIRN_CODEX_SCREENSHOT_ROUTE_HASH ?? '').replace(/^#/, '')
+    )
+    const controls = routeParameters.get('controls')
+    if (controls) expectedRouteControls = JSON.parse(controls) as Record<string, unknown>
+  } catch {
+    expectedRouteControls = {}
+  }
   try {
     const requestedWidth = Number.parseInt(
       process.env.CAIRN_CODEX_SCREENSHOT_WIDTH ?? '',
@@ -5984,6 +5994,16 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 .find((button) => button.querySelector('span')?.textContent?.trim() === label)
               const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
                 document.querySelector('.workspace-tool-rail button[aria-current="page"]')?.textContent?.trim()
+              const expectedInitialControls = ${JSON.stringify(expectedRouteControls)}
+              const assertInitialControls = (state) => {
+                for (const [key, expected] of Object.entries(expectedInitialControls)) {
+                  if (JSON.stringify(state.route.controls[key]) !== JSON.stringify(expected)) {
+                    throw new Error('Initial typed route control was overwritten: ' + JSON.stringify({
+                      key, expected, actual: state.route.controls[key], controls: state.route.controls
+                    }))
+                  }
+                }
+              }
               const assertTypedEntry = (workspace, itemExpected) => {
                 const state = window.history.state
                 if (
@@ -6012,7 +6032,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               document.querySelector('.onboarding-skip')?.click()
               await frames()
               if (window.history.state?.route?.workspace === 'sets') {
-                assertTypedEntry('sets', false)
+                const initialSet = assertTypedEntry('sets', false)
+                assertInitialControls(initialSet)
                 if (activeWorkspace() !== 'Sets') throw new Error('Direct Sets deep link did not restore its workspace.')
                 const setItem = document.querySelector('.set-card li button')
                 if (!(setItem instanceof HTMLButtonElement)) throw new Error('Deep-linked Sets route did not render an item link.')
@@ -6037,6 +6058,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 return performance.now() - started
               }
               const initial = assertTypedEntry('collection', false)
+              assertInitialControls(initial)
               if (activeWorkspace() !== 'Collection' || typeof initial.route.controls.query !== 'string') {
                 throw new Error('Direct Collection deep link did not restore its workspace and query.')
               }

@@ -59,6 +59,25 @@ assert.equal(deepLinkUrl.searchParams.get('safeMode'), '0')
 assert.deepEqual(parseAppRouteHash(deepLinkUrl.hash), plannerRoute)
 assert.ok(deepLinkUrl.hash.length < 2_000)
 
+const oracleRoute = parseAppRoute({
+  version: 1,
+  workspace: 'oracle',
+  controls: { page: 4, sort: 'name', direction: 'asc' }
+})
+assert.ok(oracleRoute)
+assert.equal(oracleRoute.controls.page, 4)
+assert.deepEqual(parseAppRouteHash(appRouteHash(oracleRoute)), oracleRoute)
+
+const suppliesRoute = parseAppRoute({
+  version: 1,
+  workspace: 'supplies',
+  controls: { category: 'augments', slot: 'jewelry', query: 'resistance', mode: 'offline', page: 7 }
+})
+assert.ok(suppliesRoute)
+assert.equal(suppliesRoute.controls.mode, 'offline')
+assert.equal(suppliesRoute.controls.page, 7)
+assert.deepEqual(parseAppRouteHash(appRouteHash(suppliesRoute)), suppliesRoute)
+
 const historyEntry = createAppHistoryEntry(7, plannerRoute)
 assert.deepEqual(parseAppHistoryEntry(historyEntry), historyEntry)
 assert.equal(parseAppHistoryEntry({ ...historyEntry, routeVersion: 2 }), null)
@@ -94,6 +113,9 @@ assert.match(appSource, /function currentAppRoute\(\): AppRoute/)
 assert.match(appSource, /appRouteHref\(state\.route, window\.location\.href\)/)
 assert.match(appSource, /parseAppRouteHash\(window\.location\.hash\)/)
 assert.match(appSource, /if \(restoringAppHistory\) return\s+currentPage\.value = 1/)
+assert.match(appSource, /watch\(sortMode,[\s\S]*?if \(restoringAppHistory\) return[\s\S]*?sortDirection\.value/)
+assert.match(appSource, /watch\(setSortMode,[\s\S]*?if \(restoringAppHistory\) return[\s\S]*?setSortDirection\.value/)
+assert.match(appSource, /watch\(\[plannerMapScope,[\s\S]*?if \(restoringAppHistory\) return[\s\S]*?selectedAtlasRegion\.value = null/)
 assert.doesNotMatch(appSource, /interface AppHistoryState/)
 assert.match(mainSource, /CAIRN_CODEX_SCREENSHOT_VERIFY_TYPED_ROUTES/)
 assert.match(mainSource, /Back did not restore the MI item drawer route/)

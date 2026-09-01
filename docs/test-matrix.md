@@ -99,13 +99,13 @@ hashes with the completed manual run. A different hash starts a new matrix.
 The automated 2026-09-01 run used Cairn Codex `0.1.0-beta.1`, helper protocol 1,
 hook SHA-256 `419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5`,
 and injector SHA-256 `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`.
-The clean `e878cce751ab6fb988ac486facd5b5279ca530b4` recovery build produced app ASAR
-SHA-256 `5772b455624f174c5a49cdfc66e3851e594edbda372e7e4512a4bf1ab23a76ee`,
+The clean combined `dcc3acea74b8e4476d750bd727f3c3103461a449` tester build produced app ASAR
+SHA-256 `88cfa5bdd02a337c75299362b18bf55f117ab01f019d6f8d7d3ebcb6226820c4`,
 self-contained helper SHA-256
-`457e4c51693eca39a93c8fa05593d675470f99c34a0feba4558588ee9de66828`,
+`97c7efd67ddbfaf64d334ec6cf972eb204b1167c733cfe7bbab2bf1c3eb2aedc`,
 portable ZIP SHA-256
-`a1c445adbd5bde0a8ee90247c11d2da474659460b86ab149d6a3794d0648fdc0`,
+`fada814ae50e6ac4c46b8740fde1aa6b9234b9fb4717286fe3020c86b45d0d30`,
 and installer SHA-256
-`4396d310667f8a33ca218d4819a00e5541b2fe358fee7dfe029363017fe3b3a5`.
+`dfe2c9cc99e44b8904f0d94fed8670e389fb77a644bb7a744ca89148668d709e`.
 The live confirmation row must additionally record the exact supported `Game.dll` hash
 reported by the support bundle; compatibility remains fail-closed when that fingerprint differs.

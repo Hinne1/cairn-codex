@@ -1,0 +1,13 @@
+:root {
+  --gd-rarity-epic: #79c2ff;
+  --gd-rarity-legendary: #e099fa;
+  --semantic-level: #d0b574;
+  --semantic-complete: #dfbd6a;
+  --semantic-progress: #b6c184;
+  --semantic-owned: #b8ce78;
+  --semantic-discovered: #adbbc3;
+  --semantic-crafting: #82c9d1;
+  --semantic-awakening: #e0b95d;
+  --semantic-fx: #76c8c0;
+  --semantic-missing: #c3bcb0;
+}

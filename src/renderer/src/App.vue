@@ -2,8 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import ItemAssistantImport from './components/ItemAssistantImport.vue'
+import SemanticBadge from './components/SemanticBadge.vue'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { searchGuidance } from './search-guidance'
+import {
+  setCompletionCount,
+  setItemBadges,
+  setItemDiscovered,
+  setItemUnqualified,
+  setRarity,
+  setReadiness
+} from './set-semantics'
 import {
   ONBOARDING_STEP_COUNT,
   readOnboardingPreference,
@@ -90,6 +99,7 @@ type DismantlingModeFilter = 'all' | 'softcore' | 'hardcore'
 type DismantlingRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
 
 const collectionSearchFields = ['name', 'set', 'skill', 'damage', 'slot', 'type', 'rarity', 'pack', 'level', 'owned'] as const
+const setSearchFields = ['name', 'set', 'skill', 'damage', 'slot', 'rarity', 'pack', 'level', 'owned', 'complete', 'craftable', 'awakening', 'fx'] as const
 const skillItemSearchFields = ['name', 'skill', 'damage', 'stat', 'slot', 'rarity', 'level', 'conversion', 'owned'] as const
 const oracleSearchFields = ['name', 'class', 'mastery', 'skill', 'damage', 'style', 'set', 'item', 'readiness', 'score'] as const
 const plannerSearchFields = ['name', 'type', 'slot', 'rarity', 'skill', 'damage', 'source', 'area', 'level', 'owned'] as const
@@ -518,6 +528,10 @@ const pageSize = 48
 const collectionSearchQuery = computed(() => compileSearchQuery(searchQuery.value, {
   fields: collectionSearchFields,
   aliases: { class: 'type' },
+  numericFields: ['level']
+}))
+const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, {
+  fields: setSearchFields,
   numericFields: ['level']
 }))
 const skillItemsSearchQuery = computed(() => compileSearchQuery(skillItemQuery.value, { fields: skillItemSearchFields, numericFields: ['level'] }))
@@ -1055,7 +1069,7 @@ const collectionSets = computed<CollectionSet[]>(() => {
     const existing = grouped.get(item.setRecord)
     if (existing) {
       existing.items.push(item)
-      existing.collected += setItemCollected(item) ? 1 : 0
+      existing.collected += setItemDiscovered(item) ? 1 : 0
       existing.availableCopies += item.availableCount
       if (item.levelRequirement > 0) {
         existing.minimumLevel = existing.minimumLevel > 0
@@ -1068,7 +1082,7 @@ const collectionSets = computed<CollectionSet[]>(() => {
         record: item.setRecord,
         name: item.setName,
         items: [item],
-        collected: setItemCollected(item) ? 1 : 0,
+        collected: setItemDiscovered(item) ? 1 : 0,
         availableCopies: item.availableCount,
         minimumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0,
         maximumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0
@@ -1077,12 +1091,13 @@ const collectionSets = computed<CollectionSet[]>(() => {
   }
   for (const set of grouped.values()) {
     set.items.sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
+    set.collected = setCompletionCount(set.items)
   }
   return [...grouped.values()]
 })
 
 const visibleSets = computed(() => {
-  const structuredQuery = collectionSearchQuery.value
+  const structuredQuery = setSearchQuery.value
   const sets = collectionSets.value
     .filter(
       (set) =>
@@ -1099,7 +1114,7 @@ const visibleSets = computed(() => {
     .filter((set) => setFeatureFilter.value === 'all' || setHasVisualChanges(set))
     .filter((set) => {
       if (!structuredQuery.expression || structuredQuery.error) return structuredQuery.matches({ text: '' })
-      return set.items.some((item) => structuredQuery.matches(itemStructuredSearchDocument(item)))
+      return set.items.some((item) => structuredQuery.matches(setStructuredSearchDocument(item, set)))
     })
   return sets.sort(compareSets)
 })
@@ -1176,7 +1191,7 @@ const collectionTrivia = computed<CollectionTriviaFact[]>(() => {
       right.collected - left.collected || left.name.localeCompare(right.name)
     )[0]
   if (closestSet) {
-    const missing = closestSet.items.filter((item) => !setItemCollected(item)).map((item) => item.name)
+    const missing = closestSet.items.filter((item) => !setItemDiscovered(item)).map((item) => item.name)
     facts.push({
       id: 'closest-set', eyebrow: 'Almost assembled', value: `${closestSet.collected}/${closestSet.items.length}`,
       title: closestSet.name,
@@ -4362,10 +4377,6 @@ function setCompletionPercent(set: CollectionSet): string {
   return ((set.collected / set.items.length) * 100).toFixed(1) + '%'
 }
 
-function setItemCollected(item: CollectionItem): boolean {
-  return Boolean(item.discovered || item.recipeUnlocked || isAvailableViaAwakening(item))
-}
-
 function miFamilyKey(item: CollectionItem): string {
   return `${item.slot}\0${item.name.normalize('NFKC').trim().toLocaleLowerCase()}`
 }
@@ -4382,20 +4393,6 @@ function setReadyWithQualifiedAvailability(set: CollectionSet): boolean {
   return set.items.every((item) =>
     item.availableCount > 0 || item.recipeUnlocked || isAvailableViaAwakening(item)
   )
-}
-
-function setReadinessLabel(set: CollectionSet): string | null {
-  if (setReadyFromStorage(set)) return 'Ready from storage'
-  if (!setReadyWithQualifiedAvailability(set)) return null
-  const needsAwakening = set.items.some((item) =>
-    item.availableCount === 0 && isAvailableViaAwakening(item)
-  )
-  const needsCrafting = set.items.some((item) =>
-    item.availableCount === 0 && !isAvailableViaAwakening(item) && item.recipeUnlocked
-  )
-  if (needsAwakening && needsCrafting) return 'Ready after crafting & awakening'
-  if (needsAwakening) return 'Ready after awakening'
-  return 'Ready after crafting'
 }
 
 function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
@@ -4762,6 +4759,25 @@ function itemSearchEverything(item: CollectionItem, document: ItemSearchDocument
 function itemStructuredSearchDocument(item: CollectionItem): SearchDocument {
   const document = itemSearchDocument(item)
   return { text: itemSearchEverything(item, document), fields: document.fields }
+}
+
+function setStructuredSearchDocument(item: CollectionItem, set: CollectionSet): SearchDocument {
+  const document = itemStructuredSearchDocument(item)
+  const fx = (item.presentation?.sections ?? []).some((section) => section.kind === 'visual-modifier') ||
+    (item.setPresentation?.tiers ?? []).some((tier) =>
+      (tier.skillModifiers ?? []).some((section) => section.kind === 'visual-modifier')
+    )
+  return {
+    text: document.text,
+    fields: {
+      ...document.fields,
+      owned: setItemDiscovered(item),
+      complete: set.collected === set.items.length,
+      craftable: item.recipeUnlocked === true,
+      awakening: isAvailableViaAwakening(item),
+      fx
+    }
+  }
 }
 
 function skillSearchText(item: CollectionItem): string {
@@ -6060,7 +6076,7 @@ function formatPercentile(value: number | null | undefined): string {
         placeholder="Name, stat, skill… (try skill:wendigo)"
         :result-count="displayedResultCount"
         :result-label="activeView === 'sets' ? 'sets' : 'results'"
-        :search-error="searchErrorMessage(collectionSearchQuery)"
+        :search-error="searchErrorMessage(activeView === 'sets' ? setSearchQuery : collectionSearchQuery)"
       >
         <template #filters>
           <label v-if="activeView === 'collection' || activeView === 'materials'">
@@ -7967,39 +7983,42 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <section v-else-if="activeView === 'sets'" class="set-grid" aria-label="Item sets">
-        <article v-for="set in visibleSets" :key="set.record" class="set-card">
+        <article
+          v-for="set in visibleSets"
+          :key="set.record"
+          class="set-card"
+          :class="`rarity-${setRarity(set.items)}`"
+        >
           <header>
             <div>
-              <p>Item set</p>
+              <div class="set-heading-badges">
+                <SemanticBadge :tone="setRarity(set.items)">{{ setRarity(set.items) }}</SemanticBadge>
+                <SemanticBadge tone="level">{{ setLevelLabel(set) }}</SemanticBadge>
+              </div>
               <h3>{{ set.name }}</h3>
-              <small class="set-level">{{ setLevelLabel(set) }}</small>
             </div>
             <div class="set-status">
-              <strong :class="{ complete: set.collected === set.items.length }">
-                {{ set.collected }} / {{ set.items.length }}
-              </strong>
+              <SemanticBadge :tone="set.collected === set.items.length ? 'complete' : 'progress'">
+                {{ set.collected }} / {{ set.items.length }} discovered
+              </SemanticBadge>
               <span class="set-percentage">{{ setCompletionPercent(set) }}</span>
             </div>
           </header>
           <div class="set-meter">
             <span :style="{ width: `${(set.collected / set.items.length) * 100}%` }" />
           </div>
-          <p
-            v-if="setReadinessLabel(set)"
-            class="set-readiness"
-            :class="{
-              crafting: !setReadyFromStorage(set),
-              awakening: setReadinessLabel(set)?.includes('awakening')
-            }"
-          >
-            {{ setReadinessLabel(set) }}
-          </p>
+          <div class="set-readiness">
+            <span>Readiness</span>
+            <SemanticBadge :tone="setReadiness(set.items).tone">
+              {{ setReadiness(set.items).label }}
+            </SemanticBadge>
+          </div>
           <ul>
             <li
               v-for="item in set.items"
               :key="item.record"
               :class="{
-                missing: !setItemCollected(item),
+                missing: setItemUnqualified(item),
                 craftable: item.recipeUnlocked && item.availableCount === 0 && !isAvailableViaAwakening(item),
                 awakening: itemAvailableByAwakeningOnly(item)
               }"
@@ -8014,16 +8033,23 @@ function formatPercentile(value: number | null | undefined): string {
                 @blur="scheduleTooltipHide"
                 @click="openItem(item)"
               >
-                <span aria-hidden="true">{{ item.availableCount > 0 ? '✓' : itemAvailableByAwakeningOnly(item) ? '✦' : setItemCollected(item) ? '◇' : '○' }}</span>
+                <span aria-hidden="true">{{ item.availableCount > 0 ? '✓' : setItemDiscovered(item) ? '◇' : itemAvailableByAwakeningOnly(item) ? '✦' : item.recipeUnlocked ? '⊕' : '○' }}</span>
                 <div><strong>{{ item.name }}</strong><small>{{ item.slot }}</small></div>
-                <em v-if="item.availableCount > 0">×{{ item.availableCount }}</em>
-                <em v-else-if="itemAvailableByAwakeningOnly(item)" class="awakening">Awaken base</em>
-                <em v-else-if="item.recipeUnlocked" class="craftable">Craftable</em>
+                <span class="set-item-badges">
+                  <SemanticBadge
+                    v-for="badge in setItemBadges(item)"
+                    :key="badge.key"
+                    :tone="badge.tone"
+                    compact
+                  >
+                    {{ badge.label }}
+                  </SemanticBadge>
+                </span>
               </button>
             </li>
           </ul>
           <section v-if="setMemberVisualChanges(set).length" class="set-member-fx">
-            <h4>Member item FX</h4>
+            <header><h4>Member item FX</h4><SemanticBadge tone="fx" compact>FX change</SemanticBadge></header>
             <button
               v-for="change in setMemberVisualChanges(set)"
               :key="`${change.item.record}:${change.section.heading}`"
@@ -8065,7 +8091,10 @@ function formatPercentile(value: number | null | undefined): string {
                 class="set-tier-group skill-bonus"
                 :class="{ 'visual-bonus': modifier.kind === 'visual-modifier' }"
               >
-                <h5>{{ modifier.heading }}</h5>
+                <h5>
+                  {{ modifier.heading }}
+                  <SemanticBadge v-if="modifier.kind === 'visual-modifier'" tone="fx" compact>FX change</SemanticBadge>
+                </h5>
                 <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
                   {{ formatPresentationLine(line) }}
                 </p>
@@ -8225,7 +8254,7 @@ function formatPercentile(value: number | null | undefined): string {
               class="set-member"
               :class="[member.rarity, {
                   current: member.record === tooltipItem.record,
-                  missing: !setItemCollected(member)
+                  missing: !setItemDiscovered(member)
                 }]"
             >
               {{ member.name }}

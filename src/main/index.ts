@@ -1669,6 +1669,20 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
         itemLevel: 1 + index % 70,
         availableCount: index % 5 === 0 ? 1 : 0,
         discovered: index % 5 === 0,
+        acquisition: Math.floor(index / 4) % 2 === 1 && template.acquisition
+          ? {
+              ...template.acquisition,
+              locations: [{
+                ...template.acquisition.locations![0]!,
+                name: 'Review Hollow',
+                routeName: 'Typed Route Review',
+                zoneRecord: 'records/levels/synthetic/review_hollow.dbr',
+                levelFile: 'levels/synthetic/review_hollow.map',
+                originX: 240,
+                originY: 180
+              }]
+            }
+          : template.acquisition,
         presentation: {
           flavorText: null,
           sections: [{
@@ -5997,6 +6011,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const expectedInitialControls = ${JSON.stringify(expectedRouteControls)}
               const assertInitialControls = (state) => {
                 for (const [key, expected] of Object.entries(expectedInitialControls)) {
+                  if (key === 'profileId' && expected === null) continue
                   if (JSON.stringify(state.route.controls[key]) !== JSON.stringify(expected)) {
                     throw new Error('Initial typed route control was overwritten: ' + JSON.stringify({
                       key, expected, actual: state.route.controls[key], controls: state.route.controls
@@ -6031,6 +6046,19 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
 
               document.querySelector('.onboarding-skip')?.click()
               await frames()
+              if (window.history.state?.route?.workspace === 'planner') {
+                const initialPlanner = assertTypedEntry('planner', false)
+                assertInitialControls(initialPlanner)
+                if (!document.querySelector('.leveling-planner')) throw new Error('Direct Planner deep link did not restore its workspace.')
+                const activeRegion = document.querySelector('.mi-atlas-regions button.active')
+                if (
+                  !(activeRegion instanceof HTMLButtonElement) ||
+                  activeRegion.dataset.regionKey !== expectedInitialControls.atlasRegion
+                ) {
+                  throw new Error('Direct Planner map route did not preserve its selected atlas region.')
+                }
+                return performance.now() - started
+              }
               if (window.history.state?.route?.workspace === 'sets') {
                 const initialSet = assertTypedEntry('sets', false)
                 assertInitialControls(initialSet)

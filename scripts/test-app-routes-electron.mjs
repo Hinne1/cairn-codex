@@ -46,4 +46,21 @@ runGate('Sets and item drawer', [
   '--width', '520', '--height', '900', '--screenshot-name', 'typed-routes-verify-narrow'
 ])
 
-console.log('Typed-route Electron gates passed at desktop and narrow widths.')
+runGate('Planner map atlas selection', [
+  '--electron-source', '--fixture', 'planner', '--query', 'Wendigo',
+  '--route-hash', verifiedRoute({
+    version: 1,
+    workspace: 'planner',
+    controls: {
+      profileId: null, skills: ['Wendigo Totem'], minimumLevel: 1, maximumLevel: 70,
+      query: '', ownership: 'all', showIgnored: false, sort: 'level', direction: 'asc',
+      display: 'map', page: 1, atlasQuery: 'Wendigo',
+      atlasRegion: 'synthetic qa:review hollow:typed route review', mapScope: 'all',
+      mapSort: 'items', mapDirection: 'desc'
+    }
+  }),
+  '--verify-typed-routes', '--assert-no-overflow', '--disable-gpu',
+  '--width', '1440', '--height', '1000', '--screenshot-name', 'typed-routes-verify-planner'
+])
+
+console.log('Typed-route Electron gates passed for Collection, Sets, and Planner map restoration.')

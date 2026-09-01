@@ -116,6 +116,7 @@ assert.match(appSource, /if \(restoringAppHistory\) return\s+currentPage\.value 
 assert.match(appSource, /watch\(sortMode,[\s\S]*?if \(restoringAppHistory\) return[\s\S]*?sortDirection\.value/)
 assert.match(appSource, /watch\(setSortMode,[\s\S]*?if \(restoringAppHistory\) return[\s\S]*?setSortDirection\.value/)
 assert.match(appSource, /watch\(\[plannerMapScope,[\s\S]*?if \(restoringAppHistory\) return[\s\S]*?selectedAtlasRegion\.value = null/)
+assert.match(appSource, /watch\(visibleAtlasRegions,[\s\S]*?if \(restoringAppHistory\) return[\s\S]*?selectedAtlasRegion\.value/)
 assert.doesNotMatch(appSource, /interface AppHistoryState/)
 assert.match(mainSource, /CAIRN_CODEX_SCREENSHOT_VERIFY_TYPED_ROUTES/)
 assert.match(mainSource, /Back did not restore the MI item drawer route/)

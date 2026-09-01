@@ -16,6 +16,7 @@ a supported game installation and records the manual live-transfer results here.
 | Live CSV serialization and semantic receipt hash | helper live-queue self-test | Passed, 18 fields |
 | Offline live-queue recovery state machine | helper live-queue self-test with disposable queue root | Passed: pending, deposited, rejected, multi-item, stale semantic hash, and path escape guard |
 | Unsupported live build negative control | helper fingerprint self-test | Passed: unknown `Game.dll` hash and known crashing hook fingerprint remain outside the verified allowlist |
+| Acquisition producer paths | helper acquisition self-test with synthetic item, loot, monster, formula, and vendor records | Passed: closest direct producers win, reagent formulae are rejected, blueprint vendors remain distinct from direct stock, and equal-depth variants survive |
 | Bundled hook/injector fingerprints | helper and package audits | Passed |
 | Duplicate vault selection | desktop smoke | Rejected |
 | Rejected retrieval state rollback | desktop smoke | Passed |

@@ -62,6 +62,19 @@ try {
     throw new Error('Dismantling probability-model self-test failed.')
   }
 
+  const acquisition = await request('self-test-acquisition')
+  if (
+    !acquisition.passed ||
+    acquisition.assertions < 10 ||
+    !acquisition.directProducerPassed ||
+    !acquisition.reagentFormulaRejected ||
+    !acquisition.blueprintVendorPassed ||
+    !acquisition.directVendorPassed ||
+    !acquisition.equalDepthVariantsPassed
+  ) {
+    throw new Error('Acquisition producer-path self-test failed.')
+  }
+
   const live = await request('self-test-live-queue')
   if (
     !live.passed ||
@@ -78,7 +91,7 @@ try {
     throw new Error('Native adapter fingerprints were not reported correctly.')
   }
 
-  console.log(JSON.stringify({ health, write, dismantling, live }, null, 2))
+  console.log(JSON.stringify({ health, write, dismantling, acquisition, live }, null, 2))
 } finally {
   child.stdin.end()
   lines.close()

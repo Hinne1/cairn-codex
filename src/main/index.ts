@@ -58,9 +58,7 @@ import { analyzeGdiaDatabase, migrateGdiaDatabase } from './gdia-migration'
 import { readLastGdiaImportResult, writeLastGdiaImportResult } from './gdia-import-receipt'
 import { ArchiveBackupService } from './archive-backup'
 import {
-  DiagnosticLogger,
-  diagnosticPrivacyViolations,
-  redactDiagnosticValue
+  DiagnosticLogger
 } from './diagnostics'
 import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-recovery'
 import {
@@ -107,6 +105,7 @@ import { DiagnosticsService } from './ipc/diagnostics-service.ts'
 import { ArchiveDomainService } from './ipc/archive-service.ts'
 import { LiveTransferDomainService } from './ipc/live-transfer-service.ts'
 import { LiveGameDomainService } from './ipc/live-game-service.ts'
+import { DiagnosticExportService } from './ipc/diagnostic-export-service.ts'
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -786,7 +785,47 @@ function registerIpcHandlers(
     validateBackgroundJobId
   )
 
-  let exportDiagnosticsOperation!: () => Promise<DiagnosticExportResult>
+  const diagnosticExporter = new DiagnosticExportService({
+    nowUtc: () => new Date().toISOString(),
+    selectOutput: async (defaultFileName) => {
+      const selection = await dialog.showSaveDialog({
+        title: 'Save Cairn Codex support bundle',
+        defaultPath: join(app.getPath('downloads'), defaultFileName),
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+      return selection.canceled ? null : selection.filePath ?? null
+    },
+    countFiles: (name) => countFiles(join(app.getPath('userData'), name)),
+    inspectLive: () => helper.request<LiveGameStatus>('inspect-live-game'),
+    helperHealth: () => helper.request<Record<string, unknown>>('health'),
+    applicationSummary: async () => ({
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      electron: process.versions.electron,
+      node: process.versions.node,
+      chrome: process.versions.chrome,
+      sha256: app.isPackaged
+        ? await readFile(app.getAppPath())
+            .then((contents) => createHash('sha256').update(contents).digest('hex'))
+            .catch(() => null)
+        : null
+    }),
+    systemSummary: () => ({ platform: platform(), release: release(), architecture: arch() }),
+    helperSha256: () => readFile(helperArtifactPath())
+      .then((contents) => createHash('sha256').update(contents).digest('hex'))
+      .catch(() => null),
+    databaseSummary: () => database.getDiagnosticSummary(),
+    archiveBackupStatus: () => archiveBackups.getStatus(),
+    collectionSnapshot: () => latestCollection,
+    inspectWriteSafety: () => helper.request<WriteSafetyStatus>('inspect-write-safety'),
+    startupStatus: () => presentStartupStatus(),
+    loggingPolicy: () => diagnostics.getRetentionPolicy(),
+    readLogs: () => diagnostics.readEntries(),
+    registerSecret: (secret) => diagnostics.registerSecret(secret),
+    write: (path, contents) => writeFile(path, contents, 'utf8'),
+    info: (event, data) => diagnostics.info('diagnostics', event, data),
+    error: (event, error) => diagnostics.error('diagnostics', event, error)
+  })
   const diagnosticsService = new DiagnosticsService({
     appVersion: () => app.getVersion(),
     helperHealth: () => helper.request('health'),
@@ -812,7 +851,7 @@ function registerIpcHandlers(
     reconcileRecovery: () => reconcileLiveRecoveryOperations(helper, database, diagnostics),
     runExclusive,
     recoveryOperations: () => database.getDiagnosticSummary().recoveryOperations,
-    exportDiagnostics: () => exportDiagnosticsOperation()
+    exporter: diagnosticExporter
   })
   ipcDomains.diagnostics.handle(IPC_CHANNELS.getAppStatus, () => diagnosticsService.getAppStatus())
   ipcDomains.diagnostics.handle(IPC_CHANNELS.getDebugLogging, () => diagnosticsService.getDebugLogging())
@@ -1059,134 +1098,6 @@ function registerIpcHandlers(
     IPC_CHANNELS.getRecoveryStatus,
     () => diagnosticsService.getRecoveryStatus()
   )
-  exportDiagnosticsOperation = async () => {
-    const generatedAtUtc = new Date().toISOString()
-    const fileStamp = generatedAtUtc.replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
-    const selection = await dialog.showSaveDialog({
-      title: 'Save Cairn Codex support bundle',
-      defaultPath: join(app.getPath('downloads'), `cairn-codex-support-${fileStamp}.json`),
-      filters: [{ name: 'JSON', extensions: ['json'] }]
-    })
-    if (selection.canceled || !selection.filePath) return { canceled: true, path: null }
-
-    const safely = async <T>(operation: () => Promise<T>): Promise<T | { error: string }> => {
-      try {
-        return await operation()
-      } catch (error) {
-        return { error: error instanceof Error ? error.message : String(error) }
-      }
-    }
-    const userData = app.getPath('userData')
-    const directoryCounts: Record<string, number> = {}
-    for (const name of ['backups', 'live-receipts', 'live-adapter', 'quarantine']) {
-      directoryCounts[name] = await countFiles(join(userData, name))
-    }
-    const live = await safely(() => helper.request<LiveGameStatus>('inspect-live-game'))
-    if (!('error' in live)) diagnostics.registerSecret(live.activeCharacterName)
-    const safeLive = 'error' in live ? live : {
-      state: live.state,
-      grimDawnProcessCount: live.grimDawnProcessIds.length,
-      itemAssistantProcessCount: live.itemAssistantProcessIds.length,
-      hookAvailable: live.hookAvailable,
-      hookVersion: live.hookVersion,
-      connected: live.connectedProcessId !== null,
-      activeCharacterPresent: live.activeCharacterName !== null,
-      isHardcore: live.isHardcore,
-      hostWindowReady: live.hostWindowReady,
-      gameVersion: live.gameVersion,
-      gameBuildId: live.gameBuildId,
-      gameDllSha256: live.gameDllSha256,
-      gameDllLastWriteUtc: live.gameDllLastWriteUtc,
-      hookSha256: live.hookSha256,
-      recommendation: live.recommendation,
-      hookMessageCount: live.messages.length
-    }
-    const helperHealth = await safely(() => helper.request<Record<string, unknown>>('health'))
-    const appSha256 = app.isPackaged
-      ? await readFile(app.getAppPath())
-          .then((contents) => createHash('sha256').update(contents).digest('hex'))
-          .catch(() => null)
-      : null
-    const helperSha256 = await readFile(helperArtifactPath())
-      .then((contents) => createHash('sha256').update(contents).digest('hex'))
-      .catch(() => null)
-    const logs = await diagnostics.readEntries()
-    const report = redactDiagnosticValue({
-      generatedAtUtc,
-      formatVersion: 1,
-      privacy: 'No item payloads, save contents, database contents, character names, personal paths, raw hook messages, credentials, queues, receipts, archives, or extracted game assets are included.',
-      app: {
-        version: app.getVersion(),
-        packaged: app.isPackaged,
-        electron: process.versions.electron,
-        node: process.versions.node,
-        chrome: process.versions.chrome,
-        sha256: appSha256
-      },
-      system: { platform: platform(), release: release(), architecture: arch() },
-      helper: { health: helperHealth, sha256: helperSha256 },
-      database: database.getDiagnosticSummary(),
-      archiveBackups: await safely(async () => {
-        const status = await archiveBackups.getStatus()
-        return {
-          retained: status.backups.length,
-          verified: status.backups.filter((backup) => backup.verified).length,
-          pendingRestore: status.pendingRestore,
-          latest: status.latest ? {
-            createdAtUtc: status.latest.createdAtUtc,
-            reason: status.latest.reason,
-            sizeBytes: status.latest.sizeBytes,
-            schemaVersion: status.latest.schemaVersion,
-            vaultItemCount: status.latest.vaultItemCount,
-            verified: status.latest.verified
-          } : null
-        }
-      }),
-      files: directoryCounts,
-      collection: latestCollection ? {
-        scannedAtUtc: latestCollection.scannedAtUtc,
-        basis: latestCollection.basis,
-        warningCount: latestCollection.warnings.length,
-        contentPacks: latestCollection.contentPacks.map((pack) => pack.id),
-        sourceCount: latestCollection.scannedStashes.length,
-        catalogItems: latestCollection.items.length,
-        observedItems: latestCollection.observedItems.length
-      } : null,
-      writeSafety: await safely(() => helper.request<WriteSafetyStatus>('inspect-write-safety')),
-      live: safeLive,
-      startup: presentStartupStatus(),
-      logging: diagnostics.getRetentionPolicy(),
-      jobTimings: logs
-        .filter((entry) => entry.durationMs !== undefined)
-        .slice(-100)
-        .map(({ timestampUtc, scope, event, correlationId, durationMs }) => ({
-          timestampUtc, scope, event, correlationId, durationMs
-        })),
-      lastSafeActions: logs
-        .filter((entry) => entry.event.endsWith('.completed'))
-        .slice(-25)
-        .map(({ timestampUtc, scope, event, correlationId, durationMs }) => ({
-          timestampUtc, scope, event, correlationId, durationMs
-        })),
-      logs
-    })
-    const serializedReport = `${JSON.stringify(report, null, 2)}\n`
-    const privacyViolations = diagnosticPrivacyViolations(
-      serializedReport,
-      'error' in live || !live.activeCharacterName ? [] : [live.activeCharacterName]
-    )
-    if (privacyViolations.length > 0) {
-      diagnostics.error(
-        'diagnostics',
-        'support-bundle.rejected',
-        new Error(`Privacy validation failed: ${privacyViolations.join(', ')}`)
-      )
-      throw new Error('The support bundle failed its privacy check and was not written.')
-    }
-    await writeFile(selection.filePath, serializedReport, 'utf8')
-    diagnostics.info('diagnostics', 'support-bundle.exported', { formatVersion: 1 })
-    return { canceled: false, path: selection.filePath }
-  }
   ipcDomains.diagnostics.handle(
     IPC_CHANNELS.exportDiagnostics,
     () => diagnosticsService.exportDiagnostics()
@@ -1568,6 +1479,10 @@ function registerIpcHandlers(
       enqueueRetrieval: (input) => helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', input),
       inspectRetrieval: (queue) =>
         helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }),
+      copyRejectedReceipt: (input) => helper.request<LiveQueueReceipt>('copy-live-incoming', {
+        ...input,
+        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-returns')
+      }),
       acknowledgeRejectedReceipt: (input) => helper.request<LiveQueueReceipt>('ack-live-incoming', {
         ...input,
         receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-returns')

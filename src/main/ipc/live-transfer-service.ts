@@ -63,6 +63,10 @@ export interface LiveTransferAdapter {
     item: unknown
   }): Promise<LiveTransferQueue>
   inspectRetrieval(queue: LiveTransferQueue): Promise<LiveTransferQueueStatus>
+  copyRejectedReceipt(input: {
+    path: string
+    expectedSha256: string
+  }): Promise<{ receiptPath: string }>
   acknowledgeRejectedReceipt(input: {
     path: string
     expectedSha256: string
@@ -273,6 +277,29 @@ export class LiveTransferDomainService {
       }))
       const deposited = outcomes.filter((entry) => entry.state === 'deposited')
       const rejected = outcomes.filter((entry) => entry.state === 'rejected')
+      const copiedRejectedReceipts = new Map<string, string>()
+      for (const entry of rejected) {
+        const copied = await this.dependencies.adapter.copyRejectedReceipt({
+          path: entry.receiptPath,
+          expectedSha256: entry.queue.semanticSha256
+        })
+        copiedRejectedReceipts.set(entry.queue.operationId, copied.receiptPath)
+      }
+      if (rejected.length > 0) {
+        this.dependencies.journal.updatePendingDetail(operationId, {
+          phase: 'terminal-receipts-copied',
+          recoveryResolution: {
+            recordedAtUtc: new Date(this.clock.now()).toISOString(),
+            entries: outcomes.map((entry) => ({
+              operationId: entry.queue.operationId,
+              state: entry.state,
+              receiptPath: entry.receiptPath,
+              semanticSha256: entry.queue.semanticSha256,
+              copiedReceiptPath: copiedRejectedReceipts.get(entry.queue.operationId) ?? null
+            }))
+          }
+        })
+      }
       if (deposited.length > 0 && rejected.length > 0) {
         for (const entry of rejected) {
           await this.dependencies.adapter.acknowledgeRejectedReceipt({
@@ -296,7 +323,9 @@ export class LiveTransferDomainService {
             phase: 'committed_partial',
             adapter: 'gdia-live-v1',
             receiptPaths,
-            rejectedReceiptPaths: rejected.map((entry) => entry.receiptPath),
+            rejectedReceiptPaths: rejected.map((entry) =>
+              copiedRejectedReceipts.get(entry.queue.operationId)!
+            ),
             vaultItemIds,
             depositedVaultItemIds: deposited.map((entry) => entry.item.id),
             rejectedVaultItemIds

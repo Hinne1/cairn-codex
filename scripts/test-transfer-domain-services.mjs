@@ -232,6 +232,7 @@ function transferFixture(options = {}) {
   let now = 0
   let sequence = 0
   const events = []
+  const details = new Map()
   const states = new Map(options.initialStates ?? [
     ['a', 'ingested'],
     ['b', 'ingested']
@@ -256,6 +257,7 @@ function transferFixture(options = {}) {
     },
     updatePendingDetail(operationId, detail) {
       events.push(['detail', operationId, detail.phase])
+      details.set(operationId, detail)
     },
     completeRetrieval(input) {
       events.push(['complete', input.operationId, ...input.receiptPaths])
@@ -269,6 +271,7 @@ function transferFixture(options = {}) {
         [...input.rejectedVaultItemIds],
         [...input.receiptPaths]
       ])
+      if (options.partialCompleteError) throw options.partialCompleteError
       for (const id of input.depositedVaultItemIds) states.set(id, 'retrieved')
       for (const id of input.rejectedVaultItemIds) states.set(id, 'ingested')
     },
@@ -298,6 +301,11 @@ function transferFixture(options = {}) {
     inspectRetrieval: async (queue) => options.inspect
       ? options.inspect(queue, events)
       : { state: 'deposited', receiptPath: `receipt/${queue.operationId}.csv` },
+    copyRejectedReceipt: async (input) => {
+      events.push(['copy-rejected', input.path])
+      if (options.copyError) throw options.copyError
+      return { receiptPath: `copied/${input.path}` }
+    },
     acknowledgeRejectedReceipt: async (input) => {
       events.push(['ack-rejected', input.path])
       if (options.ackError) throw options.ackError
@@ -325,6 +333,7 @@ function transferFixture(options = {}) {
       pollIntervalMs: options.pollIntervalMs ?? 5
     }),
     events,
+    details,
     unresolved,
     states
   }
@@ -421,13 +430,39 @@ function transferFixture(options = {}) {
   assert.match(result.issues[0], /1 of 2 selected items were deposited/i)
   assert.match(result.issues[0], /1 item remains safely stored/i)
   const phases = fixture.events.map(([event]) => event)
-  assert.ok(phases.indexOf('detail') < phases.indexOf('ack-rejected'),
-    'mixed terminal receipt details must persist before rejected acknowledgement')
+  const copiedDetailIndex = fixture.events.findIndex(([, , phase]) =>
+    phase === 'terminal-receipts-copied'
+  )
+  assert.ok(phases.indexOf('copy-rejected') < copiedDetailIndex)
+  assert.ok(copiedDetailIndex < phases.indexOf('ack-rejected'),
+    'copied receipt destination must persist before rejected acknowledgement')
   assert.ok(phases.indexOf('ack-rejected') < phases.indexOf('complete-partial'),
     'mixed completion must follow durable rejected-receipt acknowledgement')
   assert.equal(fixture.events.some(([event]) => event === 'needs-recovery'), false)
   assert.equal(fixture.states.get('a'), 'retrieved')
   assert.equal(fixture.states.get('b'), 'ingested')
+}
+
+// A process failure after acknowledgement but before journal completion remains
+// recoverable because the durable copied receipt destination was persisted first.
+{
+  const fixture = transferFixture({
+    inspect: async (queue) => queue.operationId.endsWith('-0')
+      ? { state: 'deposited', receiptPath: `deposited/${queue.operationId}.csv` }
+      : { state: 'rejected', receiptPath: `rejected/${queue.operationId}.csv` },
+    partialCompleteError: new Error('simulated process exit after acknowledgement')
+  })
+  await assert.rejects(
+    fixture.service.retrieveVaultItems(['a', 'b']),
+    /simulated process exit after acknowledgement/
+  )
+  const resolution = fixture.details.get('operation-1').recoveryResolution
+  assert.equal(resolution.entries[1].copiedReceiptPath,
+    'copied/rejected/operation-1-1.csv')
+  const phases = fixture.events.map(([event]) => event)
+  assert.ok(phases.indexOf('copy-rejected') < phases.indexOf('ack-rejected'))
+  assert.ok(phases.indexOf('ack-rejected') < phases.indexOf('needs-recovery'))
+  assert.equal(fixture.unresolved.count, 1)
 }
 
 {

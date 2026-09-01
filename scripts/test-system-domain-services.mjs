@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { BackgroundJobService } from '../src/main/ipc/background-job-service.ts'
 import { BackupService } from '../src/main/ipc/backup-service.ts'
 import { DiagnosticsService } from '../src/main/ipc/diagnostics-service.ts'
+import { DiagnosticExportService } from '../src/main/ipc/diagnostic-export-service.ts'
 import { LiveGameDomainService } from '../src/main/ipc/live-game-service.ts'
 import { WindowService } from '../src/main/ipc/window-service.ts'
 
@@ -69,7 +70,7 @@ const diagnostics = new DiagnosticsService({
     id: 'recovery-1', operation: 'retrieve', state: 'needs_recovery',
     startedAtUtc: new Date(0).toISOString(), hasBackup: true
   }],
-  exportDiagnostics: async () => ({ canceled: false, path: 'fixture/support.zip' })
+  exporter: { export: async () => ({ canceled: false, path: 'fixture/support.zip' }) }
 })
 assert.equal((await diagnostics.getAppStatus()).helper, 'unavailable')
 assert.equal(diagnostics.setDebugLogging({ enabled: true }).enabled, true)
@@ -89,13 +90,57 @@ const liveEvents = []
 const liveStatus = {
   state: 'ready', detail: 'Ready.', grimDawnProcessIds: [1], itemAssistantProcessIds: [],
   hookAvailable: true, adapterDirectory: 'fixture', hookVersion: 'fixture',
-  connectedProcessId: 1, isHardcore: false, activeCharacterName: 'Fixture',
+  connectedProcessId: 1, isHardcore: false, activeCharacterName: 'Secret Hero',
   ingestTabSetting: 4, depositTabSetting: 5, ingestTabDescription: 'ingest',
   depositTabDescription: 'deposit', hostWindowReady: true, injectorOutput: null,
   messages: [], gameVersion: 'fixture', gameBuildId: 'fixture',
   gameDllSha256: 'a'.repeat(64), gameDllLastWriteUtc: new Date(0).toISOString(),
   hookSha256: 'b'.repeat(64), recommendation: null
 }
+let exportedSupport = null
+const exportEvents = []
+const diagnosticExportDependencies = {
+  nowUtc: () => '2026-09-01T12:00:00.000Z',
+  selectOutput: async () => 'fixture/support.json',
+  countFiles: async () => 0,
+  inspectLive: async () => liveStatus,
+  helperHealth: async () => ({ service: 'fixture' }),
+  applicationSummary: async () => ({
+    version: 'fixture', packaged: false, electron: 'fixture', node: 'fixture',
+    chrome: 'fixture', sha256: null
+  }),
+  systemSummary: () => ({ platform: 'fixture' }),
+  helperSha256: async () => null,
+  databaseSummary: () => ({ vaultItems: 0 }),
+  archiveBackupStatus: async () => ({
+    backupDirectory: 'C:/private/backups', backups: [backup], latest: backup,
+    pendingRestore: false
+  }),
+  collectionSnapshot: () => null,
+  inspectWriteSafety: async () => ({ allowed: true, messages: [] }),
+  startupStatus: () => ({ phase: 'interactive' }),
+  loggingPolicy: () => ({ maxFiles: 4 }),
+  readLogs: async () => [],
+  registerSecret: () => undefined,
+  write: async (path, contents) => { exportedSupport = { path, contents } },
+  info: (event) => exportEvents.push(event),
+  error: (event) => exportEvents.push(event)
+}
+const exporter = new DiagnosticExportService(diagnosticExportDependencies)
+assert.deepEqual(await exporter.export(), { canceled: false, path: 'fixture/support.json' })
+assert.equal(exportedSupport.contents.includes('C:/private'), false)
+assert.equal(exportedSupport.contents.includes('Fixture'), false)
+assert.deepEqual(exportEvents, ['support-bundle.exported'])
+
+let privacyWriteCalls = 0
+const privacyExporter = new DiagnosticExportService({
+  ...diagnosticExportDependencies,
+  databaseSummary: () => ({ note: 'Secret Hero' }),
+  write: async () => { privacyWriteCalls += 1 }
+})
+await assert.rejects(privacyExporter.export(), /failed its privacy check/)
+assert.equal(privacyWriteCalls, 0, 'privacy failure must stop before publication')
+
 const live = new LiveGameDomainService({
   visualDiagnosticsActive: () => false,
   inspectWriteSafety: async () => ({ allowed: true, messages: [] }),

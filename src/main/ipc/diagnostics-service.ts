@@ -21,6 +21,10 @@ interface RecoveryOperationSummary {
   hasBackup: boolean
 }
 
+export interface DiagnosticExporter {
+  export(): Promise<DiagnosticExportResult>
+}
+
 export interface DiagnosticsServiceDependencies {
   appVersion(): string
   helperHealth(): Promise<unknown>
@@ -36,7 +40,7 @@ export interface DiagnosticsServiceDependencies {
   reconcileRecovery(): Promise<unknown>
   runExclusive<T>(operation: () => Promise<T>): Promise<T>
   recoveryOperations(): RecoveryOperationSummary[]
-  exportDiagnostics(): Promise<DiagnosticExportResult>
+  exporter: DiagnosticExporter
 }
 
 export class DiagnosticsService {
@@ -113,6 +117,6 @@ export class DiagnosticsService {
   }
 
   exportDiagnostics(): Promise<DiagnosticExportResult> {
-    return this.dependencies.exportDiagnostics()
+    return this.dependencies.exporter.export()
   }
 }

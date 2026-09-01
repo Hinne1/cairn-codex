@@ -25,6 +25,8 @@ const props = withDefaults(defineProps<{
   selectionMode?: BoundedSelectionMode
   selectedKeys?: readonly BoundedResultKey[]
   selectionDisabled?: boolean
+  interactive?: boolean
+  itemDescribedBy?: string
   keyboardColumns?: number
 }>(), {
   page: 1,
@@ -39,13 +41,17 @@ const props = withDefaults(defineProps<{
   selectionMode: 'none',
   selectedKeys: () => [],
   selectionDisabled: false,
+  interactive: false,
+  itemDescribedBy: undefined,
   keyboardColumns: 1
 })
 
 const emit = defineEmits<{
   'update:page': [page: number]
   'update:selectedKeys': [keys: BoundedResultKey[]]
-  activate: [key: BoundedResultKey]
+  activate: [key: BoundedResultKey, item: T]
+  'item-focus': [key: BoundedResultKey, item: T, element: HTMLElement]
+  'item-blur': [key: BoundedResultKey, item: T, event: FocusEvent]
   retry: []
 }>()
 
@@ -62,6 +68,7 @@ const resultWindow = computed(() => createBoundedResultWindow({
 const entryKeys = computed(() => resultWindow.value.entries.map((entry) => entry.key))
 const showResults = computed(() => !props.loading && !props.error && resultWindow.value.entries.length > 0)
 const selectable = computed(() => props.selectionMode !== 'none')
+const focusable = computed(() => selectable.value || props.interactive)
 const collectionRole = computed(() => props.layout === 'list'
   ? (selectable.value ? 'listbox' : 'list')
   : 'grid')
@@ -91,6 +98,17 @@ function select(key: BoundedResultKey): void {
   }
 }
 
+function activateEntry(entry: { key: BoundedResultKey, item: T }): void {
+  select(entry.key)
+  if (props.interactive) emit('activate', entry.key, entry.item)
+}
+
+function handleItemFocus(event: FocusEvent, entry: { key: BoundedResultKey, item: T }): void {
+  activeKey.value = entry.key
+  const element = event.target instanceof HTMLElement ? event.target : itemElements.get(entry.key)
+  if (element) emit('item-focus', entry.key, entry.item, element)
+}
+
 function focusKey(key: BoundedResultKey | null): void {
   if (key === null) return
   activeKey.value = key
@@ -101,7 +119,7 @@ function navigate(intent: BoundedNavigationIntent): void {
   focusKey(moveBoundedResultKey(entryKeys.value, activeKey.value, intent, props.keyboardColumns))
 }
 
-function handleKeydown(event: KeyboardEvent, key: BoundedResultKey): void {
+function handleKeydown(event: KeyboardEvent, entry: { key: BoundedResultKey, item: T }): void {
   const intent = event.key === 'Home' ? 'first'
     : event.key === 'End' ? 'last'
       : event.key === 'ArrowLeft' ? 'previous'
@@ -118,8 +136,7 @@ function handleKeydown(event: KeyboardEvent, key: BoundedResultKey): void {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
     if (props.selectionDisabled) return
-    select(key)
-    emit('activate', key)
+    activateEntry(entry)
   }
 }
 
@@ -160,6 +177,7 @@ function changePage(page: number): void {
       :aria-label="label"
       :aria-multiselectable="selectionMode === 'multiple' ? true : undefined"
     >
+      <slot name="header" />
       <div
         v-for="entry in resultWindow.entries"
         :key="entry.key"
@@ -169,10 +187,12 @@ function changePage(page: number): void {
         :role="itemRole"
         :aria-selected="selectable ? selectedKeys.includes(entry.key) : undefined"
         :aria-disabled="selectable && selectionDisabled ? true : undefined"
-        :tabindex="selectable ? (activeKey === entry.key ? 0 : -1) : undefined"
-        @focus="activeKey = entry.key"
-        @click="select(entry.key)"
-        @keydown="handleKeydown($event, entry.key)"
+        :aria-describedby="itemDescribedBy"
+        :tabindex="focusable ? (activeKey === entry.key ? 0 : -1) : undefined"
+        @focus="handleItemFocus($event, entry)"
+        @blur="emit('item-blur', entry.key, entry.item, $event)"
+        @click="activateEntry(entry)"
+        @keydown="handleKeydown($event, entry)"
       >
         <slot
           name="item"

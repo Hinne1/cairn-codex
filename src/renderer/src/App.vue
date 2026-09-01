@@ -500,6 +500,7 @@ const miAffixFilter = ref<MiAffixFilter>('all')
 const miComparisonMetric = ref<MiMetricKey>('overall')
 const miComparisonDirection = ref<SortDirection>('desc')
 const miSortMode = ref<MiSortMode>('metric')
+const miWorkshopPage = ref(1)
 const miAffixFilterSelect = ref<HTMLSelectElement | null>(null)
 const miComparisonMetricSelect = ref<HTMLSelectElement | null>(null)
 const miComparisonDirectionSelect = ref<HTMLSelectElement | null>(null)
@@ -2402,6 +2403,9 @@ watch(plannerLevelCap, (level) => {
   if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
 })
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
+watch([miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode], () => {
+  miWorkshopPage.value = 1
+})
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (applyingPlannerProfile) return
   plannerProfiles.value = plannerProfiles.value.map((profile) =>
@@ -4768,36 +4772,51 @@ function setHasVisualChanges(set: CollectionSet): boolean {
 
 function queueTooltip(
   item: CollectionItem,
-  event: MouseEvent | FocusEvent,
+  anchor: MouseEvent | FocusEvent | HTMLElement,
   copy?: Pick<ObservedStashItem, 'prefixRecord' | 'suffixRecord'>
 ): void {
   cancelTooltipHide()
   cancelTooltip()
-  positionTooltip(event)
+  positionTooltip(anchor)
   tooltipTimer = setTimeout(() => {
-    tooltipDetailsHeld.value = false
-    tooltipCopyAffixes.value = copy
-      ? { prefixRecord: copy.prefixRecord, suffixRecord: copy.suffixRecord }
-      : null
-    tooltipRecord.value = item.record
-    resetTooltipScroll()
+    showTooltip(item, anchor, copy)
   }, 180)
+}
+
+function showTooltip(
+  item: CollectionItem,
+  anchor: MouseEvent | FocusEvent | HTMLElement,
+  copy?: Pick<ObservedStashItem, 'prefixRecord' | 'suffixRecord'>
+): void {
+  cancelTooltipHide()
+  cancelTooltip()
+  positionTooltip(anchor)
+  tooltipDetailsHeld.value = false
+  tooltipCopyAffixes.value = copy
+    ? { prefixRecord: copy.prefixRecord, suffixRecord: copy.suffixRecord }
+    : null
+  tooltipRecord.value = item.record
+  resetTooltipScroll()
 }
 
 function moveTooltip(event: MouseEvent): void {
   if (!tooltipRecord.value) positionTooltip(event)
 }
 
-function positionTooltip(event: MouseEvent | FocusEvent): void {
+function positionTooltip(anchor: MouseEvent | FocusEvent | HTMLElement): void {
   const width = 455
   const margin = 14
-  const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  const target = anchor instanceof HTMLElement
+    ? anchor
+    : anchor.currentTarget instanceof HTMLElement
+      ? anchor.currentTarget
+      : null
   const rect = target?.getBoundingClientRect()
-  const anchorX = event instanceof MouseEvent ? event.clientX : rect?.right ?? margin
+  const anchorX = anchor instanceof MouseEvent ? anchor.clientX : rect?.right ?? margin
   const x = rect && rect.right + width + 18 > window.innerWidth
     ? rect.left - width - 14
     : anchorX + 18
-  const y = event instanceof MouseEvent ? event.clientY + 14 : rect?.top ?? margin
+  const y = anchor instanceof MouseEvent ? anchor.clientY + 14 : rect?.top ?? margin
   const expectedHeight = Math.min(760, window.innerHeight - margin * 2)
   tooltipPosition.value = {
     left: Math.max(margin, Math.min(x, window.innerWidth - width - margin)),
@@ -6879,63 +6898,65 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
           </template>
         </ExplorerToolbar>
-        <div class="mi-table-wrap">
-          <table class="mi-table">
-            <thead>
-              <tr>
-                <th>MI base</th>
-                <th>Level</th>
-                <th>Prefix</th>
-                <th>Suffix</th>
-                <th>{{ selectedMiMetricLabel }}</th>
-                <th>Stored</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in miWorkshopRows"
-                :key="row.key"
-                role="button"
-                tabindex="0"
-                aria-describedby="item-tooltip"
+        <BoundedResultSurface
+          v-model:page="miWorkshopPage"
+          class="mi-table-wrap mi-table-results"
+          :items="miWorkshopRows"
+          :get-key="row => row.key"
+          :page-size="50"
+          :empty-title="miWorkshopQuery ? 'No matching Monster Infrequents' : miAffixFilter === 'double-rare' ? 'No double-rare combinations retained' : 'The Workshop is empty'"
+          :empty-detail="miWorkshopQuery ? `No stored MI matches “${miWorkshopQuery}”.` : miAffixFilter === 'double-rare' ? 'No stored MI has both a rare prefix and a rare suffix.' : 'Archive a Monster Infrequent to start building the Workshop.'"
+          label="Monster Infrequent affix combinations"
+          layout="table"
+          interactive
+          item-described-by="item-tooltip"
+          @activate="(_key, row) => openItem(row.base)"
+          @item-focus="(_key, row, element) => showTooltip(row.base, element, row.leader)"
+          @item-blur="scheduleTooltipHide"
+        >
+          <template #header>
+            <div class="mi-table-header" role="row">
+              <span role="columnheader">MI base</span>
+              <span role="columnheader">Level</span>
+              <span role="columnheader">Prefix</span>
+              <span role="columnheader">Suffix</span>
+              <span role="columnheader">{{ selectedMiMetricLabel }}</span>
+              <span role="columnheader">Stored</span>
+            </div>
+          </template>
+          <template #item="{ item: row }">
+            <div
+              class="mi-table-row"
                 @mouseenter="queueTooltip(row.base, $event, row.leader)"
                 @mousemove="moveTooltip"
                 @mouseleave="scheduleTooltipHide"
-                @focus="queueTooltip(row.base, $event, row.leader)"
-                @blur="scheduleTooltipHide"
-                @click="openItem(row.base)"
-                @keydown.enter="openItem(row.base)"
-              >
-                <td>
-                  <span class="mi-base-cell">
-                    <img v-if="itemIconUrl(row.base)" :src="itemIconUrl(row.base)!" alt="" />
-                    <strong>{{ row.base.name }}</strong>
-                  </span>
-                </td>
-                <td>{{ row.base.levelRequirement }}</td>
-                <td :class="['affix-name', row.prefixRarity]">{{ row.prefix }}</td>
-                <td :class="['affix-name', row.suffixRarity]">{{ row.suffix }}</td>
-                <td class="mi-score-breakdown">
-                  <span class="mi-selected-score"><small>Selected</small><strong>{{ row.selectedMetric.display }}</strong></span>
-                  <span><small>Overall</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.overallEstimatedPercentile) }}</strong></span>
-                  <span><small>Base</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.baseEstimatedPercentile) }}</strong></span>
-                  <span><small>Prefix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.prefixEstimatedPercentile) }}</strong></span>
-                  <span><small>Suffix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.suffixEstimatedPercentile) }}</strong></span>
-                </td>
-                <td>
-                  <strong>{{ row.copies.length }}</strong>
-                  <small v-if="row.copies.length > 1">1 leader · {{ row.copies.length - 1 }} archived</small>
-                  <span v-if="showMiReserves && row.copies.length > 1" class="reserve-scores">
-                    {{ row.copies.slice(1).map((copy) => miMetricResult(copy, miComparisonMetric).display).join(' · ') }}
-                  </span>
-                </td>
-              </tr>
-              <tr v-if="miWorkshopRows.length === 0">
-                <td colspan="6" class="skill-empty">{{ miWorkshopQuery ? `No stored MI matches “${miWorkshopQuery}”.` : miAffixFilter === 'double-rare' ? 'No stored MI has both a rare prefix and a rare suffix.' : 'Archive a Monster Infrequent to start building the Workshop.' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+            >
+              <span role="gridcell">
+                <span class="mi-base-cell">
+                  <img v-if="itemIconUrl(row.base)" :src="itemIconUrl(row.base)!" alt="" />
+                  <strong>{{ row.base.name }}</strong>
+                </span>
+              </span>
+              <span role="gridcell">{{ row.base.levelRequirement }}</span>
+              <span role="gridcell" :class="['affix-name', row.prefixRarity]">{{ row.prefix }}</span>
+              <span role="gridcell" :class="['affix-name', row.suffixRarity]">{{ row.suffix }}</span>
+              <span role="gridcell" class="mi-score-breakdown">
+                <span class="mi-selected-score"><small>Selected</small><strong>{{ row.selectedMetric.display }}</strong></span>
+                <span><small>Overall</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.overallEstimatedPercentile) }}</strong></span>
+                <span><small>Base</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.baseEstimatedPercentile) }}</strong></span>
+                <span><small>Prefix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.prefixEstimatedPercentile) }}</strong></span>
+                <span><small>Suffix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.suffixEstimatedPercentile) }}</strong></span>
+              </span>
+              <span role="gridcell" class="mi-stored-cell">
+                <strong>{{ row.copies.length }}</strong>
+                <small v-if="row.copies.length > 1">1 leader · {{ row.copies.length - 1 }} archived</small>
+                <span v-if="showMiReserves && row.copies.length > 1" class="reserve-scores">
+                  {{ row.copies.slice(1).map((copy) => miMetricResult(copy, miComparisonMetric).display).join(' · ') }}
+                </span>
+              </span>
+            </div>
+          </template>
+        </BoundedResultSurface>
       </section>
 
       <section v-else-if="activeView === 'supplies'" class="supplies-workspace" aria-label="Reusable supplies">

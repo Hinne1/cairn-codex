@@ -72,9 +72,11 @@ pure paging and keyboard model in `src/renderer/src/bounded-results.ts`.
   permits it. A workspace must clear selection explicitly when its safety rules require that.
 
 Transfers operation history and quarantine are the first server-paged adopters. Quarantine uses
-the shared multi-selection model while retaining its fail-closed transfer controls. MI Workshop,
-Planner, and Skills migrations are tracked incrementally under #21 so each change can be
-visually and behaviorally verified without an `App.vue` flag-day rewrite.
+the shared multi-selection model while retaining its fail-closed transfer controls. MI Workshop
+is the first local CSS-table adopter: it mounts 50 affix combinations per page, exposes the
+existing affixed item tooltip on pointer hover and keyboard focus, and opens the item on Enter,
+Space, or click. Planner and Skills migrations remain tracked incrementally under #21 so each
+change can be visually and behaviorally verified without an `App.vue` flag-day rewrite.
 
 ## Search and filter semantics
 

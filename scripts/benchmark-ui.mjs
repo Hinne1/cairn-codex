@@ -18,6 +18,8 @@ const query = argument('--query') ?? 'wendigo'
 const category = argument('--category')
 const miAffixFilter = argument('--mi-affix-filter')
 const expectedMiRows = argument('--expected-mi-rows')
+const expectedMiTotal = argument('--expected-mi-total')
+const expectedMiMounted = argument('--expected-mi-mounted')
 const warmBudgetMs = argument('--warm-budget-ms')
 const miNativeRestore = process.argv.includes('--mi-native-restore')
 const waitForBackgroundJobs = process.argv.includes('--wait-for-background-jobs')
@@ -34,6 +36,7 @@ const transferSection = argument('--transfer-section')
 const verifyNavigation = process.argv.includes('--verify-navigation')
 const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
+const verifyBoundedKeyboard = process.argv.includes('--verify-bounded-keyboard')
 const simulateWorkspaceError = process.argv.includes('--simulate-workspace-error')
 const safeMode = process.argv.includes('--safe-mode')
 const safeModeSuggested = process.argv.includes('--safe-mode-suggested')
@@ -113,6 +116,7 @@ const env = {
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
   ...(openPlannerSetup ? { CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP: '1' } : {}),
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
+  ...(verifyBoundedKeyboard ? { CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD: '1' } : {}),
   ...(simulateWorkspaceError ? { CAIRN_CODEX_SCREENSHOT_RENDER_ERROR: '1' } : {}),
   ...(safeMode ? { CAIRN_CODEX_SCREENSHOT_SAFE_MODE: '1' } : {}),
   ...(safeModeSuggested ? {
@@ -187,6 +191,25 @@ if (expectedMiRows !== null) {
     )
   }
 }
+if (expectedMiTotal !== null) {
+  const expected = Number(expectedMiTotal)
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new Error(`--expected-mi-total must be a non-negative integer; received ${expectedMiTotal}.`)
+  }
+  if (itemCount !== expected) {
+    throw new Error(`MI total mismatch: counter reported ${itemCount}; expected ${expected}.`)
+  }
+}
+if (expectedMiMounted !== null) {
+  const expected = Number(expectedMiMounted)
+  const rendered = report.renderedState?.miRows?.length ?? 0
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new Error(`--expected-mi-mounted must be a non-negative integer; received ${expectedMiMounted}.`)
+  }
+  if (rendered !== expected) {
+    throw new Error(`MI mounted-row mismatch: rendered ${rendered}; expected ${expected}.`)
+  }
+}
 if (warmBudgetMs !== null) {
   const budget = Number(warmBudgetMs)
   if (!Number.isFinite(budget) || budget <= 0) {
@@ -218,6 +241,7 @@ console.log(JSON.stringify({
   verifyNavigation,
   openPlannerSetup,
   verifyPlannerNavigation,
+  verifyBoundedKeyboard,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
   scrollTarget,

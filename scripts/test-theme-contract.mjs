@@ -144,7 +144,10 @@ assert.equal(gameplayCollisionTheme.fallback, 'cairn')
 assert.ok(gameplayCollisionTheme.issues.some((issue) => issue.token === '--gd-rarity-epic'))
 
 for (const [token, background] of [
+  ['--cc-accent-strong', '--cc-accent-surface'],
+  ['--cc-accent-strong', '--cc-accent-surface-hover'],
   ['--cc-accent-soft', '--cc-accent-surface'],
+  ['--cc-accent-soft', '--cc-accent-surface-hover'],
   ['--cc-tone-green-accent-soft', '--cc-tone-green-surface'],
   ['--cc-tone-green-focus', '--cc-tone-green-surface']
 ]) {

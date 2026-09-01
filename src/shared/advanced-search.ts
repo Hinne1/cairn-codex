@@ -131,8 +131,12 @@ export function parseAdvancedSearchDraft(query: string, schema: SearchWorkspaceS
     const positiveParts = andParts.filter((part) => part.kind !== 'not')
     const excludedParts = andParts.filter((part) => part.kind === 'not')
     if (positiveParts.length === 1 && positiveParts[0]?.kind === 'or') {
+      const anyParts = flatten(positiveParts[0], 'or')
+      if (anyParts.some((expression) => expression.kind === 'not')) {
+        return unrepresentable(trimmed, 'This query combines exclusions with OR in a way the form cannot edit safely. It is preserved as a locked clause.')
+      }
       combinator = 'any'
-      expressions = [...flatten(positiveParts[0], 'or'), ...excludedParts]
+      expressions = [...anyParts, ...excludedParts]
     } else {
       expressions = andParts
     }

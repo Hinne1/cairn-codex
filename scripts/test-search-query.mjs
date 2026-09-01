@@ -130,7 +130,11 @@ for (const [comparison, operator] of [
   assert.equal(buildAdvancedSearchQuery(parsed.draft, searchSchemas.collection).query, query)
 }
 
-for (const query of ['rarity:epic OR NOT damage:aether', 'NOT rarity:epic OR NOT damage:aether']) {
+for (const query of [
+  'rarity:epic OR NOT damage:aether',
+  'NOT rarity:epic OR NOT damage:aether',
+  '(rarity:epic OR NOT damage:aether) AND NOT slot:ring'
+]) {
   const parsed = parseAdvancedSearchDraft(query, searchSchemas.collection)
   assert.equal(parsed.representable, false)
   assert.equal(parsed.draft.preservedQuery, query)

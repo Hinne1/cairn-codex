@@ -5900,6 +5900,81 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE === '1') {
+          interactionTimings.dismantlingWorkspaceMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const rows = () => [...document.querySelectorAll('.dismantling-row')]
+              const setQuery = async (value) => {
+                const input = document.querySelector('.dismantling-workspace .explorer-search input')
+                if (!(input instanceof HTMLInputElement)) throw new Error('Dismantling search control was not rendered.')
+                input.value = value
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                await wait(175)
+                await frames()
+              }
+              if (!document.querySelector('.dismantling-workspace')) throw new Error('Dismantling workspace was not rendered.')
+              for (let attempt = 0; attempt < 120 && rows().length !== 120; attempt += 1) await wait(250)
+              if (rows().length !== 120) throw new Error('Dismantling did not mount its initial 120-copy window.')
+              const firstCheckbox = rows()[0]?.querySelector('input[type="checkbox"]')
+              if (!(firstCheckbox instanceof HTMLInputElement)) throw new Error('Dismantling copy selection was unavailable.')
+              firstCheckbox.focus()
+              if (document.activeElement !== firstCheckbox) throw new Error('Dismantling copy selection was not keyboard focusable.')
+              firstCheckbox.click()
+              await frames()
+              const run = document.querySelector('.dismantling-run')
+              if (!(run instanceof HTMLButtonElement) || run.disabled || !run.textContent?.includes('Preview 1 selected')) {
+                throw new Error('Dismantling selection did not enable the read-only preview action.')
+              }
+              run.click()
+              let previewReady = false
+              for (let attempt = 0; attempt < 120; attempt += 1) {
+                const previewError = document.querySelector('.dismantling-preview .vault-notice.error')?.textContent
+                if (previewError) throw new Error('Dismantling preview failed: ' + previewError)
+                if (document.querySelector('.dismantling-costs')) {
+                  previewReady = true
+                  break
+                }
+                await wait(250)
+              }
+              if (!previewReady) throw new Error('Dismantling preview did not complete.')
+              const waitForPopState = () => new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('Dismantling history navigation timed out.')), 2_000)
+                window.addEventListener('popstate', () => {
+                  clearTimeout(timer)
+                  requestAnimationFrame(() => requestAnimationFrame(resolve))
+                }, { once: true })
+              })
+              const back = waitForPopState()
+              history.back()
+              await back
+              if (document.querySelector('.dismantling-workspace')) throw new Error('Back did not leave Dismantling Lab.')
+              const forward = waitForPopState()
+              history.forward()
+              await forward
+              const restoredRun = document.querySelector('.dismantling-run')
+              if (!(restoredRun instanceof HTMLButtonElement) || !restoredRun.textContent?.includes('Preview 1 selected')) {
+                throw new Error('Forward did not restore Dismantling Lab with its transient selection intact.')
+              }
+              await setQuery('zz-no-dismantling-result-zz')
+              if (rows().length !== 0 || !document.querySelector('.dismantling-candidates .vault-empty')) {
+                throw new Error('Dismantling did not render its empty state after an impossible search.')
+              }
+              await setQuery(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_QUERY ?? '')})
+              if (rows().length !== 120) throw new Error('Dismantling search did not restore its initial 120-copy window.')
+              const more = document.querySelector('.dismantling-more')
+              if (!(more instanceof HTMLButtonElement)) throw new Error('Dismantling progressive disclosure control was unavailable.')
+              more.focus()
+              if (document.activeElement !== more) throw new Error('Dismantling progressive disclosure was not keyboard focusable.')
+              more.click()
+              await frames()
+              if (rows().length !== 240) throw new Error('Dismantling did not reveal the next 120 candidate copies.')
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP === '1') {
           const openedSearchHelp = await window.webContents.executeJavaScript(`
             (() => {

@@ -4,6 +4,20 @@ Cairn Codex is not considered releasable merely because the UI builds. A public
 beta candidate must satisfy every required gate below. Code signing and automatic
 updates are deliberately deferred until after the beta has real users.
 
+## External tester gate
+
+Before sending a build to a new tester with a large Item Assistant archive:
+
+- [x] Import and repeat-import 20,000 synthetic mixed-mode copies without duplicates or source mutation.
+- [ ] Replace the current full-archive/24-copy roll-hydration loop with a bounded background job.
+- [ ] Page or virtualize Transfers and operation histories; never mount the full archive.
+- [ ] Persist redacted rotating logs and export them in a support bundle with correlation IDs.
+- [ ] Provide first-run Item Assistant guidance, import preflight, named progress, and a durable summary.
+- [ ] Deduplicate unchanged Item Assistant source backups and preflight free disk space.
+
+The measured evidence and product/architecture follow-up are tracked in
+`docs/test-matrix.md` and `docs/roadmap.md`.
+
 ## Source and provenance
 
 - [x] The application has an explicit license.

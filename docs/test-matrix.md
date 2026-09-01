@@ -33,7 +33,10 @@ a supported game installation and records the manual live-transfer results here.
 | Softcore-only, Hardcore-only, and mixed saves | isolated malformed-stash diagnostics | Passed; mode remained correctly classified without parsing unsafe bytes |
 | Item Assistant migration | packaged app, synthetic GDIA database and queue, copied catalog seed | 4 copies imported (2 SC / 2 HC), 1 queue receipt retained, 1 unsupported record skipped, source unchanged |
 | Repeated Item Assistant migration | second packaged import against same target | No duplicate vault item or journal; a second verified backup retained |
-| Large-archive startup and search | packaged app, isolated copy of 5,525-item profile | 3.1–3.5 s to rendered collection; 153 ms structured / 164 ms ordinary full-text search including 120 ms debounce |
+| Large-archive startup and search | packaged app, isolated copy of 5,525-item / 4,514-copy profile | 2026-08-30 recorded 3.1–3.5 s; 2026-09-01 screenshot harness settled in 33.5–36.3 s while ordinary search remained about 153–166 ms. Instrument cached first paint separately from background refresh before treating either number as user-perceived startup. |
+| 20k Item Assistant migration | packaged app, synthetic 20,000-copy mixed-mode database plus queue receipt | Passed 2026-09-01: 20,000 imported in 818 ms; repeat completed in 493 ms with no duplicates; source unchanged; two backups verified |
+| 20k archive renderer scale | packaged app, isolated 24,514-copy profile | **Gate failed 2026-09-01:** 41.5 s benchmark-ready startup; unfiltered Transfers mounted 14,509 rows and took 1.8 s to switch |
+| 20k archive roll hydration | packaged app, isolated 20,002 newly unscored copies | **Gate failed 2026-09-01:** only 96 new copies scored during capture; 24-copy batches repeatedly projected and serialized the full archive |
 | Package personal-data/art audit | `scripts/audit-package.mjs` | Passed, 282 files |
 | Installer install/first run/uninstall | `npm run test:installer` | Passed; app removed and isolated user data retained |
 | Dependency vulnerability audit | `npm audit --audit-level=high` | Passed, 0 vulnerabilities |

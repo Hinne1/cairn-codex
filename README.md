@@ -212,7 +212,9 @@ npm.cmd run package:release
 This produces the unsigned installer, portable ZIP, SHA-256 file, and manifest
 under `dist\release`. The release harness audits package contents and native
 fingerprints before emitting artifacts. See the [release readiness checklist](docs/release-readiness.md)
-and [test matrix](docs/test-matrix.md) for the remaining manual live gates.
+and [test matrix](docs/test-matrix.md) for the remaining manual live gates. External builds also
+use the [tester checklist](docs/external-testing.md); larger product and architecture work is
+tracked in the [roadmap](docs/roadmap.md).
 
 ## Architecture
 

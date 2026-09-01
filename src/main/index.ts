@@ -5191,6 +5191,135 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION === '1' && !transferSection) {
+          if (process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP === undefined) {
+            await window.webContents.executeJavaScript(`
+              (async () => {
+                document.querySelector('.onboarding-skip')?.click()
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              })()
+            `)
+          }
+          window.setOpacity(0)
+          window.showInactive()
+          window.webContents.invalidate()
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          interactionTimings.navigationMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
+                .find((button) => button.textContent?.trim() === label)
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button')]
+                .find((button) => button.querySelector('span')?.textContent?.trim() === label)
+              const currentSystemView = () => document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim()
+              const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim()
+              const assertSettings = () => {
+                if (currentSystemView() !== 'Settings' || !document.querySelector('.settings-workspace')) {
+                  throw new Error('Settings destination and content were not restored together.')
+                }
+              }
+              const assertCollection = () => {
+                if (
+                  currentSystemView() !== 'Collection' ||
+                  activeWorkspace() !== 'Collection' ||
+                  !document.querySelector('.category-tabs')
+                ) {
+                  throw new Error('Collection destination and main workspace were not restored together.')
+                }
+              }
+              const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const waitForPopState = () => new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('System navigation did not emit popstate.')), 1500)
+                window.addEventListener('popstate', () => {
+                  clearTimeout(timer)
+                  requestAnimationFrame(() => requestAnimationFrame(resolve))
+                }, { once: true })
+              })
+              assertSettings()
+              const collection = systemButton('Collection')
+              if (!collection) throw new Error('Persistent Collection navigation was not rendered.')
+              const systemNav = document.querySelector('.system-nav')
+              const navButtons = [...(systemNav?.querySelectorAll('button') ?? [])]
+              const navLabels = navButtons.map((button) => button.textContent?.trim())
+              if (navLabels.join('|') !== 'Collection|Transfers|Settings') {
+                throw new Error('System navigation order was not deterministic: ' + navLabels.join('|') + '.')
+              }
+              const navRect = systemNav?.getBoundingClientRect()
+              if (
+                !navRect ||
+                navRect.left < 0 || navRect.right > window.innerWidth ||
+                navRect.top < 0 || navRect.bottom > window.innerHeight ||
+                navRect.width <= 0 || navRect.height <= 0 ||
+                (systemNav?.scrollWidth ?? 1) > (systemNav?.clientWidth ?? 0) ||
+                (systemNav?.scrollHeight ?? 1) > (systemNav?.clientHeight ?? 0) ||
+                document.documentElement.scrollWidth > window.innerWidth
+              ) {
+                throw new Error('Persistent system navigation is clipped or overflowing.')
+              }
+              for (const button of navButtons) {
+                const rect = button.getBoundingClientRect()
+                const style = getComputedStyle(button)
+                const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+                if (
+                  button.disabled || button.tabIndex < 0 ||
+                  style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 ||
+                  rect.width <= 0 || rect.height <= 0 ||
+                  rect.left < navRect.left || rect.right > navRect.right ||
+                  rect.top < navRect.top || rect.bottom > navRect.bottom ||
+                  rect.left < 0 || rect.right > window.innerWidth ||
+                  rect.top < 0 || rect.bottom > window.innerHeight ||
+                  !hit || (hit !== button && !button.contains(hit))
+                ) {
+                  throw new Error(
+                    (button.textContent?.trim() || 'Unknown') + ' is clipped, obscured, or unavailable: ' +
+                    JSON.stringify({
+                      rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                      navRect: { left: navRect.left, right: navRect.right, top: navRect.top, bottom: navRect.bottom },
+                      viewport: { width: window.innerWidth, height: window.innerHeight },
+                      display: style.display,
+                      visibility: style.visibility,
+                      opacity: style.opacity,
+                      hit: hit ? { tag: hit.tagName, className: hit.className } : null
+                    })
+                  )
+                }
+                button.focus()
+                if (document.activeElement !== button) {
+                  throw new Error((button.textContent?.trim() || 'Unknown') + ' could not receive keyboard focus.')
+                }
+              }
+              collection.focus()
+              if (document.activeElement !== collection) throw new Error('Collection could not receive keyboard focus.')
+              collection.click()
+              await waitForFrames()
+              assertCollection()
+              const sets = workspaceButton('Sets')
+              if (!sets) throw new Error('Sets child workspace was not rendered for navigation verification.')
+              sets.click()
+              await waitForFrames()
+              if (currentSystemView() !== 'Collection' || activeWorkspace() !== 'Sets' || document.querySelector('.category-tabs')) {
+                throw new Error('Collection did not remain current while its Sets child workspace was active.')
+              }
+              const backToCollection = waitForPopState()
+              window.history.back()
+              await backToCollection
+              assertCollection()
+              const backToSettings = waitForPopState()
+              window.history.back()
+              await backToSettings
+              assertSettings()
+              const forward = waitForPopState()
+              window.history.forward()
+              await forward
+              assertCollection()
+              const returnToSettings = waitForPopState()
+              window.history.back()
+              await returnToSettings
+              assertSettings()
+              return performance.now() - started
+            })()
+          `)
+        }
         await window.webContents.executeJavaScript(`
           (async () => {
             if (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP === undefined)}) {

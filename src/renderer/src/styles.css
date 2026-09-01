@@ -469,8 +469,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .set-card li.craftable button > span:first-child { color: var(--semantic-crafting); }
 .set-card li.awakening { color: #dcc58b; }
 .set-card li.awakening button > span:first-child { color: var(--semantic-awakening); }
-.set-card li.missing { color: #656158; }
-.set-card li.missing button > span:first-child { color: #565249; }
+.set-card li.missing { color: var(--semantic-missing); }
+.set-card li.missing small { color: #aaa296; }
+.set-card li.missing button > span:first-child { color: var(--semantic-missing); }
 .set-item-badges { display: flex; max-width: 150px; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .set-member-fx { display: grid; gap: 5px; margin-top: 12px; padding: 10px; border: 1px solid rgba(78, 139, 137, .34); border-radius: 5px; background: rgba(27, 64, 62, .14); }
 .set-member-fx > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

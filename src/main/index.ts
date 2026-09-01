@@ -43,6 +43,7 @@ import {
   isCollectionOwned,
   withAwakeningAvailability
 } from '@shared/collection-availability'
+import { withRecipeAvailability } from '@shared/recipe-availability'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import {
   CollectionDatabase,
@@ -2821,22 +2822,8 @@ function withRecipeCollection(
   snapshot: CollectionSnapshot,
   isHardcore?: boolean
 ): CollectionSnapshot {
-  const recipeKnown = (item: CollectionSnapshot['items'][number]): boolean => {
-    const crafting = item.acquisition?.crafting
-    if (!crafting) return false
-    if (isHardcore === true) return crafting.knownHardcore === true
-    if (isHardcore === false) return crafting.knownSoftcore === true
-    return crafting.knownSoftcore === true || crafting.knownHardcore === true
-  }
-  const decorate = (item: CollectionSnapshot['items'][number]) => {
-    const recipeUnlocked = recipeKnown(item)
-    return {
-      ...item,
-      recipeUnlocked,
-      discovered:
-        snapshot.basis === 'archive' ? Boolean(item.discovered || recipeUnlocked) : item.discovered
-    }
-  }
+  const decorate = (item: CollectionSnapshot['items'][number]) =>
+    withRecipeAvailability(item, isHardcore)
   const recipeItemsCatalog = snapshot.items.map(decorate)
   const recipePlannerItems = (snapshot.plannerItems ?? []).map(decorate)
   const materials = (snapshot.materials ?? []).map(decorate)
@@ -3448,10 +3435,10 @@ async function runSmokeTest(
       recipeArchiveSnapshot.recipeSummary.total < 400 ||
       recipeArchiveSnapshot.recipeSummary.collected === 0 ||
       !recipeUnlockedMask?.recipeUnlocked ||
-      !recipeUnlockedMask.discovered ||
+      recipeUnlockedMask.discovered ||
       recipeUnlockedMask.availableCount !== 0
     ) {
-      throw new Error('Known recipes did not unlock their Codex items without creating stored copies.')
+      throw new Error('Known recipes did not stay explicit and separate from discovered copies.')
     }
     const awakenedCatalogItem = helperSnapshot.items.find((item) => item.baseVersionRecord)
     const awakeningBase = awakenedCatalogItem?.baseVersionRecord

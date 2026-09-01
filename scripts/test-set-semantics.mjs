@@ -91,13 +91,15 @@ const tokenSource = readFileSync(new URL('../src/renderer/src/semantic-tokens.cs
 const semanticColors = [...tokenSource.matchAll(/--(?:gd-rarity|semantic)-[\w-]+:\s*(#[0-9a-f]{6})/gi)]
   .map((match) => ({ name: match[0].slice(2, match[0].indexOf(':')), color: match[1] }))
 assert(semanticColors.length >= 10, 'Expected every semantic tone to expose a hex token')
+const tokenByName = new Map(semanticColors.map(({ name, color }) => [name, color]))
+const rarityCardBackgrounds = ['gd-rarity-epic', 'gd-rarity-legendary'].map((name) =>
+  compositeHex(tokenByName.get(name), '#2a2720', 0.09)
+)
 for (const { name, color: foreground } of semanticColors) {
-  const backgrounds = ['#11110f', '#2d252a']
-  if (name.startsWith('gd-rarity-')) {
-    // The first set-card gradient stop mixes 9% rarity color into its base
-    // before SemanticBadge adds its own 12% tint.
-    backgrounds.push(compositeHex(foreground, '#2a2720', 0.09))
-  }
+  // The first set-card gradient stop mixes 9% rarity color into its base
+  // before SemanticBadge adds its own 12% tint. Every badge tone can appear
+  // on either rarity card, so test the full foreground/background cross-product.
+  const backgrounds = ['#11110f', '#2d252a', ...rarityCardBackgrounds]
   for (const background of backgrounds) {
     const badgeSurface = compositeHex(foreground, background, 0.12)
     assert(contrastRatio(foreground, badgeSurface) >= 4.5,

@@ -1283,7 +1283,7 @@ body.planner-setup-active { overflow: hidden; }
 .vault-panel h3, .vault-history h3 { margin: 0; color: #e2d7c0; font-size: 22px; font-weight: 500; }
 .vault-panel > header > strong { color: #d0a95d; font: 500 30px Georgia, serif; }
 .panel-help { min-height: 42px; margin: 12px 0 16px; color: #777064; font-size: 12px; line-height: 1.5; }
-.vault-item-list { display: grid; gap: 5px; max-height: 290px; overflow-y: auto; margin-bottom: 16px; }
+.quarantine-results .bounded-results-collection { display: grid; gap: 5px; max-height: 290px; overflow-y: auto; margin-bottom: 16px; }
 .vault-row { display: grid; grid-template-columns: 24px 1fr; align-items: center; gap: 10px; padding: 10px; border: 1px solid #37332b; border-radius: 5px; color: #beb39b; background: rgba(20, 20, 17, 0.58); }
 .vault-row input { accent-color: #bc8d3b; }
 .vault-row div { display: grid; gap: 3px; }

@@ -803,9 +803,6 @@ const visibleSupplyVaultItems = computed(() => supplyVaultItems.value.slice(0, s
 const workspaceToolIdSet = computed(() => new Set(visibleWorkspaceToolIds.value))
 const quarantinedVaultItems = computed(() => quarantineVaultPage.value.items)
 const visibleQuarantinedVaultItems = computed(() => quarantinedVaultItems.value)
-const vaultQuarantinePageCount = computed(() =>
-  Math.max(1, Math.ceil(quarantineVaultPage.value.total / vaultPageSize))
-)
 const activeHistoryKind = computed(() =>
   transferSection.value === 'ingest-history' ? 'ingest' as const : 'retrieve' as const
 )
@@ -2476,9 +2473,6 @@ watch(vaultQuarantinePage, () => {
 })
 watch(vaultPageCount, (count) => {
   if (vaultPage.value > count) vaultPage.value = count
-})
-watch(vaultQuarantinePageCount, (count) => {
-  if (vaultQuarantinePage.value > count) vaultQuarantinePage.value = count
 })
 watch(supplyCategory, () => {
   supplySlotFilter.value = 'all'
@@ -7698,18 +7692,36 @@ function formatPercentile(value: number | null | undefined): string {
               </div>
             </header>
             <p>CC retained these items because they could not safely join the collection catalog. Review the exact record and return only the copies you recognize.</p>
-            <div v-if="visibleQuarantinedVaultItems.length" class="vault-item-list selectable">
-              <label v-for="item in visibleQuarantinedVaultItems" :key="item.id" class="vault-row unsupported">
-                <input type="checkbox" :checked="selectedVaultIds.includes(item.id)" :disabled="vaultBusy" @change="toggleVaultItem(item.id)" />
-                <div><strong>{{ item.name }}</strong><small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.baseRecord }} · seed {{ item.seed }}</small></div>
-              </label>
-            </div>
-            <div v-else class="vault-empty">Nothing is waiting in quarantine.</div>
-            <nav v-if="vaultQuarantinePageCount > 1" class="pagination vault-pagination" aria-label="Quarantine pages">
-              <button type="button" :disabled="vaultQuarantinePage === 1" @click="vaultQuarantinePage -= 1">Previous</button>
-              <span>Page {{ vaultQuarantinePage }} of {{ vaultQuarantinePageCount }}</span>
-              <button type="button" :disabled="vaultQuarantinePage === vaultQuarantinePageCount" @click="vaultQuarantinePage += 1">Next</button>
-            </nav>
+            <BoundedResultSurface
+              v-model:page="vaultQuarantinePage"
+              v-model:selected-keys="selectedVaultIds"
+              class="quarantine-results"
+              :items="visibleQuarantinedVaultItems"
+              :get-key="item => item.id"
+              :page-size="vaultPageSize"
+              :total-count="quarantineVaultPage.total"
+              :loading="vaultPageLoading"
+              :selection-disabled="vaultBusy"
+              label="Quarantined items"
+              selection-mode="multiple"
+              remote
+              empty-title="Nothing is waiting in quarantine"
+              empty-detail="Items that cannot safely join the catalog will appear here for review."
+            >
+              <template #item="{ item, selected }">
+                <div class="vault-row unsupported">
+                  <input
+                    type="checkbox"
+                    :checked="selected"
+                    :disabled="vaultBusy"
+                    :aria-label="`Select ${item.name}`"
+                    @click.stop
+                    @change="toggleVaultItem(item.id)"
+                  />
+                  <div><strong>{{ item.name }}</strong><small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.baseRecord }} · seed {{ item.seed }}</small></div>
+                </div>
+              </template>
+            </BoundedResultSurface>
             <div class="quarantine-actions">
               <button
                 v-if="transferMode === 'live'"

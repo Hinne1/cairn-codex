@@ -71,9 +71,10 @@ pure paging and keyboard model in `src/renderer/src/bounded-results.ts`.
 - Selection is keyed by domain identity and may survive sorting or paging when the owning tool
   permits it. A workspace must clear selection explicitly when its safety rules require that.
 
-Transfers operation history is the first server-paged adopter. Remaining Transfers, MI
-Workshop, Planner, and Skills migrations are tracked incrementally under #21 so each change can
-be visually and behaviorally verified without an `App.vue` flag-day rewrite.
+Transfers operation history and quarantine are the first server-paged adopters. Quarantine uses
+the shared multi-selection model while retaining its fail-closed transfer controls. MI Workshop,
+Planner, and Skills migrations are tracked incrementally under #21 so each change can be
+visually and behaviorally verified without an `App.vue` flag-day rewrite.
 
 ## Search and filter semantics
 

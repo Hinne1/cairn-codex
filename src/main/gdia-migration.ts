@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, stat } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { CollectionDatabase, VaultImportResult } from './collection-database'
+import { prepareGdiaBackup } from './gdia-backup'
 
 interface GdiaPlayerItemRow {
   Id: number
@@ -37,6 +38,7 @@ export interface GdiaMigrationResult extends VaultImportResult {
   sourceSoftcoreItems: number
   sourceSha256: string
   backupPath: string
+  backupReused: boolean
 }
 
 export async function migrateGdiaDatabase(
@@ -45,18 +47,8 @@ export async function migrateGdiaDatabase(
   backupDirectory: string,
   options: { requireHardcoreOnly?: boolean; requireAllCatalogued?: boolean } = {}
 ): Promise<GdiaMigrationResult> {
-  const sourceSha256 = await hashFile(sourcePath)
-  await mkdir(backupDirectory, { recursive: true })
-  const backupPath = join(
-    backupDirectory,
-    `${basename(sourcePath)}.${new Date().toISOString().replaceAll(/[-:.]/g, '')}.${sourceSha256.slice(0, 12)}.bak`
-  )
-  await copyFile(sourcePath, backupPath)
-  const backupSha256 = await hashFile(backupPath)
-  const sourceSha256AfterCopy = await hashFile(sourcePath)
-  if (backupSha256 !== sourceSha256 || sourceSha256AfterCopy !== sourceSha256) {
-    throw new Error('The GDIA database changed during backup; migration was aborted before import.')
-  }
+  const backup = await prepareGdiaBackup(sourcePath, backupDirectory)
+  const { backupPath, sourceSha256 } = backup
 
   // Import from the verified immutable copy, never from GDIA's live database.
   const source = new DatabaseSync(backupPath, { readOnly: true })
@@ -129,7 +121,8 @@ export async function migrateGdiaDatabase(
       sourceHardcoreItems,
       sourceSoftcoreItems: items.length - sourceHardcoreItems,
       sourceSha256,
-      backupPath
+      backupPath,
+      backupReused: backup.reused
     }
   } finally {
     source.close()

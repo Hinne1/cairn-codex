@@ -124,6 +124,7 @@ export interface GdiaImportResult {
   duplicateItems: number
   unsupportedItems: number
   backupPath: string | null
+  backupReused: boolean
 }
 
 export interface RecoveryStatus {

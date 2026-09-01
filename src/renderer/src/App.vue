@@ -6937,6 +6937,7 @@ function formatPercentile(value: number | null | undefined): string {
               <div><dt>Unsupported</dt><dd>{{ gdiaImportResult.unsupportedItems }}</dd></div>
               <div><dt>Modes</dt><dd>{{ gdiaImportResult.sourceSoftcoreItems }} SC · {{ gdiaImportResult.sourceHardcoreItems }} HC</dd></div>
               <div><dt>Pending queue</dt><dd>{{ gdiaImportResult.sourceQueueItems }}</dd></div>
+              <div><dt>Source backup</dt><dd>{{ gdiaImportResult.backupReused ? 'Verified copy reused' : 'Verified copy created' }}</dd></div>
             </dl>
           </article>
 

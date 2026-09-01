@@ -63,6 +63,7 @@ while ((line = Console.ReadLine()) is not null)
             "inspect-live-retrieval" => InspectLiveRetrieval(request),
             "self-test-write-transaction" => HelperResponse.Success(request.Id, WriteTransactionSelfTest.Run()),
             "self-test-live-queue" => HelperResponse.Success(request.Id, LiveGameAdapter.SelfTest()),
+            "self-test-dismantling" => HelperResponse.Success(request.Id, DismantlingSimulatorSelfTest.Run()),
             "validate-transfer-stash-roundtrip" => ValidateTransferStashRoundTrip(request),
             "validate-ingest-plan" => ValidateIngestPlan(request),
             "plan-ingest-items" => PlanIngestItems(request),

@@ -18,6 +18,13 @@ internal static partial class DismantlingSimulator
         IReadOnlyList<DismantlingInputItem> items)
     {
         var data = ItemCatalogBuilder.Load(installationPath);
+        return Simulate(data, items);
+    }
+
+    internal static DismantlingPreview Simulate(
+        ItemCatalogData data,
+        IReadOnlyList<DismantlingInputItem> items)
+    {
         if (!data.Records.TryGetValue(DismantleTable, out var source))
         {
             throw new InvalidDataException("The installed Grim Dawn dismantling table was not found.");
@@ -144,7 +151,7 @@ internal static partial class DismantlingSimulator
                     : [];
             }
 
-            if (record.Type is "LootMasterTable" or "LootItemTable_DynWeight")
+            if (record.Type == "LootMasterTable")
             {
                 var choices = Enumerable.Range(1, 200)
                     .Select(index => new
@@ -152,13 +159,14 @@ internal static partial class DismantlingSimulator
                         path = record.Text("lootName" + index),
                         weight = Math.Max(0, record.Number("lootWeight" + index) ?? 0)
                     })
-                    .Where(choice => choice.path is not null && choice.weight > 0)
+                    .Where(choice => choice.weight > 0)
                     .ToArray();
                 var total = choices.Sum(choice => choice.weight);
                 if (total <= 0) return [];
                 var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
                 foreach (var choice in choices)
                 {
+                    if (choice.path is null) continue;
                     foreach (var terminal in Flatten(data, choice.path!, itemLevel, ancestors))
                     {
                         result[terminal.Key] = result.GetValueOrDefault(terminal.Key) +
@@ -168,11 +176,114 @@ internal static partial class DismantlingSimulator
                 return result;
             }
 
+            if (record.Type == "LootItemTable_DynWeight")
+            {
+                return FlattenDynamicTable(data, record, itemLevel, ancestors);
+            }
+
             return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { [recordName] = 1 };
         }
         finally
         {
             ancestors.Remove(recordName);
+        }
+    }
+
+    private static Dictionary<string, double> FlattenDynamicTable(
+        ItemCatalogData data,
+        ArzRecord record,
+        int parentLevel,
+        HashSet<string> ancestors)
+    {
+        var disableLevelLimits = (record.Number("disableLevelLimits") ?? 0) != 0;
+        var minimum = disableLevelLimits
+            ? double.NegativeInfinity
+            : EvaluateEquation(record.Text("minItemLevelEquation") ?? "1", parentLevel);
+        var maximum = disableLevelLimits
+            ? double.PositiveInfinity
+            : EvaluateEquation(record.Text("maxItemLevelEquation") ?? "parentLevel", parentLevel);
+        var target = EvaluateEquation(record.Text("targetLevelEquation") ?? "parentLevel", parentLevel);
+        if (minimum > maximum)
+        {
+            throw new InvalidDataException(
+                $"Dynamic loot table {record.Name} has an inverted item-level range ({minimum}..{maximum}).");
+        }
+
+        var bellSlope = record.Values.GetValueOrDefault("bellSlope")?
+            .Select(value => Math.Max(0, value.Number ?? 0))
+            .ToArray() ?? [];
+        var choices = Enumerable.Range(1, 200)
+            .Select(index => new
+            {
+                path = record.Text("lootName" + index),
+                baseWeight = Math.Max(0, record.Number("lootWeight" + index) ?? 0)
+            })
+            .Where(choice => choice.baseWeight > 0)
+            .Select(choice =>
+            {
+                if (choice.path is null)
+                {
+                    return new WeightedChoice(null, choice.baseWeight);
+                }
+                if (!data.Records.TryGetValue(choice.path, out var candidate))
+                {
+                    throw new InvalidDataException(
+                        $"Dynamic loot table {record.Name} references a missing record: {choice.path}");
+                }
+
+                var candidateLevel = candidate.Record.Number("itemLevel");
+                if (!disableLevelLimits && candidateLevel is null)
+                {
+                    throw new InvalidDataException(
+                        $"Dynamic loot candidate {choice.path} has no itemLevel for range validation.");
+                }
+                if (candidateLevel is not null && (candidateLevel < minimum || candidateLevel > maximum))
+                {
+                    return new WeightedChoice(choice.path, 0);
+                }
+
+                var multiplier = BellMultiplier(bellSlope, candidateLevel ?? target, target);
+                return new WeightedChoice(choice.path, choice.baseWeight * multiplier);
+            })
+            .Where(choice => choice.Weight > 0)
+            .ToArray();
+        var total = choices.Sum(choice => choice.Weight);
+        if (total <= 0) return [];
+
+        var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var choice in choices)
+        {
+            if (choice.Path is null) continue;
+            foreach (var terminal in Flatten(data, choice.Path, parentLevel, ancestors))
+            {
+                result[terminal.Key] = result.GetValueOrDefault(terminal.Key) +
+                    choice.Weight / total * terminal.Value;
+            }
+        }
+        return result;
+    }
+
+    private static double BellMultiplier(IReadOnlyList<double> bellSlope, double itemLevel, double targetLevel)
+    {
+        if (bellSlope.Count == 0) return 1;
+        var distance = checked((int)Math.Round(
+            Math.Abs(itemLevel - targetLevel), MidpointRounding.AwayFromZero));
+        return distance < bellSlope.Count ? bellSlope[distance] : 0;
+    }
+
+    private static double EvaluateEquation(string expression, int parentLevel)
+    {
+        try
+        {
+            return new EquationParser(expression, parentLevel).Parse();
+        }
+        catch (InvalidDataException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is OverflowException or DivideByZeroException)
+        {
+            throw new InvalidDataException($"Unsupported Grim Dawn loot equation: {expression}", exception);
         }
     }
 
@@ -246,6 +357,110 @@ internal static partial class DismantlingSimulator
         public string Category { get; } = category;
         public double ExpectedCount { get; set; }
         public double NoDropProbability { get; set; } = 1;
+    }
+
+    private sealed record WeightedChoice(string? Path, double Weight);
+
+    private sealed class EquationParser(string expression, double parentLevel)
+    {
+        private int cursor;
+
+        public double Parse()
+        {
+            var value = ParseAdditive();
+            SkipWhitespace();
+            if (cursor != expression.Length || !double.IsFinite(value))
+            {
+                throw InvalidEquation();
+            }
+            return value;
+        }
+
+        private double ParseAdditive()
+        {
+            var value = ParseMultiplicative();
+            while (true)
+            {
+                SkipWhitespace();
+                if (Take('+')) value += ParseMultiplicative();
+                else if (Take('-')) value -= ParseMultiplicative();
+                else return value;
+            }
+        }
+
+        private double ParseMultiplicative()
+        {
+            var value = ParseUnary();
+            while (true)
+            {
+                SkipWhitespace();
+                if (Take('*')) value *= ParseUnary();
+                else if (Take('/'))
+                {
+                    var divisor = ParseUnary();
+                    if (divisor == 0) throw InvalidEquation();
+                    value /= divisor;
+                }
+                else return value;
+            }
+        }
+
+        private double ParseUnary()
+        {
+            SkipWhitespace();
+            if (Take('+')) return ParseUnary();
+            if (Take('-')) return -ParseUnary();
+            return ParsePrimary();
+        }
+
+        private double ParsePrimary()
+        {
+            SkipWhitespace();
+            if (Take('('))
+            {
+                var value = ParseAdditive();
+                SkipWhitespace();
+                if (!Take(')')) throw InvalidEquation();
+                return value;
+            }
+
+            if (cursor < expression.Length && (char.IsLetter(expression[cursor]) || expression[cursor] == '_'))
+            {
+                var start = cursor++;
+                while (cursor < expression.Length &&
+                       (char.IsLetterOrDigit(expression[cursor]) || expression[cursor] == '_')) cursor++;
+                var identifier = expression[start..cursor];
+                return identifier.Equals("parentLevel", StringComparison.OrdinalIgnoreCase)
+                    ? parentLevel
+                    : throw InvalidEquation();
+            }
+
+            var numberStart = cursor;
+            while (cursor < expression.Length &&
+                   (char.IsDigit(expression[cursor]) || expression[cursor] == '.')) cursor++;
+            if (numberStart == cursor ||
+                !double.TryParse(expression[numberStart..cursor], NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture, out var number))
+            {
+                throw InvalidEquation();
+            }
+            return number;
+        }
+
+        private void SkipWhitespace()
+        {
+            while (cursor < expression.Length && char.IsWhiteSpace(expression[cursor])) cursor++;
+        }
+
+        private bool Take(char token)
+        {
+            if (cursor >= expression.Length || expression[cursor] != token) return false;
+            cursor++;
+            return true;
+        }
+
+        private InvalidDataException InvalidEquation() =>
+            new($"Unsupported Grim Dawn loot equation: {expression}");
     }
 }
 

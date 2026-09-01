@@ -5191,6 +5191,45 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION === '1' && !transferSection) {
+          interactionTimings.navigationMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
+                .find((button) => button.textContent?.trim() === label)
+              const currentSystemView = () => document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim()
+              const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const waitForPopState = () => new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('System navigation did not emit popstate.')), 1500)
+                window.addEventListener('popstate', () => {
+                  clearTimeout(timer)
+                  requestAnimationFrame(() => requestAnimationFrame(resolve))
+                }, { once: true })
+              })
+              if (currentSystemView() !== 'Settings') throw new Error('Settings was not the active system destination.')
+              const collection = systemButton('Collection')
+              if (!collection) throw new Error('Persistent Collection navigation was not rendered.')
+              collection.click()
+              await waitForFrames()
+              if (currentSystemView() !== 'Collection' || !document.querySelector('.hero')) {
+                throw new Error('Collection navigation did not restore the main workspace.')
+              }
+              const back = waitForPopState()
+              window.history.back()
+              await back
+              if (currentSystemView() !== 'Settings') throw new Error('Back did not restore Settings.')
+              const forward = waitForPopState()
+              window.history.forward()
+              await forward
+              if (currentSystemView() !== 'Collection') throw new Error('Forward did not restore Collection.')
+              const returnToSettings = waitForPopState()
+              window.history.back()
+              await returnToSettings
+              if (currentSystemView() !== 'Settings') throw new Error('Final screenshot did not return to Settings.')
+              return performance.now() - started
+            })()
+          `)
+        }
         await window.webContents.executeJavaScript(`
           (async () => {
             if (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP === undefined)}) {

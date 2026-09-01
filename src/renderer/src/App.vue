@@ -2312,6 +2312,11 @@ function navigateAppHistory(direction: 'back' | 'forward'): void {
   if (direction === 'forward' && canNavigateForward.value) window.history.forward()
 }
 
+function returnToCollection(): void {
+  selectedRecord.value = null
+  activeView.value = 'collection'
+}
+
 watch(
   [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, setFeatureFilter, setSortMode, setSortDirection, materialCategory],
   () => {
@@ -5397,10 +5402,28 @@ function formatPercentile(value: number | null | undefined): string {
           <button v-if="false" type="button" :aria-expanded="todoOpen" @click="openTodos">
             To-do <span v-if="remainingTodoCount" class="todo-nav-count">{{ remainingTodoCount }}</span>
           </button>
-          <button type="button" :class="{ active: activeView === 'vault' }" @click="activeView = 'vault'">
+          <button
+            type="button"
+            :class="{ active: activeView === 'collection' }"
+            :aria-current="activeView === 'collection' ? 'page' : undefined"
+            @click="returnToCollection"
+          >
+            Collection
+          </button>
+          <button
+            type="button"
+            :class="{ active: activeView === 'vault' }"
+            :aria-current="activeView === 'vault' ? 'page' : undefined"
+            @click="activeView = 'vault'"
+          >
             Transfers
           </button>
-          <button type="button" :class="{ active: activeView === 'settings' }" @click="activeView = 'settings'">
+          <button
+            type="button"
+            :class="{ active: activeView === 'settings' }"
+            :aria-current="activeView === 'settings' ? 'page' : undefined"
+            @click="activeView = 'settings'"
+          >
             Settings
           </button>
         </nav>

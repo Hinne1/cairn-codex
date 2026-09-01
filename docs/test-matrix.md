@@ -35,6 +35,7 @@ a supported game installation and records the manual live-transfer results here.
 | Representative ingest plans | desktop smoke | 5 passed without writing game files |
 | Representative ingest/retrieval round trips | desktop smoke | 5 passed in memory |
 | Packaged helper with external .NET lookup disabled | packaged-helper smoke | Passed |
+| Windows application icon pipeline | deterministic SVG-to-ICO check, portable and NSIS builds, and extracted-resource pixel comparison | **Passed 2026-09-01:** the repo-owned Cairn mark generates nine Windows icon frames (16–256px); the development `BrowserWindow` and AppUserModelID use it; portable EXE, installed EXE, setup, uninstaller, and shortcut configuration use the same ICO; extracted portable, installed, and setup resources match its 32px frame pixel-for-pixel. |
 | Empty Cairn user profile | packaged screenshot diagnostic | Passed 2026-08-30 |
 | Missing game and missing saves | isolated helper discovery roots | Passed; host environment did not leak into result |
 | Non-default Steam library and GOG install | synthetic filesystem discovery | Passed |

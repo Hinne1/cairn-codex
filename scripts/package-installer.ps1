@@ -17,6 +17,16 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'NSIS installer build failed.' }
   & node (Join-Path $PSScriptRoot 'audit-package.mjs') (Join-Path $projectRoot 'dist\builder\win-unpacked')
   if ($LASTEXITCODE -ne 0) { throw 'Installer payload audit failed.' }
+  $package = Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
+  $appIcon = Join-Path $projectRoot 'build\icon.ico'
+  & (Join-Path $PSScriptRoot 'test-app-icon.ps1') `
+    -ExecutablePath (Join-Path $projectRoot 'dist\builder\win-unpacked\Cairn Codex.exe') `
+    -IconPath $appIcon
+  if ($LASTEXITCODE -ne 0) { throw 'Installer application icon verification failed.' }
+  & (Join-Path $PSScriptRoot 'test-app-icon.ps1') `
+    -ExecutablePath (Join-Path $projectRoot "dist\builder\Cairn-Codex-$($package.version)-Setup.exe") `
+    -IconPath $appIcon
+  if ($LASTEXITCODE -ne 0) { throw 'Installer executable icon verification failed.' }
 } finally {
   Pop-Location
 }

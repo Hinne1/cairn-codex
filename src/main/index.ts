@@ -5198,6 +5198,21 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
                 .find((button) => button.textContent?.trim() === label)
               const currentSystemView = () => document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim()
+              const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim()
+              const assertSettings = () => {
+                if (currentSystemView() !== 'Settings' || !document.querySelector('.settings-workspace')) {
+                  throw new Error('Settings destination and content were not restored together.')
+                }
+              }
+              const assertCollection = () => {
+                if (
+                  currentSystemView() !== 'Collection' ||
+                  activeWorkspace() !== 'Collection' ||
+                  !document.querySelector('.category-tabs')
+                ) {
+                  throw new Error('Collection destination and main workspace were not restored together.')
+                }
+              }
               const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const waitForPopState = () => new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(new Error('System navigation did not emit popstate.')), 1500)
@@ -5206,26 +5221,47 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                   requestAnimationFrame(() => requestAnimationFrame(resolve))
                 }, { once: true })
               })
-              if (currentSystemView() !== 'Settings') throw new Error('Settings was not the active system destination.')
+              assertSettings()
               const collection = systemButton('Collection')
               if (!collection) throw new Error('Persistent Collection navigation was not rendered.')
+              const systemNav = document.querySelector('.system-nav')
+              const navButtons = [...(systemNav?.querySelectorAll('button') ?? [])]
+              const navLabels = navButtons.map((button) => button.textContent?.trim())
+              if (navLabels.join('|') !== 'Collection|Transfers|Settings') {
+                throw new Error('System navigation order was not deterministic: ' + navLabels.join('|') + '.')
+              }
+              const navRect = systemNav?.getBoundingClientRect()
+              const collectionRect = collection.getBoundingClientRect()
+              if (
+                !navRect ||
+                navRect.left < 0 || navRect.right > window.innerWidth ||
+                collectionRect.left < navRect.left || collectionRect.right > navRect.right ||
+                collectionRect.width <= 0 || collectionRect.height <= 0 ||
+                (systemNav?.scrollWidth ?? 1) > (systemNav?.clientWidth ?? 0) ||
+                document.documentElement.scrollWidth > window.innerWidth
+              ) {
+                throw new Error('Persistent system navigation is clipped or horizontally overflowing.')
+              }
+              if (navButtons.some((button) => button.disabled || button.tabIndex < 0)) {
+                throw new Error('A system destination is not keyboard-focusable.')
+              }
+              collection.focus()
+              if (document.activeElement !== collection) throw new Error('Collection could not receive keyboard focus.')
               collection.click()
               await waitForFrames()
-              if (currentSystemView() !== 'Collection' || !document.querySelector('.hero')) {
-                throw new Error('Collection navigation did not restore the main workspace.')
-              }
+              assertCollection()
               const back = waitForPopState()
               window.history.back()
               await back
-              if (currentSystemView() !== 'Settings') throw new Error('Back did not restore Settings.')
+              assertSettings()
               const forward = waitForPopState()
               window.history.forward()
               await forward
-              if (currentSystemView() !== 'Collection') throw new Error('Forward did not restore Collection.')
+              assertCollection()
               const returnToSettings = waitForPopState()
               window.history.back()
               await returnToSettings
-              if (currentSystemView() !== 'Settings') throw new Error('Final screenshot did not return to Settings.')
+              assertSettings()
               return performance.now() - started
             })()
           `)

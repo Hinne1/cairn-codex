@@ -327,6 +327,9 @@ const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
 const zoomFactor = ref(initialPreferences.appearance.zoomFactor)
 const activeCategory = ref('All')
 const activeView = ref<ActiveView>('collection')
+const collectionSystemDestinationActive = computed(() =>
+  activeView.value !== 'vault' && activeView.value !== 'settings'
+)
 const query = ref('')
 const searchQuery = ref('')
 const ownership = ref<OwnershipFilter>('all')
@@ -5404,8 +5407,8 @@ function formatPercentile(value: number | null | undefined): string {
           </button>
           <button
             type="button"
-            :class="{ active: activeView === 'collection' }"
-            :aria-current="activeView === 'collection' ? 'page' : undefined"
+            :class="{ active: collectionSystemDestinationActive }"
+            :aria-current="collectionSystemDestinationActive ? 'page' : undefined"
             @click="returnToCollection"
           >
             Collection

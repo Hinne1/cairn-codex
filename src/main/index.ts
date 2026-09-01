@@ -70,6 +70,30 @@ import {
   runGlobalRollHydration,
   TrailingJobQueue
 } from './background-jobs'
+import { createMainIpcDomains } from './ipc/domains.ts'
+import {
+  booleanField,
+  validateBackgroundJobId,
+  validateCollectionRequest,
+  validateNavigation,
+  validateOperationHistory,
+  validateOptionalMode,
+  validatePath,
+  validatePathAndVaultIds,
+  validatePinnedBest,
+  validatePreferenceLoad,
+  validateRendererError,
+  validateSerializedPreferences,
+  validateSourcePaths,
+  validateSpecialRecovery,
+  validateStartupPhase,
+  validateSupplyDispense,
+  validateVaultIds,
+  validateVaultPage,
+  validateZoomFactor
+} from './ipc/validation.ts'
+import { registerManagedShutdown, registerPrimaryWindowLifecycle } from './window-lifecycle.ts'
+import { MainOperationCoordinator } from './operation-coordinator.ts'
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -672,50 +696,30 @@ function registerIpcHandlers(
   startupRecovery: StartupRecoveryService,
   jobs: BackgroundJobCoordinator
 ): () => Promise<void> {
-  let writeQueue: Promise<void> = Promise.resolve()
+  const ipcDomains = createMainIpcDomains(ipcMain)
   let latestCollection: CollectionSnapshot | null = null
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
   const gdiaBackupDirectory = join(app.getPath('userData'), 'migrations', 'gdia')
   let gdiaImportProgress: GdiaImportProgress | null = null
-  const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = writeQueue.then(operation, operation)
-    writeQueue = result.then(
-      () => undefined,
-      () => undefined
-    )
-    return result
-  }
+  const operations = new MainOperationCoordinator({
+    diagnostics,
+    reconcileTransfers: () => reconcileLiveRecoveryOperations(helper, database, diagnostics),
+    unresolvedTransferCount: () => database.getRecoveryOperationCount()
+  })
+  const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => operations.runExclusive(operation)
   const runTransferExclusive = <T>(operation: () => Promise<T>): Promise<T> =>
-    runExclusive(async () => {
-      await reconcileLiveRecoveryOperations(helper, database, diagnostics)
-      const unresolved = database.getRecoveryOperationCount()
-      if (unresolved > 0) {
-        throw new Error(
-          `${unresolved} earlier transfer operation${unresolved === 1 ? '' : 's'} require recovery attention. ` +
-          'Pause writes, export diagnostics in Settings, and audit the retained journal and receipts first.'
-        )
-      }
-      return operation()
-    })
-  const runDiagnosticOperation = async <T>(
+    operations.runTransferExclusive(operation)
+  const runDiagnosticOperation = <T>(
     scope: string,
     event: string,
     operation: () => Promise<T>,
     startData?: Record<string, unknown>,
     completedData?: (result: T) => Record<string, unknown>,
-    correlationId: string = randomUUID()
-  ): Promise<T> => {
-    const startedAt = diagnostics.operationStarted(scope, event, correlationId, startData)
-    try {
-      const result = await operation()
-      diagnostics.operationCompleted(scope, event, correlationId, startedAt, completedData?.(result))
-      return result
-    } catch (error) {
-      diagnostics.operationFailed(scope, event, correlationId, startedAt, error)
-      throw error
-    }
-  }
+    correlationId?: string
+  ): Promise<T> => operations.runDiagnostic(
+    scope, event, operation, startData, completedData, correlationId
+  )
   const queuedArchiveBackups = new TrailingJobQueue<string>(async (queuedReason) => {
     await runArchiveBackupJob(
       jobs,
@@ -737,18 +741,19 @@ function registerIpcHandlers(
       }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.getBackgroundJobs, () => jobs.list())
-  ipcMain.handle(
+  ipcDomains.backgroundJobs.handle(IPC_CHANNELS.getBackgroundJobs, () => jobs.list())
+  ipcDomains.backgroundJobs.handle(
     IPC_CHANNELS.cancelBackgroundJob,
     (_event, input: { id: string }) => {
       if (!input || !isBackgroundJobId(input.id)) {
         throw new Error('A valid background job ID is required.')
       }
       return jobs.requestCancellation(input.id)
-    }
+    },
+    validateBackgroundJobId
   )
 
-  ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
+  ipcDomains.diagnostics.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
     try {
       await helper.request('health')
       return { appVersion: app.getVersion(), helper: 'available', mode: 'read-only', safeMode: startupRecovery.getStatus() }
@@ -756,7 +761,7 @@ function registerIpcHandlers(
       return { appVersion: app.getVersion(), helper: 'unavailable', mode: 'read-only', safeMode: startupRecovery.getStatus() }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.getDebugLogging, (): DebugLoggingStatus => {
+  ipcDomains.diagnostics.handle(IPC_CHANNELS.getDebugLogging, (): DebugLoggingStatus => {
     const policy = diagnostics.getRetentionPolicy()
     return {
       enabled: diagnostics.getDebugMode(),
@@ -765,7 +770,7 @@ function registerIpcHandlers(
       maxAgeDays: policy.maxAgeDays
     }
   })
-  ipcMain.handle(
+  ipcDomains.diagnostics.handle(
     IPC_CHANNELS.setDebugLogging,
     (_event, input: { enabled: boolean }): DebugLoggingStatus => {
       if (typeof input?.enabled !== 'boolean') throw new Error('Debug logging must be enabled or disabled explicitly.')
@@ -778,9 +783,10 @@ function registerIpcHandlers(
         maxFileBytes: policy.maxFileBytes,
         maxAgeDays: policy.maxAgeDays
       }
-    }
+    },
+    booleanField('enabled', 'Debug logging must be enabled or disabled explicitly.')
   )
-  ipcMain.handle(
+  ipcDomains.diagnostics.handle(
     IPC_CHANNELS.recordNavigation,
     (_event, input: { view: string }): void => {
       const views = new Set([
@@ -789,9 +795,10 @@ function registerIpcHandlers(
       ])
       if (!views.has(input?.view)) throw new Error('Unknown workspace navigation event.')
       diagnostics.info('navigation', 'workspace.opened', { view: input.view })
-    }
+    },
+    validateNavigation
   )
-  ipcMain.handle(
+  ipcDomains.diagnostics.handle(
     IPC_CHANNELS.reportRendererError,
     (_event, input: RendererErrorReport): void => {
       if (
@@ -808,9 +815,10 @@ function registerIpcHandlers(
         new Error(input.message),
         { correlationId: input.correlationId, workspace: input.workspace, stack: input.stack }
       )
-    }
+    },
+    validateRendererError
   )
-  ipcMain.handle(
+  ipcDomains.diagnostics.handle(
     IPC_CHANNELS.reportPreferenceLoad,
     (_event, input: PreferenceLoadReport): void => {
       const sources = new Set(['fresh', 'legacy', 'stored'])
@@ -830,9 +838,10 @@ function registerIpcHandlers(
       }
       if (input.invalidFields.length) diagnostics.warn('settings', event, data)
       else diagnostics.info('settings', event, data)
-    }
+    },
+    validatePreferenceLoad
   )
-  ipcMain.handle(
+  ipcDomains.diagnostics.handle(
     IPC_CHANNELS.exportPreferences,
     async (_event, input: { serialized: string }): Promise<DiagnosticExportResult> => {
       if (!input || typeof input.serialized !== 'string' || input.serialized.length > 2 * 1024 * 1024) {
@@ -853,7 +862,8 @@ function registerIpcHandlers(
       await writeFile(selection.filePath, input.serialized, 'utf8')
       diagnostics.info('settings', 'preferences.exported', { schemaVersion: 1 })
       return { canceled: false, path: selection.filePath }
-    }
+    },
+    validateSerializedPreferences
   )
   const restartWithSafeMode = (safe: boolean): void => {
     const args = process.argv.slice(1).filter((argument) => argument !== SAFE_MODE_ARGUMENT)
@@ -862,10 +872,10 @@ function registerIpcHandlers(
     app.relaunch({ args })
     app.quit()
   }
-  ipcMain.handle(IPC_CHANNELS.restartInSafeMode, (): void => restartWithSafeMode(true))
-  ipcMain.handle(IPC_CHANNELS.restartNormally, (): void => restartWithSafeMode(false))
-  ipcMain.handle(IPC_CHANNELS.getStartupStatus, (): StartupStatus => presentStartupStatus())
-  ipcMain.handle(
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.restartInSafeMode, (): void => restartWithSafeMode(true))
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.restartNormally, (): void => restartWithSafeMode(false))
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.getStartupStatus, (): StartupStatus => presentStartupStatus())
+  ipcDomains.windowLifecycle.handle(
     IPC_CHANNELS.reportStartupPhase,
     (_event, input: { phase: StartupPhaseEvent }): StartupStatus => {
       const phases: StartupPhaseEvent[] = [
@@ -879,13 +889,14 @@ function registerIpcHandlers(
         diagnostics.error('recovery', 'startup-health.persist-failed', error)
       })
       return status
-    }
+    },
+    validateStartupPhase
   )
-  ipcMain.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
     return shell.openPath(app.getPath('userData'))
   })
-  ipcMain.handle(IPC_CHANNELS.getArchiveBackupStatus, () => archiveBackups.getStatus())
-  ipcMain.handle(
+  ipcDomains.backups.handle(IPC_CHANNELS.getArchiveBackupStatus, () => archiveBackups.getStatus())
+  ipcDomains.backups.handle(
     IPC_CHANNELS.createArchiveBackup,
     async (): Promise<ArchiveBackupActionResult> => {
       const backup = await runArchiveBackupJob(
@@ -897,7 +908,7 @@ function registerIpcHandlers(
       return { canceled: false, backup, path: null, restarting: false }
     }
   )
-  ipcMain.handle(
+  ipcDomains.backups.handle(
     IPC_CHANNELS.exportArchiveBackup,
     async (): Promise<ArchiveBackupActionResult> => {
       const stamp = new Date().toISOString().slice(0, 10)
@@ -923,7 +934,7 @@ function registerIpcHandlers(
       }
     }
   )
-  ipcMain.handle(
+  ipcDomains.backups.handle(
     IPC_CHANNELS.restoreArchiveBackup,
     async (): Promise<ArchiveBackupActionResult> => {
       const unresolved = database.getRecoveryOperationCount()
@@ -974,13 +985,13 @@ function registerIpcHandlers(
       return { canceled: false, backup, path: sourcePath, restarting: true }
     }
   )
-  ipcMain.handle(IPC_CHANNELS.openArchiveBackupDirectory, async (): Promise<string> => {
+  ipcDomains.backups.handle(IPC_CHANNELS.openArchiveBackupDirectory, async (): Promise<string> => {
     return shell.openPath((await archiveBackups.getStatus()).backupDirectory)
   })
-  ipcMain.handle(IPC_CHANNELS.getLastGdiaImportResult, () =>
+  ipcDomains.imports.handle(IPC_CHANNELS.getLastGdiaImportResult, () =>
     readLastGdiaImportResult(gdiaBackupDirectory))
-  ipcMain.handle(IPC_CHANNELS.getGdiaImportProgress, () => gdiaImportProgress)
-  ipcMain.handle(IPC_CHANNELS.importGdiaDatabase, async (event): Promise<GdiaImportResult> => {
+  ipcDomains.imports.handle(IPC_CHANNELS.getGdiaImportProgress, () => gdiaImportProgress)
+  ipcDomains.imports.handle(IPC_CHANNELS.importGdiaDatabase, async (event): Promise<GdiaImportResult> => {
     const startedAt = Date.now()
     const importJob = jobs.run({
       kind: 'item-assistant-import',
@@ -1214,7 +1225,7 @@ function registerIpcHandlers(
     }))
     return importJob.result
   })
-  ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => runExclusive(async () => {
+  ipcDomains.diagnostics.handle(IPC_CHANNELS.getRecoveryStatus, () => runExclusive(async () => {
     await reconcileLiveRecoveryOperations(helper, database, diagnostics)
     const operations = database.getDiagnosticSummary().recoveryOperations
     return {
@@ -1228,7 +1239,7 @@ function registerIpcHandlers(
       }))
     }
   }))
-  ipcMain.handle(IPC_CHANNELS.exportDiagnostics, async () => {
+  ipcDomains.diagnostics.handle(IPC_CHANNELS.exportDiagnostics, async () => {
     const generatedAtUtc = new Date().toISOString()
     const fileStamp = generatedAtUtc.replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
     const selection = await dialog.showSaveDialog({
@@ -1356,19 +1367,20 @@ function registerIpcHandlers(
     diagnostics.info('diagnostics', 'support-bundle.exported', { formatVersion: 1 })
     return { canceled: false, path: selection.filePath }
   })
-  ipcMain.handle(
+  ipcDomains.windowLifecycle.handle(
     IPC_CHANNELS.setZoomFactor,
     (event, input: { factor: number }): number => {
       const factor = Math.min(1.8, Math.max(0.7, Math.round(input.factor * 10) / 10))
       event.sender.setZoomFactor(factor)
       return factor
-    }
+    },
+    validateZoomFactor
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.discoverGrimDawn,
     (): Promise<GrimDawnDiscovery> => helper.request<GrimDawnDiscovery>('discover-grim-dawn')
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.listCharacters,
     async (): Promise<CharacterSaveProfile[]> => {
       const discovered = latestCollection?.discovery ?? await helper.request<GrimDawnDiscovery>('discover-grim-dawn')
@@ -1377,7 +1389,7 @@ function registerIpcHandlers(
       return helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
     }
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.getCachedCollection,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot | null> => {
       const screenshotFixture = process.env.CAIRN_CODEX_SCREENSHOT_PATH
@@ -1399,9 +1411,10 @@ function registerIpcHandlers(
         ...(await presentCollection(helper, database, projected, input.basis)),
         cacheNeedsRefresh
       }
-    }
+    },
+    validateCollectionRequest
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.hydrateArchiveRolls,
     async (_event, input: { sourcePaths: string[] }): Promise<ArchiveRollHydrationResult | null> => {
       const screenshotFixture = process.env.CAIRN_CODEX_SCREENSHOT_PATH
@@ -1502,9 +1515,10 @@ function registerIpcHandlers(
         ...result,
         snapshot: await presentCollection(helper, database, projected, 'archive')
       }))
-    }
+    },
+    validateSourcePaths
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.scanCollection,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
       const scan = jobs.run({
@@ -1568,9 +1582,10 @@ function registerIpcHandlers(
       // change; keeping it inside this foreground promise left the renderer on a
       // zero-item loading screen even though the completed cache was already on disk.
       return presentCollection(helper, database, projected, input.basis)
-    }
+    },
+    validateCollectionRequest
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.rebuildGameDataIndex,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
       const rebuild = jobs.run({
@@ -1621,42 +1636,47 @@ function registerIpcHandlers(
       const rebuilt = await rebuild.result
       const projected = projectCollectionSources(rebuilt, input.sourcePaths)
       return presentCollection(helper, database, projected, input.basis)
-    }
+    },
+    validateCollectionRequest
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.setPinnedBest,
     (_event, input: { record: string; instanceKey: string | null; isHardcore: boolean }): void => {
       database.setPinnedBest(input.record, input.instanceKey, input.isHardcore)
       queueArchiveBackup('pinned copy changed')
-    }
+    },
+    validatePinnedBest
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.getInfiniteSupplies,
     (): boolean => database.getInfiniteSupplies()
   )
-  ipcMain.handle(
+  ipcDomains.collection.handle(
     IPC_CHANNELS.setInfiniteSupplies,
     async (_event, input: { enabled: boolean }): Promise<boolean> => {
       const enabled = await runExclusive(async () => database.setInfiniteSupplies(input.enabled))
       queueArchiveBackup('supply settings changed')
       return enabled
-    }
+    },
+    booleanField('enabled', 'Infinite supplies must be enabled or disabled explicitly.')
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.inspectWriteSafety,
     (): Promise<WriteSafetyStatus> => helper.request<WriteSafetyStatus>('inspect-write-safety')
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.inspectStagingTab,
     (_event, input: { path: string }): Promise<StagingTabInspection> =>
-      inspectStagingTab(helper, database, input.path)
+      inspectStagingTab(helper, database, input.path),
+    validatePath
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.listVaultItems,
     (_event, input?: { isHardcore?: boolean }): VaultListItem[] =>
-      database.listVaultItems(input?.isHardcore)
+      database.listVaultItems(input?.isHardcore),
+    validateOptionalMode
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.queryVaultItems,
     (_event, input: VaultPageRequest): VaultItemPage => {
       if (!input || !['ingested', 'retrieval_pending', 'retrieved'].includes(input.state)) {
@@ -1682,9 +1702,10 @@ function registerIpcHandlers(
         throw new Error('Vault paging parameters are outside their safe bounds.')
       }
       return database.queryVaultItems(input)
-    }
+    },
+    validateVaultPage
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.queryOperationHistory,
     (_event, input: OperationHistoryRequest): OperationHistoryPage => {
       if (!input || !['ingest', 'retrieve'].includes(input.operation)) {
@@ -1701,9 +1722,10 @@ function registerIpcHandlers(
         throw new Error('Operation-history paging parameters are outside their safe bounds.')
       }
       return database.queryOperationHistory(input)
-    }
+    },
+    validateOperationHistory
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.getVaultSummary,
     (): VaultSummary => {
       const summary = database.getVaultSummary()
@@ -1716,7 +1738,7 @@ function registerIpcHandlers(
       return summary
     }
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.previewDismantling,
     async (_event, input: { vaultItemIds: string[] }): Promise<DismantlingPreview> => {
       const requestedIds = input.vaultItemIds ?? []
@@ -1743,9 +1765,10 @@ function registerIpcHandlers(
       const installationPath = discovered.installations[0]?.path
       if (!installationPath) throw new Error('No Grim Dawn installation is available.')
       return helper.request<DismantlingPreview>('simulate-dismantling', { installationPath, items })
-    }
+    },
+    validateVaultIds
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.ingestStagingTab,
     async (_event, input: { path: string }): Promise<IngestResult> => {
       const result = await runDiagnosticOperation(
@@ -1757,9 +1780,10 @@ function registerIpcHandlers(
       )
       if (result.ingested.length > 0) queueArchiveBackup('offline ingest')
       return result
-    }
+    },
+    validatePath
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.retrieveVaultItems,
     async (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> => {
       const result = await runDiagnosticOperation(
@@ -1771,9 +1795,10 @@ function registerIpcHandlers(
       )
       if (result.retrieved.length > 0) queueArchiveBackup('offline retrieval')
       return result
-    }
+    },
+    validatePathAndVaultIds
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.inspectLiveGame,
     async (): Promise<LiveGameStatus> => {
       const status = await helper.request<LiveGameStatus>('inspect-live-game')
@@ -1788,11 +1813,11 @@ function registerIpcHandlers(
       }
     }
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.approveLiveGameBuild,
     (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('approve-live-game-build')
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.startLiveGame,
     (): Promise<LiveGameStatus> => {
       if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) {
@@ -1801,11 +1826,11 @@ function registerIpcHandlers(
       return helper.request<LiveGameStatus>('start-live-game')
     }
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.stopLiveGame,
     (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('stop-live-game')
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.syncLiveGame,
     async (): Promise<LiveGameSyncResult> => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
@@ -1821,7 +1846,7 @@ function registerIpcHandlers(
       return result
     }
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.retrieveLiveVaultItems,
     async (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> => {
       const result = await runDiagnosticOperation(
@@ -1833,9 +1858,10 @@ function registerIpcHandlers(
       )
       if (result.retrieved.length > 0) queueArchiveBackup('live retrieval')
       return result
-    }
+    },
+    validateVaultIds
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.dispenseLiveAugments,
     (_event, input: { records: string[]; expectedCharacterName?: string }): Promise<LiveSupplyDispenseResult> =>
       runDiagnosticOperation('transfer', 'supply-dispense', () => runTransferExclusive(async () => {
@@ -1850,9 +1876,10 @@ function registerIpcHandlers(
         )
         queueArchiveBackup('supply delivery')
         return result
-      }), { requestedItems: input.records.length }, (completed) => ({ deliveredItems: completed.dispensed.length }))
+      }), { requestedItems: input.records.length }, (completed) => ({ deliveredItems: completed.dispensed.length })),
+    validateSupplyDispense
   )
-  ipcMain.handle(
+  ipcDomains.transfers.handle(
     IPC_CHANNELS.recoverSahdinasMemento,
     (_event, input: { destination: SpecialRecoveryDestination; expectedCharacterName?: string }): Promise<SpecialItemRecoveryResult> =>
       runDiagnosticOperation('transfer', 'special-item-recovery', () => runTransferExclusive(async () => {
@@ -1867,12 +1894,13 @@ function registerIpcHandlers(
         )
         queueArchiveBackup('special item recovery')
         return result
-      }), { destination: input.destination }, () => ({ deliveredItems: 1 }))
+      }), { destination: input.destination }, () => ({ deliveredItems: 1 })),
+    validateSpecialRecovery
   )
   return async () => {
     stopPublishingJobs()
     await queuedArchiveBackups.flush()
-    await writeQueue
+    await operations.flush()
     await archiveBackups.flush()
     diagnostics.info('startup', 'application.shutdown')
     await diagnostics.flush()
@@ -5772,15 +5800,15 @@ const hasSingleInstanceLock = process.env.CAIRN_CODEX_SCREENSHOT_PATH ||
   : app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
   app.quit()
-} else {
-  app.on('second-instance', () => {
-    const window = BrowserWindow.getAllWindows()[0]
-    if (!window) return
-    if (window.isMinimized()) window.restore()
-    window.show()
-    window.focus()
-  })
 }
+
+let createActivatedWindow: (() => Promise<void>) | null = null
+registerPrimaryWindowLifecycle({
+  app,
+  getWindows: () => BrowserWindow.getAllWindows(),
+  createWindow: async () => { await createActivatedWindow?.() },
+  platform: process.platform
+}, hasSingleInstanceLock)
 
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
@@ -5953,6 +5981,7 @@ app.whenReady().then(async () => {
   )
   diagnostics.info('startup', 'ipc.registered')
   console.log('[startup] IPC handlers registered; creating the main window.')
+  createActivatedWindow = () => createWindow(startupRecovery.getStatus())
   void createWindow(startupRecoveryStatus)
   void jobs.run({
     kind: 'archive-backup',
@@ -5978,30 +6007,16 @@ app.whenReady().then(async () => {
     })
     .catch((error) => console.error('[archive-backup] automatic daily backup failed', error))
 
-  let shutdownReady = false
-  app.on('before-quit', (event) => {
-    if (shutdownReady) return
-    event.preventDefault()
-    void flushIpcWrites()
-      .catch((error) => console.error('[shutdown] queued archive work failed', error))
-      .finally(async () => {
-        if (!rendererProcessFailed) {
-          await startupRecovery.markHealthy().catch((error) => {
-            diagnostics.error('recovery', 'startup-health.shutdown-persist-failed', error)
-          })
-        }
-        helper.dispose()
-        database.close()
-        shutdownReady = true
-        app.quit()
+  registerManagedShutdown(app, async () => {
+    await flushIpcWrites().catch((error) => {
+      console.error('[shutdown] queued archive work failed', error)
+    })
+    if (!rendererProcessFailed) {
+      await startupRecovery.markHealthy().catch((error) => {
+        diagnostics.error('recovery', 'startup-health.shutdown-persist-failed', error)
       })
-  })
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow(startupRecovery.getStatus())
-  })
-})
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+    }
+    helper.dispose()
+    database.close()
+  }, (error) => console.error('[shutdown] queued archive work failed', error))
 })

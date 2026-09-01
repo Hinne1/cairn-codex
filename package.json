@@ -21,6 +21,7 @@
     "test:planner": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-planner-setup.mjs",
     "test:notifications": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-notifications.mjs",
     "test:background-jobs": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-background-jobs.mjs",
+    "test:ipc-services": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-ipc-services.mjs",
     "test:safe-mode": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-safe-mode.mjs",
     "test:search": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-search-query.mjs",
     "test:set-semantics": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-set-semantics.mjs",
@@ -37,7 +38,7 @@
     "test:release-local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-release.ps1",
     "preview": "electron-vite preview",
     "smoke:desktop": "npm run build:helper && npm run build && node ./scripts/smoke-desktop.mjs",
-    "verify": "npm run audit:repo && npm run test:theme-contract && npm run test:bounded-results && npm run build && npm run build:helper && npm run test:helper && npm run test:discovery && npm run test:diagnostics && npm run test:gdia-backup && npm run test:gdia-migration && npm run test:onboarding && npm run test:preferences && npm run test:planner && npm run test:notifications && npm run test:background-jobs && npm run test:safe-mode && npm run test:search && npm run test:set-semantics && npm run test:copy-policy",
+    "verify": "npm run audit:repo && npm run test:theme-contract && npm run test:bounded-results && npm run build && npm run build:helper && npm run test:helper && npm run test:discovery && npm run test:diagnostics && npm run test:gdia-backup && npm run test:gdia-migration && npm run test:onboarding && npm run test:preferences && npm run test:planner && npm run test:notifications && npm run test:background-jobs && npm run test:ipc-services && npm run test:safe-mode && npm run test:search && npm run test:set-semantics && npm run test:copy-policy",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json"

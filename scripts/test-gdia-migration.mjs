@@ -182,7 +182,7 @@ console.log(JSON.stringify({
 
 async function runImport() {
   const database = new CollectionDatabase(targetDatabasePath)
-  const stages = []
+  const events = []
   try {
     const analysis = await analyzeGdiaDatabase(database, sourceDatabasePath, backupDirectory)
     const result = await migrateGdiaDatabase(database, sourceDatabasePath, backupDirectory, {
@@ -190,9 +190,10 @@ async function runImport() {
       expectedSourceSha256: analysis.preflight.sourceSha256,
       expectedQueueFingerprint: analysis.queueFingerprint,
       expectedRequiredFreeBytes: analysis.preflight.requiredFreeBytes,
-      onStage: (stage) => stages.push(stage)
+      onStage: (stage) => events.push(stage),
+      onArchiveMutationCommitted: () => events.push('archive-mutation-committed')
     })
-    return { migration: 'gdia', preflight: analysis.preflight, stages, ...result }
+    return { migration: 'gdia', preflight: analysis.preflight, events, ...result }
   } finally {
     database.close()
   }
@@ -229,9 +230,18 @@ function assertPreflight(run, reused) {
   ) {
     throw new Error(`Preflight backup or destination details were incorrect: ${JSON.stringify(preflight)}`)
   }
-  const expectedStages = ['verifying', 'backing-up', 'reading', 'importing', 'finalizing']
-  if (JSON.stringify(run.stages) !== JSON.stringify(expectedStages)) {
-    throw new Error(`Named migration stages were incomplete or unbounded: ${JSON.stringify(run.stages)}`)
+  const expectedEvents = [
+    'verifying',
+    'backing-up',
+    'reading',
+    'importing',
+    'archive-mutation-committed',
+    'finalizing'
+  ]
+  if (JSON.stringify(run.events) !== JSON.stringify(expectedEvents)) {
+    throw new Error(
+      `Migration commit callback did not precede finalization exactly: ${JSON.stringify(run.events)}`
+    )
   }
   if (run.backupReused !== reused) {
     throw new Error(`Migration backup reuse result did not match preflight: ${JSON.stringify(run)}`)

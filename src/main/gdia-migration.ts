@@ -62,6 +62,8 @@ export interface GdiaMigrationOptions {
   expectedQueueFingerprint?: string
   expectedRequiredFreeBytes?: number
   onStage?: (stage: Extract<GdiaImportStage, 'verifying' | 'backing-up' | 'reading' | 'importing' | 'finalizing'>) => void
+  /** Called synchronously once the archive transaction has committed. */
+  onArchiveMutationCommitted?: () => void
 }
 
 interface PendingQueueItem {
@@ -253,6 +255,7 @@ export async function migrateGdiaDatabase(
       }
       throw error
     }
+    options.onArchiveMutationCommitted?.()
     if (
       queueBatch.published &&
       !batchHasReference(queueBatch.batchPath, database.getGdiaQueueReceiptBackupPaths())

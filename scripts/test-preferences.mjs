@@ -47,6 +47,8 @@ assert.equal(migrated.value.meta.profileKind, 'returning')
 assert.equal(migrated.value.workspace.experimentalToolsEnabled, true)
 assert.ok(migrated.value.workspace.visibleTools.includes('dismantling'))
 assert.equal(migrated.value.planner.profiles[0]?.name, 'Pet build')
+assert.equal(migrated.value.planner.profiles[0]?.className, undefined)
+assert.equal(migrated.value.planner.profiles[0]?.masteries, undefined)
 assert.equal(migrated.value.notes.todos[0]?.text, 'Farm the set')
 assert.equal(migrated.value.sources.collectionBasis, 'stashes')
 assert.deepEqual(migrated.value.sources.archivePaths, ['archive-a'])
@@ -63,6 +65,21 @@ assert.equal(migrated.value.search.selectedSkill, 'Wendigo Totem')
 assert.equal(JSON.stringify(migrated.value.planner), beforeResetPlanner)
 assert.equal(JSON.stringify(migrated.value.notes), beforeResetNotes)
 assert.equal(JSON.stringify(migrated.value.sources), beforeResetSources)
+
+const plannerMetadataStorage = new MemoryStorage()
+const plannerMetadataPreferences = JSON.parse(fresh.exportJson())
+plannerMetadataPreferences.planner = {
+  profiles: [{
+    id: 'build-2', name: 'Death Knight', className: 'Death Knight', masteries: ['Necromancer', 'Soldier'],
+    skills: ['Raise Skeletons', 'Field Command'], excludedSkills: [], minimumLevel: 1, levelCap: 100,
+    source: 'manual', modifiedAt: fixedNow()
+  }],
+  selectedProfileId: 'build-2', ignoredRecords: [], favoriteRecords: []
+}
+plannerMetadataStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(plannerMetadataPreferences))
+const plannerMetadata = createPreferenceRepository(plannerMetadataStorage, fixedNow, createId)
+assert.equal(plannerMetadata.value.planner.profiles[0]?.className, 'Death Knight')
+assert.deepEqual(plannerMetadata.value.planner.profiles[0]?.masteries, ['Necromancer', 'Soldier'])
 
 const corruptStorage = new MemoryStorage()
 const corrupt = JSON.parse(fresh.exportJson())
@@ -91,5 +108,6 @@ console.log(JSON.stringify({
   returningMigration: true,
   fieldRecovery: recovered.diagnostics.invalidFields,
   nonDestructiveReset: true,
+  plannerMetadataRoundTrip: true,
   settingsOnlyExport: true
 }, null, 2))

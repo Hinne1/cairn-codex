@@ -1674,6 +1674,29 @@ function registerIpcHandlers(
 
 function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
   if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
+  if (name === 'planner') {
+    const fixture = createScreenshotCollectionFixture('search-help')
+    const searchlight = fixture.items[0]!
+    return {
+      ...fixture,
+      items: [
+        { ...searchlight, record: 'records/items/synthetic/wendigo_focus.dbr', name: 'Wendigo Focus', itemLevel: 35, levelRequirement: 35 },
+        { ...searchlight, record: 'records/items/synthetic/skeleton_focus.dbr', name: 'Skeleton Focus', itemLevel: 50, levelRequirement: 50 }
+      ],
+      skillMasteries: {
+        'Curse of Frailty': 'Occultist',
+        'Summon Hellhound': 'Occultist',
+        'Summon Briarthorn': 'Shaman',
+        'Wendigo Totem': 'Shaman',
+        'Raise Skeletons': 'Necromancer',
+        'Field Command': 'Soldier'
+      },
+      skillClassNames: {
+        'Occultist|Shaman': 'Conjurer',
+        'Necromancer|Soldier': 'Death Knight'
+      }
+    }
+  }
   if (name === 'sets-semantics') {
     const setPresentation = {
       name: 'Veil of the Cairn',
@@ -4892,6 +4915,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
            : true)`
       )
       if (ready) {
+        window.webContents.setZoomFactor(1)
+        await new Promise((resolve) => setTimeout(resolve, 50))
         const onboardingStep = Number.parseInt(
           process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP ?? '0',
           10
@@ -5049,6 +5074,54 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           await window.webContents.executeJavaScript(
             "document.querySelector('.planner-display button:last-child')?.click()"
           )
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION === '1') {
+          interactionTimings.plannerNavigationMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const activePlan = () => document.querySelector('#planner-profile-select option:checked')?.textContent?.trim() ?? ''
+              const originalPlan = activePlan()
+              document.querySelector('.planner-new-plan')?.click()
+              await wait(50)
+              document.querySelector('.planner-setup-dialog footer button:not(.secondary)')?.click()
+              await wait(75)
+              const name = document.querySelector('.planner-setup-dialog input[type="text"]')
+              if (name) {
+                name.value = 'Synthetic Conjurer'
+                name.dispatchEvent(new Event('input', { bubbles: true }))
+              }
+              document.querySelector('.planner-setup-dialog footer button:not(.secondary)')?.click()
+              await wait(75)
+              document.querySelector('.planner-setup-suggestions button')?.click()
+              await wait(50)
+              document.querySelector('.planner-setup-dialog footer button:not(.secondary)')?.click()
+              await wait(75)
+              document.querySelector('.planner-setup-dialog footer button:not(.secondary)')?.click()
+              await wait(100)
+              if (!activePlan().startsWith('Synthetic Conjurer')) {
+                const dialogState = document.querySelector('.planner-setup-dialog')?.textContent?.replace(/\\s+/g, ' ').trim().slice(0, 240) ?? 'closed'
+                throw new Error('New planner profile did not become active: ' + activePlan() + ' · ' + dialogState)
+              }
+              history.back()
+              await wait(100)
+              if (activePlan() !== originalPlan) throw new Error('Back did not restore the previous planner profile.')
+              history.forward()
+              await wait(100)
+              if (!activePlan().startsWith('Synthetic Conjurer')) throw new Error('Forward did not restore the new planner profile.')
+              return performance.now() - started
+            })()
+          `)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP === '1') {
+          const openedPlannerSetup = await window.webContents.executeJavaScript(`
+            (async () => {
+              document.querySelector('.planner-new-plan')?.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              return Boolean(document.querySelector('.planner-setup-dialog'))
+            })()
+          `)
+          if (!openedPlannerSetup) throw new Error('New plan dialog was not available for screenshot capture.')
         }
         const skillScope = process.env.CAIRN_CODEX_SCREENSHOT_SKILL_SCOPE
         if (skillScope) {
@@ -5352,6 +5425,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           copyCards: document.querySelectorAll('.copy-card').length,
           vaultRows: document.querySelectorAll('.vault-item-list .vault-row').length,
           operationRows: document.querySelectorAll('.operation-history-row').length,
+          plannerRows: document.querySelectorAll('.planner-table tbody tr').length,
           miRows: [...document.querySelectorAll('.mi-table tbody tr')].map((row) => ({
             text: row.textContent?.replace(/\s+/g, ' ').trim(),
             prefixClass: row.children[2]?.className,

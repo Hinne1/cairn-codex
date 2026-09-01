@@ -12,6 +12,8 @@ Version 1 separates settings by purpose:
   the theme, zoom, tracker layout, planner presentation, visible and experimental tools,
   Monster Infrequent tier counting, and remembered explorer choices.
 - `planner` and `notes` contain user-authored builds, ignored/favorite records, and to-dos.
+  Planner profiles may include a combined class name and its two masteries; older profiles
+  without that metadata remain valid and are enriched only when the user creates or edits a plan.
 - `sources` contains operational choices: collection basis, enabled source paths, retrieval
   stash, and live auto-connect.
 - `onboarding` records the current guide version, status, and step.

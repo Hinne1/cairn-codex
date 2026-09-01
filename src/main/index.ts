@@ -5825,6 +5825,97 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_SKILL_EXPLORER_WORKSPACE === '1') {
+          interactionTimings.skillExplorerWorkspaceMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const root = document.querySelector('.skill-table-results')
+              const rows = () => [...document.querySelectorAll('.skill-table-results .bounded-results-item')]
+              const resultCount = () => Number((document.querySelector('.skill-explorer-toolbar .explorer-result-count')?.textContent ?? '').replace(/[^0-9]/g, ''))
+              const setQuery = async (value) => {
+                const input = document.querySelector('.skill-explorer-toolbar .explorer-search input')
+                if (!(input instanceof HTMLInputElement)) throw new Error('Skill Explorer result search was not rendered.')
+                input.value = value
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                await wait(175)
+                await frames()
+              }
+              if (!document.querySelector('.skill-explorer')) throw new Error('Skill Explorer workspace was not rendered.')
+              if (!root || rows().length < 2 || rows().length > 50) {
+                throw new Error('Skill Explorer did not mount a bounded non-empty result page.')
+              }
+              const originalTotal = resultCount()
+              const originalFirst = rows()[0]?.textContent?.replace(/\s+/g, ' ').trim()
+              if (!Number.isFinite(originalTotal) || originalTotal < rows().length) throw new Error('Skill Explorer result count was invalid.')
+              const first = rows()[0]
+              const second = rows()[1]
+              let nativeFocusEvents = 0
+              first.addEventListener('focus', () => { nativeFocusEvents += 1 })
+              const activeBeforeFocus = document.activeElement === first
+              if (activeBeforeFocus) {
+                const picker = document.querySelector('.skill-combobox input')
+                if (picker instanceof HTMLInputElement) picker.focus()
+                await frames()
+              }
+              first.focus()
+              if (document.activeElement !== first) throw new Error('The first Skill Explorer row was not keyboard focusable.')
+              // Hidden screenshot windows can update activeElement without dispatching focus.
+              // Exercise the same event that a foreground keyboard focus transition produces.
+              if (nativeFocusEvents === 0) first.dispatchEvent(new FocusEvent('focus'))
+              for (let attempt = 0; attempt < 8 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(10)
+              if (!document.querySelector('.game-tooltip')) throw new Error('Keyboard focus did not immediately use the global Skill Explorer tooltip.')
+              first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              await wait(20)
+              if (document.activeElement !== second) throw new Error('ArrowDown did not move to the next Skill Explorer row.')
+              const firstRow = first.querySelector('.skill-table-row')
+              if (!(firstRow instanceof HTMLElement)) throw new Error('Skill Explorer row content was unavailable.')
+              const rowRect = firstRow.getBoundingClientRect()
+              firstRow.dispatchEvent(new MouseEvent('mouseenter', {
+                clientX: rowRect.left + Math.min(12, rowRect.width / 2),
+                clientY: rowRect.top + Math.min(12, rowRect.height / 2)
+              }))
+              for (let attempt = 0; attempt < 40 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
+              if (!document.querySelector('.game-tooltip')) throw new Error('Skill Explorer did not use the global item tooltip.')
+              firstRow.dispatchEvent(new MouseEvent('mouseleave'))
+              const levelSort = [...document.querySelectorAll('.skill-table-header button')]
+                .find((button) => button.textContent?.trim().startsWith('Level'))
+              if (!(levelSort instanceof HTMLButtonElement)) throw new Error('Skill Explorer level sort was unavailable.')
+              levelSort.focus()
+              levelSort.click()
+              await frames()
+              if (!levelSort.textContent?.includes('↓')) throw new Error('Skill Explorer level sort did not select descending order.')
+              const next = root.querySelector('.bounded-results-footer nav button:last-of-type')
+              if (next instanceof HTMLButtonElement && !next.disabled) {
+                next.click()
+                await frames()
+                if (rows().length > 50 || rows()[0]?.textContent?.replace(/\s+/g, ' ').trim() === originalFirst) {
+                  throw new Error('Skill Explorer paging did not replace its bounded rows.')
+                }
+              }
+              await setQuery('zz-no-skill-result-zz')
+              if (rows().length !== 0 || !root.querySelector('.bounded-results-state.is-empty')) {
+                throw new Error('Skill Explorer did not render the shared empty state after an impossible search.')
+              }
+              await setQuery('')
+              if (rows().length < 2 || rows().length > 50 || resultCount() !== originalTotal) {
+                throw new Error('Skill Explorer search reset did not restore the original bounded result set.')
+              }
+              const picker = document.querySelector('.skill-combobox input')
+              if (!(picker instanceof HTMLInputElement)) throw new Error('Skill picker was unavailable.')
+              picker.focus()
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              await frames()
+              const activeOption = document.querySelector('.skill-suggestions [role="option"].active')
+              if (!(activeOption instanceof HTMLButtonElement)) throw new Error('Skill picker keyboard traversal did not expose an active option.')
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+              await frames()
+              if (document.querySelector('.skill-suggestions')) throw new Error('Escape did not close the Skill picker.')
+              return performance.now() - started
+            })()
+          `)
+        }
         const query = process.env.CAIRN_CODEX_SCREENSHOT_QUERY
         if (query) {
           interactionTimings.searchMs = await window.webContents.executeJavaScript(`

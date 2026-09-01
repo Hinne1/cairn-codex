@@ -9,6 +9,8 @@ import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceSwitcher from './components/WorkspaceSwitcher.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
+import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
+import type { CollectionFarmingControls } from './workspaces/collection-farming'
 import { createNotificationService, type AppNotification } from './notification-service'
 import {
   resetUiPreferences,
@@ -190,14 +192,6 @@ interface CollectionTriviaFact {
   detail: string
   tone: 'gold' | 'purple' | 'blue' | 'green' | 'ember'
   itemRecord?: string
-}
-
-interface FarmTarget {
-  key: string
-  name: string
-  contentPack: string
-  items: CollectionItem[]
-  minimumLevel: number
 }
 
 interface SupplyOption {
@@ -418,9 +412,7 @@ const experimentalToolsEnabled = ref(safeModeActive.value ? false : initialPrefe
 const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>([...initialPreferences.workspace.visibleTools])
 const toolSettingsOpen = ref(false)
 const materialCategory = ref<MaterialCategory>('all')
-const farmingQuery = ref('')
-const farmingRarity = ref<RarityFilter>('all')
-const farmingPage = ref(1)
+const farmingControls = ref<CollectionFarmingControls>({ query: '', rarity: 'all', page: 1 })
 const dismantlingQuery = ref('')
 const dismantlingMode = ref<DismantlingModeFilter>('all')
 const dismantlingRarity = ref<DismantlingRarityFilter>('all')
@@ -517,7 +509,6 @@ const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.
 const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, searchQueryOptions(searchSchemas.miWorkshop)))
 const supplyStructuredQuery = computed(() => compileSearchQuery(reusableSupplyQuery.value, searchQueryOptions(searchSchemas.supplies)))
 const dismantlingStructuredQuery = computed(() => compileSearchQuery(dismantlingQuery.value, searchQueryOptions(searchSchemas.dismantling)))
-const farmingStructuredQuery = computed(() => compileSearchQuery(farmingQuery.value, searchQueryOptions(searchSchemas.farming)))
 const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, searchQueryOptions(searchSchemas.vault)))
 const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, searchQueryOptions(searchSchemas.history)))
 
@@ -1498,50 +1489,6 @@ const skillSlotOptions = computed(() => [...new Set(
   plannerCatalogItems.value.map((item) => item.slot).filter(Boolean)
 )].sort((left, right) => left.localeCompare(right)))
 
-const farmTargets = computed<FarmTarget[]>(() => {
-  if (!snapshot.value) return []
-  const structuredQuery = farmingStructuredQuery.value
-  const grouped = new Map<string, FarmTarget>()
-  for (const item of snapshot.value.items) {
-    if (isCollectionOwned(item)) continue
-    if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
-    const locations = item.acquisition?.locations ?? []
-    for (const location of locations) {
-      const itemDocument = itemStructuredSearchDocument(item)
-      if (!structuredQuery.matches({
-        text: [itemDocument.text, location.name, location.routeName, location.contentPack, ...(item.acquisition?.sources ?? [])].filter(Boolean).join(' '),
-        fields: {
-          name: item.name,
-          skill: itemDocument.fields?.skill,
-          damage: itemDocument.fields?.damage,
-          monster: item.acquisition?.sources ?? [],
-          source: item.acquisition?.sources ?? [],
-          area: [location.name, location.routeName ?? ''],
-          rarity: item.rarity,
-          level: item.levelRequirement
-        }
-      })) continue
-      const key = `${location.contentPack}:${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
-      const existing = grouped.get(key)
-      if (existing) {
-        if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
-        existing.minimumLevel = Math.min(existing.minimumLevel, item.levelRequirement)
-      } else {
-        grouped.set(key, {
-          key,
-          name: location.name,
-          contentPack: location.contentPack,
-          items: [item],
-          minimumLevel: item.levelRequirement
-        })
-      }
-    }
-  }
-  return [...grouped.values()]
-    .filter((target) => target.items.length > 0)
-    .sort((left, right) => right.items.length - left.items.length || left.minimumLevel - right.minimumLevel || left.name.localeCompare(right.name))
-})
-
 const plannerSkillOptions = computed(() => {
   const needle = plannerSkillDraft.value.trim().toLocaleLowerCase()
   return skillNames.value
@@ -2222,7 +2169,7 @@ function currentAppRoute(): AppRoute {
       mode: transferMode.value, page: supplyPage.value
     } }
     case 'farming': return { version: 1, workspace: 'farming', itemRecord, controls: {
-      query: farmingQuery.value, rarity: farmingRarity.value, page: farmingPage.value
+      ...farmingControls.value
     } }
     case 'dismantling': return { version: 1, workspace: 'dismantling', itemRecord, controls: {
       query: dismantlingQuery.value, mode: dismantlingMode.value, rarity: dismantlingRarity.value
@@ -2348,9 +2295,7 @@ function restoreAppRoute(route: AppRoute): void {
       supplyPage.value = route.controls.page
       break
     case 'farming':
-      farmingQuery.value = route.controls.query
-      farmingRarity.value = route.controls.rarity
-      farmingPage.value = route.controls.page
+      farmingControls.value = { ...route.controls }
       break
     case 'dismantling':
       dismantlingQuery.value = route.controls.query
@@ -2470,7 +2415,7 @@ watch(
     plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
     plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
     reusableSupplyQuery, supplyCategory, supplySlotFilter, supplyPage,
-    farmingQuery, farmingRarity, farmingPage,
+    farmingControls,
     dismantlingQuery, dismantlingMode, dismantlingRarity,
     transferMode, transferHistoryQuery, transferHistoryOutcome, transferHistoryPage,
     vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, vaultPage, vaultQuarantinePage
@@ -2501,10 +2446,6 @@ watch([selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFi
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (restoringAppHistory) return
   plannerPage.value = 1
-})
-watch([farmingQuery, farmingRarity], () => {
-  if (restoringAppHistory) return
-  farmingPage.value = 1
 })
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (applyingPlannerProfile) return
@@ -7342,64 +7283,17 @@ function formatPercentile(value: number | null | undefined): string {
         </div>
       </section>
 
-      <section v-else-if="activeView === 'farming'" class="farming-workspace" aria-label="Collection farming planner">
-        <ToolHeader
-          eyebrow="Collection completion"
-          title="Where should I farm?"
-          description="Areas are ranked by how many currently missing item bases their indexed enemies can drop."
-        >
-          <template #aside><strong>{{ farmTargets.length }} useful areas</strong></template>
-        </ToolHeader>
-        <ExplorerToolbar
-          v-model="farmingQuery"
-          v-bind="searchGuidance.farming"
-          search-label="Search farming targets"
-          placeholder="Item, monster, area…"
-          :result-count="farmTargets.length"
-          result-label="useful areas"
-          :search-error="searchErrorMessage(farmingStructuredQuery)"
-        >
-          <template #filters>
-            <label>
-              <span>Rarity</span>
-              <select v-model="farmingRarity" autocomplete="off">
-                <option value="all">All tracked rarities</option>
-                <option value="mi">Monster Infrequents</option>
-                <option value="epic">Epics</option>
-                <option value="legendary">Legendaries</option>
-              </select>
-            </label>
-          </template>
-        </ExplorerToolbar>
-        <BoundedResultSurface
-          v-model:page="farmingPage"
-          class="farm-list farming-route-results bounded-tooltip-results"
-          :items="farmTargets"
-          :get-key="target => target.key"
-          :page-size="50"
-          empty-title="No useful farming areas"
-          empty-detail="No missing items have indexed locations under this filter."
-          label="Collection farming routes"
-          layout="list"
-        >
-          <template #item="{ item: target, index }">
-            <article :data-route-key="target.key">
-              <span class="farm-rank">{{ index + 1 }}</span>
-              <div>
-                <h3>{{ target.name }} <small>{{ contentPackShortLabel(target.contentPack) }}</small></h3>
-                <p>{{ target.items.length }} missing base{{ target.items.length === 1 ? '' : 's' }} · earliest item Lv{{ target.minimumLevel }}</p>
-                <div class="farm-items">
-                  <button v-for="item in target.items.slice(0, 12)" :key="item.record" type="button" @mouseenter="queueTooltip(item, $event)" @mouseleave="scheduleTooltipHide" @click="openItem(item)">
-                    <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
-                    <span>{{ item.name }}</span>
-                  </button>
-                  <small v-if="target.items.length > 12">+{{ target.items.length - 12 }} more</small>
-                </div>
-              </div>
-            </article>
-          </template>
-        </BoundedResultSurface>
-      </section>
+      <CollectionFarmingWorkspace
+        v-else-if="activeView === 'farming'"
+        v-model:controls="farmingControls"
+        :items="snapshot?.items ?? []"
+        :search-document-for-item="itemStructuredSearchDocument"
+        :icon-url-for-item="itemIconUrl"
+        :content-pack-label="contentPackShortLabel"
+        @queue-tooltip="queueTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+      />
 
       <section v-else-if="activeView === 'settings'" class="settings-workspace" aria-label="Cairn Codex settings">
         <ToolHeader

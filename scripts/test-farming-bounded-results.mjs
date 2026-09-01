@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createBoundedResultWindow } from '../src/renderer/src/bounded-results.ts'
+import {
+  buildCollectionFarmingTargets,
+  withCollectionFarmingPage,
+  withCollectionFarmingQuery,
+  withCollectionFarmingRarity
+} from '../src/renderer/src/workspaces/collection-farming.ts'
 
 function generatedRoutes(count) {
   return Array.from({ length: count }, (_, index) => ({
@@ -55,29 +61,110 @@ const empty = createBoundedResultWindow({
 assert.equal(empty.entries.length, 0)
 assert.equal(empty.totalCount, 0)
 
-const [app, styles, main] = await Promise.all([
+const restoredControls = { query: 'restored', rarity: 'legendary', page: 4 }
+assert.deepEqual(withCollectionFarmingQuery(restoredControls, 'edited'), {
+  query: 'edited', rarity: 'legendary', page: 1
+})
+assert.deepEqual(withCollectionFarmingRarity(restoredControls, 'epic'), {
+  query: 'restored', rarity: 'epic', page: 1
+})
+assert.deepEqual(withCollectionFarmingPage(restoredControls, 3), {
+  query: 'restored', rarity: 'legendary', page: 3
+})
+assert.deepEqual(restoredControls, { query: 'restored', rarity: 'legendary', page: 4 })
+
+const farmingItems = [
+  {
+    record: 'records/items/test/legendary_a.dbr',
+    name: 'Legendary A',
+    rarity: 'legendary',
+    levelRequirement: 94,
+    acquisition: {
+      sources: ['Fleshwarped Commander'],
+      locations: [{ name: 'Kurnhold', routeName: 'Kurnhold route', contentPack: 'gdx1' }]
+    }
+  },
+  {
+    record: 'records/items/test/epic_b.dbr',
+    name: 'Epic B',
+    rarity: 'epic',
+    levelRequirement: 50,
+    acquisition: {
+      sources: ['Fleshwarped Commander'],
+      locations: [{ name: 'Kurnhold', routeName: 'Kurnhold route', contentPack: 'gdx1' }]
+    }
+  },
+  {
+    record: 'records/items/test/owned_mi.dbr',
+    name: 'Owned MI',
+    rarity: 'mi',
+    levelRequirement: 70,
+    acquisition: {
+      sources: ['Fleshwarped Commander'],
+      locations: [{ name: 'Kurnhold', routeName: 'Kurnhold route', contentPack: 'gdx1' }]
+    }
+  },
+  {
+    record: 'records/items/test/epic_c.dbr',
+    name: 'Epic C',
+    rarity: 'epic',
+    levelRequirement: 25,
+    acquisition: {
+      sources: ['Cronley Gang'],
+      locations: [{ name: "Cronley's Hideout", routeName: '', contentPack: 'base' }]
+    }
+  }
+]
+const targetOptions = {
+  rarity: 'all',
+  query: { matches: () => true },
+  isOwned: (item) => item.record.endsWith('owned_mi.dbr'),
+  searchDocumentForItem: (item) => ({ text: item.name, fields: { skill: [], damage: [] } })
+}
+const builtTargets = buildCollectionFarmingTargets(farmingItems, targetOptions)
+assert.equal(builtTargets.length, 2)
+assert.equal(builtTargets[0].name, 'Kurnhold')
+assert.equal(builtTargets[0].items.length, 2)
+assert.equal(builtTargets[0].minimumLevel, 50)
+assert.ok(!builtTargets[0].items.some((item) => item.record.endsWith('owned_mi.dbr')))
+const legendaryTargets = buildCollectionFarmingTargets(farmingItems, { ...targetOptions, rarity: 'legendary' })
+assert.equal(legendaryTargets.length, 1)
+assert.deepEqual(legendaryTargets[0].items.map((item) => item.name), ['Legendary A'])
+const areaTargets = buildCollectionFarmingTargets(farmingItems, {
+  ...targetOptions,
+  query: { matches: (document) => document.fields.area.includes('Kurnhold') }
+})
+assert.equal(areaTargets.length, 1)
+assert.equal(areaTargets[0].name, 'Kurnhold')
+
+const [app, workspace, viewModel, styles, main] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/workspaces/CollectionFarmingWorkspace.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/workspaces/collection-farming.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8'),
   readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 ])
 
-const farmingStart = app.indexOf('activeView === \'farming\'')
-const farmingEnd = app.indexOf('activeView === \'settings\'', farmingStart)
-assert.ok(farmingStart >= 0 && farmingEnd > farmingStart, 'Collection Farming template section was not found.')
-const farmingTemplate = app.slice(farmingStart, farmingEnd)
-
-assert.match(app, /const farmingPage = ref\(1\)/)
-assert.match(app, /watch\(\[farmingQuery, farmingRarity\], \(\) => \{\s*if \(restoringAppHistory\) return\s*farmingPage\.value = 1\s*\}\)/)
-assert.match(farmingTemplate, /v-model:page="farmingPage"[\s\S]*?:items="farmTargets"[\s\S]*?:get-key="target => target\.key"[\s\S]*?:page-size="50"/)
-assert.match(farmingTemplate, /#item="\{ item: target, index \}"[\s\S]*?farm-rank">\{\{ index \+ 1 \}\}/)
-assert.match(farmingTemplate, /<article :data-route-key="target\.key">/)
-assert.match(farmingTemplate, /target\.items\.slice\(0, 12\)/)
-assert.match(farmingTemplate, /target\.items\.length - 12/)
-assert.match(farmingTemplate, /@mouseenter="queueTooltip\(item, \$event\)"[\s\S]*?@click="openItem\(item\)"/)
-assert.doesNotMatch(farmingTemplate, /<article v-for="\(target, index\) in farmTargets"/)
+assert.match(app, /<CollectionFarmingWorkspace[\s\S]*?v-else-if="activeView === 'farming'"/)
+assert.match(app, /const farmingControls = ref<CollectionFarmingControls>/)
+assert.match(app, /v-model:controls="farmingControls"/)
+assert.match(app, /case 'farming':[\s\S]*?farmingControls\.value = \{ \.\.\.route\.controls \}/)
+assert.doesNotMatch(app, /const farmTargets|const farmingQuery|const farmingRarity|const farmingPage/)
+assert.match(workspace, /defineModel<CollectionFarmingControls>\('controls'/)
+assert.match(workspace, /withCollectionFarmingQuery\(controls\.value, query\)/)
+assert.match(workspace, /withCollectionFarmingRarity\(controls\.value, rarity\)/)
+assert.match(workspace, /withCollectionFarmingPage\(controls\.value, page\)/)
+assert.match(workspace, /v-model:page="page"[\s\S]*?:items="targets"[\s\S]*?:get-key="target => target\.key"[\s\S]*?:page-size="50"/)
+assert.match(workspace, /#item="\{ item: target, index \}"[\s\S]*?farm-rank">\{\{ index \+ 1 \}\}/)
+assert.match(workspace, /<article :data-route-key="target\.key">/)
+assert.match(workspace, /target\.items\.slice\(0, 12\)/)
+assert.match(workspace, /target\.items\.length - 12/)
+assert.match(workspace, /emit\('queue-tooltip', item, \$event\)[\s\S]*?emit\('open-item', item\)/)
+assert.doesNotMatch(workspace, /<article v-for="\(target, index\) in targets"/)
+assert.match(viewModel, /export function buildCollectionFarmingTargets/)
 assert.match(styles, /\.farm-list \.bounded-results-item > article/)
 assert.match(main, /name === 'farming-routes'/)
 assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING/)
 assert.match(main, /farmingRows: document\.querySelectorAll\('\.farm-list \.bounded-results-item > article'\)\.length/)
 
-console.log('Collection Farming bounded results passed: 214 total routes, 50 mounted per full page, 14 on the final page, with normal and empty states preserved.')
+console.log('Collection Farming workspace passed: extracted view-model grouping/filtering plus 214 bounded routes with 50 mounted per full page and 14 on the final page.')

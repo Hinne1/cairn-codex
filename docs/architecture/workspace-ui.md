@@ -4,6 +4,21 @@ Cairn Codex workspaces share one interaction vocabulary even when their data is 
 This avoids each new tool inventing its own search bar, filter placement, result count, and
 responsive behavior.
 
+Presentation roles and the workspace migration audit are defined in `design-foundation.md`.
+Shared UI consumes `semantic-tokens.css`; literal workspace palettes and workspace-specific
+control geometry are not part of this contract.
+
+## Semantic foundation
+
+- Use application-layer tokens for canvas, surfaces, overlays, borders, text, focus, controls,
+  spacing, radii, elevation, status, and motion.
+- Workspace tone changes may alter accent, heading, border, and surface color, but never control
+  geometry, typography hierarchy, focus behavior, or responsive layout.
+- Grim Dawn rarity and gameplay colors are semantic data and remain separate from application
+  success, warning, error, ownership, readiness, and experimental states.
+- Shared Vue components contain no literal color values. The legacy global stylesheet is a
+  ratcheted migration surface and must only move toward semantic tokens.
+
 ## Explorer toolbar
 
 Searchable workspaces use `src/renderer/src/components/ExplorerToolbar.vue`.

@@ -1883,13 +1883,73 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
   if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
   if (name === 'planner') {
     const fixture = createScreenshotCollectionFixture('search-help')
-    const searchlight = fixture.items[0]!
+    const template = fixture.items[0]!
+    const rarities = ['legendary', 'epic', 'mi', 'faction'] as const
+    const slots = ['head', 'chest', 'shoulders', 'medal', 'sword', 'offhand'] as const
+    const items = Array.from({ length: 120 }, (_, index): CollectionItem => {
+      const rarity = rarities[index % rarities.length]!
+      const slot = slots[index % slots.length]!
+      const conversionTarget = ['Vitality', 'Cold', 'Lightning', 'Acid'][index % 4]!
+      return {
+        ...template,
+        record: `records/items/synthetic/planner_support_${index}.dbr`,
+        name: `Wendigo Field Kit ${String(index + 1).padStart(3, '0')}`,
+        rarity,
+        itemClass: slot === 'sword' ? 'weapon_sword' : `armor_${slot}`,
+        slot,
+        levelRequirement: 1 + index % 70,
+        itemLevel: 1 + index % 70,
+        availableCount: index % 5 === 0 ? 1 : 0,
+        discovered: index % 5 === 0,
+        presentation: {
+          flavorText: null,
+          sections: [{
+            kind: 'base',
+            heading: null,
+            lines: [{
+              label: 'to Wendigo Totem',
+              minimum: 1 + index % 3,
+              maximum: 1 + index % 3,
+              unit: '',
+              tone: 'skill',
+              prefix: '+',
+              suffix: ''
+            }]
+          }, {
+            kind: 'skill-modifier',
+            heading: 'Wendigo Totem',
+            lines: [{
+              label: `Bleeding Damage converted to ${conversionTarget} Damage`,
+              minimum: 20 + index % 31,
+              maximum: 20 + index % 31,
+              unit: '%',
+              tone: 'standard',
+              prefix: '',
+              suffix: ''
+            }, {
+              label: 'Skill Recharge',
+              minimum: -(index % 4 + 1) * 0.25,
+              maximum: -(index % 4 + 1) * 0.25,
+              unit: 's',
+              tone: 'standard',
+              prefix: '',
+              suffix: ''
+            }]
+          }],
+          grantedSkill: null,
+          searchText: `wendigo totem ${conversionTarget.toLocaleLowerCase()} damage leveling planner synthetic qa`
+        }
+      }
+    })
     return {
       ...fixture,
-      items: [
-        { ...searchlight, record: 'records/items/synthetic/wendigo_focus.dbr', name: 'Wendigo Focus', itemLevel: 35, levelRequirement: 35 },
-        { ...searchlight, record: 'records/items/synthetic/skeleton_focus.dbr', name: 'Skeleton Focus', itemLevel: 50, levelRequirement: 50 }
-      ],
+      items,
+      rarities: rarities.map((rarity) => ({
+        rarity,
+        total: items.filter((item) => item.rarity === rarity).length,
+        collected: items.filter((item) => item.rarity === rarity && item.discovered).length,
+        availableCopies: items.filter((item) => item.rarity === rarity).reduce((total, item) => total + item.availableCount, 0)
+      })),
       skillMasteries: {
         'Curse of Frailty': 'Occultist',
         'Summon Hellhound': 'Occultist',
@@ -5447,6 +5507,19 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        const plannerDisplay = process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY
+        if (plannerDisplay) {
+          const plannerDisplayLabel = ({ table: 'Table', cards: 'Cards', map: 'MI sources' } as Record<string, string>)[plannerDisplay] ?? ''
+          await window.webContents.executeJavaScript(`
+            (async () => {
+              const label = ${JSON.stringify(plannerDisplayLabel)}
+              ;[...document.querySelectorAll('.planner-display button')]
+                .find((button) => button.textContent?.trim() === label)
+                ?.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            })()
+          `)
+        }
         const transferSection = process.env.CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION
         if (transferSection) {
           await window.webContents.executeJavaScript(`
@@ -5473,6 +5546,54 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS === '1') {
+          interactionTimings.plannerActionsMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const resultCount = () => Number((document.querySelector('.planner-explorer-toolbar .explorer-result-count')?.textContent ?? '').replace(/[^0-9]/g, ''))
+              const firstResult = () => document.querySelector('.planner-results .bounded-results-item')
+              const first = firstResult()
+              const buttons = first?.querySelectorAll('.planner-item-actions button, .planner-card-actions button')
+              const favorite = buttons?.[0]
+              const ignore = buttons?.[1]
+              if (!(favorite instanceof HTMLButtonElement) || !(ignore instanceof HTMLButtonElement)) {
+                throw new Error('Planner action verification could not find favorite and ignore controls.')
+              }
+              favorite.click()
+              await frames()
+              if (!favorite.classList.contains('active') || document.querySelector('.item-drawer')) {
+                throw new Error('Planner favorite did not toggle independently of item activation.')
+              }
+              favorite.click()
+              await frames()
+              if (favorite.classList.contains('active')) throw new Error('Planner favorite did not toggle off.')
+              ignore.click()
+              await frames()
+              if (resultCount() !== 119 || document.querySelector('.item-drawer')) {
+                throw new Error('Planner ignore did not remove exactly one result without opening the item.')
+              }
+              const listFilter = document.querySelectorAll('.planner-explorer-toolbar .explorer-toolbar-filters select')[1]
+              if (!(listFilter instanceof HTMLSelectElement)) throw new Error('Planner ignored-list filter was not available.')
+              listFilter.value = 'true'
+              listFilter.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              if (resultCount() !== 1) throw new Error('Planner ignored-list filter did not reveal the ignored base.')
+              const restore = firstResult()?.querySelectorAll('.planner-item-actions button, .planner-card-actions button')[1]
+              if (!(restore instanceof HTMLButtonElement) || restore.textContent?.trim() !== 'Restore') {
+                throw new Error('Planner ignored result did not expose Restore.')
+              }
+              restore.click()
+              await frames()
+              if (resultCount() !== 0) throw new Error('Planner Restore did not remove the base from the ignored list.')
+              listFilter.value = 'false'
+              listFilter.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              if (resultCount() !== 120) throw new Error('Planner shopping list did not recover after restoring the base.')
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD === '1') {
           interactionTimings.boundedKeyboardMs = await window.webContents.executeJavaScript(`
             (async () => {
@@ -5487,10 +5608,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               if (document.activeElement !== rows[0]) throw new Error('The first bounded row did not receive focus.')
               if (!document.querySelector('.game-tooltip')) throw new Error('Focused MI row did not open the shared item tooltip.')
+              const firstTop = rows[0].offsetTop
+              const expectedDown = rows.find((row) => row.offsetTop > firstTop) ?? rows[1]
               rows[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
               await wait(20)
-              if (document.activeElement !== rows[1]) throw new Error('ArrowDown did not move focus to the next bounded row.')
-              rows[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+              if (document.activeElement !== expectedDown) throw new Error('ArrowDown did not move focus to the next bounded row.')
+              expectedDown.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
               await wait(20)
               if (document.activeElement !== rows.at(-1)) throw new Error('End did not move focus to the last mounted row.')
               rows.at(-1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
@@ -5700,7 +5823,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           await new Promise((resolve) => setTimeout(resolve, 250))
           await window.webContents.executeJavaScript(`
             (() => {
-              const card = document.querySelector('.item-card[role=button], .set-card li button, .planner-table tbody tr, .atlas-item-list button')
+              const card = document.querySelector('.item-card[role=button], .set-card li button, .planner-results .bounded-results-item, .atlas-item-list button')
               if (!card) return
               const rect = card.getBoundingClientRect()
               card.dispatchEvent(new MouseEvent('mouseenter', {
@@ -5902,7 +6025,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           copyCards: document.querySelectorAll('.copy-card').length,
           vaultRows: document.querySelectorAll('.quarantine-results .vault-row, .vault-item-list .vault-row').length,
           operationRows: document.querySelectorAll('.operation-history-row').length,
-          plannerRows: document.querySelectorAll('.planner-table tbody tr').length,
+          plannerRows: document.querySelectorAll('.planner-table-results .planner-table-row').length,
+          plannerCards: document.querySelectorAll('.planner-card-results .planner-card').length,
           boundedRows: document.querySelectorAll('.bounded-tooltip-results .bounded-results-item').length,
           skillRows: document.querySelectorAll('.skill-table-results .skill-table-row').length,
           miRows: [...document.querySelectorAll('.mi-table-results .mi-table-row')].map((row) => ({

@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import './semantic-tokens.css'
+import { applyThemeManifest, CAIRN_THEME_MANIFEST } from './semantic-tokens'
 import {
   RENDERER_FAILURE_EVENT,
   rendererFailureReport,
@@ -8,6 +9,8 @@ import {
   type RendererFailureReport
 } from './renderer-recovery'
 import './styles.css'
+
+applyThemeManifest(document.documentElement, CAIRN_THEME_MANIFEST)
 
 let rootRecoveryVisible = false
 

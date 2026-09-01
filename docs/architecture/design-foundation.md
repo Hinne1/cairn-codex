@@ -7,8 +7,10 @@ needed to make those rules visible throughout the application.
 
 ## Foundation model
 
-`src/renderer/src/semantic-tokens.css` is the only renderer palette source. Tokens are grouped
-by responsibility rather than by workspace:
+`src/renderer/src/semantic-tokens.css` provides the static Cairn fallback palette, while
+`src/renderer/src/semantic-tokens.ts` defines the versioned extension allowlist, resolver, and
+runtime application API. The two Cairn representations are kept in sync by the theme contract
+test. Tokens are grouped by responsibility rather than by workspace:
 
 - application layers describe canvas, surfaces, overlays, and elevation;
 - content tokens describe strong, primary, secondary, muted, and disabled text;
@@ -19,7 +21,8 @@ by responsibility rather than by workspace:
 
 Shared components consume those semantic roles. A workspace may choose an existing tone, but
 must not carry its own input height, focus ring, button geometry, heading shell, or literal
-palette. Alternate themes override tokens only after the default Cairn theme is coherent.
+palette. Alternate themes use the versioned contract in `theme-extension.md`; gameplay colors
+remain protected and invalid or inaccessible manifests fall back to the Cairn palette.
 
 ## Baseline audit
 
@@ -92,8 +95,8 @@ for focus, keyboard, reduced-motion, and assistive-technology acceptance across 
    error, selection, keyboard, paging, and virtualization states.
 4. Migrate workspaces in focused slices, coordinating component extraction with issue #17.
 5. Complete the keyboard, focus, reduced-motion, and assistive-technology audit in issue #16.
-6. Define alternate theme manifests and fallbacks in issue #24 only after the Cairn theme is
-   visually coherent.
+6. Extend alternate themes only through the versioned manifest and fallback contract; never add
+   theme-identifier branches or workspace-local palettes.
 
 ## Visual acceptance matrix
 
@@ -112,7 +115,9 @@ hide a new cross-tool inconsistency.
 
 ## Enforcement
 
-`npm run test:theme-contract` verifies required semantic roles, rejects literal colors in
-shared Vue components, and prevents the remaining `styles.css` palette debt from increasing.
-The ceiling is intentionally a migration ratchet, not an approved design API. Lower it whenever
-literal values are replaced and remove it once `styles.css` is fully semantic.
+`npm run test:theme-contract` verifies required semantic roles and runtime/CSS fallback parity,
+exercises manifest versioning and fail-closed contrast behavior, protects gameplay semantics,
+rejects literal colors in every Vue component, and prevents the remaining `styles.css` palette
+debt from increasing. The ceiling is intentionally a migration ratchet, not an approved design
+API. Lower it whenever literal values are replaced and remove it once `styles.css` is fully
+semantic.

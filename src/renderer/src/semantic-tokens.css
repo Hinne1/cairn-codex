@@ -42,14 +42,14 @@
   /* Application layers */
   --cc-canvas: #10100f;
   --cc-canvas-deep: #0d0d0c;
-  --cc-mix-light: #fff;
+  --cc-mix-light: #ffffff;
   --cc-surface-1: #171714;
   --cc-surface-2: #1d1c18;
   --cc-surface-3: #24211b;
   --cc-surface-raised: #2a241b;
   --cc-surface-input: #11110f;
-  --cc-surface-overlay: rgba(23, 23, 20, .96);
-  --cc-backdrop: rgba(4, 4, 3, .78);
+  --cc-surface-overlay: color-mix(in srgb, var(--cc-surface-1), transparent 4%);
+  --cc-backdrop: color-mix(in srgb, var(--cc-canvas-deep), transparent 22%);
 
   /* Borders and focus */
   --cc-border-subtle: #343026;
@@ -57,7 +57,7 @@
   --cc-border-strong: #454034;
   --cc-border-emphasis: #554a37;
   --cc-focus: #8c7040;
-  --cc-focus-ring: rgba(140, 112, 64, .14);
+  --cc-focus-ring: color-mix(in srgb, var(--cc-focus), transparent 86%);
 
   /* Content */
   --cc-text-strong: #ece5d3;
@@ -112,7 +112,7 @@
   --cc-tone-green-muted: #75816d;
   --cc-tone-green-heading: #dcebd2;
   --cc-tone-green-focus: #73955f;
-  --cc-tone-green-focus-ring: rgba(105, 145, 83, .15);
+  --cc-tone-green-focus-ring: color-mix(in srgb, var(--cc-tone-green-focus), transparent 85%);
   --cc-tone-blue-accent: #6aa7c8;
   --cc-tone-blue-border: #3b4c54;
   --cc-tone-blue-surface: #151b1d;
@@ -121,7 +121,7 @@
   --cc-tone-ember-accent: #df9443;
   --cc-tone-ember-border: #55462c;
   --cc-tone-ember-surface: #292319;
-  --cc-tone-ember-glow: rgba(132, 91, 35, .2);
+  --cc-tone-ember-glow: color-mix(in srgb, var(--cc-tone-ember-accent), transparent 80%);
 
   /* Grim Dawn gameplay semantics remain distinct from application chrome. */
   --gd-rarity-epic: #79c2ff;

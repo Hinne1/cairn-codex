@@ -52,12 +52,16 @@ export async function prepareGdiaBackup(
 ): Promise<GdiaBackupResult> {
   const now = options.now ?? (() => new Date())
   const retention = Math.max(1, Math.floor(options.retention ?? GDIA_BACKUP_RETENTION))
-  const sourceMetadata = await stat(sourcePath)
-  const sourceBytes = sourceMetadata.size
+  const sourceMetadataBeforeHash = await stat(sourcePath)
   const sourceSha256 = await hashFile(sourcePath)
+  const sourceMetadataAfterHash = await stat(sourcePath)
+  if (sourceMetadataBeforeHash.size !== sourceMetadataAfterHash.size) {
+    throw new Error('The GDIA database changed while it was being hashed; import was aborted.')
+  }
+  const sourceBytes = sourceMetadataAfterHash.size
   await mkdir(backupDirectory, { recursive: true })
 
-  const existing = await loadBackupEntries(backupDirectory)
+  const existing = await loadBackupEntries(backupDirectory, basename(sourcePath))
   const reusable = existing
     .filter((entry) => entry.valid && entry.manifest?.sourceSha256 === sourceSha256)
     .sort((left, right) => manifestTime(right) - manifestTime(left))[0]
@@ -93,8 +97,13 @@ export async function prepareGdiaBackup(
   try {
     await copyFile(sourcePath, temporaryPath)
     const backupSha256 = await hashFile(temporaryPath)
+    const backupMetadata = await stat(temporaryPath)
     const sourceSha256AfterCopy = await hashFile(sourcePath)
-    if (backupSha256 !== sourceSha256 || sourceSha256AfterCopy !== sourceSha256) {
+    if (
+      backupMetadata.size !== sourceBytes ||
+      backupSha256 !== sourceSha256 ||
+      sourceSha256AfterCopy !== sourceSha256
+    ) {
       throw new Error('The GDIA database changed during backup; migration was aborted before import.')
     }
     await rename(temporaryPath, backupPath)
@@ -102,7 +111,7 @@ export async function prepareGdiaBackup(
       manifestVersion: MANIFEST_VERSION,
       fileName,
       sourceSha256,
-      sourceBytes,
+      sourceBytes: backupMetadata.size,
       createdAtUtc: now().toISOString()
     }
     await writeManifest(manifestPath, manifest)
@@ -120,11 +129,17 @@ export async function prepareGdiaBackup(
   }
 }
 
-async function loadBackupEntries(backupDirectory: string): Promise<BackupEntry[]> {
-  const names = (await readdir(backupDirectory))
+async function loadBackupEntries(backupDirectory: string, sourceFileName: string): Promise<BackupEntry[]> {
+  const directoryNames = await readdir(backupDirectory)
+  await Promise.all(directoryNames
+    .filter((name) => isManagedTemporaryName(name, sourceFileName))
+    .map((name) => rm(join(backupDirectory, name), { force: true }).catch(() => undefined)))
+  const names = directoryNames
     .filter((name) => name.toLocaleLowerCase().endsWith('.bak'))
     .sort()
   const entries = await Promise.all(names.map(async (fileName): Promise<BackupEntry | null> => {
+    const expectedHashPrefix = managedHashPrefix(fileName, sourceFileName)
+    if (!expectedHashPrefix) return null
     const backupPath = join(backupDirectory, fileName)
     const manifestPath = `${backupPath}.json`
     const manifest = await readManifest(manifestPath)
@@ -139,11 +154,8 @@ async function loadBackupEntries(backupDirectory: string): Promise<BackupEntry[]
       return { backupPath, manifestPath, manifest: null, valid: false }
     }
 
-    // Adopt backups created before manifests were introduced. Their content hash
-    // becomes the recorded identity only when it still matches the hash prefix
-    // embedded by the legacy Cairn filename. Unrecognized .bak files are left alone.
-    const expectedHashPrefix = legacyHashPrefix(fileName)
-    if (!expectedHashPrefix) return null
+    // Reconcile backups published before their manifest, including legacy files.
+    // Only exact Cairn filename formats are managed; every other .bak is left alone.
     const metadata = await stat(backupPath)
     const sourceSha256 = await hashFile(backupPath)
     if (!sourceSha256.startsWith(expectedHashPrefix)) {
@@ -172,10 +184,14 @@ async function pruneBackups(
   const validNewestFirst = entries
     .filter((entry) => entry.valid && entry.backupPath !== currentBackupPath)
     .sort((left, right) => manifestTime(right) - manifestTime(left))
-  const keep = new Set([
-    currentBackupPath,
-    ...validNewestFirst.slice(0, retention - 1).map((entry) => entry.backupPath)
-  ])
+  const keep = new Set([currentBackupPath])
+  const retainedHashes = new Set([current.manifest!.sourceSha256])
+  for (const entry of validNewestFirst) {
+    const sourceSha256 = entry.manifest!.sourceSha256
+    if (retainedHashes.has(sourceSha256)) continue
+    retainedHashes.add(sourceSha256)
+    if (keep.size < retention) keep.add(entry.backupPath)
+  }
   await Promise.all(entries
     .filter((entry) => !keep.has(entry.backupPath))
     .flatMap((entry) => [
@@ -241,8 +257,29 @@ function safeStamp(value: Date): string {
   return value.toISOString().replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
 }
 
-function legacyHashPrefix(fileName: string): string | null {
-  return fileName.match(/\.([0-9a-f]{12})\.bak$/i)?.[1]?.toLocaleLowerCase() ?? null
+function managedHashPrefix(fileName: string, sourceFileName: string): string | null {
+  const source = escapeRegExp(sourceFileName)
+  const legacy = fileName.match(new RegExp(
+    `^${source}\\.\\d{8}T\\d{9}Z\\.([0-9a-f]{12})\\.bak$`,
+    'i'
+  ))
+  if (legacy?.[1]) return legacy[1].toLocaleLowerCase()
+  return fileName.match(new RegExp(
+    `^${source}\\.\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}Z\\.([0-9a-f]{16})-[0-9a-f]{8}\\.bak$`,
+    'i'
+  ))?.[1]?.toLocaleLowerCase() ?? null
+}
+
+function isManagedTemporaryName(fileName: string, sourceFileName: string): boolean {
+  const source = escapeRegExp(sourceFileName)
+  const current = `${source}\\.\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}Z\\.` +
+    `[0-9a-f]{16}-[0-9a-f]{8}\\.bak`
+  return new RegExp(`^${current}\\.tmp$`, 'i').test(fileName) ||
+    new RegExp(`^${current}\\.json\\.[0-9a-f-]{36}\\.tmp$`, 'i').test(fileName)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function formatBytes(value: number | bigint): string {

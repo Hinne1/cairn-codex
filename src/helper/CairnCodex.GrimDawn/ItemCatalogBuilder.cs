@@ -724,7 +724,7 @@ internal static class ItemCatalogBuilder
                filename[4] == '_';
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> BuildAcquisitionReferences(
+    internal static IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> BuildAcquisitionReferences(
         IReadOnlyDictionary<string, CatalogSourceRecord> records)
     {
         var references = new Dictionary<string, List<AcquisitionReference>>(StringComparer.OrdinalIgnoreCase);
@@ -750,7 +750,7 @@ internal static class ItemCatalogBuilder
             StringComparer.OrdinalIgnoreCase);
     }
 
-    private static ItemAcquisitionPresentation BuildAcquisition(
+    internal static ItemAcquisitionPresentation BuildAcquisition(
         string itemRecord,
         IReadOnlyDictionary<string, IReadOnlyList<AcquisitionReference>> references,
         IReadOnlyDictionary<string, CatalogSourceRecord> records,
@@ -758,24 +758,27 @@ internal static class ItemCatalogBuilder
         KnownFormulaIndex? knownFormulas)
     {
         var hints = new List<string>();
-        var monsterHints = new List<string>();
-        var monsterSourceRecords = new List<string>();
-        var containerHints = new List<string>();
-        var containerSourceRecords = new List<string>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { itemRecord };
-        var queue = new Queue<(string Record, int Depth)>();
-        queue.Enqueue((itemRecord, 0));
+        var monsterSources = new List<AcquisitionSourceCandidate>();
+        var containerSources = new List<AcquisitionSourceCandidate>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            $"{AcquisitionRoute.Direct}\0{itemRecord}"
+        };
+        var queue = new Queue<(string Record, int Depth, AcquisitionRoute Route)>();
+        queue.Enqueue((itemRecord, 0, AcquisitionRoute.Direct));
         var sawDropTable = false;
-        var sawVendor = false;
+        var sawDirectVendor = false;
+        var sawBlueprintVendor = false;
         var blueprintRecords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var factionRequirements = new List<ItemFactionRequirement>();
+        var blueprintFactionRequirements = new List<ItemFactionRequirement>();
 
         // An MI normally reaches its source through two or more reverse references:
         // item -> dynamic loot table -> monster, sometimes with one or more pool tables
         // in between. Walking only the first edge made every MI look like a random drop.
         while (queue.Count > 0 && visited.Count <= 2_000)
         {
-            var (target, depth) = queue.Dequeue();
+            var (target, depth, route) = queue.Dequeue();
             if (depth >= 8) continue;
 
             foreach (var reference in references.GetValueOrDefault(target) ?? [])
@@ -789,48 +792,70 @@ internal static class ItemCatalogBuilder
                 var isContainer = path.Contains("/interactiveobjects/loot", StringComparison.OrdinalIgnoreCase) ||
                                   path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase) ||
                                   path.Contains("/items/lootchests/", StringComparison.OrdinalIgnoreCase);
+                var isFormula = source.Record.Type == "ItemArtifactFormula";
 
                 // Only a formula whose artifactName points directly at this item is a
                 // deterministic recipe for it. Formulae for broad random-item tables
                 // are reachable through the drop graph too, but are not useful shopping
-                // list recipes for every possible table result.
-                if (depth == 0 && source.Record.Type == "ItemArtifactFormula" && reference.Field == "artifactName")
+                // list recipes for every possible table result. A formula that points at
+                // the item through a reagent field consumes it; it is not an acquisition
+                // path and must stop here.
+                if (isFormula)
+                {
+                    if (route != AcquisitionRoute.Direct || depth != 0 || reference.Field != "artifactName")
+                        continue;
+
                     blueprintRecords.Add(source.Record.Name);
-                if (path.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) && !isVendor)
+                    var formulaVisit = $"{AcquisitionRoute.Blueprint}\0{reference.Record}";
+                    if (visited.Add(formulaVisit))
+                        queue.Enqueue((reference.Record, depth + 1, AcquisitionRoute.Blueprint));
+                    continue;
+                }
+
+                if (route == AcquisitionRoute.Direct &&
+                    path.Contains("/loottables/", StringComparison.OrdinalIgnoreCase) && !isVendor)
                     sawDropTable = true;
                 if (isVendor)
                 {
-                    sawVendor = true;
-                    var requirement = ParseFactionRequirement(path);
-                    if (requirement is not null) factionRequirements.Add(requirement);
+                    var requirement = ParseFactionRequirement(
+                        path,
+                        route == AcquisitionRoute.Blueprint ? "blueprint" : "item");
+                    if (route == AcquisitionRoute.Blueprint)
+                    {
+                        sawBlueprintVendor = true;
+                        if (requirement is not null) blueprintFactionRequirements.Add(requirement);
+                    }
+                    else
+                    {
+                        sawDirectVendor = true;
+                        if (requirement is not null) factionRequirements.Add(requirement);
+                    }
                 }
 
-                if (isMonster)
+                if (route == AcquisitionRoute.Direct && isMonster)
                 {
-                    AddNamedSource("Dropped by", source, tags, monsterHints, monsterSourceRecords);
+                    AddNamedSource("Dropped by", source, tags, depth + 1, monsterSources);
                     // Proxies point at monsters, but they are not needed to discover the
                     // drop graph. Map placement is indexed independently from sourceRecords.
                     continue;
                 }
 
-                if (isContainer)
+                if (route == AcquisitionRoute.Direct && isContainer)
                 {
-                    AddNamedSource("Found in", source, tags, containerHints, containerSourceRecords);
+                    AddNamedSource("Found in", source, tags, depth + 1, containerSources);
                 }
 
-                if (visited.Add(reference.Record) && IsAcquisitionBridge(path, source.Record.Type))
-                    queue.Enqueue((reference.Record, depth + 1));
+                var visit = $"{route}\0{reference.Record}";
+                if (visited.Add(visit) && IsAcquisitionBridge(path, source.Record.Type))
+                    queue.Enqueue((reference.Record, depth + 1, route));
             }
         }
 
         // A boss-specific item table can also be reachable through broad reward
         // chests. When a real monster consumer exists, that is the actionable farming
         // source and its placement graph must not be polluted by every generic chest.
-        var preferredHints = monsterHints.Count > 0 ? monsterHints : containerHints;
-        var preferredSourceRecords = monsterSourceRecords.Count > 0
-            ? monsterSourceRecords
-            : containerSourceRecords;
-        hints.AddRange(preferredHints);
+        var preferredSources = SelectClosestSources(monsterSources, containerSources);
+        hints.AddRange(preferredSources.Select(source => source.Hint).OfType<string>());
 
         if (blueprintRecords.Count > 0) hints.Add("Craftable from a blueprint");
         foreach (var requirement in factionRequirements
@@ -838,14 +863,21 @@ internal static class ItemCatalogBuilder
         {
             hints.Add($"Faction vendor: {requirement.Faction} · {requirement.Reputation}");
         }
-        if (sawVendor && factionRequirements.Count == 0) hints.Add("Merchant inventory");
+        foreach (var requirement in blueprintFactionRequirements
+                     .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase))
+        {
+            hints.Add($"Blueprint vendor: {requirement.Faction} · {requirement.Reputation}");
+        }
+        if (sawDirectVendor && factionRequirements.Count == 0) hints.Add("Merchant inventory");
+        if (sawBlueprintVendor && blueprintFactionRequirements.Count == 0) hints.Add("Blueprint merchant");
         if (hints.Count == 0 && sawDropTable) hints.Add("Random drop");
         if (hints.Count == 0) hints.Add("Special source; exact location not yet indexed");
         return new ItemAcquisitionPresentation(
             hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
-            preferredSourceRecords.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
-            factionRequirements
-                .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)
+            preferredSources.Select(source => source.Record)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
+            factionRequirements.Concat(blueprintFactionRequirements)
+                .DistinctBy(requirement => $"{requirement.Kind}\0{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
             blueprintRecords.Count == 0
                 ? null
@@ -859,7 +891,9 @@ internal static class ItemCatalogBuilder
                         : blueprintRecords.Any(knownFormulas.HardcoreRecords.Contains)));
     }
 
-    private static ItemFactionRequirement? ParseFactionRequirement(string path)
+    private static ItemFactionRequirement? ParseFactionRequirement(
+        string path,
+        string kind = "item")
     {
         const string marker = "/merchants/factiontables/";
         var markerIndex = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -874,7 +908,8 @@ internal static class ItemCatalogBuilder
             return new ItemFactionRequirement(
                 FactionDisplayName(key),
                 char.ToUpperInvariant(reputation[0]) + reputation[1..],
-                path);
+                path,
+                kind);
         }
         return null;
     }
@@ -916,12 +951,31 @@ internal static class ItemCatalogBuilder
         type.Contains("Merchant", StringComparison.OrdinalIgnoreCase) ||
         type.Contains("Formula", StringComparison.OrdinalIgnoreCase);
 
+    private static IReadOnlyList<AcquisitionSourceCandidate> SelectClosestSources(
+        IReadOnlyList<AcquisitionSourceCandidate> monsterSources,
+        IReadOnlyList<AcquisitionSourceCandidate> containerSources)
+    {
+        var closestMonsterDepth = monsterSources.Count == 0
+            ? int.MaxValue
+            : monsterSources.Min(source => source.Depth);
+        var closestContainerDepth = containerSources.Count == 0
+            ? int.MaxValue
+            : containerSources.Min(source => source.Depth);
+        var closestDepth = Math.Min(closestMonsterDepth, closestContainerDepth);
+        if (closestDepth == int.MaxValue) return [];
+
+        // At equal distance a monster is the more actionable farming answer. A direct
+        // chest, however, must beat a monster inherited through a deeper broad pool.
+        var sources = closestMonsterDepth == closestDepth ? monsterSources : containerSources;
+        return sources.Where(source => source.Depth == closestDepth).ToArray();
+    }
+
     private static void AddNamedSource(
         string verb,
         CatalogSourceRecord source,
         IReadOnlyDictionary<string, string> tags,
-        IList<string> hints,
-        IList<string> sourceRecords)
+        int depth,
+        IList<AcquisitionSourceCandidate> candidates)
     {
         var record = source.Record;
         var name = new[]
@@ -940,25 +994,10 @@ internal static class ItemCatalogBuilder
             if (IsUsefulSourceName(fallback)) name = fallback;
         }
 
-        // Ordinary world monsters are the most useful answer to "where can I farm
-        // this?". Boss, hero, devotion and procedural variants often share the same
-        // legitimate MI table, but listing those first made broad families look like
-        // corrupt acquisition data and polluted their first map locations.
-        var normalizedPath = record.Name.Replace('\\', '/');
-        var isOrdinaryMonster = verb == "Dropped by" &&
-            !normalizedPath.Contains("/boss&quest/", StringComparison.OrdinalIgnoreCase) &&
-            !normalizedPath.Contains("/hero/", StringComparison.OrdinalIgnoreCase) &&
-            !normalizedPath.Contains("/devotion/", StringComparison.OrdinalIgnoreCase);
-        if (isOrdinaryMonster)
-        {
-            sourceRecords.Insert(0, record.Name);
-            if (name is not null) hints.Insert(0, $"{verb} {name}");
-        }
-        else
-        {
-            sourceRecords.Add(record.Name);
-            if (name is not null) hints.Add($"{verb} {name}");
-        }
+        candidates.Add(new AcquisitionSourceCandidate(
+            depth,
+            name is null ? null : $"{verb} {name}",
+            record.Name));
     }
 
     private static bool IsUsefulSourceName(string? value) =>
@@ -1102,6 +1141,12 @@ internal sealed record CatalogAffixRecord(
     ItemPresentation Presentation);
 
 internal sealed record AcquisitionReference(string Record, string Type, string Field);
+internal sealed record AcquisitionSourceCandidate(int Depth, string? Hint, string Record);
+internal enum AcquisitionRoute
+{
+    Direct,
+    Blueprint
+}
 internal sealed record ItemAcquisitionPresentation(
     IReadOnlyList<string> Sources,
     IReadOnlyList<string> SourceRecords,
@@ -1111,4 +1156,8 @@ internal sealed record ItemCraftingPresentation(
     IReadOnlyList<string> BlueprintRecords,
     bool? KnownSoftcore,
     bool? KnownHardcore);
-internal sealed record ItemFactionRequirement(string Faction, string Reputation, string VendorRecord);
+internal sealed record ItemFactionRequirement(
+    string Faction,
+    string Reputation,
+    string VendorRecord,
+    string Kind = "item");

@@ -462,6 +462,7 @@ const toolSettingsOpen = ref(false)
 const materialCategory = ref<MaterialCategory>('all')
 const farmingQuery = ref('')
 const farmingRarity = ref<RarityFilter>('all')
+const farmingPage = ref(1)
 const dismantlingQuery = ref('')
 const dismantlingMode = ref<DismantlingModeFilter>('all')
 const dismantlingRarity = ref<DismantlingRarityFilter>('all')
@@ -2436,6 +2437,9 @@ watch([selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFi
 })
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   plannerPage.value = 1
+})
+watch([farmingQuery, farmingRarity], () => {
+  farmingPage.value = 1
 })
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (applyingPlannerProfile) return
@@ -7280,23 +7284,34 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
           </template>
         </ExplorerToolbar>
-        <div class="farm-list">
-          <article v-for="(target, index) in farmTargets" :key="target.key">
-            <span class="farm-rank">{{ index + 1 }}</span>
-            <div>
-              <h3>{{ target.name }} <small>{{ contentPackShortLabel(target.contentPack) }}</small></h3>
-              <p>{{ target.items.length }} missing base{{ target.items.length === 1 ? '' : 's' }} · earliest item Lv{{ target.minimumLevel }}</p>
-              <div class="farm-items">
-                <button v-for="item in target.items.slice(0, 12)" :key="item.record" type="button" @mouseenter="queueTooltip(item, $event)" @mouseleave="scheduleTooltipHide" @click="openItem(item)">
-                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
-                  <span>{{ item.name }}</span>
-                </button>
-                <small v-if="target.items.length > 12">+{{ target.items.length - 12 }} more</small>
+        <BoundedResultSurface
+          v-model:page="farmingPage"
+          class="farm-list farming-route-results bounded-tooltip-results"
+          :items="farmTargets"
+          :get-key="target => target.key"
+          :page-size="50"
+          empty-title="No useful farming areas"
+          empty-detail="No missing items have indexed locations under this filter."
+          label="Collection farming routes"
+          layout="list"
+        >
+          <template #item="{ item: target, index }">
+            <article>
+              <span class="farm-rank">{{ index + 1 }}</span>
+              <div>
+                <h3>{{ target.name }} <small>{{ contentPackShortLabel(target.contentPack) }}</small></h3>
+                <p>{{ target.items.length }} missing base{{ target.items.length === 1 ? '' : 's' }} · earliest item Lv{{ target.minimumLevel }}</p>
+                <div class="farm-items">
+                  <button v-for="item in target.items.slice(0, 12)" :key="item.record" type="button" @mouseenter="queueTooltip(item, $event)" @mouseleave="scheduleTooltipHide" @click="openItem(item)">
+                    <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
+                    <span>{{ item.name }}</span>
+                  </button>
+                  <small v-if="target.items.length > 12">+{{ target.items.length - 12 }} more</small>
+                </div>
               </div>
-            </div>
-          </article>
-          <p v-if="farmTargets.length === 0" class="skill-empty">No missing items have indexed locations under this filter.</p>
-        </div>
+            </article>
+          </template>
+        </BoundedResultSurface>
       </section>
 
       <section v-else-if="activeView === 'settings'" class="settings-workspace" aria-label="Cairn Codex settings">

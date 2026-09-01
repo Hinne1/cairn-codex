@@ -1594,6 +1594,59 @@ function registerIpcHandlers(
 
 function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
   if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
+  if (name === 'farming-routes') {
+    const fixture = createScreenshotCollectionFixture('search-help')
+    const template = fixture.items[0]!
+    const rarities = ['mi', 'epic', 'legendary'] as const
+    const contentPacks = ['base', 'gdx1', 'gdx2', 'gdx3'] as const
+    const items = Array.from({ length: 214 }, (_, routeIndex) =>
+      Array.from({ length: routeIndex === 0 ? 13 : 1 }, (_, itemIndex): CollectionItem => {
+        const routeNumber = String(routeIndex + 1).padStart(3, '0')
+        const rarity = rarities[routeIndex % rarities.length]!
+        const contentPack = contentPacks[routeIndex % contentPacks.length]!
+        return {
+          ...template,
+          record: `records/items/synthetic/farming_route_${routeNumber}_item_${itemIndex}.dbr`,
+          name: `Route ${routeNumber} Missing Base ${String(itemIndex + 1).padStart(2, '0')}`,
+          rarity,
+          levelRequirement: 1 + routeIndex % 94,
+          itemLevel: 1 + routeIndex % 94,
+          availableCount: 0,
+          discovered: false,
+          acquisition: {
+            sources: [`Dropped by Route ${routeNumber} Guardian`],
+            sourceRecords: [],
+            factions: [],
+            crafting: null,
+            locations: [{
+              name: `Synthetic Route ${routeNumber}`,
+              routeName: `Rift ${1 + routeIndex % 7}`,
+              zoneRecord: `records/levels/synthetic/farming_route_${routeNumber}.dbr`,
+              levelFile: `levels/synthetic/farming_route_${routeNumber}.lvl`,
+              contentPack,
+              originX: routeIndex * 10,
+              originY: routeIndex * 5
+            }]
+          },
+          presentation: {
+            ...template.presentation!,
+            searchText: `synthetic farming route ${routeNumber} ${rarity}`
+          }
+        }
+      })
+    ).flat()
+    return {
+      ...fixture,
+      items,
+      observedItems: [],
+      rarities: rarities.map((rarity) => ({
+        rarity,
+        total: items.filter((item) => item.rarity === rarity).length,
+        collected: 0,
+        availableCopies: 0
+      }))
+    }
+  }
   if (name === 'planner') {
     const fixture = createScreenshotCollectionFixture('search-help')
     const template = fixture.items[0]!
@@ -5436,6 +5489,64 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING === '1') {
+          interactionTimings.farmingPagingMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const root = document.querySelector('.farming-route-results')
+              const mountedRows = () => [...document.querySelectorAll('.farming-route-results .bounded-results-item')]
+              const firstRank = () => document.querySelector('.farming-route-results .farm-rank')?.textContent?.trim()
+              if (!root || mountedRows().length !== 50 || firstRank() !== '1') {
+                throw new Error('The first Collection Farming page did not mount ranks 1–50.')
+              }
+              const next = root.querySelector('.bounded-results-footer nav button:last-of-type')
+              if (!(next instanceof HTMLButtonElement) || next.disabled) {
+                throw new Error('Collection Farming did not expose an enabled next-page control.')
+              }
+              next.focus()
+              if (document.activeElement !== next) {
+                throw new Error('The Collection Farming next-page control was not keyboard reachable.')
+              }
+              next.click()
+              await frames()
+              if (mountedRows().length !== 50 || firstRank() !== '51') {
+                throw new Error('Collection Farming did not replace page one with global ranks 51–100.')
+              }
+              const rarity = document.querySelector('.farming-workspace .explorer-toolbar-filters select')
+              if (!(rarity instanceof HTMLSelectElement)) {
+                throw new Error('Collection Farming rarity control was not available.')
+              }
+              rarity.value = 'mi'
+              rarity.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              if (firstRank() !== '1') {
+                throw new Error('Collection Farming did not reset paging after a rarity change.')
+              }
+              rarity.value = 'all'
+              rarity.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              const item = document.querySelector('.farming-route-results .farm-items button')
+              if (!(item instanceof HTMLButtonElement)) {
+                throw new Error('Collection Farming item snippets were not retained.')
+              }
+              const rect = item.getBoundingClientRect()
+              item.dispatchEvent(new MouseEvent('mouseenter', {
+                bubbles: true,
+                clientX: rect.left + Math.min(8, rect.width / 2),
+                clientY: rect.top + Math.min(8, rect.height / 2)
+              }))
+              for (let attempt = 0; attempt < 20 && !document.querySelector('.game-tooltip'); attempt += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 25))
+              }
+              if (!document.querySelector('.game-tooltip')) {
+                throw new Error('Collection Farming item snippets did not retain the global tooltip.')
+              }
+              item.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_DISMANTLING_PREVIEW === '1') {
           await window.webContents.executeJavaScript(`
             [...document.querySelectorAll('.dismantling-toolbar button')]
@@ -5926,7 +6037,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           boundedRows: document.querySelectorAll('.bounded-tooltip-results .bounded-results-item').length,
           skillRows: document.querySelectorAll('.skill-table-results .skill-table-row').length,
           dismantlingRows: document.querySelectorAll('.dismantling-row').length,
-          farmingRows: document.querySelectorAll('.farm-list > article').length,
+          farmingRows: document.querySelectorAll('.farm-list .bounded-results-item > article').length,
           oracleCards: document.querySelectorAll('.oracle-card').length,
           supplyCards: document.querySelectorAll('.supply-card').length,
           materialCards: document.querySelectorAll('.materials-grid .item-card').length,

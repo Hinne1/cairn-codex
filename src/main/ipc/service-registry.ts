@@ -14,26 +14,11 @@ export interface IpcRegistrar {
 
 export type IpcInputValidator<T> = (input: unknown) => T
 
-export class IpcServiceError extends Error {
-  readonly code: string
-
-  constructor(
-    message: string,
-    code: string,
-    options?: ErrorOptions
-  ) {
-    super(message, options)
-    this.name = 'IpcServiceError'
-    this.code = code
-  }
-}
-
-export function translateIpcServiceError(error: unknown, domain: string): Error {
-  if (error instanceof IpcServiceError) return error
-  if (error instanceof Error) {
-    return new IpcServiceError(error.message, `${domain}.failed`, { cause: error })
-  }
-  return new IpcServiceError(`${domain} operation failed.`, `${domain}.failed`, { cause: error })
+export function translateIpcServiceError(error: unknown, domain: IpcErrorDomain): Error {
+  const classified = classifyIpcDomainError(domain, error)
+  const translated = new Error(classified.message)
+  translated.name = classified.code
+  return translated
 }
 
 /**
@@ -42,11 +27,11 @@ export function translateIpcServiceError(error: unknown, domain: string): Error 
  * the process boundary.
  */
 export class IpcDomainService {
-  readonly domain: string
+  readonly domain: IpcErrorDomain
   private readonly registrar: IpcRegistrar
 
   constructor(
-    domain: string,
+    domain: IpcErrorDomain,
     registrar: IpcRegistrar
   ) {
     this.domain = domain
@@ -95,3 +80,7 @@ export class SerializedServiceQueue {
     await this.tail
   }
 }
+import {
+  classifyIpcDomainError,
+  type IpcErrorDomain
+} from './domain-error-transport.ts'

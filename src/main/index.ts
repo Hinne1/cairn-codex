@@ -94,6 +94,18 @@ import {
 } from './ipc/validation.ts'
 import { registerManagedShutdown, registerPrimaryWindowLifecycle } from './window-lifecycle.ts'
 import { MainOperationCoordinator } from './operation-coordinator.ts'
+import { BackgroundJobService } from './ipc/background-job-service.ts'
+import { BackupService } from './ipc/backup-service.ts'
+import { WindowService } from './ipc/window-service.ts'
+import {
+  ItemAssistantImportCanceledError,
+  ItemAssistantImportService,
+  migrationOptionsFromRequest
+} from './ipc/import-service.ts'
+import { CollectionService } from './ipc/collection-service.ts'
+import { DiagnosticsService } from './ipc/diagnostics-service.ts'
+import { ArchiveDomainService } from './ipc/archive-service.ts'
+import { LiveTransferDomainService } from './ipc/live-transfer-service.ts'
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -697,6 +709,7 @@ function registerIpcHandlers(
   jobs: BackgroundJobCoordinator
 ): () => Promise<void> {
   const ipcDomains = createMainIpcDomains(ipcMain)
+  const backgroundJobService = new BackgroundJobService(jobs)
   let latestCollection: CollectionSnapshot | null = null
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
@@ -741,128 +754,69 @@ function registerIpcHandlers(
       }
     }
   })
-  ipcDomains.backgroundJobs.handle(IPC_CHANNELS.getBackgroundJobs, () => jobs.list())
+  ipcDomains.backgroundJobs.handle(
+    IPC_CHANNELS.getBackgroundJobs,
+    () => backgroundJobService.list()
+  )
   ipcDomains.backgroundJobs.handle(
     IPC_CHANNELS.cancelBackgroundJob,
-    (_event, input: { id: string }) => {
-      if (!input || !isBackgroundJobId(input.id)) {
-        throw new Error('A valid background job ID is required.')
-      }
-      return jobs.requestCancellation(input.id)
-    },
+    (_event, input: { id: string }) => backgroundJobService.cancel(input),
     validateBackgroundJobId
   )
 
-  ipcDomains.diagnostics.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
-    try {
-      await helper.request('health')
-      return { appVersion: app.getVersion(), helper: 'available', mode: 'read-only', safeMode: startupRecovery.getStatus() }
-    } catch {
-      return { appVersion: app.getVersion(), helper: 'unavailable', mode: 'read-only', safeMode: startupRecovery.getStatus() }
-    }
-  })
-  ipcDomains.diagnostics.handle(IPC_CHANNELS.getDebugLogging, (): DebugLoggingStatus => {
-    const policy = diagnostics.getRetentionPolicy()
-    return {
-      enabled: diagnostics.getDebugMode(),
-      maxFiles: policy.maxFiles,
-      maxFileBytes: policy.maxFileBytes,
-      maxAgeDays: policy.maxAgeDays
-    }
-  })
-  ipcDomains.diagnostics.handle(
-    IPC_CHANNELS.setDebugLogging,
-    (_event, input: { enabled: boolean }): DebugLoggingStatus => {
-      if (typeof input?.enabled !== 'boolean') throw new Error('Debug logging must be enabled or disabled explicitly.')
-      database.setDebugLogging(input.enabled)
-      diagnostics.setDebugMode(input.enabled)
-      const policy = diagnostics.getRetentionPolicy()
-      return {
-        enabled: diagnostics.getDebugMode(),
-        maxFiles: policy.maxFiles,
-        maxFileBytes: policy.maxFileBytes,
-        maxAgeDays: policy.maxAgeDays
-      }
-    },
-    booleanField('enabled', 'Debug logging must be enabled or disabled explicitly.')
-  )
-  ipcDomains.diagnostics.handle(
-    IPC_CHANNELS.recordNavigation,
-    (_event, input: { view: string }): void => {
-      const views = new Set([
-        'collection', 'sets', 'materials', 'skills', 'planner', 'oracle', 'mi-workshop',
-        'supplies', 'farming', 'dismantling', 'vault', 'settings'
-      ])
-      if (!views.has(input?.view)) throw new Error('Unknown workspace navigation event.')
-      diagnostics.info('navigation', 'workspace.opened', { view: input.view })
-    },
-    validateNavigation
-  )
-  ipcDomains.diagnostics.handle(
-    IPC_CHANNELS.reportRendererError,
-    (_event, input: RendererErrorReport): void => {
-      if (
-        !input || !/^[0-9a-f-]{36}$/i.test(input.correlationId) ||
-        typeof input.workspace !== 'string' || input.workspace.length > 64 ||
-        typeof input.message !== 'string' || input.message.length < 1 || input.message.length > 500 ||
-        (input.stack !== null && (typeof input.stack !== 'string' || input.stack.length > 4000))
-      ) {
-        throw new Error('Renderer error report is outside its safe bounds.')
-      }
-      diagnostics.error(
-        'renderer',
-        'workspace.failed',
-        new Error(input.message),
-        { correlationId: input.correlationId, workspace: input.workspace, stack: input.stack }
-      )
-    },
-    validateRendererError
-  )
-  ipcDomains.diagnostics.handle(
-    IPC_CHANNELS.reportPreferenceLoad,
-    (_event, input: PreferenceLoadReport): void => {
-      const sources = new Set(['fresh', 'legacy', 'stored'])
-      if (
-        !input || !sources.has(input.source) || typeof input.migrated !== 'boolean' ||
-        input.schemaVersion !== 1 || !Array.isArray(input.invalidFields) || input.invalidFields.length > 64 ||
-        !input.invalidFields.every((field) => typeof field === 'string' && /^[a-z][a-zA-Z0-9.[\]-]{0,99}$/.test(field))
-      ) {
-        throw new Error('Preference-load diagnostics are outside their safe bounds.')
-      }
-      const event = input.invalidFields.length ? 'preferences.recovered' : 'preferences.loaded'
-      const data = {
-        source: input.source,
-        migrated: input.migrated,
-        schemaVersion: input.schemaVersion,
-        invalidFields: input.invalidFields
-      }
-      if (input.invalidFields.length) diagnostics.warn('settings', event, data)
-      else diagnostics.info('settings', event, data)
-    },
-    validatePreferenceLoad
-  )
-  ipcDomains.diagnostics.handle(
-    IPC_CHANNELS.exportPreferences,
-    async (_event, input: { serialized: string }): Promise<DiagnosticExportResult> => {
-      if (!input || typeof input.serialized !== 'string' || input.serialized.length > 2 * 1024 * 1024) {
-        throw new Error('Preference export is outside its safe bounds.')
-      }
-      let parsed: unknown
-      try { parsed = JSON.parse(input.serialized) as unknown } catch { throw new Error('Preference export is not valid JSON.') }
-      if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 1) {
-        throw new Error('Preference export has an unsupported schema version.')
-      }
+  let exportDiagnosticsOperation!: () => Promise<DiagnosticExportResult>
+  const diagnosticsService = new DiagnosticsService({
+    appVersion: () => app.getVersion(),
+    helperHealth: () => helper.request('health'),
+    safeModeStatus: () => startupRecovery.getStatus(),
+    debugEnabled: () => diagnostics.getDebugMode(),
+    retentionPolicy: () => diagnostics.getRetentionPolicy(),
+    persistDebugLogging: (enabled) => database.setDebugLogging(enabled),
+    applyDebugLogging: (enabled) => diagnostics.setDebugMode(enabled),
+    info: (scope, event, data) => diagnostics.info(scope, event, data),
+    warn: (scope, event, data) => diagnostics.warn(scope, event, data),
+    error: (scope, event, error, data) => diagnostics.error(scope, event, error, data),
+    selectPreferenceExport: async (serialized) => {
       const stamp = new Date().toISOString().slice(0, 10)
       const selection = await dialog.showSaveDialog({
         title: 'Export Cairn Codex preferences',
         defaultPath: join(app.getPath('documents'), `cairn-codex-preferences-${stamp}.json`),
         filters: [{ name: 'Cairn Codex preferences', extensions: ['json'] }]
       })
-      if (selection.canceled || !selection.filePath) return { canceled: true, path: null }
-      await writeFile(selection.filePath, input.serialized, 'utf8')
-      diagnostics.info('settings', 'preferences.exported', { schemaVersion: 1 })
-      return { canceled: false, path: selection.filePath }
+      if (selection.canceled || !selection.filePath) return null
+      await writeFile(selection.filePath, serialized, 'utf8')
+      return selection.filePath
     },
+    reconcileRecovery: () => reconcileLiveRecoveryOperations(helper, database, diagnostics),
+    runExclusive,
+    recoveryOperations: () => database.getDiagnosticSummary().recoveryOperations,
+    exportDiagnostics: () => exportDiagnosticsOperation()
+  })
+  ipcDomains.diagnostics.handle(IPC_CHANNELS.getAppStatus, () => diagnosticsService.getAppStatus())
+  ipcDomains.diagnostics.handle(IPC_CHANNELS.getDebugLogging, () => diagnosticsService.getDebugLogging())
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.setDebugLogging,
+    (_event, input: { enabled: boolean }) => diagnosticsService.setDebugLogging(input),
+    booleanField('enabled', 'Debug logging must be enabled or disabled explicitly.')
+  )
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.recordNavigation,
+    (_event, input: { view: string }) => diagnosticsService.recordNavigation(input),
+    validateNavigation
+  )
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.reportRendererError,
+    (_event, input: RendererErrorReport) => diagnosticsService.reportRendererError(input),
+    validateRendererError
+  )
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.reportPreferenceLoad,
+    (_event, input: PreferenceLoadReport) => diagnosticsService.reportPreferenceLoad(input),
+    validatePreferenceLoad
+  )
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.exportPreferences,
+    (_event, input: { serialized: string }) => diagnosticsService.exportPreferences(input),
     validateSerializedPreferences
   )
   const restartWithSafeMode = (safe: boolean): void => {
@@ -872,127 +826,160 @@ function registerIpcHandlers(
     app.relaunch({ args })
     app.quit()
   }
-  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.restartInSafeMode, (): void => restartWithSafeMode(true))
-  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.restartNormally, (): void => restartWithSafeMode(false))
-  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.getStartupStatus, (): StartupStatus => presentStartupStatus())
+  const windowService = new WindowService({
+    restart: restartWithSafeMode,
+    startupStatus: presentStartupStatus,
+    recordStartupPhase: (phase) => recordStartupPhase(phase, diagnostics),
+    markHealthy: () => startupRecovery.markHealthy(),
+    recordHealthFailure: (error) => diagnostics.error('recovery', 'startup-health.persist-failed', error),
+    openDataDirectory: () => shell.openPath(app.getPath('userData'))
+  })
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.restartInSafeMode, () => windowService.restartInSafeMode())
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.restartNormally, () => windowService.restartNormally())
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.getStartupStatus, () => windowService.getStartupStatus())
   ipcDomains.windowLifecycle.handle(
     IPC_CHANNELS.reportStartupPhase,
-    (_event, input: { phase: StartupPhaseEvent }): StartupStatus => {
-      const phases: StartupPhaseEvent[] = [
-        'cache-hit', 'cache-miss', 'cached-paint', 'interactive',
-        'scan-started', 'scan-settled', 'scan-skipped',
-        'roll-analysis-started', 'roll-analysis-settled', 'roll-analysis-skipped'
-      ]
-      if (!phases.includes(input?.phase)) throw new Error('Unknown startup phase event.')
-      const status = recordStartupPhase(input.phase, diagnostics)
-      if (input.phase === 'interactive') void startupRecovery.markHealthy().catch((error) => {
-        diagnostics.error('recovery', 'startup-health.persist-failed', error)
-      })
-      return status
-    },
+    (_event, input: { phase: StartupPhaseEvent }) => windowService.reportStartupPhase(input),
     validateStartupPhase
   )
-  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
-    return shell.openPath(app.getPath('userData'))
-  })
-  ipcDomains.backups.handle(IPC_CHANNELS.getArchiveBackupStatus, () => archiveBackups.getStatus())
-  ipcDomains.backups.handle(
-    IPC_CHANNELS.createArchiveBackup,
-    async (): Promise<ArchiveBackupActionResult> => {
-      const backup = await runArchiveBackupJob(
-        jobs,
-        'archive-backup:create',
-        'manual backup',
-        () => runExclusive(() => archiveBackups.createBackup('manual backup'))
-      ).result
-      return { canceled: false, backup, path: null, restarting: false }
-    }
-  )
-  ipcDomains.backups.handle(
-    IPC_CHANNELS.exportArchiveBackup,
-    async (): Promise<ArchiveBackupActionResult> => {
+  ipcDomains.windowLifecycle.handle(IPC_CHANNELS.openDataDirectory, () => windowService.openDataDirectory())
+  const backupService = new BackupService({
+    store: archiveBackups,
+    unresolvedTransferCount: () => database.getRecoveryOperationCount(),
+    selectExportPath: async () => {
       const stamp = new Date().toISOString().slice(0, 10)
       const selection = await dialog.showSaveDialog({
         title: 'Export Cairn Codex archive backup',
         defaultPath: join(app.getPath('documents'), `cairn-codex-archive-${stamp}.sqlite3`),
         filters: [{ name: 'Cairn Codex archive', extensions: ['sqlite3'] }]
       })
-      if (selection.canceled || !selection.filePath) {
-        return { canceled: true, backup: null, path: null, restarting: false }
-      }
-      const backup = await runArchiveBackupJob(
-        jobs,
-        `archive-backup:export:${createHash('sha256').update(selection.filePath).digest('hex').slice(0, 16)}`,
-        'manual export',
-        () => runExclusive(() => archiveBackups.exportBackup(selection.filePath!))
-      ).result
-      return {
-        canceled: false,
-        backup,
-        path: selection.filePath,
-        restarting: false
-      }
-    }
-  )
-  ipcDomains.backups.handle(
-    IPC_CHANNELS.restoreArchiveBackup,
-    async (): Promise<ArchiveBackupActionResult> => {
-      const unresolved = database.getRecoveryOperationCount()
-      if (unresolved > 0) {
-        throw new Error(
-          `${unresolved} transfer operation${unresolved === 1 ? '' : 's'} require recovery attention. ` +
-          'Resolve or audit them before restoring the archive.'
-        )
-      }
+      return selection.canceled ? null : selection.filePath ?? null
+    },
+    selectRestorePath: async (defaultDirectory) => {
       const selection = await dialog.showOpenDialog({
         title: 'Restore Cairn Codex archive backup',
-        defaultPath: (await archiveBackups.getStatus()).backupDirectory,
+        defaultPath: defaultDirectory,
         properties: ['openFile'],
         filters: [
           { name: 'Cairn Codex archive', extensions: ['sqlite3', 'sqlite', 'db'] },
           { name: 'All files', extensions: ['*'] }
         ]
       })
-      const sourcePath = selection.filePaths[0]
-      if (selection.canceled || !sourcePath) {
-        return { canceled: true, backup: null, path: null, restarting: false }
-      }
-      const confirmation = await dialog.showMessageBox({
-        type: 'warning',
-        title: 'Restore Cairn Codex archive?',
-        message: 'CC will verify this backup and restart to restore it.',
-        detail:
-          'Before replacement, CC will preserve the current archive as a verified emergency backup. ' +
-          'Grim Dawn stash files are not changed.',
-        buttons: ['Cancel', 'Restore and restart'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
-      })
-      if (confirmation.response !== 1) {
-        return { canceled: true, backup: null, path: null, restarting: false }
-      }
-      const backup = await runArchiveBackupJob(
-        jobs,
-        `archive-backup:restore:${createHash('sha256').update(sourcePath).digest('hex').slice(0, 16)}`,
-        'stage archive restore',
-        () => runExclusive(() => archiveBackups.stageRestore(sourcePath))
-      ).result
-      setTimeout(() => {
-        app.relaunch()
-        app.quit()
-      }, 100)
-      return { canceled: false, backup, path: sourcePath, restarting: true }
-    }
-  )
-  ipcDomains.backups.handle(IPC_CHANNELS.openArchiveBackupDirectory, async (): Promise<string> => {
-    return shell.openPath((await archiveBackups.getStatus()).backupDirectory)
+      return selection.canceled ? null : selection.filePaths[0] ?? null
+    },
+    confirmRestore: async () => (await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Restore Cairn Codex archive?',
+      message: 'CC will verify this backup and restart to restore it.',
+      detail:
+        'Before replacement, CC will preserve the current archive as a verified emergency backup. ' +
+        'Grim Dawn stash files are not changed.',
+      buttons: ['Cancel', 'Restore and restart'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    })).response === 1,
+    runBackup: (dedupeKey, reason, operation) =>
+      runArchiveBackupJob(jobs, dedupeKey, reason, operation).result,
+    runExclusive,
+    scheduleRestart: () => setTimeout(() => { app.relaunch(); app.quit() }, 100),
+    openPath: (path) => shell.openPath(path)
   })
+  ipcDomains.backups.handle(IPC_CHANNELS.getArchiveBackupStatus, () => backupService.getStatus())
+  ipcDomains.backups.handle(
+    IPC_CHANNELS.createArchiveBackup,
+    (): Promise<ArchiveBackupActionResult> => backupService.create()
+  )
+  ipcDomains.backups.handle(
+    IPC_CHANNELS.exportArchiveBackup,
+    (): Promise<ArchiveBackupActionResult> => backupService.export()
+  )
+  ipcDomains.backups.handle(
+    IPC_CHANNELS.restoreArchiveBackup,
+    (): Promise<ArchiveBackupActionResult> => backupService.restore()
+  )
+  ipcDomains.backups.handle(
+    IPC_CHANNELS.openArchiveBackupDirectory,
+    (): Promise<string> => backupService.openDirectory()
+  )
   ipcDomains.imports.handle(IPC_CHANNELS.getLastGdiaImportResult, () =>
     readLastGdiaImportResult(gdiaBackupDirectory))
   ipcDomains.imports.handle(IPC_CHANNELS.getGdiaImportProgress, () => gdiaImportProgress)
+  const itemAssistantImportService = new ItemAssistantImportService({
+    collection: {
+      readCollection: async () => {
+        latestCollection ??= await readCollectionCache(collectionCachePath)
+        return latestCollection
+      }
+    },
+    sourcePicker: {
+      pickDatabase: async () => {
+        const defaultDatabase = join(
+          process.env.LOCALAPPDATA ?? app.getPath('appData'),
+          'EvilSoft', 'IAGD', 'data', 'userdata.db'
+        )
+        const selection = await dialog.showOpenDialog({
+          title: 'Import Grim Dawn Item Assistant archive',
+          defaultPath: defaultDatabase,
+          properties: ['openFile'],
+          filters: [
+            { name: 'Item Assistant database', extensions: ['db', 'sqlite', 'sqlite3'] },
+            { name: 'All files', extensions: ['*'] }
+          ]
+        })
+        return selection.canceled ? null : selection.filePaths[0] ?? null
+      }
+    },
+    analyzer: { analyze: (sourcePath) => analyzeGdiaDatabase(database, sourcePath, gdiaBackupDirectory) },
+    reviewer: {
+      confirm: async (preflight) => {
+        const enoughSpace = preflight.requiredFreeBytes <= preflight.availableFreeBytes
+        const confirmation = await dialog.showMessageBox({
+          type: enoughSpace ? 'question' : 'warning',
+          title: enoughSpace ? 'Import analyzed Item Assistant source?' : 'More free space is required',
+          message: enoughSpace
+            ? `${preflight.sourceItems.toLocaleString()} Item Assistant copies are ready for review.`
+            : 'CC cannot reserve the full verified import footprint.',
+          detail: [
+            `Source: ${preflight.sourcePath}`,
+            `Copies: ${preflight.sourceItems.toLocaleString()} total · ${preflight.sourceSoftcoreItems.toLocaleString()} Softcore · ${preflight.sourceHardcoreItems.toLocaleString()} Hardcore`,
+            `Unsupported estimate: ${preflight.unsupportedItems.toLocaleString()}`,
+            `Database backup: ${formatImportBytes(preflight.backupBytes)}`,
+            `Total required free space: ${formatImportBytes(preflight.requiredFreeBytes)}`,
+            `Available free space: ${formatImportBytes(preflight.availableFreeBytes)}`
+          ].join('\n'),
+          buttons: enoughSpace ? ['Cancel', 'Import'] : ['Close'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        })
+        return enoughSpace && confirmation.response === 1
+      }
+    },
+    committer: {
+      commit: (request) => migrateGdiaDatabase(
+        database,
+        request.sourcePath,
+        gdiaBackupDirectory,
+        {
+          ...migrationOptionsFromRequest(request),
+          onStage: (stage) => {
+            if (stage === 'finalizing') request.onArchiveMutationCommitted()
+            request.onStage(stage)
+          }
+        }
+      )
+    },
+    receipts: { write: (result) => writeLastGdiaImportResult(gdiaBackupDirectory, result) },
+    backups: { enqueue: queueArchiveBackup },
+    diagnostics: {
+      reportFailure: (boundary, error) => diagnostics.error(
+        'item-assistant-import', `${boundary}.failed`, error
+      )
+    },
+    clock: { nowMs: () => Date.now(), nowUtc: () => new Date().toISOString() }
+  })
   ipcDomains.imports.handle(IPC_CHANNELS.importGdiaDatabase, async (event): Promise<GdiaImportResult> => {
-    const startedAt = Date.now()
     const importJob = jobs.run({
       kind: 'item-assistant-import',
       dedupeKey: 'item-assistant-import:interactive',
@@ -1006,214 +993,40 @@ function registerIpcHandlers(
       boundary: 'during source selection',
       completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
     }, async (job) => {
-    const publish = (progress: GdiaImportProgress): void => {
-      gdiaImportProgress = progress
-      if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.gdiaImportProgress, progress)
-      job.update({
-        stage: progress.stage,
-        progress: {
-          completed: progress.percent,
-          total: 100,
-          percent: progress.percent,
-          label: progress.label,
-          detail: progress.detail
-        },
-        canCancel: progress.canCancel,
-        boundary: progress.canCancel ? 'before archive mutation' : null
-      })
-    }
-    const canceledResult = (sourcePath: string | null): GdiaImportResult => ({
-      canceled: true,
-      sourcePath,
-      sourceItems: 0,
-      sourceDatabaseItems: 0,
-      sourceQueueItems: 0,
-      sourceHardcoreItems: 0,
-      sourceSoftcoreItems: 0,
-      importedItems: 0,
-      duplicateItems: 0,
-      unsupportedItems: 0,
-      backupPath: null,
-      backupReused: false,
-      receiptPersisted: false,
-      completedAtUtc: null,
-      durationMs: Date.now() - startedAt
-    })
-    publish({
-      stage: 'selecting',
-      label: 'Choose Item Assistant database',
-      detail: 'No files have been changed.',
-      percent: 0,
-      canCancel: true
-    })
-    try {
-    latestCollection ??= await readCollectionCache(collectionCachePath)
-    if (!latestCollection) {
-      throw new Error('Let CC finish its initial game-data scan before importing Item Assistant.')
-    }
-    const defaultDatabase = join(
-      process.env.LOCALAPPDATA ?? app.getPath('appData'),
-      'EvilSoft',
-      'IAGD',
-      'data',
-      'userdata.db'
-    )
-    const selection = await dialog.showOpenDialog({
-      title: 'Import Grim Dawn Item Assistant archive',
-      defaultPath: defaultDatabase,
-      properties: ['openFile'],
-      filters: [
-        { name: 'Item Assistant database', extensions: ['db', 'sqlite', 'sqlite3'] },
-        { name: 'All files', extensions: ['*'] }
-      ]
-    })
-    job.throwIfCancellationRequested()
-    const sourcePath = selection.filePaths[0]
-    if (selection.canceled || !sourcePath) {
-      publish({ stage: 'canceled', label: 'Import canceled', detail: 'No files were changed.', percent: 0, canCancel: false })
-      job.finishAsCanceled('canceled')
-      return canceledResult(null)
-    }
-    publish({
-      stage: 'analyzing',
-      label: 'Analyze selected source',
-      detail: 'Counting copies, modes, unsupported records, backup bytes, and free space.',
-      percent: 12,
-      canCancel: false
-    })
-    const analysis = await analyzeGdiaDatabase(database, sourcePath, gdiaBackupDirectory)
-    const preflight = analysis.preflight
-    const enoughSpace = preflight.requiredFreeBytes <= preflight.availableFreeBytes
-    publish({
-      stage: 'awaiting-confirmation',
-      label: 'Review analyzed source',
-      detail: 'Cancel is safe here. No backup or archive mutation has started.',
-      percent: 25,
-      canCancel: true
-    })
-    const confirmation = await dialog.showMessageBox({
-      type: enoughSpace ? 'question' : 'warning',
-      title: enoughSpace ? 'Import analyzed Item Assistant source?' : 'More free space is required',
-      message: enoughSpace
-        ? `${preflight.sourceItems.toLocaleString()} Item Assistant copies are ready for review.`
-        : 'CC cannot reserve the full verified import footprint.',
-      detail: [
-        `Source: ${preflight.sourcePath}`,
-        `Copies: ${preflight.sourceItems.toLocaleString()} total · ${preflight.sourceSoftcoreItems.toLocaleString()} Softcore · ${preflight.sourceHardcoreItems.toLocaleString()} Hardcore`,
-        `Unsupported estimate: ${preflight.unsupportedItems.toLocaleString()}`,
-        `Database backup: ${formatImportBytes(preflight.backupBytes)}`,
-        `Source-backup reserve: ${formatImportBytes(preflight.sourceBackupRequiredBytes)}${preflight.backupReused ? ' · verified backup will be reused' : ''}`,
-        `Queue-receipt reserve: ${formatImportBytes(preflight.queueReceiptBytes)}`,
-        `Archive growth reserve: ${formatImportBytes(preflight.archiveGrowthReserveBytes)}`,
-        `Post-import archive backup reserve: ${formatImportBytes(preflight.archiveBackupReserveBytes)}`,
-        `Total required free space: ${formatImportBytes(preflight.requiredFreeBytes)}`,
-        `Available free space: ${formatImportBytes(preflight.availableFreeBytes)}`,
-        `Destination: ${preflight.destinationMode}`,
-        '',
-        enoughSpace
-          ? 'After confirmation, CC runs the verified backup and archive commit to completion. The source remains unchanged.'
-          : 'Free space on the destination volume, then analyze the source again.'
-      ].join('\n'),
-      buttons: enoughSpace ? ['Cancel', 'Import analyzed source'] : ['Close'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true
-    })
-    job.throwIfCancellationRequested()
-    if (!enoughSpace || confirmation.response !== 1) {
-      publish({ stage: 'canceled', label: 'Import canceled safely', detail: 'No files were changed.', percent: 25, canCancel: false })
-      job.finishAsCanceled('canceled')
-      return canceledResult(sourcePath)
-    }
-    const stageProgress: Record<string, GdiaImportProgress> = {
-      verifying: { stage: 'verifying', label: 'Verify analyzed source', detail: 'Confirming the database and pending queue still match preflight.', percent: 30, canCancel: false },
-      'backing-up': { stage: 'backing-up', label: 'Protect source', detail: 'Creating or reusing a fully verified immutable backup.', percent: 42, canCancel: false },
-      reading: { stage: 'reading', label: 'Read verified backup', detail: 'Loading supported Softcore and Hardcore copies from the immutable backup.', percent: 60, canCancel: false },
-      importing: { stage: 'importing', label: 'Commit archive copies', detail: 'Applying one bounded archive transaction. This stage cannot be canceled.', percent: 78, canCancel: false },
-      finalizing: { stage: 'finalizing', label: 'Write durable result', detail: 'Recording the final counts and verified backup outcome.', percent: 94, canCancel: false }
-    }
-    const completed = await runDiagnosticOperation(
-      'import',
-      'item-assistant',
-      () => runExclusive(async () => {
-        job.throwIfCancellationRequested()
-        const result = await migrateGdiaDatabase(
-          database,
-          sourcePath,
-          gdiaBackupDirectory,
-          {
-            requireAllCatalogued: false,
-            expectedSourceSha256: preflight.sourceSha256,
-            expectedQueueFingerprint: analysis.queueFingerprint,
-            expectedRequiredFreeBytes: preflight.requiredFreeBytes,
-            onStage: (stage) => publish(stageProgress[stage]!)
-          }
-        )
-        const completedAtUtc = new Date().toISOString()
-        let summary: GdiaImportResult = {
-          canceled: false,
-          sourcePath,
-          sourceItems: result.sourceItems,
-          sourceDatabaseItems: result.sourceDatabaseItems,
-          sourceQueueItems: result.sourceQueueItems,
-          sourceHardcoreItems: result.sourceHardcoreItems,
-          sourceSoftcoreItems: result.sourceSoftcoreItems,
-          importedItems: result.importedIds.length,
-          duplicateItems: result.duplicateIds.length,
-          unsupportedItems: result.unsupportedIds.length,
-          backupPath: result.backupPath,
-          backupReused: result.backupReused,
-          receiptPersisted: true,
-          completedAtUtc,
-          durationMs: Date.now() - startedAt
-        }
-        try {
-          await writeLastGdiaImportResult(gdiaBackupDirectory, summary)
-        } catch (error) {
-          summary = { ...summary, receiptPersisted: false }
-          diagnostics.error('import', 'item-assistant.receipt-failed', error)
-        }
-        return { result, summary }
-      }),
-      { sourceItems: preflight.sourceItems, unsupportedEstimate: preflight.unsupportedItems },
-      (completed) => ({
-        sourceItems: completed.result.sourceItems,
-        importedItems: completed.result.importedIds.length,
-        duplicateItems: completed.result.duplicateIds.length,
-        unsupportedItems: completed.result.unsupportedIds.length
-      }),
-      job.correlationId
-    )
-    const { result, summary } = completed
-    if (result.importedIds.length > 0) queueArchiveBackup('Item Assistant migration')
-    publish({
-      stage: 'complete',
-      label: 'Item Assistant import complete',
-      detail: `${summary.importedItems.toLocaleString()} imported · ${summary.duplicateItems.toLocaleString()} already present · ${summary.unsupportedItems.toLocaleString()} unsupported.`,
-      percent: 100,
-      canCancel: false
-    })
-    return summary
-    } catch (error) {
-      if (error instanceof BackgroundJobCanceledError) {
-        publish({
-          stage: 'canceled',
-          label: 'Import canceled safely',
-          detail: 'No archive mutation started after the cancellation request.',
-          percent: gdiaImportProgress?.percent ?? 0,
-          canCancel: false
+      const publishProgress = (progress: GdiaImportProgress): void => {
+        gdiaImportProgress = progress
+        if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.gdiaImportProgress, progress)
+        job.update({
+          stage: progress.stage,
+          progress: {
+            completed: progress.percent,
+            total: 100,
+            percent: progress.percent,
+            label: progress.label,
+            detail: progress.detail
+          },
+          canCancel: progress.canCancel,
+          boundary: progress.canCancel ? 'before archive mutation' : null
         })
+      }
+      try {
+        const result = await itemAssistantImportService.start({
+          cancellation: {
+            isCancellationRequested: () => {
+              try { job.throwIfCancellationRequested(); return false } catch { return true }
+            }
+          },
+          publishProgress
+        })
+        if (result.canceled) job.finishAsCanceled('canceled')
+        return result
+      } catch (error) {
+        if (error instanceof ItemAssistantImportCanceledError) {
+          job.finishAsCanceled('canceled')
+          throw new BackgroundJobCanceledError()
+        }
         throw error
       }
-      publish({
-        stage: 'failed',
-        label: 'Import stopped safely',
-        detail: 'CC preserved the source and reported the failure without continuing.',
-        percent: 100,
-        canCancel: false
-      })
-      throw error
-    }
     }, (result) => ({
       summary: 'Item Assistant import complete.',
       metrics: {
@@ -1225,21 +1038,11 @@ function registerIpcHandlers(
     }))
     return importJob.result
   })
-  ipcDomains.diagnostics.handle(IPC_CHANNELS.getRecoveryStatus, () => runExclusive(async () => {
-    await reconcileLiveRecoveryOperations(helper, database, diagnostics)
-    const operations = database.getDiagnosticSummary().recoveryOperations
-    return {
-      requiresAttention: operations.length > 0,
-      operations: operations.map((operation) => ({
-        id: operation.id,
-        operation: operation.operation,
-        state: operation.state,
-        startedAtUtc: operation.startedAtUtc,
-        hasBackup: operation.hasBackup
-      }))
-    }
-  }))
-  ipcDomains.diagnostics.handle(IPC_CHANNELS.exportDiagnostics, async () => {
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.getRecoveryStatus,
+    () => diagnosticsService.getRecoveryStatus()
+  )
+  exportDiagnosticsOperation = async () => {
     const generatedAtUtc = new Date().toISOString()
     const fileStamp = generatedAtUtc.replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
     const selection = await dialog.showSaveDialog({
@@ -1366,13 +1169,15 @@ function registerIpcHandlers(
     await writeFile(selection.filePath, serializedReport, 'utf8')
     diagnostics.info('diagnostics', 'support-bundle.exported', { formatVersion: 1 })
     return { canceled: false, path: selection.filePath }
-  })
+  }
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.exportDiagnostics,
+    () => diagnosticsService.exportDiagnostics()
+  )
   ipcDomains.windowLifecycle.handle(
     IPC_CHANNELS.setZoomFactor,
     (event, input: { factor: number }): number => {
-      const factor = Math.min(1.8, Math.max(0.7, Math.round(input.factor * 10) / 10))
-      event.sender.setZoomFactor(factor)
-      return factor
+      return windowService.setZoomFactor(event, input)
     },
     validateZoomFactor
   )
@@ -1389,184 +1194,149 @@ function registerIpcHandlers(
       return helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
     }
   )
-  ipcDomains.collection.handle(
-    IPC_CHANNELS.getCachedCollection,
-    async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot | null> => {
-      const screenshotFixture = process.env.CAIRN_CODEX_SCREENSHOT_PATH
-        ? process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE
-        : undefined
-      if (screenshotFixture) {
-        latestCollection = createScreenshotCollectionFixture(screenshotFixture)
+  const collectionService = new CollectionService({
+    cache: {
+      read: async () => {
+        const screenshotFixture = process.env.CAIRN_CODEX_SCREENSHOT_PATH
+          ? process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE
+          : undefined
+        if (screenshotFixture) latestCollection = createScreenshotCollectionFixture(screenshotFixture)
+        latestCollection ??= await readCollectionCache(collectionCachePath)
         return latestCollection
-      }
-      latestCollection ??= await readCollectionCache(collectionCachePath)
-      if (!latestCollection) {
-        return null
-      }
-      const mapIndex = await readMapLocationIndex(mapLocationCachePath)
-      if (!mapIndex || !(await mapLocationIndexIsFresh(mapIndex))) return null
-      const cacheNeedsRefresh = !(await collectionStashesAreFresh(latestCollection))
-      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return {
-        ...(await presentCollection(helper, database, projected, input.basis)),
-        cacheNeedsRefresh
+      },
+      write: async (snapshot) => {
+        await writeCollectionCache(collectionCachePath, snapshot)
+        latestCollection = snapshot
       }
     },
-    validateCollectionRequest
-  )
-  ipcDomains.collection.handle(
-    IPC_CHANNELS.hydrateArchiveRolls,
-    async (_event, input: { sourcePaths: string[] }): Promise<ArchiveRollHydrationResult | null> => {
-      const screenshotFixture = process.env.CAIRN_CODEX_SCREENSHOT_PATH
-        ? process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE
-        : undefined
-      if (screenshotFixture) {
-        latestCollection = createScreenshotCollectionFixture(screenshotFixture)
-        return { processed: 0, pending: 0, snapshot: latestCollection }
+    freshness: {
+      isMapIndexFresh: async () => {
+        if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) return true
+        const mapIndex = await readMapLocationIndex(mapLocationCachePath)
+        return Boolean(mapIndex && await mapLocationIndexIsFresh(mapIndex))
+      },
+      areSourcesFresh: collectionStashesAreFresh
+    },
+    scanner: { scanInstalledData: () => helper.request<CollectionSnapshot>('scan-collection') },
+    icons: { attachIcons: (snapshot) => attachItemIcons(helper, jobs, snapshot) },
+    maps: {
+      attachLocations: async (snapshot, forceRebuild) => {
+        const installationPath = snapshot.discovery.installations[0]?.path
+        if (!installationPath) return snapshot
+        const index = await loadMapLocationIndex(
+          helper, jobs, mapLocationCachePath, installationPath, forceRebuild
+        )
+        return attachMapLocations(snapshot, index)
       }
-      latestCollection ??= await readCollectionCache(collectionCachePath)
-      if (!latestCollection) return null
-      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      const installation = projected.discovery.installations[0]
-      if (!installation) {
-        return {
-          processed: 0,
-          pending: 0,
-          snapshot: await presentCollection(helper, database, projected, 'archive')
-        }
-      }
-      return runGlobalRollHydration(jobs, async (job) => runDiagnosticOperation(
-        'background-job',
-        'archive-roll-hydration',
-        async (): Promise<ArchiveRollHydrationResult> => {
-          // Hydration owns one global candidate domain. Caller-specific SC/HC
-          // projection happens only after the shared analysis job settles.
-          const mode: boolean | undefined = undefined
-          const total = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
-          let processed = 0
-          let pending = total
-          job.update({ progress: { total, completed: 0 } })
-          while (pending > 0) {
-            job.safeBoundary('before the next analysis batch')
-            const candidates = database.listArchiveRollAnalysisCandidates(
-              ROLL_ANALYSIS_VERSION,
-              256,
-              mode
-            )
-            if (candidates.length === 0) break
-            job.update({
-              stage: 'analyzing',
-              canCancel: false,
-              boundary: null,
-              progress: {
-                completed: processed,
-                label: 'Analyze archived item rolls',
-                detail: `Processing a bounded batch of ${candidates.length} copies.`
-              }
-            })
-            const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
-              installationPath: installation.path,
-              items: candidates.map(({ payload }) => {
-                const item = payload as LiveVaultPayload
-                return {
-                  baseRecord: item.baseRecord,
-                  prefixRecord: item.prefixRecord,
-                  suffixRecord: item.suffixRecord,
-                  seed: item.seed
+    },
+    archive: { persistSnapshot: (snapshot) => database.persistSnapshot(snapshot) },
+    projector: {
+      projectSources: projectCollectionSources,
+      present: (snapshot, basis) => presentCollection(helper, database, snapshot, basis)
+    },
+    hydration: {
+      hydrateAll: ({ installationPath, batchLimit, onProgress }) =>
+        runGlobalRollHydration(jobs, async (job) => runDiagnosticOperation(
+          'background-job',
+          'archive-roll-hydration',
+          async () => {
+            const mode: boolean | undefined = undefined
+            const total = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
+            let processed = 0
+            let pending = total
+            job.update({ progress: { total, completed: 0 } })
+            while (pending > 0) {
+              job.safeBoundary('before the next analysis batch')
+              const candidates = database.listArchiveRollAnalysisCandidates(
+                ROLL_ANALYSIS_VERSION, batchLimit, mode
+              )
+              if (candidates.length === 0) break
+              job.update({
+                stage: 'analyzing', canCancel: false, boundary: null,
+                progress: {
+                  completed: processed,
+                  label: 'Analyze archived item rolls',
+                  detail: 'Processing a bounded batch of ' + candidates.length + ' copies.'
                 }
               })
-            })
-            if (analyzed.items.length !== candidates.length) {
-              throw new Error(
-                `Roll analysis returned ${analyzed.items.length} results for ${candidates.length} archived copies.`
-              )
-            }
-            job.update({
-              stage: 'persisting',
-              progress: { label: 'Store roll ratings', detail: 'Committing this bounded batch.' }
-            })
-            await runExclusive(async () => {
-              database.setVaultRollAnalyses(
+              const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
+                installationPath,
+                items: candidates.map(({ payload }) => {
+                  const item = payload as LiveVaultPayload
+                  return {
+                    baseRecord: item.baseRecord,
+                    prefixRecord: item.prefixRecord,
+                    suffixRecord: item.suffixRecord,
+                    seed: item.seed
+                  }
+                })
+              })
+              if (analyzed.items.length !== candidates.length) {
+                throw new Error(
+                  'Roll analysis returned ' + analyzed.items.length +
+                  ' results for ' + candidates.length + ' archived copies.'
+                )
+              }
+              job.update({
+                stage: 'persisting',
+                progress: { label: 'Store roll ratings', detail: 'Committing this bounded batch.' }
+              })
+              await runExclusive(async () => database.setVaultRollAnalyses(
                 candidates.map((candidate, index) => ({
                   id: candidate.id,
                   rollAnalysis: analyzed.items[index]!
                 }))
-              )
-            })
-            processed += candidates.length
-            pending = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
-            job.update({
-              progress: { completed: processed, total: processed + pending },
-              canCancel: true,
-              boundary: 'before the next analysis batch'
-            })
-            if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
-          }
-          return {
-            processed,
-            pending,
-            snapshot: null
-          }
-        },
-        { batchLimit: 256 },
-        (result) => ({ processed: result?.processed ?? 0, pending: result?.pending ?? 0 }),
-        job.correlationId
-      ), async (result) => ({
-        ...result,
-        snapshot: await presentCollection(helper, database, projected, 'archive')
-      }))
+              ))
+              processed += candidates.length
+              pending = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
+              onProgress({ processed, pending })
+              job.update({
+                progress: { completed: processed, total: processed + pending },
+                canCancel: true,
+                boundary: 'before the next analysis batch'
+              })
+              if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
+            }
+            return { processed, pending }
+          },
+          { batchLimit },
+          (result) => ({ processed: result.processed, pending: result.pending }),
+          job.correlationId
+        ), (result) => result)
     },
+    diagnostics: {
+      reportMapIndexFailure: (error) => console.warn('Grim Dawn map locations could not be indexed.', error)
+    },
+    catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
+  })
+  ipcDomains.collection.handle(
+    IPC_CHANNELS.getCachedCollection,
+    (_event, input: { sourcePaths: string[]; basis: CollectionBasis }) =>
+      collectionService.getCached(input),
+    validateCollectionRequest
+  )
+  ipcDomains.collection.handle(
+    IPC_CHANNELS.hydrateArchiveRolls,
+    (_event, input: { sourcePaths: string[] }) => collectionService.hydrateArchiveRolls(input),
     validateSourcePaths
   )
   ipcDomains.collection.handle(
     IPC_CHANNELS.scanCollection,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
       const scan = jobs.run({
-        kind: 'collection-scan',
-        dedupeKey: 'collection-scan:catalog',
-        stage: 'queued',
+        kind: 'collection-scan', dedupeKey: 'collection-scan:catalog', stage: 'queued',
         progress: {
           completed: 0, total: 4, percent: 0, unit: 'steps',
           label: 'Refresh collection', detail: 'Preparing the catalog scan.'
         },
-        canCancel: false,
-        boundary: null,
+        canCancel: false, boundary: null,
         completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
       }, async (job) => runDiagnosticOperation('background-job', 'collection-scan', async () => {
-        const startedAt = Date.now()
-        job.throwIfCancellationRequested()
         job.update({
           stage: 'scanning', canCancel: false, boundary: null,
           progress: { completed: 0, label: 'Scan collection', detail: 'Reading installed game data and configured item sources.' }
         })
-        const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-        const withIcons = await attachItemIcons(helper, jobs, snapshot)
-        const installationPath = withIcons.discovery.installations[0]?.path
-        let withLocations = withIcons
-        if (installationPath) {
-          try {
-            const locationIndex = await loadMapLocationIndex(
-              helper,
-              jobs,
-              mapLocationCachePath,
-              installationPath
-            )
-            withLocations = attachMapLocations(withIcons, locationIndex)
-          } catch (error) {
-            console.warn('Grim Dawn map locations could not be indexed.', error)
-          }
-        }
-        job.update({
-          stage: 'persisting', progress: { completed: 3, label: 'Store collection cache', detail: 'Committing the refreshed catalog.' }
-        })
-        const persisted = {
-          ...database.persistSnapshot(withLocations),
-          catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
-        }
-        latestCollection = persisted
-        await writeCollectionCache(collectionCachePath, persisted)
-        console.log(`[collection-scan] completed in ${Date.now() - startedAt}ms`)
-        return persisted
+        return collectionService.scan(input)
       }, undefined, (result) => ({
         catalogItems: result.items.length,
         observedItems: result.observedItems.length,
@@ -1575,13 +1345,7 @@ function registerIpcHandlers(
         summary: 'Collection scan complete.',
         metrics: { catalogItems: result.items.length, observedItems: result.observedItems.length }
       }))
-      const snapshot = await scan.result
-      const projected = projectCollectionSources(snapshot, input.sourcePaths)
-      // A catalog refresh must resolve as soon as the browsable snapshot is ready.
-      // Re-analyzing older archived rolls can take minutes after a game-data/schema
-      // change; keeping it inside this foreground promise left the renderer on a
-      // zero-item loading screen even though the completed cache was already on disk.
-      return presentCollection(helper, database, projected, input.basis)
+      return scan.result
     },
     validateCollectionRequest
   )
@@ -1589,42 +1353,19 @@ function registerIpcHandlers(
     IPC_CHANNELS.rebuildGameDataIndex,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
       const rebuild = jobs.run({
-        kind: 'game-data-rebuild',
-        dedupeKey: 'game-data-rebuild:catalog',
-        stage: 'queued',
+        kind: 'game-data-rebuild', dedupeKey: 'game-data-rebuild:catalog', stage: 'queued',
         progress: {
           completed: 0, total: 4, percent: 0, unit: 'steps',
           label: 'Rebuild game-data index', detail: 'Preparing a complete catalog rebuild.'
         },
-        canCancel: false,
-        boundary: null,
+        canCancel: false, boundary: null,
         completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
       }, async (job) => runDiagnosticOperation('background-job', 'game-data-rebuild', async () => {
-        job.throwIfCancellationRequested()
         job.update({
           stage: 'scanning', canCancel: false, boundary: null,
-          progress: { label: 'Scan installed game data', detail: 'Building a fresh catalog from the installed archives.' }
+          progress: { label: 'Scan installed game data', detail: 'Building a fresh catalog from installed archives.' }
         })
-        const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-        const withIcons = await attachItemIcons(helper, jobs, snapshot)
-        const installationPath = withIcons.discovery.installations[0]?.path
-        if (!installationPath) throw new Error('No Grim Dawn installation is available.')
-        const locationIndex = await loadMapLocationIndex(
-          helper,
-          jobs,
-          mapLocationCachePath,
-          installationPath,
-          true
-        )
-        job.update({
-          stage: 'persisting', progress: { completed: 3, label: 'Store rebuilt index', detail: 'Committing the refreshed catalog and map index.' }
-        })
-        latestCollection = {
-          ...database.persistSnapshot(attachMapLocations(withIcons, locationIndex)),
-          catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
-        }
-        await writeCollectionCache(collectionCachePath, latestCollection)
-        return latestCollection
+        return collectionService.rebuild(input)
       }, undefined, (result) => ({
         catalogItems: result.items.length,
         observedItems: result.observedItems.length,
@@ -1633,9 +1374,7 @@ function registerIpcHandlers(
         summary: 'Game-data rebuild complete.',
         metrics: { catalogItems: result.items.length, observedItems: result.observedItems.length }
       }))
-      const rebuilt = await rebuild.result
-      const projected = projectCollectionSources(rebuilt, input.sourcePaths)
-      return presentCollection(helper, database, projected, input.basis)
+      return rebuild.result
     },
     validateCollectionRequest
   )
@@ -1660,6 +1399,42 @@ function registerIpcHandlers(
     },
     booleanField('enabled', 'Infinite supplies must be enabled or disabled explicitly.')
   )
+  const archiveService = new ArchiveDomainService({
+    reads: {
+      findCatalogNames: (records) => database.getCatalogNames([...records]),
+      readVaultItems: () => database.listVaultItems(),
+      readVaultPage: (request) => database.queryVaultItems(request),
+      readOperationHistory: (request) => database.queryOperationHistory(request),
+      readVaultSummary: () => {
+        const summary = database.getVaultSummary()
+        if (
+          process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
+          process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'onboarding'
+        ) return { ...summary, total: 128, ingested: 128 }
+        return summary
+      }
+    },
+    stashes: {
+      scan: (path) => helper.request<TransferStashScan>('scan-transfer-stash', { path })
+    },
+    transactions: {
+      commitIngest: (input) => executeStagingTabIngest(helper, database, input.path),
+      commitRetrieval: (input) => executeLastTabRetrieval(
+        helper, database, input.path, input.vaultItemIds
+      )
+    },
+    enqueueArchiveBackup: queueArchiveBackup,
+    reportBackupSchedulingFailure: (reason, error) => diagnostics.error(
+      'archive-backup', 'post-commit-queue.failed', error, { reason }
+    ),
+    discoverInstallationPath: async () => {
+      const discovered = latestCollection?.discovery ??
+        await helper.request<GrimDawnDiscovery>('discover-grim-dawn')
+      return discovered.installations[0]?.path ?? null
+    },
+    simulateDismantling: (installationPath, items) =>
+      helper.request<DismantlingPreview>('simulate-dismantling', { installationPath, items })
+  })
   ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.inspectWriteSafety,
     (): Promise<WriteSafetyStatus> => helper.request<WriteSafetyStatus>('inspect-write-safety')
@@ -1667,105 +1442,38 @@ function registerIpcHandlers(
   ipcDomains.archive.handle(
     IPC_CHANNELS.inspectStagingTab,
     (_event, input: { path: string }): Promise<StagingTabInspection> =>
-      inspectStagingTab(helper, database, input.path),
+      archiveService.inspectStagingTab(input.path),
     validatePath
   )
   ipcDomains.archive.handle(
     IPC_CHANNELS.listVaultItems,
     (_event, input?: { isHardcore?: boolean }): VaultListItem[] =>
-      database.listVaultItems(input?.isHardcore),
+      input?.isHardcore === undefined
+        ? archiveService.listVaultItems()
+        : database.listVaultItems(input.isHardcore),
     validateOptionalMode
   )
   ipcDomains.archive.handle(
     IPC_CHANNELS.queryVaultItems,
-    (_event, input: VaultPageRequest): VaultItemPage => {
-      if (!input || !['ingested', 'retrieval_pending', 'retrieved'].includes(input.state)) {
-        throw new Error('A valid vault state is required.')
-      }
-      if (!['recent', 'name', 'level', 'roll'].includes(input.sort)) {
-        throw new Error('A valid vault sort is required.')
-      }
-      if (!['asc', 'desc'].includes(input.direction)) {
-        throw new Error('A valid vault sort direction is required.')
-      }
-      if (
-        input.rarity !== undefined &&
-        !['epic', 'legendary', 'mi', 'rare', 'faction', 'supply'].includes(input.rarity)
-      ) {
-        throw new Error('The requested vault rarity is not supported.')
-      }
-      if (
-        !Number.isInteger(input.offset) || input.offset < 0 || input.offset > 10_000_000 ||
-        !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 250 ||
-        (input.query?.length ?? 0) > 200
-      ) {
-        throw new Error('Vault paging parameters are outside their safe bounds.')
-      }
-      return database.queryVaultItems(input)
-    },
+    (_event, input: VaultPageRequest): VaultItemPage => archiveService.queryVaultItems(input),
     validateVaultPage
   )
   ipcDomains.archive.handle(
     IPC_CHANNELS.queryOperationHistory,
-    (_event, input: OperationHistoryRequest): OperationHistoryPage => {
-      if (!input || !['ingest', 'retrieve'].includes(input.operation)) {
-        throw new Error('A valid operation-history kind is required.')
-      }
-      if (!['all', 'committed', 'failed', 'pending'].includes(input.outcome)) {
-        throw new Error('A valid operation-history outcome is required.')
-      }
-      if (
-        !Number.isInteger(input.offset) || input.offset < 0 || input.offset > 10_000_000 ||
-        !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 250 ||
-        (input.query?.length ?? 0) > 200
-      ) {
-        throw new Error('Operation-history paging parameters are outside their safe bounds.')
-      }
-      return database.queryOperationHistory(input)
-    },
+    (_event, input: OperationHistoryRequest): OperationHistoryPage =>
+      archiveService.queryOperationHistory(input),
     validateOperationHistory
   )
   ipcDomains.archive.handle(
     IPC_CHANNELS.getVaultSummary,
     (): VaultSummary => {
-      const summary = database.getVaultSummary()
-      if (
-        process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
-        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'onboarding'
-      ) {
-        return { ...summary, total: 128, ingested: 128 }
-      }
-      return summary
+      return archiveService.getVaultSummary()
     }
   )
   ipcDomains.archive.handle(
     IPC_CHANNELS.previewDismantling,
-    async (_event, input: { vaultItemIds: string[] }): Promise<DismantlingPreview> => {
-      const requestedIds = input.vaultItemIds ?? []
-      if (new Set(requestedIds).size !== requestedIds.length) {
-        throw new Error('Duplicate dismantling candidate IDs are not allowed.')
-      }
-      const byId = new Map(database.listVaultItems().map((item) => [item.id, item]))
-      const items = requestedIds.map((id) => {
-        const item = byId.get(id)
-        if (!item || item.state !== 'ingested' || !item.catalogued || item.reusable ||
-          !['epic', 'legendary', 'mi', 'rare'].includes(item.rarity)) {
-          throw new Error(`Archive copy is not eligible for dismantling preview: ${id}`)
-        }
-        return {
-          vaultItemId: item.id,
-          name: item.name,
-          rarity: item.rarity,
-          itemLevel: item.itemLevel,
-          ascendant: item.ascendant
-        }
-      })
-      const discovered = latestCollection?.discovery ??
-        await helper.request<GrimDawnDiscovery>('discover-grim-dawn')
-      const installationPath = discovered.installations[0]?.path
-      if (!installationPath) throw new Error('No Grim Dawn installation is available.')
-      return helper.request<DismantlingPreview>('simulate-dismantling', { installationPath, items })
-    },
+    (_event, input: { vaultItemIds: string[] }) =>
+      archiveService.previewDismantling(input.vaultItemIds),
     validateVaultIds
   )
   ipcDomains.archive.handle(
@@ -1774,11 +1482,10 @@ function registerIpcHandlers(
       const result = await runDiagnosticOperation(
         'transfer',
         'offline-ingest',
-        () => runTransferExclusive(() => executeStagingTabIngest(helper, database, input.path)),
+        () => runTransferExclusive(() => archiveService.ingestStagingTab(input.path)),
         undefined,
         (completed) => ({ ingestedItems: completed.ingested.length })
       )
-      if (result.ingested.length > 0) queueArchiveBackup('offline ingest')
       return result
     },
     validatePath
@@ -1789,15 +1496,72 @@ function registerIpcHandlers(
       const result = await runDiagnosticOperation(
         'transfer',
         'offline-retrieval',
-        () => runTransferExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds)),
+        () => runTransferExclusive(() => archiveService.retrieveVaultItems(input.path, input.vaultItemIds)),
         { requestedItems: input.vaultItemIds.length },
         (completed) => ({ retrievedItems: completed.retrieved.length })
       )
-      if (result.retrieved.length > 0) queueArchiveBackup('offline retrieval')
       return result
     },
     validatePathAndVaultIds
   )
+  const liveTransferService = new LiveTransferDomainService({
+    journal: {
+      readVaultItems: (vaultItemIds, isHardcore) => {
+        const summaries = new Map(
+          database.listVaultItems(isHardcore).map((item) => [item.id, item])
+        )
+        const matchingIds = vaultItemIds.filter((id) => summaries.has(id))
+        if (matchingIds.length === 0) return []
+        return database.getVaultItems(matchingIds, isHardcore).map((item) => {
+          const summary = summaries.get(item.id)!
+          const payload = item.payload as LiveVaultPayload
+          return {
+            id: item.id,
+            baseRecord: item.baseRecord,
+            seed: payload.seed ?? summary.seed,
+            isHardcore,
+            state: item.state,
+            payload: item.payload
+          }
+        })
+      },
+      prepareRetrieval: (input) => database.prepareRetrievalOperation({
+        operationId: input.operationId,
+        stashPath: input.stashPath,
+        sourceSha256: input.sourceIdentity,
+        startedAtUtc: input.startedAtUtc,
+        vaultItemIds: input.vaultItemIds,
+        detail: input.detail
+      }),
+      updatePendingDetail: (operationId, detail) =>
+        database.updatePendingOperationDetail(operationId, detail),
+      completeRetrieval: (input) => database.completeRetrievalOperation({
+        operationId: input.operationId,
+        vaultItemIds: input.vaultItemIds,
+        backupPath: input.receiptPaths[0]!,
+        completedAtUtc: input.completedAtUtc,
+        detail: input.detail
+      }),
+      failRetrieval: (operationId, vaultItemIds, error) =>
+        database.failRetrievalOperation(operationId, [...vaultItemIds], error),
+      markRetrievalNeedsRecovery: (operationId, error) =>
+        database.markRetrievalNeedsRecovery(operationId, error)
+    },
+    adapter: {
+      inspectGame: () => helper.request<LiveGameStatus>('inspect-live-game'),
+      enqueueRetrieval: (input) => helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', input),
+      inspectRetrieval: (queue) =>
+        helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }),
+      acknowledgeRejectedReceipt: (input) => helper.request<LiveQueueReceipt>('ack-live-incoming', {
+        ...input,
+        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-returns')
+      }).then(() => undefined)
+    },
+    recovery: {
+      reconcile: () => reconcileLiveRecoveryOperations(helper, database, diagnostics).then(() => undefined),
+      unresolvedCount: () => database.getRecoveryOperationCount()
+    }
+  })
   ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.inspectLiveGame,
     async (): Promise<LiveGameStatus> => {
@@ -1852,7 +1616,7 @@ function registerIpcHandlers(
       const result = await runDiagnosticOperation(
         'transfer',
         'live-retrieval',
-        () => runTransferExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds)),
+        () => liveTransferService.retrieveVaultItems(input.vaultItemIds),
         { requestedItems: input.vaultItemIds.length },
         (completed) => ({ retrievedItems: completed.retrieved.length })
       )

@@ -1,0 +1,111 @@
+import assert from 'node:assert/strict'
+import { BackgroundJobService } from '../src/main/ipc/background-job-service.ts'
+import { BackupService } from '../src/main/ipc/backup-service.ts'
+import { DiagnosticsService } from '../src/main/ipc/diagnostics-service.ts'
+import { WindowService } from '../src/main/ipc/window-service.ts'
+
+const listed = [{ id: 'fixture' }]
+let canceledId = null
+const jobs = new BackgroundJobService({
+  list: () => listed,
+  requestCancellation: (id) => { canceledId = id; return listed[0] }
+})
+assert.equal(jobs.list(), listed)
+assert.equal(jobs.cancel({ id: 'fixture' }), listed[0])
+assert.equal(canceledId, 'fixture')
+
+const backup = {
+  id: 'backup-1', fileName: 'backup.sqlite3', path: 'fixture/backup.sqlite3',
+  createdAtUtc: new Date(0).toISOString(), reason: 'fixture', sizeBytes: 1,
+  sha256: 'a'.repeat(64), schemaVersion: 1, vaultItemCount: 0, verified: true
+}
+let unresolved = 1
+let storeCalls = 0
+let restartCalls = 0
+const backupService = new BackupService({
+  store: {
+    getStatus: async () => ({ backupDirectory: 'fixture/backups', backups: [backup], latest: backup, pendingRestore: false }),
+    createBackup: async () => { storeCalls += 1; return backup },
+    exportBackup: async () => { storeCalls += 1; return backup },
+    stageRestore: async () => { storeCalls += 1; return backup }
+  },
+  unresolvedTransferCount: () => unresolved,
+  selectExportPath: async () => 'fixture/export.sqlite3',
+  selectRestorePath: async () => 'fixture/restore.sqlite3',
+  confirmRestore: async () => true,
+  runBackup: async (_key, _reason, operation) => operation(),
+  runExclusive: async (operation) => operation(),
+  scheduleRestart: () => { restartCalls += 1 },
+  openPath: async (path) => path
+})
+await assert.rejects(backupService.restore(), /require recovery attention/)
+assert.equal(storeCalls, 0, 'unresolved transfer recovery must block restore before mutation')
+unresolved = 0
+const restored = await backupService.restore()
+assert.equal(restored.restarting, true)
+assert.equal(storeCalls, 1)
+assert.equal(restartCalls, 1)
+assert.equal(await backupService.openDirectory(), 'fixture/backups')
+
+let debugEnabled = false
+let recoveryChecks = 0
+const diagnosticEvents = []
+const diagnostics = new DiagnosticsService({
+  appVersion: () => 'fixture',
+  helperHealth: async () => { throw new Error('helper unavailable') },
+  safeModeStatus: () => ({ active: false, suggested: false, failedStarts: 0, threshold: 3 }),
+  debugEnabled: () => debugEnabled,
+  retentionPolicy: () => ({ maxFiles: 4, maxFileBytes: 1024, maxAgeDays: 7 }),
+  persistDebugLogging: (enabled) => { debugEnabled = enabled },
+  applyDebugLogging: () => undefined,
+  info: (...event) => { diagnosticEvents.push(event) },
+  warn: (...event) => { diagnosticEvents.push(event) },
+  error: (...event) => { diagnosticEvents.push(event) },
+  selectPreferenceExport: async () => 'fixture/preferences.json',
+  reconcileRecovery: async () => { recoveryChecks += 1 },
+  runExclusive: async (operation) => operation(),
+  recoveryOperations: () => [{
+    id: 'recovery-1', operation: 'retrieve', state: 'needs_recovery',
+    startedAtUtc: new Date(0).toISOString(), hasBackup: true
+  }],
+  exportDiagnostics: async () => ({ canceled: false, path: 'fixture/support.zip' })
+})
+assert.equal((await diagnostics.getAppStatus()).helper, 'unavailable')
+assert.equal(diagnostics.setDebugLogging({ enabled: true }).enabled, true)
+assert.deepEqual(await diagnostics.exportPreferences({ serialized: '{}' }), {
+  canceled: false, path: 'fixture/preferences.json'
+})
+const recovery = await diagnostics.getRecoveryStatus()
+assert.equal(recoveryChecks, 1)
+assert.equal(recovery.requiresAttention, true)
+assert.equal(recovery.operations.length, 1)
+assert.deepEqual(await diagnostics.exportDiagnostics(), {
+  canceled: false, path: 'fixture/support.zip'
+})
+assert.equal(diagnosticEvents.length, 1)
+
+const startup = {
+  startedAtUtc: new Date(0).toISOString(), cacheOutcome: 'pending', cachedPaintMs: null,
+  interactiveMs: null, scanState: 'pending', scanSettledMs: null,
+  rollAnalysisState: 'pending', rollAnalysisSettledMs: null, backgroundPhase: 'opening-cache'
+}
+let safeRestart = null
+let zoom = null
+let healthyCalls = 0
+const windows = new WindowService({
+  restart: (safe) => { safeRestart = safe },
+  startupStatus: () => startup,
+  recordStartupPhase: () => startup,
+  markHealthy: async () => { healthyCalls += 1 },
+  recordHealthFailure: () => undefined,
+  openDataDirectory: async () => 'fixture/data'
+})
+windows.restartInSafeMode()
+assert.equal(safeRestart, true)
+assert.equal(windows.setZoomFactor({ sender: { setZoomFactor: (factor) => { zoom = factor } } }, { factor: 4 }), 1.8)
+assert.equal(zoom, 1.8)
+windows.reportStartupPhase({ phase: 'interactive' })
+await Promise.resolve()
+assert.equal(healthyCalls, 1)
+
+console.log('System domain service checks passed.')

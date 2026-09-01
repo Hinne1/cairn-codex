@@ -1,0 +1,225 @@
+import type {
+  ArchiveRollHydrationResult,
+  CollectionBasis,
+  CollectionSnapshot
+} from '../../shared/contracts.ts'
+
+export const ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT = 256
+
+export class CollectionRefreshInProgressError extends Error {
+  readonly code = 'collection.refresh-already-running'
+
+  constructor() {
+    super('A collection scan or rebuild is already running.')
+    this.name = 'CollectionRefreshInProgressError'
+  }
+}
+
+export class CollectionInstallationUnavailableError extends Error {
+  readonly code = 'collection.installation-unavailable'
+
+  constructor() {
+    super('No Grim Dawn installation is available.')
+    this.name = 'CollectionInstallationUnavailableError'
+  }
+}
+
+export interface CollectionSnapshotCache {
+  read(): Promise<CollectionSnapshot | null>
+  write(snapshot: CollectionSnapshot): Promise<void>
+}
+
+export interface CollectionCacheFreshness {
+  isMapIndexFresh(): Promise<boolean>
+  areSourcesFresh(snapshot: CollectionSnapshot): Promise<boolean>
+}
+
+export interface CollectionCatalogScanner {
+  scanInstalledData(): Promise<CollectionSnapshot>
+}
+
+export interface CollectionIconEnricher {
+  attachIcons(snapshot: CollectionSnapshot): Promise<CollectionSnapshot>
+}
+
+export interface CollectionMapEnricher {
+  attachLocations(snapshot: CollectionSnapshot, forceRebuild: boolean): Promise<CollectionSnapshot>
+}
+
+export interface CollectionArchiveRepository {
+  persistSnapshot(snapshot: CollectionSnapshot): CollectionSnapshot
+}
+
+export interface CollectionProjector {
+  projectSources(snapshot: CollectionSnapshot, sourcePaths: string[]): CollectionSnapshot
+  present(snapshot: CollectionSnapshot, basis: CollectionBasis): Promise<CollectionSnapshot>
+}
+
+export interface CollectionHydrationProgress {
+  processed: number
+  pending: number
+}
+
+export interface CollectionRollHydrationRequest {
+  installationPath: string
+  batchLimit: number
+  onProgress(progress: CollectionHydrationProgress): void
+}
+
+export interface CollectionRollHydrator {
+  hydrateAll(request: CollectionRollHydrationRequest): Promise<CollectionHydrationProgress>
+}
+
+export interface CollectionServiceDiagnostics {
+  reportMapIndexFailure(error: unknown): void
+}
+
+export interface CollectionServiceDependencies {
+  cache: CollectionSnapshotCache
+  freshness: CollectionCacheFreshness
+  scanner: CollectionCatalogScanner
+  icons: CollectionIconEnricher
+  maps: CollectionMapEnricher
+  archive: CollectionArchiveRepository
+  projector: CollectionProjector
+  hydration: CollectionRollHydrator
+  diagnostics: CollectionServiceDiagnostics
+  catalogPresentationVersion: number
+}
+
+export interface CollectionRequest {
+  sourcePaths: string[]
+  basis: CollectionBasis
+}
+
+export interface CollectionHydrationServiceRequest {
+  sourcePaths: string[]
+  onProgress?(progress: CollectionHydrationProgress): void
+}
+
+/**
+ * Owns collection cache, refresh, rebuild, and bounded hydration orchestration.
+ * No dependency knows about Electron; each one represents a concrete low-level
+ * scanner, persistence, enrichment, projection, or hydration capability.
+ */
+export class CollectionService {
+  private readonly dependencies: CollectionServiceDependencies
+  private latest: CollectionSnapshot | null = null
+  private refresh: Promise<CollectionSnapshot> | null = null
+
+  constructor(dependencies: CollectionServiceDependencies) {
+    this.dependencies = dependencies
+  }
+
+  async getCached(request: CollectionRequest): Promise<CollectionSnapshot | null> {
+    const snapshot = await this.loadLatest()
+    if (!snapshot) return null
+    if (!(await this.dependencies.freshness.isMapIndexFresh())) return null
+
+    const cacheNeedsRefresh = !(await this.dependencies.freshness.areSourcesFresh(snapshot))
+    const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
+    return {
+      ...(await this.dependencies.projector.present(projected, request.basis)),
+      cacheNeedsRefresh
+    }
+  }
+
+  scan(request: CollectionRequest): Promise<CollectionSnapshot> {
+    return this.startRefresh(async () => {
+      const scanned = await this.dependencies.scanner.scanInstalledData()
+      const withIcons = await this.dependencies.icons.attachIcons(scanned)
+      let enriched = withIcons
+      if (withIcons.discovery.installations[0]) {
+        try {
+          enriched = await this.dependencies.maps.attachLocations(withIcons, false)
+        } catch (error) {
+          // A normal catalog scan keeps existing fail-open map behavior. The
+          // collection remains usable when optional location indexing fails.
+          this.dependencies.diagnostics.reportMapIndexFailure(error)
+        }
+      }
+      return this.persistAndPresent(enriched, request)
+    })
+  }
+
+  rebuild(request: CollectionRequest): Promise<CollectionSnapshot> {
+    return this.startRefresh(async () => {
+      const scanned = await this.dependencies.scanner.scanInstalledData()
+      const withIcons = await this.dependencies.icons.attachIcons(scanned)
+      if (!withIcons.discovery.installations[0]) {
+        throw new CollectionInstallationUnavailableError()
+      }
+      const withLocations = await this.dependencies.maps.attachLocations(withIcons, true)
+      return this.persistAndPresent(withLocations, request)
+    })
+  }
+
+  async hydrateArchiveRolls(
+    request: CollectionHydrationServiceRequest
+  ): Promise<ArchiveRollHydrationResult | null> {
+    const snapshot = await this.loadLatest()
+    if (!snapshot) return null
+
+    const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
+    const installation = projected.discovery.installations[0]
+    if (!installation) {
+      return {
+        processed: 0,
+        pending: 0,
+        snapshot: await this.dependencies.projector.present(projected, 'archive')
+      }
+    }
+
+    const result = await this.dependencies.hydration.hydrateAll({
+      installationPath: installation.path,
+      batchLimit: ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT,
+      onProgress: request.onProgress ?? (() => undefined)
+    })
+    return {
+      processed: Math.max(0, Math.trunc(result.processed)),
+      pending: Math.max(0, Math.trunc(result.pending)),
+      snapshot: await this.dependencies.projector.present(projected, 'archive')
+    }
+  }
+
+  private async loadLatest(): Promise<CollectionSnapshot | null> {
+    if (this.latest) return this.latest
+    this.latest = await this.dependencies.cache.read()
+    return this.latest
+  }
+
+  private startRefresh(operation: () => Promise<CollectionSnapshot>): Promise<CollectionSnapshot> {
+    if (this.refresh) return Promise.reject(new CollectionRefreshInProgressError())
+    // Install the in-flight marker before invoking scanner/enricher dependencies,
+    // which may synchronously call application observers.
+    const refresh = Promise.resolve().then(operation)
+    const tracked = refresh.then(
+      (result) => {
+        if (this.refresh === tracked) this.refresh = null
+        return result
+      },
+      (error: unknown) => {
+        if (this.refresh === tracked) this.refresh = null
+        throw error
+      }
+    )
+    this.refresh = tracked
+    return tracked
+  }
+
+  private async persistAndPresent(
+    snapshot: CollectionSnapshot,
+    request: CollectionRequest
+  ): Promise<CollectionSnapshot> {
+    const persisted = {
+      ...this.dependencies.archive.persistSnapshot(snapshot),
+      catalogPresentationVersion: this.dependencies.catalogPresentationVersion
+    }
+    // Publish the new in-memory snapshot only after the cache write succeeds.
+    // A failed durable write therefore cannot masquerade as a completed refresh.
+    await this.dependencies.cache.write(persisted)
+    this.latest = persisted
+    const projected = this.dependencies.projector.projectSources(persisted, request.sourcePaths)
+    return this.dependencies.projector.present(projected, request.basis)
+  }
+}

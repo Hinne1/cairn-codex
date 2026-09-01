@@ -28,11 +28,13 @@ remain outputs and are not request handlers.
 1. validates and narrows the untrusted input;
 2. invokes exactly one concrete domain operation;
 3. awaits its result; and
-4. translates failures to an `IpcServiceError` while preserving the safe user-facing message.
+4. translates ordinary production failures to a fixed, redacted domain error.
 
 Validation happens before filesystem, database, helper, dialog, or native work. Bounds cover path
 and identifier lengths, batch sizes, paging limits, enums, booleans, preference JSON, and renderer
-diagnostic payloads. Shared preload channel names and return shapes are unchanged by this split.
+diagnostic payloads. Domain errors are also available as a schema-versioned, structured-clone-safe
+envelope; neither the thrown error nor that envelope exposes internal messages, paths, stacks, or
+causes. Shared preload channel names and return shapes are unchanged by this split.
 
 ## Persistence and native serialization
 
@@ -47,11 +49,12 @@ flush workflow can run, and isolates single-instance focus, activation, and plat
 
 ## Testing and extension
 
-`npm run test:ipc-services` uses fake IPC, service, diagnostics, window, and application adapters;
-it does not import Electron or boot the app. It verifies all channel ownership, validation-before-
-delegation, one-call delegation, error translation, queue serialization, post-failure recovery,
-fail-closed transfer reconciliation, correlated diagnostics, single-instance focus, activation,
-platform close, and repeated shutdown behavior.
+`npm run test:ipc-services` and `npm run test:domain-services` use fake IPC, storage, helper,
+diagnostics, window, and application adapters; neither imports Electron nor boots the app. Together
+they verify channel ownership, validation-before-delegation, one-call delegation, error translation
+and serialization, queue recovery after rejection, import cancellation and post-commit backups,
+bounded collection hydration, archive write serialization, transfer timeout/restart/replay safety,
+fail-closed recovery, correlated diagnostics, and deduplicated shutdown behavior.
 
 When adding a request channel:
 

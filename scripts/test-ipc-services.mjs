@@ -4,7 +4,6 @@ import { IPC_CHANNELS } from '../src/shared/contracts.ts'
 import { createMainIpcDomains, MAIN_IPC_CHANNELS } from '../src/main/ipc/domains.ts'
 import {
   IpcDomainService,
-  IpcServiceError,
   SerializedServiceQueue
 } from '../src/main/ipc/service-registry.ts'
 import {
@@ -54,7 +53,8 @@ assert.equal(await debugHandler(fakeEvent(), { enabled: true }), true)
 assert.equal(serviceCalls, 1, 'a valid handler must delegate exactly once')
 await assert.rejects(
   debugHandler(fakeEvent(), { enabled: 'yes' }),
-  (error) => error instanceof IpcServiceError && error.code === 'diagnostics.failed'
+  (error) => error.name === 'diagnostics.invalid-debug-setting' &&
+    error.message === 'Choose a valid debug-logging setting.'
 )
 assert.equal(serviceCalls, 1, 'invalid input must not reach the service')
 
@@ -72,18 +72,21 @@ assert.deepEqual(
 )
 
 const failureHandlers = new Map()
-const failures = new IpcDomainService('failure-test', {
+const failures = new IpcDomainService('archive', {
   handle: (channel, listener) => failureHandlers.set(channel, listener)
 })
-failures.handle('known', () => { throw new IpcServiceError('Known failure.', 'known.code') })
-failures.handle('unknown', () => { throw new Error('Native boundary failed.') })
+failures.handle('known', () => { throw new Error('Vault item does not exist: private-id') })
+failures.handle('unknown', () => { throw new Error('Native boundary failed at C:\\Users\\private') })
 await assert.rejects(
   failureHandlers.get('known')(fakeEvent()),
-  (error) => error instanceof IpcServiceError && error.code === 'known.code'
+  (error) => error.name === 'archive.item-unavailable' &&
+    error.message === 'One or more requested archive items are no longer available.'
 )
 await assert.rejects(
   failureHandlers.get('unknown')(fakeEvent()),
-  (error) => error instanceof IpcServiceError && error.code === 'failure-test.failed' && error.message === 'Native boundary failed.'
+  (error) => error.name === 'archive.failed' &&
+    error.message === 'The archive operation failed safely.' &&
+    !error.message.includes('private')
 )
 
 assert.throws(

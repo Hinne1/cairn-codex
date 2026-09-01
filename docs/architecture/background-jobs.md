@@ -14,7 +14,8 @@ backups, icon extraction, and map indexing.
 `dedupeKey` identifies equivalent work. A second request for an active key deliberately coalesces
 onto the first promise, so the helper and durable stores see one operation. Keys must not combine
 operations with different side effects; for example, creating and exporting backups use different
-keys.
+keys. Roll hydration deliberately analyzes the all-mode archive domain once, then each IPC caller
+receives its own Softcore/Hardcore source projection after the shared work settles.
 
 ## Cancellation
 

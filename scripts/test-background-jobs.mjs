@@ -75,6 +75,38 @@ assert.equal(completed?.persistence.restart, 'discard-in-flight')
 assert.ok(JSON.stringify(events).includes('No archive payload is present.'))
 assert.ok(!JSON.stringify(events).includes('observedItems'), 'progress events stay lightweight')
 
+let releaseHydration
+const hydrationGate = new Promise((resolve) => { releaseHydration = resolve })
+let hydrationExecutions = 0
+const hydrateForCaller = async (projection) => {
+  const shared = coordinator.run({
+    kind: 'roll-hydration',
+    dedupeKey: 'roll-hydration:all-modes',
+    stage: 'queued',
+    progress: { ...progress, unit: 'items', label: 'Hydrate all archive modes' },
+    supportsCancellation: true,
+    completedStage: 'complete',
+    failedStage: 'failed',
+    canceledStage: 'canceled'
+  }, async () => {
+    hydrationExecutions += 1
+    await hydrationGate
+    return { processed: 12, pending: 0 }
+  }, (result) => ({ summary: 'Hydration complete.', metrics: result }))
+  return { ...await shared.result, projection }
+}
+const softcoreHydration = hydrateForCaller('softcore selection')
+const hardcoreHydration = hydrateForCaller('hardcore selection')
+releaseHydration()
+assert.deepEqual(await softcoreHydration, {
+  processed: 12, pending: 0, projection: 'softcore selection'
+})
+assert.deepEqual(await hardcoreHydration, {
+  processed: 12, pending: 0, projection: 'hardcore selection'
+})
+assert.equal(hydrationExecutions, 1,
+  'concurrent caller projections share one all-mode hydration job')
+
 let enterBoundary
 const boundary = new Promise((resolve) => { enterBoundary = resolve })
 let continueJob
@@ -148,6 +180,7 @@ console.log(JSON.stringify({
   typedLifecycle: true,
   duplicateCoalescing: true,
   trailingBackupCoalescing: true,
+  callerSpecificHydrationProjection: true,
   safeCancellation: true,
   listenerIsolation: true,
   strictIdentityValidation: true,

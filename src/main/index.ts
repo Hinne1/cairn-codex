@@ -1410,11 +1410,20 @@ function registerIpcHandlers(
         latestCollection = createScreenshotCollectionFixture(screenshotFixture)
         return { processed: 0, pending: 0, snapshot: latestCollection }
       }
+      latestCollection ??= await readCollectionCache(collectionCachePath)
+      if (!latestCollection) return null
+      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+      const installation = projected.discovery.installations[0]
+      if (!installation) {
+        return {
+          processed: 0,
+          pending: 0,
+          snapshot: await presentCollection(helper, database, projected, 'archive')
+        }
+      }
       const hydration = jobs.run({
         kind: 'roll-hydration',
-        dedupeKey: `roll-hydration:${createHash('sha256')
-          .update(JSON.stringify([...input.sourcePaths].map((path) => path.toLocaleLowerCase()).sort()))
-          .digest('hex').slice(0, 16)}`,
+        dedupeKey: 'roll-hydration:all-modes',
         stage: 'queued',
         progress: {
           completed: 0,
@@ -1434,18 +1443,9 @@ function registerIpcHandlers(
         'background-job',
         'archive-roll-hydration',
         async (): Promise<ArchiveRollHydrationResult | null> => {
-          latestCollection ??= await readCollectionCache(collectionCachePath)
-          if (!latestCollection) return null
-          const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-          const mode = lifetimeMode(projected)
-          const installation = projected.discovery.installations[0]
-          if (!installation) {
-            return {
-              processed: 0,
-              pending: 0,
-              snapshot: await presentCollection(helper, database, projected, 'archive')
-            }
-          }
+          // Hydration owns one global candidate domain. Caller-specific SC/HC
+          // projection happens only after the shared analysis job settles.
+          const mode: boolean | undefined = undefined
           const total = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
           let processed = 0
           let pending = total
@@ -1509,7 +1509,7 @@ function registerIpcHandlers(
           return {
             processed,
             pending,
-            snapshot: await presentCollection(helper, database, projected, 'archive')
+            snapshot: null
           }
         },
         { batchLimit: 256 },
@@ -1519,7 +1519,12 @@ function registerIpcHandlers(
         summary: 'Archived roll hydration settled.',
         metrics: { processed: result?.processed ?? 0, pending: result?.pending ?? 0 }
       }))
-      return hydration.result
+      const result = await hydration.result
+      if (!result) return null
+      return {
+        ...result,
+        snapshot: await presentCollection(helper, database, projected, 'archive')
+      }
     }
   )
   ipcMain.handle(

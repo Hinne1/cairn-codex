@@ -33,7 +33,9 @@ exact fingerprint passes the compatibility procedure.
 
 ## Current beta limitations
 
-- The release is unsigned and has no automatic updater.
+- The initial beta is deliberately unsigned and has no automatic updater. The release manifest
+  records that policy; a future signing change must cover the installer, app, helper, injector,
+  and hook under one publisher identity and deliberately refresh native fingerprints.
 - Live transfer mutates a running process and is considered experimental.
 - New game builds require a maintained compatibility update or the future guided
   compatibility lab; a generic “ignore safety” switch will not be added.

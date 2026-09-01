@@ -108,6 +108,27 @@ internal sealed class LiveGameAdapter : IDisposable
         var unsupportedBuildRejected = !VerifiedRetailGameDlls.ContainsKey(new string('0', 64)) &&
             !string.Equals(CrashingRetailHookSha256, VerifiedRetailHookSha256,
                 StringComparison.OrdinalIgnoreCase);
+        var diagnosticRoot = Path.Combine(Path.GetTempPath(), $"cairn-live-adapter-diagnostic-{Guid.NewGuid():N}");
+        var adapterDiagnosticsPassed = false;
+        try
+        {
+            var diagnosticNative = Path.Combine(diagnosticRoot, "native");
+            Directory.CreateDirectory(diagnosticNative);
+            var bothMissing = InspectAdapterFiles(diagnosticRoot);
+            File.WriteAllBytes(Path.Combine(diagnosticNative, "ItemAssistantHook_x64.dll"), [0]);
+            var injectorMissing = InspectAdapterFiles(diagnosticRoot);
+            adapterDiagnosticsPassed = !bothMissing.Ready &&
+                bothMissing.Detail.Contains("ItemAssistantHook_x64.dll", StringComparison.Ordinal) &&
+                bothMissing.Detail.Contains("DllInjector64.exe", StringComparison.Ordinal) &&
+                !injectorMissing.Ready &&
+                injectorMissing.Detail.Contains("DllInjector64.exe", StringComparison.Ordinal) &&
+                injectorMissing.Detail.Contains("Protection history", StringComparison.OrdinalIgnoreCase) &&
+                injectorMissing.Detail.Contains("Do not disable", StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(diagnosticRoot)) Directory.Delete(diagnosticRoot, true);
+        }
         var recoveryRoot = Path.Combine(Path.GetTempPath(), $"cairn-live-recovery-{Guid.NewGuid():N}");
         var offlineRecoveryPassed = false;
         var staleReceiptRejected = false;
@@ -175,14 +196,14 @@ internal sealed class LiveGameAdapter : IDisposable
             if (Directory.Exists(recoveryRoot)) Directory.Delete(recoveryRoot, true);
         }
         if (!offlineRecoveryPassed || !staleReceiptRejected || !queuePathGuardPassed ||
-            !multiItemPassed || !unsupportedBuildRejected)
+            !multiItemPassed || !unsupportedBuildRejected || !adapterDiagnosticsPassed)
         {
             throw new InvalidDataException("The CC live recovery state machine failed its self-test.");
         }
         return new LiveQueueSelfTestResult(
             true, 18, sample.Seed, sample.AffixRerolls, hookHash, injectorHash,
             offlineRecoveryPassed, staleReceiptRejected, queuePathGuardPassed, multiItemPassed,
-            unsupportedBuildRejected);
+            unsupportedBuildRejected, adapterDiagnosticsPassed);
     }
 
     public LiveGameStatus Inspect()
@@ -193,7 +214,8 @@ internal sealed class LiveGameAdapter : IDisposable
             var itemAssistant = FindProcesses(["IAGrim"]);
             try
             {
-                var install = ResolveAdapterDirectory();
+                var adapter = InspectAdapterFiles();
+                var install = adapter.Ready ? adapter.Directory : null;
                 var hook = install is null ? null : Path.Combine(install, "ItemAssistantHook_x64.dll");
                 var injector = install is null ? null : Path.Combine(install, "DllInjector64.exe");
                 var filesPresent = hook is not null && injector is not null && File.Exists(hook) && File.Exists(injector);
@@ -219,7 +241,7 @@ internal sealed class LiveGameAdapter : IDisposable
                 {
                     currentState = game.Count == 0 || !compatible ? "unavailable" : "available";
                     currentDetail = !filesPresent
-                        ? "The bundled Cairn Codex live adapter is incomplete."
+                        ? adapter.Detail
                         : !runtimeAvailable
                             ? VisualCppRuntimeRequirement()
                         : game.Count == 0
@@ -302,14 +324,11 @@ internal sealed class LiveGameAdapter : IDisposable
                         ? "Start Grim Dawn and enter the world before enabling live mode."
                         : "Live mode requires exactly one Grim Dawn process.");
             }
-            adapterDirectory = ResolveAdapterDirectory()
-                ?? throw new FileNotFoundException("The bundled Cairn Codex live adapter is incomplete.");
+            var adapter = InspectAdapterFiles();
+            if (!adapter.Ready) throw new FileNotFoundException(adapter.Detail);
+            adapterDirectory = adapter.Directory;
             var hook = Path.Combine(adapterDirectory, "ItemAssistantHook_x64.dll");
             var injector = Path.Combine(adapterDirectory, "DllInjector64.exe");
-            if (!File.Exists(hook) || !File.Exists(injector))
-            {
-                throw new FileNotFoundException("The bundled CC hook or injector is missing.");
-            }
             var compatibility = GetCompatibility(game[0], hook);
             if (!compatibility.Verified)
             {
@@ -1021,11 +1040,31 @@ internal sealed class LiveGameAdapter : IDisposable
 
     private static string? ResolveAdapterDirectory()
     {
-        var bundled = Path.Combine(AppContext.BaseDirectory, "native");
-        return File.Exists(Path.Combine(bundled, "ItemAssistantHook_x64.dll")) &&
-               File.Exists(Path.Combine(bundled, "DllInjector64.exe"))
-            ? bundled
-            : null;
+        var adapter = InspectAdapterFiles();
+        return adapter.Ready ? adapter.Directory : null;
+    }
+
+    private static AdapterFileStatus InspectAdapterFiles(string? baseDirectory = null)
+    {
+        var bundled = Path.Combine(baseDirectory ?? AppContext.BaseDirectory, "native");
+        var missing = new List<string>();
+        if (!File.Exists(Path.Combine(bundled, "ItemAssistantHook_x64.dll")))
+        {
+            missing.Add("ItemAssistantHook_x64.dll");
+        }
+        if (!File.Exists(Path.Combine(bundled, "DllInjector64.exe")))
+        {
+            missing.Add("DllInjector64.exe");
+        }
+        if (missing.Count == 0) return new AdapterFileStatus(true, bundled, string.Empty);
+
+        return new AdapterFileStatus(
+            false,
+            bundled,
+            $"The bundled Cairn Codex live adapter is incomplete: missing {string.Join(" and ", missing)}. " +
+            "Windows Security or another endpoint protection tool may have quarantined the file. " +
+            "Repair or reinstall Cairn Codex from its trusted release source, then review Windows Security > " +
+            "Protection history if the file is still missing. Do not disable security software globally.");
     }
 
     private static bool HasCompatibleVisualCppRuntime(out string? version)
@@ -1235,6 +1274,7 @@ internal sealed class LiveGameAdapter : IDisposable
 }
 
 internal sealed record LiveHookMessage(int Type, string DataHex, string ReceivedAtUtc);
+internal sealed record AdapterFileStatus(bool Ready, string Directory, string Detail);
 internal sealed record LiveHookCompatibility(
     bool Verified,
     string? Reason,
@@ -1255,7 +1295,8 @@ internal sealed record LiveQueueSelfTestResult(
     bool StaleReceiptRejected,
     bool QueuePathGuardPassed,
     bool MultiItemPassed,
-    bool UnsupportedBuildRejected);
+    bool UnsupportedBuildRejected,
+    bool AdapterDiagnosticsPassed);
 internal sealed record LiveQueueSettings(
     int LootFrom,
     int DepositTo,

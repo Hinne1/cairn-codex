@@ -1,8 +1,12 @@
 # Public beta release gates
 
 Cairn Codex is not considered releasable merely because the UI builds. A public
-beta candidate must satisfy every required gate below. Code signing and automatic
-updates are deliberately deferred until after the beta has real users.
+beta candidate must satisfy every required gate below. Automatic updates are deliberately
+deferred until after the beta has real users. Authenticode signing is also deferred for the
+initial beta: every Cairn-produced executable and native library remains unsigned, and the
+release harness fails on a mixed signing state and records that policy in the manifest. Adopting
+signing requires one consistent trusted publisher identity across the installer, app, helper,
+injector, and hook, plus deliberate post-signature fingerprint and clean-machine validation.
 
 ## External tester gate
 
@@ -39,6 +43,8 @@ The measured evidence and product/architecture follow-up are tracked in
       prerequisite and diagnose it before live injection.
 - [x] CI builds both runtimes and runs the game-independent safety self-tests.
 - [x] A versioned ZIP and SHA-256 checksum are produced from a clean checkout.
+- [x] The release manifest records the explicit unsigned-beta Authenticode policy and the
+      release harness rejects a partially or unexpectedly signed Cairn binary.
 - [x] Package contents include the project license, third-party notices, and no
       extracted Grim Dawn assets or personal application data.
 - [x] The release artifact starts on a clean supported Windows installation.

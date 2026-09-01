@@ -15,6 +15,27 @@ until every P0 gate in `docs/roadmap.md` is complete.
 5. Do not ask the tester to upload saves, `userdata.db`, the Cairn SQLite archive, or raw live
    queue files. Use the redacted diagnostic export and application logs.
 
+## Clean-machine security pass
+
+Use a fresh Windows 10 or 11 VM with default SmartScreen and Defender settings and no previous
+Cairn Codex or Item Assistant installation. Download only from the project release page, verify
+the published installer SHA-256, and record the exact SmartScreen publisher/warning text. The
+initial beta is intentionally unsigned, so a policy-managed machine may refuse to run it.
+
+After installation, confirm first launch works and that both
+`resources\helper\native\ItemAssistantHook_x64.dll` and `DllInjector64.exe` remain present. If
+Cairn reports that either file is missing, review **Windows Security > Protection history** and
+record the detection name and affected path. Repair or reinstall from the trusted release after
+the file is allowed under the tester's normal security policy. Do not disable SmartScreen,
+Defender, real-time protection, or third-party endpoint protection globally. If organizational
+policy prevents an exception, keep live mode off; collection browsing and closed-game workflows
+remain available.
+
+Before attempting live mode, export a redacted support bundle and record the app version, native
+fingerprints, VC++ runtime status, and whether the adapter reports available. Then use only the
+maintained allowlisted Grim Dawn build and the normal live-transfer checklist. Do not substitute
+or rename a quarantined native file.
+
 ## First-run observations
 
 - Time from launch to the first usable Collection screen, separately from the time until every

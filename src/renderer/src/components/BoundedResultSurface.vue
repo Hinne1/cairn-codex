@@ -25,6 +25,8 @@ const props = withDefaults(defineProps<{
   selectionMode?: BoundedSelectionMode
   selectedKeys?: readonly BoundedResultKey[]
   selectionDisabled?: boolean
+  isItemDisabled?: (item: T) => boolean
+  navigable?: boolean
   interactive?: boolean
   itemDescribedBy?: string
   keyboardColumns?: number
@@ -41,6 +43,8 @@ const props = withDefaults(defineProps<{
   selectionMode: 'none',
   selectedKeys: () => [],
   selectionDisabled: false,
+  isItemDisabled: undefined,
+  navigable: false,
   interactive: false,
   itemDescribedBy: undefined,
   keyboardColumns: 1
@@ -68,7 +72,7 @@ const resultWindow = computed(() => createBoundedResultWindow({
 const entryKeys = computed(() => resultWindow.value.entries.map((entry) => entry.key))
 const showResults = computed(() => !props.loading && !props.error && resultWindow.value.entries.length > 0)
 const selectable = computed(() => props.selectionMode !== 'none')
-const focusable = computed(() => selectable.value || props.interactive)
+const focusable = computed(() => selectable.value || props.navigable || props.interactive)
 const collectionRole = computed(() => props.layout === 'list'
   ? (selectable.value ? 'listbox' : 'list')
   : 'grid')
@@ -91,16 +95,21 @@ function rememberElement(key: BoundedResultKey, element: Element | null): void {
   else itemElements.delete(key)
 }
 
-function select(key: BoundedResultKey): void {
-  activeKey.value = key
-  if (selectable.value && !props.selectionDisabled) {
-    emit('update:selectedKeys', updateBoundedSelection(props.selectedKeys, key, props.selectionMode))
+function entryDisabled(entry: { item: T }): boolean {
+  return props.selectionDisabled || Boolean(props.isItemDisabled?.(entry.item))
+}
+
+function select(entry: { key: BoundedResultKey, item: T }): void {
+  activeKey.value = entry.key
+  if (entryDisabled(entry)) return
+  if (selectable.value) {
+    emit('update:selectedKeys', updateBoundedSelection(props.selectedKeys, entry.key, props.selectionMode))
   }
 }
 
 function activateEntry(entry: { key: BoundedResultKey, item: T }): void {
-  select(entry.key)
-  if (props.interactive) emit('activate', entry.key, entry.item)
+  select(entry)
+  if (props.interactive && !entryDisabled(entry)) emit('activate', entry.key, entry.item)
 }
 
 function handleItemFocus(event: FocusEvent, entry: { key: BoundedResultKey, item: T }): void {
@@ -144,7 +153,7 @@ function handleKeydown(event: KeyboardEvent, entry: { key: BoundedResultKey, ite
   }
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
-    if (props.selectionDisabled) return
+    if (entryDisabled(entry)) return
     activateEntry(entry)
   }
 }
@@ -192,10 +201,10 @@ function changePage(page: number): void {
         :key="entry.key"
         :ref="(element) => rememberElement(entry.key, element as Element | null)"
         class="bounded-results-item"
-        :class="{ 'is-selected': selectable && selectedKeys.includes(entry.key) }"
+        :class="{ 'is-selected': selectable && selectedKeys.includes(entry.key), 'is-disabled': entryDisabled(entry) }"
         :role="itemRole"
         :aria-selected="selectable ? selectedKeys.includes(entry.key) : undefined"
-        :aria-disabled="selectable && selectionDisabled ? true : undefined"
+        :aria-disabled="selectable && entryDisabled(entry) ? true : undefined"
         :aria-describedby="itemDescribedBy"
         :tabindex="focusable ? (activeKey === entry.key ? 0 : -1) : undefined"
         @focus="handleItemFocus($event, entry)"

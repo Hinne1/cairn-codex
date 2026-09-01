@@ -496,6 +496,7 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .pagination button { min-width: 92px; padding: 9px 12px; border: 1px solid #433d31; border-radius: 5px; color: #b7aa8c; background: #24211b; cursor: pointer; }
 .pagination button:disabled { opacity: 0.35; cursor: default; }
 .pagination span { color: #777164; font-size: 12px; }
+.vault-pagination { padding: 0 0 16px; }
 .no-results { grid-column: 1 / -1; padding: 72px 20px; color: #777164; text-align: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 

@@ -103,6 +103,7 @@ console.log(JSON.stringify({
   hydrateAllModes,
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,
+  renderedVaultRows: report.renderedState?.vaultRows,
   screenshotPath,
   reportPath
 }, null, 2))

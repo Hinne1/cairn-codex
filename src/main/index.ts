@@ -3721,6 +3721,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           cards: document.querySelectorAll('.item-card').length,
           sets: document.querySelectorAll('.set-card').length,
           copyCards: document.querySelectorAll('.copy-card').length,
+          vaultRows: document.querySelectorAll('.vault-item-list .vault-row').length,
           miRows: [...document.querySelectorAll('.mi-table tbody tr')].map((row) => ({
             text: row.textContent?.replace(/\s+/g, ' ').trim(),
             prefixClass: row.children[2]?.className,

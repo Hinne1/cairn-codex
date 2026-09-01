@@ -348,6 +348,10 @@ const vaultQuery = ref('')
 const vaultRarityFilter = ref<VaultRarityFilter>('all')
 const vaultSortMode = ref<VaultSortMode>('recent')
 const vaultSortDirection = ref<SortDirection>('desc')
+const vaultPage = ref(1)
+const vaultHistoryPage = ref(1)
+const vaultQuarantinePage = ref(1)
+const vaultPageSize = 100
 const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
@@ -486,6 +490,10 @@ const availableVaultItems = computed(() => {
       return comparison * direction
     })
 })
+const vaultPageCount = computed(() => Math.max(1, Math.ceil(availableVaultItems.value.length / vaultPageSize)))
+const visibleAvailableVaultItems = computed(() =>
+  availableVaultItems.value.slice((vaultPage.value - 1) * vaultPageSize, vaultPage.value * vaultPageSize)
+)
 const dismantlingCandidates = computed(() =>
   vaultItems.value.filter((item) =>
     item.catalogued &&
@@ -697,6 +705,24 @@ const quarantinedVaultItems = computed(() =>
 )
 const retrievedVaultItems = computed(() =>
   vaultItems.value.filter((item) => item.state === 'retrieved')
+)
+const visibleQuarantinedVaultItems = computed(() =>
+  quarantinedVaultItems.value.slice(
+    (vaultQuarantinePage.value - 1) * vaultPageSize,
+    vaultQuarantinePage.value * vaultPageSize
+  )
+)
+const vaultQuarantinePageCount = computed(() =>
+  Math.max(1, Math.ceil(quarantinedVaultItems.value.length / vaultPageSize))
+)
+const visibleRetrievedVaultItems = computed(() =>
+  retrievedVaultItems.value.slice(
+    (vaultHistoryPage.value - 1) * vaultPageSize,
+    vaultHistoryPage.value * vaultPageSize
+  )
+)
+const vaultHistoryPageCount = computed(() =>
+  Math.max(1, Math.ceil(retrievedVaultItems.value.length / vaultPageSize))
 )
 const archivedCopyCount = computed(() =>
   vaultItems.value.filter((item) => item.state === 'ingested').length
@@ -2265,9 +2291,24 @@ watch(visibleAtlasRegions, (regions) => {
 }, { immediate: true })
 watch(transferMode, () => {
   selectedVaultIds.value = []
+  vaultPage.value = 1
+  vaultQuarantinePage.value = 1
   selectedSupplyIds.value = []
   vaultError.value = null
   vaultMessage.value = null
+})
+watch([vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, activeTransferHardcore], () => {
+  vaultPage.value = 1
+  selectedVaultIds.value = []
+})
+watch(vaultPageCount, (count) => {
+  if (vaultPage.value > count) vaultPage.value = count
+})
+watch(vaultQuarantinePageCount, (count) => {
+  if (vaultQuarantinePage.value > count) vaultQuarantinePage.value = count
+})
+watch(vaultHistoryPageCount, (count) => {
+  if (vaultHistoryPage.value > count) vaultHistoryPage.value = count
 })
 watch(supplyCategory, () => {
   supplySlotFilter.value = 'all'
@@ -6952,7 +6993,7 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
           </template>
           <template #actions>
-            <button type="button" :disabled="availableVaultItems.length === 0" @click="selectedVaultIds = availableVaultItems.map((item) => item.id)">Select visible</button>
+            <button type="button" :disabled="visibleAvailableVaultItems.length === 0" @click="selectedVaultIds = visibleAvailableVaultItems.map((item) => item.id)">Select visible</button>
             <button type="button" :disabled="selectedVaultIds.length === 0" @click="selectedVaultIds = []">Clear</button>
           </template>
         </ExplorerToolbar>
@@ -7030,7 +7071,7 @@ function formatPercentile(value: number | null | undefined): string {
             Select them and use live return; their verified receipt remains on disk until the return is acknowledged.
           </p>
           <div class="vault-item-list selectable">
-            <label v-for="item in quarantinedVaultItems" :key="item.id" class="vault-row unsupported">
+            <label v-for="item in visibleQuarantinedVaultItems" :key="item.id" class="vault-row unsupported">
               <input
                 type="checkbox"
                 :checked="selectedVaultIds.includes(item.id)"
@@ -7043,6 +7084,11 @@ function formatPercentile(value: number | null | undefined): string {
               </div>
             </label>
           </div>
+          <nav v-if="vaultQuarantinePageCount > 1" class="pagination vault-pagination" aria-label="Quarantine pages">
+            <button type="button" :disabled="vaultQuarantinePage === 1" @click="vaultQuarantinePage -= 1">Previous</button>
+            <span>Page {{ vaultQuarantinePage }} of {{ vaultQuarantinePageCount }}</span>
+            <button type="button" :disabled="vaultQuarantinePage === vaultQuarantinePageCount" @click="vaultQuarantinePage += 1">Next</button>
+          </nav>
           <button
             class="vault-action live-action"
             type="button"
@@ -7066,7 +7112,7 @@ function formatPercentile(value: number | null | undefined): string {
             and commits each return only after the game acknowledges receipt.
           </p>
           <div v-if="availableVaultItems.length" class="vault-item-list selectable">
-            <label v-for="item in availableVaultItems" :key="item.id" class="vault-row">
+            <label v-for="item in visibleAvailableVaultItems" :key="item.id" class="vault-row">
               <input
                 type="checkbox"
                 :checked="selectedVaultIds.includes(item.id)"
@@ -7080,6 +7126,11 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
           </div>
           <div v-else class="vault-empty">No archived items are waiting.</div>
+          <nav v-if="vaultPageCount > 1" class="pagination vault-pagination" aria-label="Stored copy pages">
+            <button type="button" :disabled="vaultPage === 1" @click="vaultPage -= 1">Previous</button>
+            <span>Page {{ vaultPage }} of {{ vaultPageCount }}</span>
+            <button type="button" :disabled="vaultPage === vaultPageCount" @click="vaultPage += 1">Next</button>
+          </nav>
           <button
             class="vault-action live-action"
             type="button"
@@ -7194,7 +7245,7 @@ function formatPercentile(value: number | null | undefined): string {
               These copies are already part of the Codex Archive. Selecting one retrieves it out to the game; no filing step is required.
             </p>
             <div v-if="availableVaultItems.length" class="vault-item-list selectable">
-              <label v-for="item in availableVaultItems" :key="item.id" class="vault-row">
+              <label v-for="item in visibleAvailableVaultItems" :key="item.id" class="vault-row">
                 <input
                   type="checkbox"
                   :checked="selectedVaultIds.includes(item.id)"
@@ -7208,6 +7259,11 @@ function formatPercentile(value: number | null | undefined): string {
               </label>
             </div>
             <div v-else class="vault-empty">No archived items are waiting.</div>
+            <nav v-if="vaultPageCount > 1" class="pagination vault-pagination" aria-label="Stored copy pages">
+              <button type="button" :disabled="vaultPage === 1" @click="vaultPage -= 1">Previous</button>
+              <span>Page {{ vaultPage }} of {{ vaultPageCount }}</span>
+              <button type="button" :disabled="vaultPage === vaultPageCount" @click="vaultPage += 1">Next</button>
+            </nav>
             <button
               class="vault-action"
               type="button"
@@ -7226,10 +7282,15 @@ function formatPercentile(value: number | null | undefined): string {
             <h3>Previously retrieved</h3>
           </div>
           <div class="history-chips">
-            <span v-for="item in retrievedVaultItems" :key="item.id">
+            <span v-for="item in visibleRetrievedVaultItems" :key="item.id">
               {{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.name }} · seed {{ item.seed }}
             </span>
           </div>
+          <nav v-if="vaultHistoryPageCount > 1" class="pagination vault-pagination" aria-label="Retrieval history pages">
+            <button type="button" :disabled="vaultHistoryPage === 1" @click="vaultHistoryPage -= 1">Previous</button>
+            <span>Page {{ vaultHistoryPage }} of {{ vaultHistoryPageCount }}</span>
+            <button type="button" :disabled="vaultHistoryPage === vaultHistoryPageCount" @click="vaultHistoryPage += 1">Next</button>
+          </nav>
         </section>
       </section>
 

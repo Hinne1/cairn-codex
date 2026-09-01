@@ -75,8 +75,10 @@ Transfers operation history and quarantine are the first server-paged adopters. 
 the shared multi-selection model while retaining its fail-closed transfer controls. MI Workshop
 is the first local CSS-table adopter: it mounts 50 affix combinations per page, exposes the
 existing affixed item tooltip on pointer hover and keyboard focus, and opens the item on Enter,
-Space, or click. Planner and Skills migrations remain tracked incrementally under #21 so each
-change can be visually and behaviorally verified without an `App.vue` flag-day rewrite.
+Space, or click. Skill Explorer uses the same local table pattern for item-to-skill comparisons,
+including its rank, conversion, special-modifier, and level sorts. The Planner migration remains
+tracked incrementally under #21 so each change can be visually and behaviorally verified without
+an `App.vue` flag-day rewrite.
 
 ## Search and filter semantics
 

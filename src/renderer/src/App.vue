@@ -362,6 +362,7 @@ const selectedSkill = ref(initialPreferences.search.selectedSkill)
 const skillScope = ref<SkillScope>(initialPreferences.search.skillScope)
 const skillSort = ref<SkillSort>('amount')
 const skillSortDirection = ref<SortDirection>('desc')
+const skillItemPage = ref(1)
 const skillItemQuery = ref('')
 const skillRarityFilter = ref<SkillRarityFilter>('all')
 const skillSlotFilter = ref('all')
@@ -2405,6 +2406,9 @@ watch(plannerLevelCap, (level) => {
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch([miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode], () => {
   miWorkshopPage.value = 1
+})
+watch([selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection], () => {
+  skillItemPage.value = 1
 })
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (applyingPlannerProfile) return
@@ -6232,60 +6236,58 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
           </template>
         </ExplorerToolbar>
-        <div class="skill-table-wrap">
-          <table class="skill-table">
-            <thead>
-              <tr>
-                <th><button type="button" @click="setSkillSort('item')">Item {{ skillSort === 'item' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
-                <th><button type="button" @click="setSkillSort('slot')">Slot <span v-if="skillSort === 'slot'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
-                <th><button type="button" @click="setSkillSort('amount')">Ranks {{ skillSort === 'amount' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
-                <th><button type="button" @click="setSkillSort('conversion')">Target {{ skillSort === 'conversion' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
-                <th>Conversion details</th>
-                <th><button type="button" @click="setSkillSort('special')">Special modifier <span v-if="skillSort === 'special'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
-                <th><button type="button" @click="setSkillSort('level')">Level {{ skillSort === 'level' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in skillItemRows"
-                :key="row.item.record"
-                role="button"
-                tabindex="0"
-                aria-describedby="item-tooltip"
+        <BoundedResultSurface
+          v-model:page="skillItemPage"
+          class="skill-table-wrap skill-table-results bounded-tooltip-results"
+          :items="skillItemRows"
+          :get-key="row => row.item.record"
+          :page-size="50"
+          :empty-title="selectedSkill ? 'No matching items' : 'Choose a skill to begin'"
+          :empty-detail="selectedSkill ? (skillItemQuery || skillRarityFilter !== 'all' || skillSlotFilter !== 'all' ? 'No items match the current search and filters.' : 'No matching items in this availability scope.') : 'Select an indexed skill to compare its supporting items.'"
+          label="Items matching the selected skill"
+          layout="table"
+          interactive
+          item-described-by="item-tooltip"
+          @activate="(_key, row) => openItem(row.item)"
+          @item-focus="(_key, row, element) => showTooltip(row.item, element)"
+          @item-blur="scheduleTooltipHide"
+        >
+          <template #header>
+            <div class="skill-table-header" role="row">
+              <span role="columnheader"><button type="button" @click="setSkillSort('item')">Item {{ skillSort === 'item' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
+              <span role="columnheader"><button type="button" @click="setSkillSort('slot')">Slot <template v-if="skillSort === 'slot'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</template></button></span>
+              <span role="columnheader"><button type="button" @click="setSkillSort('amount')">Ranks {{ skillSort === 'amount' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
+              <span role="columnheader"><button type="button" @click="setSkillSort('conversion')">Target {{ skillSort === 'conversion' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
+              <span role="columnheader">Conversion details</span>
+              <span role="columnheader"><button type="button" @click="setSkillSort('special')">Special modifier <template v-if="skillSort === 'special'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</template></button></span>
+              <span role="columnheader"><button type="button" @click="setSkillSort('level')">Level {{ skillSort === 'level' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
+            </div>
+          </template>
+          <template #item="{ item: row }">
+            <div
+              class="skill-table-row"
                 @mouseenter="queueTooltip(row.item, $event)"
                 @mousemove="moveTooltip"
                 @mouseleave="scheduleTooltipHide"
-                @focus="queueTooltip(row.item, $event)"
-                @blur="scheduleTooltipHide"
-                @click="openItem(row.item)"
-                @keydown.enter="openItem(row.item)"
-              >
-                <td>
-                  <div class="skill-item-name">
-                    <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-                    <span>
-                      <strong>{{ row.item.name }}</strong>
-                      <small>{{ row.item.rarity }}<template v-if="plannerOwnershipLabel(row.item)"> · {{ plannerOwnershipLabel(row.item) }}</template></small>
-                    </span>
-                  </div>
-                </td>
-                <td>{{ row.item.slot }}</td>
-                <td class="skill-amount">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</td>
-                <td class="skill-conversion-target">{{ row.conversionTarget || '—' }}</td>
-                <td>{{ row.conversionDetails || '—' }}</td>
-                <td>{{ row.special || '—' }}</td>
-                <td>{{ row.item.levelRequirement }}</td>
-              </tr>
-              <tr v-if="skillItemRows.length === 0">
-                <td colspan="7" class="skill-empty">
-                  {{ skillItemQuery || skillRarityFilter !== 'all' || skillSlotFilter !== 'all'
-                    ? 'No items match the current search and filters.'
-                    : 'No matching items in this availability scope.' }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+            >
+              <span role="gridcell">
+                <span class="skill-item-name">
+                  <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
+                  <span>
+                    <strong>{{ row.item.name }}</strong>
+                    <small>{{ row.item.rarity }}<template v-if="plannerOwnershipLabel(row.item)"> · {{ plannerOwnershipLabel(row.item) }}</template></small>
+                  </span>
+                </span>
+              </span>
+              <span role="gridcell">{{ row.item.slot }}</span>
+              <span role="gridcell" class="skill-amount">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</span>
+              <span role="gridcell" class="skill-conversion-target">{{ row.conversionTarget || '—' }}</span>
+              <span role="gridcell">{{ row.conversionDetails || '—' }}</span>
+              <span role="gridcell">{{ row.special || '—' }}</span>
+              <span role="gridcell">{{ row.item.levelRequirement }}</span>
+            </div>
+          </template>
+        </BoundedResultSurface>
       </section>
 
       <section v-else-if="activeView === 'oracle'" class="stash-oracle" aria-label="Stash Oracle build recommendations">
@@ -6900,7 +6902,7 @@ function formatPercentile(value: number | null | undefined): string {
         </ExplorerToolbar>
         <BoundedResultSurface
           v-model:page="miWorkshopPage"
-          class="mi-table-wrap mi-table-results"
+          class="mi-table-wrap mi-table-results bounded-tooltip-results"
           :items="miWorkshopRows"
           :get-key="row => row.key"
           :page-size="50"

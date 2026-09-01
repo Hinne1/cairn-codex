@@ -2073,6 +2073,78 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
       affixSummary: { total: prefixes.length + suffixes.length, collected: prefixes.length + suffixes.length, availableCopies: observedItems.length * 2 }
     }
   }
+  if (name === 'skill-explorer') {
+    const fixture = createScreenshotCollectionFixture('search-help')
+    const template = fixture.items[0]!
+    const rarities = ['legendary', 'epic', 'rare'] as const
+    const slots = ['head', 'chest', 'shoulders', 'medal', 'sword', 'offhand'] as const
+    const items = Array.from({ length: 120 }, (_, index): CollectionItem => {
+      const rarity = rarities[index % rarities.length]!
+      const slot = slots[index % slots.length]!
+      const conversionTarget = ['Vitality', 'Cold', 'Lightning', 'Acid'][index % 4]!
+      return {
+        ...template,
+        record: `records/items/synthetic/skill_support_${index}.dbr`,
+        name: `Totemic Research ${String(index + 1).padStart(3, '0')}`,
+        rarity,
+        itemClass: slot === 'sword' ? 'weapon_sword' : `armor_${slot}`,
+        slot,
+        levelRequirement: 20 + index % 75,
+        itemLevel: 20 + index % 75,
+        availableCount: index % 4 === 0 ? 1 : 0,
+        discovered: index % 4 === 0,
+        presentation: {
+          flavorText: null,
+          sections: [{
+            kind: 'base',
+            heading: null,
+            lines: [{
+              label: 'to Wendigo Totem',
+              minimum: 1 + index % 3,
+              maximum: 1 + index % 3,
+              unit: '',
+              tone: 'skill',
+              prefix: '+',
+              suffix: ''
+            }]
+          }, {
+            kind: 'skill-modifier',
+            heading: 'Wendigo Totem',
+            lines: [{
+              label: `Bleeding Damage converted to ${conversionTarget} Damage`,
+              minimum: 20 + index % 31,
+              maximum: 20 + index % 31,
+              unit: '%',
+              tone: 'standard',
+              prefix: '',
+              suffix: ''
+            }, {
+              label: 'Skill Recharge',
+              minimum: -(index % 4 + 1) * 0.25,
+              maximum: -(index % 4 + 1) * 0.25,
+              unit: 's',
+              tone: 'standard',
+              prefix: '',
+              suffix: ''
+            }]
+          }],
+          grantedSkill: null,
+          searchText: `wendigo totem ${conversionTarget.toLocaleLowerCase()} damage skill recharge synthetic qa`
+        }
+      }
+    })
+    return {
+      ...fixture,
+      items,
+      rarities: rarities.map((rarity) => ({
+        rarity,
+        total: items.filter((item) => item.rarity === rarity).length,
+        collected: items.filter((item) => item.rarity === rarity && item.discovered).length,
+        availableCopies: items.filter((item) => item.rarity === rarity).reduce((total, item) => total + item.availableCount, 0)
+      })),
+      skillMasteries: { 'Wendigo Totem': 'Shaman' }
+    }
+  }
   if (name !== 'search-help') throw new Error(`Unknown screenshot fixture: ${name}`)
   return {
     catalogPresentationVersion: CATALOG_PRESENTATION_VERSION,
@@ -5406,7 +5478,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             (async () => {
               const started = performance.now()
               const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
-              const rows = [...document.querySelectorAll('.mi-table-results .bounded-results-item')]
+              const rows = [...document.querySelectorAll('.bounded-tooltip-results .bounded-results-item')]
               if (rows.length < 2) throw new Error('Bounded keyboard verification needs at least two mounted rows.')
               rows[0].focus()
               rows[0].dispatchEvent(new FocusEvent('focus'))
@@ -5424,6 +5496,26 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               rows.at(-1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
               await wait(20)
               if (document.activeElement !== rows[0]) throw new Error('Home did not restore focus to the first mounted row.')
+              const firstPageFirstRow = rows[0].textContent?.replace(/\s+/g, ' ').trim()
+              const nextPage = document.querySelector('.bounded-tooltip-results .bounded-results-footer nav button:last-of-type')
+              if (!(nextPage instanceof HTMLButtonElement) || nextPage.disabled) {
+                throw new Error('Bounded keyboard verification needs an enabled next-page control.')
+              }
+              nextPage.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const nextRows = [...document.querySelectorAll('.bounded-tooltip-results .bounded-results-item')]
+              const nextPageFirstRow = nextRows[0]?.textContent?.replace(/\s+/g, ' ').trim()
+              if (nextRows.length === 0 || nextRows.length > rows.length || nextPageFirstRow === firstPageFirstRow) {
+                throw new Error('Next did not replace the mounted bounded page.')
+              }
+              const previousPage = document.querySelector('.bounded-tooltip-results .bounded-results-footer nav button:first-of-type')
+              if (!(previousPage instanceof HTMLButtonElement) || previousPage.disabled) {
+                throw new Error('The bounded previous-page control did not enable on page two.')
+              }
+              previousPage.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const restoredFirstRow = document.querySelector('.bounded-tooltip-results .bounded-results-item')?.textContent?.replace(/\s+/g, ' ').trim()
+              if (restoredFirstRow !== firstPageFirstRow) throw new Error('Previous did not restore the first bounded page.')
               return performance.now() - started
             })()
           `)
@@ -5811,6 +5903,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           vaultRows: document.querySelectorAll('.quarantine-results .vault-row, .vault-item-list .vault-row').length,
           operationRows: document.querySelectorAll('.operation-history-row').length,
           plannerRows: document.querySelectorAll('.planner-table tbody tr').length,
+          boundedRows: document.querySelectorAll('.bounded-tooltip-results .bounded-results-item').length,
+          skillRows: document.querySelectorAll('.skill-table-results .skill-table-row').length,
           miRows: [...document.querySelectorAll('.mi-table-results .mi-table-row')].map((row) => ({
             text: row.textContent?.replace(/\s+/g, ' ').trim(),
             prefixClass: row.children[2]?.className,

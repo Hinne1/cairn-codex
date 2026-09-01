@@ -16,10 +16,14 @@ const baseProfile = argument('--base-profile')
 const fixture = argument('--fixture')
 const query = argument('--query') ?? 'wendigo'
 const category = argument('--category')
+const skillQuery = argument('--skill-query')
+const skillSelectFirst = process.argv.includes('--skill-select-first')
 const miAffixFilter = argument('--mi-affix-filter')
 const expectedMiRows = argument('--expected-mi-rows')
 const expectedMiTotal = argument('--expected-mi-total')
 const expectedMiMounted = argument('--expected-mi-mounted')
+const expectedBoundedTotal = argument('--expected-bounded-total')
+const expectedBoundedMounted = argument('--expected-bounded-mounted')
 const warmBudgetMs = argument('--warm-budget-ms')
 const miNativeRestore = process.argv.includes('--mi-native-restore')
 const waitForBackgroundJobs = process.argv.includes('--wait-for-background-jobs')
@@ -112,6 +116,8 @@ const env = {
   ...(onboardingStep !== null ? { CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP: onboardingStep } : {}),
   ...(dismissOnboarding ? { CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING: '1' } : {}),
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
+  ...(skillQuery ? { CAIRN_CODEX_SCREENSHOT_SKILL_QUERY: skillQuery } : {}),
+  ...(skillSelectFirst ? { CAIRN_CODEX_SCREENSHOT_SKILL_SELECT_FIRST: '1' } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
   ...(openPlannerSetup ? { CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP: '1' } : {}),
@@ -210,6 +216,25 @@ if (expectedMiMounted !== null) {
     throw new Error(`MI mounted-row mismatch: rendered ${rendered}; expected ${expected}.`)
   }
 }
+if (expectedBoundedTotal !== null) {
+  const expected = Number(expectedBoundedTotal)
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new Error(`--expected-bounded-total must be a non-negative integer; received ${expectedBoundedTotal}.`)
+  }
+  if (itemCount !== expected) {
+    throw new Error(`Bounded result total mismatch: counter reported ${itemCount}; expected ${expected}.`)
+  }
+}
+if (expectedBoundedMounted !== null) {
+  const expected = Number(expectedBoundedMounted)
+  const rendered = report.renderedState?.boundedRows ?? 0
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new Error(`--expected-bounded-mounted must be a non-negative integer; received ${expectedBoundedMounted}.`)
+  }
+  if (rendered !== expected) {
+    throw new Error(`Bounded mounted-row mismatch: rendered ${rendered}; expected ${expected}.`)
+  }
+}
 if (warmBudgetMs !== null) {
   const budget = Number(warmBudgetMs)
   if (!Number.isFinite(budget) || budget <= 0) {
@@ -233,6 +258,8 @@ console.log(JSON.stringify({
   searchMsIncludingDebounce: report.interactions?.searchMs,
   query,
   category: category ?? 'Collection',
+  skillQuery,
+  skillSelectFirst,
   miAffixFilter: miAffixFilter ?? null,
   miNativeRestore,
   waitForBackgroundJobs,
@@ -253,6 +280,7 @@ console.log(JSON.stringify({
   renderedVaultRows: report.renderedState?.vaultRows,
   renderedOperationRows: report.renderedState?.operationRows,
   renderedPlannerRows: report.renderedState?.plannerRows,
+  renderedBoundedRows: report.renderedState?.boundedRows,
   screenshotPath,
   reportPath
 }, null, 2))

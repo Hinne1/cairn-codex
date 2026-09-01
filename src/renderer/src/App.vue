@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
+import ItemAssistantImport from './components/ItemAssistantImport.vue'
 import { searchGuidance } from './search-guidance'
 import ToolHeader from './components/ToolHeader.vue'
 import {
@@ -412,8 +413,6 @@ const debugLoggingStatus = ref<DebugLoggingStatus>({
 })
 const archiveBackupBusy = ref<'backup' | 'export' | 'restore' | null>(null)
 const archiveBackupStatus = ref<ArchiveBackupStatus | null>(null)
-const gdiaImportBusy = ref(false)
-const gdiaImportResult = ref<GdiaImportResult | null>(null)
 const recoveryStatus = ref<RecoveryStatus | null>(null)
 const vaultBusy = ref(false)
 const sahdinaRecoveryBusy = ref<'shared-stash' | 'character-inventory' | null>(null)
@@ -2636,15 +2635,9 @@ async function openArchiveBackupDirectory(): Promise<void> {
   if (error) vaultError.value = `Windows could not open Cairn's archive backup folder: ${error}`
 }
 
-async function importFromItemAssistant(): Promise<void> {
-  if (gdiaImportBusy.value) return
-  gdiaImportBusy.value = true
+async function handleGdiaImportCompleted(result: GdiaImportResult): Promise<void> {
   vaultError.value = null
-  gdiaImportResult.value = null
   try {
-    const result = await window.cairnCodex.importGdiaDatabase()
-    if (result.canceled) return
-    gdiaImportResult.value = result
     if (collectionBasis.value !== 'archive') {
       collectionBasis.value = 'archive'
       localStorage.setItem('cairn-codex-collection-basis', 'archive')
@@ -2655,8 +2648,6 @@ async function importFromItemAssistant(): Promise<void> {
       : `Item Assistant import found no new copies; ${result.duplicateItems} were already archived.`
   } catch (error) {
     vaultError.value = readableError(error)
-  } finally {
-    gdiaImportBusy.value = false
   }
 }
 
@@ -6940,23 +6931,7 @@ function formatPercentile(value: number | null | undefined): string {
             </div>
           </article>
 
-          <article class="settings-card migration-settings">
-            <p class="section-label">Migration</p>
-            <h3>Import from Item Assistant</h3>
-            <p>Choose Item Assistant's <code>userdata.db</code>. Cairn first creates and verifies an immutable backup, then imports every supported SC and HC copy without changing Item Assistant's files.</p>
-            <button class="settings-action" type="button" :disabled="gdiaImportBusy || !snapshot" @click="importFromItemAssistant">
-              {{ gdiaImportBusy ? 'Backing up and importing…' : 'Choose Item Assistant database…' }}
-            </button>
-            <small>Safe to repeat: copies already present in Cairn are detected and skipped. Close Item Assistant first so its database cannot change during backup.</small>
-            <dl v-if="gdiaImportResult" class="migration-result">
-              <div><dt>Imported</dt><dd>{{ gdiaImportResult.importedItems }}</dd></div>
-              <div><dt>Already present</dt><dd>{{ gdiaImportResult.duplicateItems }}</dd></div>
-              <div><dt>Unsupported</dt><dd>{{ gdiaImportResult.unsupportedItems }}</dd></div>
-              <div><dt>Modes</dt><dd>{{ gdiaImportResult.sourceSoftcoreItems }} SC · {{ gdiaImportResult.sourceHardcoreItems }} HC</dd></div>
-              <div><dt>Pending queue</dt><dd>{{ gdiaImportResult.sourceQueueItems }}</dd></div>
-              <div><dt>Source backup</dt><dd>{{ gdiaImportResult.backupReused ? 'Verified copy reused' : 'Verified copy created' }}</dd></div>
-            </dl>
-          </article>
+          <ItemAssistantImport :disabled="!snapshot" @completed="handleGdiaImportCompleted" />
 
           <article class="settings-card archive-protection-settings">
             <p class="section-label">Archive protection</p>

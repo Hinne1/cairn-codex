@@ -513,6 +513,21 @@ export class CollectionDatabase {
     }
   }
 
+  countUnsupportedVaultItems(baseRecords: readonly string[]): number {
+    const catalogItem = this.database.prepare('SELECT 1 FROM catalog_item WHERE record = ?')
+    const supported = new Map<string, boolean>()
+    let unsupported = 0
+    for (const record of baseRecords) {
+      let exists = supported.get(record)
+      if (exists === undefined) {
+        exists = Boolean(catalogItem.get(record))
+        supported.set(record, exists)
+      }
+      if (!exists) unsupported += 1
+    }
+    return unsupported
+  }
+
   importVaultItems(input: VaultImport): VaultImportResult {
     const infiniteSupplies = this.getInfiniteSupplies()
     const existingRows = this.database

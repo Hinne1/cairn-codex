@@ -14,6 +14,7 @@ import {
   type DismantlingPreview,
   type DebugLoggingStatus,
   type GrimDawnDiscovery,
+  type GdiaImportProgress,
   type GdiaImportResult,
   type IngestResult,
   type ItemRollAnalysis,
@@ -44,7 +45,8 @@ import {
   CollectionDatabase,
   type ResolvedArchiveCatalogItem
 } from './collection-database'
-import { migrateGdiaDatabase } from './gdia-migration'
+import { analyzeGdiaDatabase, migrateGdiaDatabase } from './gdia-migration'
+import { readLastGdiaImportResult, writeLastGdiaImportResult } from './gdia-import-receipt'
 import { ArchiveBackupService } from './archive-backup'
 import {
   DiagnosticLogger,
@@ -81,6 +83,13 @@ const startupStatus: StartupStatus = {
   rollAnalysisState: 'pending',
   rollAnalysisSettledMs: null,
   backgroundPhase: 'opening-cache'
+}
+
+function formatImportBytes(value: number): string {
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GiB`
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MiB`
+  if (value >= 1024) return `${Math.ceil(value / 1024).toLocaleString()} KiB`
+  return `${value.toLocaleString()} bytes`
 }
 
 function presentStartupStatus(): StartupStatus {
@@ -373,6 +382,8 @@ function registerIpcHandlers(
   let archiveRollHydrationBatch: Promise<ArchiveRollHydrationResult | null> | null = null
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
+  const gdiaBackupDirectory = join(app.getPath('userData'), 'migrations', 'gdia')
+  let gdiaImportActive = false
   const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = writeQueue.then(operation, operation)
     writeQueue = result.then(
@@ -555,7 +566,40 @@ function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.openArchiveBackupDirectory, async (): Promise<string> => {
     return shell.openPath((await archiveBackups.getStatus()).backupDirectory)
   })
-  ipcMain.handle(IPC_CHANNELS.importGdiaDatabase, async (): Promise<GdiaImportResult> => {
+  ipcMain.handle(IPC_CHANNELS.getLastGdiaImportResult, () =>
+    readLastGdiaImportResult(gdiaBackupDirectory))
+  ipcMain.handle(IPC_CHANNELS.importGdiaDatabase, async (event): Promise<GdiaImportResult> => {
+    if (gdiaImportActive) throw new Error('An Item Assistant import is already in progress.')
+    gdiaImportActive = true
+    const startedAt = Date.now()
+    const publish = (progress: GdiaImportProgress): void => {
+      if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.gdiaImportProgress, progress)
+    }
+    const canceledResult = (sourcePath: string | null): GdiaImportResult => ({
+      canceled: true,
+      sourcePath,
+      sourceItems: 0,
+      sourceDatabaseItems: 0,
+      sourceQueueItems: 0,
+      sourceHardcoreItems: 0,
+      sourceSoftcoreItems: 0,
+      importedItems: 0,
+      duplicateItems: 0,
+      unsupportedItems: 0,
+      backupPath: null,
+      backupReused: false,
+      receiptPersisted: false,
+      completedAtUtc: null,
+      durationMs: Date.now() - startedAt
+    })
+    publish({
+      stage: 'selecting',
+      label: 'Choose Item Assistant database',
+      detail: 'No files have been changed.',
+      percent: 0,
+      canCancel: true
+    })
+    try {
     latestCollection ??= await readCollectionCache(collectionCachePath)
     if (!latestCollection) {
       throw new Error('Let Cairn finish its initial game-data scan before importing Item Assistant.')
@@ -578,20 +622,60 @@ function registerIpcHandlers(
     })
     const sourcePath = selection.filePaths[0]
     if (selection.canceled || !sourcePath) {
-      return {
-        canceled: true,
-        sourcePath: null,
-        sourceItems: 0,
-        sourceDatabaseItems: 0,
-        sourceQueueItems: 0,
-        sourceHardcoreItems: 0,
-        sourceSoftcoreItems: 0,
-        importedItems: 0,
-        duplicateItems: 0,
-        unsupportedItems: 0,
-        backupPath: null,
-        backupReused: false
-      }
+      publish({ stage: 'canceled', label: 'Import canceled', detail: 'No files were changed.', percent: 0, canCancel: false })
+      return canceledResult(null)
+    }
+    publish({
+      stage: 'analyzing',
+      label: 'Analyze selected source',
+      detail: 'Counting copies, modes, unsupported records, backup bytes, and free space.',
+      percent: 12,
+      canCancel: false
+    })
+    const analysis = await analyzeGdiaDatabase(database, sourcePath, gdiaBackupDirectory)
+    const preflight = analysis.preflight
+    const enoughSpace = preflight.requiredFreeBytes <= preflight.availableFreeBytes
+    publish({
+      stage: 'awaiting-confirmation',
+      label: 'Review analyzed source',
+      detail: 'Cancel is safe here. No backup or archive mutation has started.',
+      percent: 25,
+      canCancel: true
+    })
+    const confirmation = await dialog.showMessageBox({
+      type: enoughSpace ? 'question' : 'warning',
+      title: enoughSpace ? 'Import analyzed Item Assistant source?' : 'More free space is required',
+      message: enoughSpace
+        ? `${preflight.sourceItems.toLocaleString()} Item Assistant copies are ready for review.`
+        : 'Cairn cannot create the required verified source backup.',
+      detail: [
+        `Source: ${preflight.sourcePath}`,
+        `Copies: ${preflight.sourceItems.toLocaleString()} total · ${preflight.sourceSoftcoreItems.toLocaleString()} Softcore · ${preflight.sourceHardcoreItems.toLocaleString()} Hardcore`,
+        `Unsupported estimate: ${preflight.unsupportedItems.toLocaleString()}`,
+        `Database backup: ${formatImportBytes(preflight.backupBytes)}`,
+        `Required free space: ${formatImportBytes(preflight.requiredFreeBytes)}${preflight.backupReused ? ' · verified backup will be reused' : ''}`,
+        `Available free space: ${formatImportBytes(preflight.availableFreeBytes)}`,
+        `Destination: ${preflight.destinationMode}`,
+        '',
+        enoughSpace
+          ? 'After confirmation, Cairn runs the verified backup and archive commit to completion. The source remains unchanged.'
+          : 'Free space on the destination volume, then analyze the source again.'
+      ].join('\n'),
+      buttons: enoughSpace ? ['Cancel', 'Import analyzed source'] : ['Close'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    })
+    if (!enoughSpace || confirmation.response !== 1) {
+      publish({ stage: 'canceled', label: 'Import canceled safely', detail: 'No files were changed.', percent: 25, canCancel: false })
+      return canceledResult(sourcePath)
+    }
+    const stageProgress: Record<string, GdiaImportProgress> = {
+      verifying: { stage: 'verifying', label: 'Verify analyzed source', detail: 'Confirming the database and pending queue still match preflight.', percent: 30, canCancel: false },
+      'backing-up': { stage: 'backing-up', label: 'Protect source', detail: 'Creating or reusing a fully verified immutable backup.', percent: 42, canCancel: false },
+      reading: { stage: 'reading', label: 'Read verified backup', detail: 'Loading supported Softcore and Hardcore copies from the immutable backup.', percent: 60, canCancel: false },
+      importing: { stage: 'importing', label: 'Commit archive copies', detail: 'Applying one bounded archive transaction. This stage cannot be canceled.', percent: 78, canCancel: false },
+      finalizing: { stage: 'finalizing', label: 'Write durable result', detail: 'Recording the final counts and verified backup outcome.', percent: 94, canCancel: false }
     }
     const result = await runDiagnosticOperation(
       'import',
@@ -599,10 +683,15 @@ function registerIpcHandlers(
       () => runExclusive(() => migrateGdiaDatabase(
         database,
         sourcePath,
-        join(app.getPath('userData'), 'migrations', 'gdia'),
-        { requireAllCatalogued: false }
+        gdiaBackupDirectory,
+        {
+          requireAllCatalogued: false,
+          expectedSourceSha256: preflight.sourceSha256,
+          expectedQueueFingerprint: analysis.queueFingerprint,
+          onStage: (stage) => publish(stageProgress[stage]!)
+        }
       )),
-      undefined,
+      { sourceItems: preflight.sourceItems, unsupportedEstimate: preflight.unsupportedItems },
       (completed) => ({
         sourceItems: completed.sourceItems,
         importedItems: completed.importedIds.length,
@@ -611,7 +700,8 @@ function registerIpcHandlers(
       })
     )
     if (result.importedIds.length > 0) queueArchiveBackup('Item Assistant migration')
-    return {
+    const completedAtUtc = new Date().toISOString()
+    let summary: GdiaImportResult = {
       canceled: false,
       sourcePath,
       sourceItems: result.sourceItems,
@@ -623,7 +713,36 @@ function registerIpcHandlers(
       duplicateItems: result.duplicateIds.length,
       unsupportedItems: result.unsupportedIds.length,
       backupPath: result.backupPath,
-      backupReused: result.backupReused
+      backupReused: result.backupReused,
+      receiptPersisted: true,
+      completedAtUtc,
+      durationMs: Date.now() - startedAt
+    }
+    try {
+      await writeLastGdiaImportResult(gdiaBackupDirectory, summary)
+    } catch (error) {
+      summary = { ...summary, receiptPersisted: false }
+      diagnostics.error('import', 'item-assistant.receipt-failed', error)
+    }
+    publish({
+      stage: 'complete',
+      label: 'Item Assistant import complete',
+      detail: `${summary.importedItems.toLocaleString()} imported · ${summary.duplicateItems.toLocaleString()} already present · ${summary.unsupportedItems.toLocaleString()} unsupported.`,
+      percent: 100,
+      canCancel: false
+    })
+    return summary
+    } catch (error) {
+      publish({
+        stage: 'failed',
+        label: 'Import stopped safely',
+        detail: 'Cairn preserved the source and reported the failure without continuing.',
+        percent: 100,
+        canCancel: false
+      })
+      throw error
+    } finally {
+      gdiaImportActive = false
     }
   })
   ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => {
@@ -4024,7 +4143,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 .find((button) =>
                   (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
                 ?.click()
-              await new Promise((resolve) => setTimeout(resolve, 0))
+              await new Promise((resolve) => setTimeout(resolve, 100))
               return performance.now() - started
             })()
           `)
@@ -4191,6 +4310,18 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         window.showInactive()
         window.webContents.invalidate()
         await new Promise((resolve) => setTimeout(resolve, 1000))
+        if (scrollTarget) {
+          await window.webContents.executeJavaScript(`
+            (() => {
+              const target = document.querySelector(${JSON.stringify(scrollTarget)})
+              if (!target) return
+              const topbar = document.querySelector('.topbar')
+              const offset = (topbar?.getBoundingClientRect().height ?? 0) + 12
+              window.scrollTo(0, Math.max(0, target.getBoundingClientRect().top + window.scrollY - offset))
+            })()
+          `)
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
         const renderedState = await window.webContents.executeJavaScript(`({
           heading: document.querySelector('.hero h2')?.textContent,
           results: document.querySelector('.explorer-result-count, .result-count')?.textContent,
@@ -4222,6 +4353,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             height: image.naturalHeight
           })),
           scrollX: window.scrollX,
+          scrollY: window.scrollY,
+          scrollTargetFound: Boolean(document.querySelector(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET ?? 'body')})),
           titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
           mainX: document.querySelector('main')?.getBoundingClientRect().x,
           viewport: { width: window.innerWidth, height: window.innerHeight }
@@ -4374,15 +4507,26 @@ app.whenReady().then(async () => {
 
   const gdiaImportPath = process.env.CAIRN_CODEX_IMPORT_GDIA
   if (gdiaImportPath) {
-    void migrateGdiaDatabase(
-      database,
-      gdiaImportPath,
-      process.env.CAIRN_CODEX_MIGRATION_BACKUP_DIR ??
-        join(app.getPath('userData'), 'migrations', 'gdia'),
-      { requireAllCatalogued: false }
-    )
-      .then((result) => {
-        console.log(JSON.stringify({ migration: 'gdia', ...result }))
+    const backupDirectory = process.env.CAIRN_CODEX_MIGRATION_BACKUP_DIR ??
+      join(app.getPath('userData'), 'migrations', 'gdia')
+    const stages: string[] = []
+    void analyzeGdiaDatabase(database, gdiaImportPath, backupDirectory)
+      .then(async (analysis) => ({
+        analysis,
+        result: await migrateGdiaDatabase(
+          database,
+          gdiaImportPath,
+          backupDirectory,
+          {
+            requireAllCatalogued: false,
+            expectedSourceSha256: analysis.preflight.sourceSha256,
+            expectedQueueFingerprint: analysis.queueFingerprint,
+            onStage: (stage) => stages.push(stage)
+          }
+        )
+      }))
+      .then(({ analysis, result }) => {
+        console.log(JSON.stringify({ migration: 'gdia', preflight: analysis.preflight, stages, ...result }))
         helper.dispose()
         database.close()
         app.exit(0)

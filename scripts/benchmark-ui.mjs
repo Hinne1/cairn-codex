@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { copyFile, cp, mkdir, readFile, rm } from 'node:fs/promises'
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 function argument(name) {
@@ -27,6 +27,7 @@ const collapseTrackers = process.argv.includes('--collapse-trackers')
 const screenshotWidth = argument('--width')
 const screenshotHeight = argument('--height')
 const scrollTarget = argument('--scroll-target')
+const gdiaResultFixture = process.argv.includes('--gdia-result-fixture')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -54,6 +55,31 @@ if (fixture) {
 } else {
   await mkdir(profileRoot, { recursive: true })
   await copyFile(resolve(baseDatabase), resolve(profileRoot, 'cairn-codex.sqlite3'))
+}
+if (gdiaResultFixture) {
+  if (!fixture) throw new Error('--gdia-result-fixture requires an isolated --fixture source.')
+  const receiptDirectory = resolve(profileRoot, 'migrations', 'gdia')
+  await mkdir(receiptDirectory, { recursive: true })
+  await writeFile(resolve(receiptDirectory, 'last-import.json'), `${JSON.stringify({
+    receiptVersion: 1,
+    result: {
+      canceled: false,
+      sourcePath: 'C:\\Synthetic QA\\ItemAssistant\\data\\userdata.db',
+      sourceItems: 20001,
+      sourceDatabaseItems: 20000,
+      sourceQueueItems: 1,
+      sourceHardcoreItems: 10000,
+      sourceSoftcoreItems: 10001,
+      importedItems: 20000,
+      duplicateItems: 0,
+      unsupportedItems: 1,
+      backupPath: 'C:\\Synthetic QA\\backups\\userdata.verified.bak',
+      backupReused: false,
+      receiptPersisted: true,
+      completedAtUtc: '2026-09-01T03:30:00.000Z',
+      durationMs: 995
+    }
+  }, null, 2)}\n`, 'utf8')
 }
 
 const env = {
@@ -120,6 +146,9 @@ if (
     `${report.renderedState?.viewport?.height ?? 'unknown'}.`
   )
 }
+if (scrollTarget && !report.renderedState?.scrollTargetFound) {
+  throw new Error(`Screenshot scroll target was not rendered: ${scrollTarget}.`)
+}
 if (expectedMiRows !== null) {
   const expected = Number(expectedMiRows)
   const rendered = report.renderedState?.miRows?.length ?? 0
@@ -162,7 +191,10 @@ console.log(JSON.stringify({
   openSearchHelp,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
+  scrollTarget,
+  scrollY: report.renderedState.scrollY,
   fixture,
+  gdiaResultFixture,
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,
   renderedVaultRows: report.renderedState?.vaultRows,

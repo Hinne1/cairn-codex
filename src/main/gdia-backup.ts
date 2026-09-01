@@ -11,7 +11,7 @@ import {
   statfs,
   writeFile
 } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 const MANIFEST_VERSION = 1
 export const GDIA_BACKUP_RETENTION = 3
@@ -43,6 +43,35 @@ export interface GdiaBackupOptions {
   retention?: number
   now?: () => Date
   availableBytes?: (directory: string) => Promise<bigint>
+  expectedSourceSha256?: string
+}
+
+export interface GdiaBackupInspection {
+  sourceSha256: string
+  sourceBytes: number
+  backupReused: boolean
+  requiredFreeBytes: number
+  availableFreeBytes: number
+}
+
+export async function inspectGdiaBackup(
+  sourcePath: string,
+  backupDirectory: string,
+  options: Pick<GdiaBackupOptions, 'availableBytes'> = {}
+): Promise<GdiaBackupInspection> {
+  const source = await inspectStableSource(sourcePath)
+  const existing = await loadBackupEntries(backupDirectory, basename(sourcePath), false)
+  const backupReused = existing.some(
+    (entry) => entry.valid && entry.manifest?.sourceSha256 === source.sourceSha256
+  )
+  const availabilityDirectory = await nearestExistingDirectory(backupDirectory)
+  const available = await (options.availableBytes ?? diskAvailableBytes)(availabilityDirectory)
+  return {
+    ...source,
+    backupReused,
+    requiredFreeBytes: backupReused ? 0 : source.sourceBytes,
+    availableFreeBytes: safeByteNumber(available)
+  }
 }
 
 export async function prepareGdiaBackup(
@@ -52,13 +81,11 @@ export async function prepareGdiaBackup(
 ): Promise<GdiaBackupResult> {
   const now = options.now ?? (() => new Date())
   const retention = Math.max(1, Math.floor(options.retention ?? GDIA_BACKUP_RETENTION))
-  const sourceMetadataBeforeHash = await stat(sourcePath)
-  const sourceSha256 = await hashFile(sourcePath)
-  const sourceMetadataAfterHash = await stat(sourcePath)
-  if (sourceMetadataBeforeHash.size !== sourceMetadataAfterHash.size) {
-    throw new Error('The GDIA database changed while it was being hashed; import was aborted.')
+  const source = await inspectStableSource(sourcePath)
+  const { sourceBytes, sourceSha256 } = source
+  if (options.expectedSourceSha256 && options.expectedSourceSha256 !== sourceSha256) {
+    throw new Error('The Item Assistant database changed after preflight; analyze it again before importing.')
   }
-  const sourceBytes = sourceMetadataAfterHash.size
   await mkdir(backupDirectory, { recursive: true })
 
   const existing = await loadBackupEntries(backupDirectory, basename(sourcePath))
@@ -129,11 +156,23 @@ export async function prepareGdiaBackup(
   }
 }
 
-async function loadBackupEntries(backupDirectory: string, sourceFileName: string): Promise<BackupEntry[]> {
-  const directoryNames = await readdir(backupDirectory)
-  await Promise.all(directoryNames
-    .filter((name) => isManagedTemporaryName(name, sourceFileName))
-    .map((name) => rm(join(backupDirectory, name), { force: true }).catch(() => undefined)))
+async function loadBackupEntries(
+  backupDirectory: string,
+  sourceFileName: string,
+  reconcile = true
+): Promise<BackupEntry[]> {
+  let directoryNames: string[]
+  try {
+    directoryNames = await readdir(backupDirectory)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  if (reconcile) {
+    await Promise.all(directoryNames
+      .filter((name) => isManagedTemporaryName(name, sourceFileName))
+      .map((name) => rm(join(backupDirectory, name), { force: true }).catch(() => undefined)))
+  }
   const names = directoryNames
     .filter((name) => name.toLocaleLowerCase().endsWith('.bak'))
     .sort()
@@ -168,7 +207,7 @@ async function loadBackupEntries(backupDirectory: string, sourceFileName: string
       sourceBytes: metadata.size,
       createdAtUtc: metadata.mtime.toISOString()
     }
-    await writeManifest(manifestPath, adopted)
+    if (reconcile) await writeManifest(manifestPath, adopted)
     return { backupPath, manifestPath, manifest: adopted, valid: true }
   }))
   return entries.filter((entry): entry is BackupEntry => entry !== null)
@@ -233,6 +272,26 @@ async function diskAvailableBytes(directory: string): Promise<bigint> {
   return information.bavail * information.bsize
 }
 
+async function inspectStableSource(path: string): Promise<{ sourceSha256: string; sourceBytes: number }> {
+  const metadataBeforeHash = await stat(path)
+  const sourceSha256 = await hashFile(path)
+  const metadataAfterHash = await stat(path)
+  if (metadataBeforeHash.size !== metadataAfterHash.size) {
+    throw new Error('The GDIA database changed while it was being hashed; import was aborted.')
+  }
+  return { sourceSha256, sourceBytes: metadataAfterHash.size }
+}
+
+async function nearestExistingDirectory(path: string): Promise<string> {
+  let candidate = path
+  while (!(await fileExists(candidate))) {
+    const parent = dirname(candidate)
+    if (parent === candidate) throw new Error(`No existing parent directory found for ${path}.`)
+    candidate = parent
+  }
+  return candidate
+}
+
 async function hashFile(path: string): Promise<string> {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(path)) hash.update(chunk)
@@ -288,4 +347,8 @@ function formatBytes(value: number | bigint): string {
   if (bytes >= mebibyte) return `${Number(bytes / (mebibyte / 10n)) / 10} MiB`
   if (bytes >= 1024n) return `${Number(bytes / 1024n)} KiB`
   return `${bytes} bytes`
+}
+
+function safeByteNumber(value: bigint): number {
+  return Number(value > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : value)
 }

@@ -9,6 +9,8 @@ export const IPC_CHANNELS = {
   restoreArchiveBackup: 'app:restore-archive-backup',
   openArchiveBackupDirectory: 'app:open-archive-backup-directory',
   importGdiaDatabase: 'app:import-gdia-database',
+  getLastGdiaImportResult: 'app:get-last-gdia-import-result',
+  gdiaImportProgress: 'app:gdia-import-progress',
   getRecoveryStatus: 'app:get-recovery-status',
   getCachedCollection: 'collection:get-cached',
   hydrateArchiveRolls: 'collection:hydrate-archive-rolls',
@@ -125,6 +127,46 @@ export interface GdiaImportResult {
   unsupportedItems: number
   backupPath: string | null
   backupReused: boolean
+  receiptPersisted: boolean
+  completedAtUtc: string | null
+  durationMs: number
+}
+
+export type GdiaImportStage =
+  | 'selecting'
+  | 'analyzing'
+  | 'awaiting-confirmation'
+  | 'verifying'
+  | 'backing-up'
+  | 'reading'
+  | 'importing'
+  | 'finalizing'
+  | 'complete'
+  | 'canceled'
+  | 'failed'
+
+export interface GdiaImportProgress {
+  stage: GdiaImportStage
+  label: string
+  detail: string
+  percent: number
+  canCancel: boolean
+}
+
+export interface GdiaImportPreflight {
+  sourcePath: string
+  sourceSha256: string
+  sourceItems: number
+  sourceDatabaseItems: number
+  sourceQueueItems: number
+  sourceHardcoreItems: number
+  sourceSoftcoreItems: number
+  unsupportedItems: number
+  backupBytes: number
+  requiredFreeBytes: number
+  availableFreeBytes: number
+  backupReused: boolean
+  destinationMode: string
 }
 
 export interface RecoveryStatus {
@@ -149,6 +191,8 @@ export interface CairnCodexApi {
   restoreArchiveBackup: () => Promise<ArchiveBackupActionResult>
   openArchiveBackupDirectory: () => Promise<string>
   importGdiaDatabase: () => Promise<GdiaImportResult>
+  getLastGdiaImportResult: () => Promise<GdiaImportResult | null>
+  onGdiaImportProgress: (listener: (progress: GdiaImportProgress) => void) => () => void
   getRecoveryStatus: () => Promise<RecoveryStatus>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   listCharacters: () => Promise<CharacterSaveProfile[]>

@@ -4,10 +4,14 @@ import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promi
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-const options = parseOptions(process.argv.slice(2))
+const rawArguments = process.argv.slice(2)
+const electronSource = rawArguments.includes('--electron-source')
+const options = parseOptions(rawArguments.filter((argument) => argument !== '--electron-source'))
 const requestedItems = positiveInteger(options.items ?? '4', '--items')
 const projectRoot = resolve(import.meta.dirname, '..')
-const appPath = resolveRequired(options.app, '--app')
+const appPath = resolve(options.app ?? (
+  electronSource ? 'node_modules/electron/dist/electron.exe' : resolveRequired(options.app, '--app')
+))
 const baseDatabasePath = resolveRequired(options['base-db'], '--base-db')
 const testRoot = join(projectRoot, 'local-cache', 'gdia-migration')
 const profileRoot = join(testRoot, 'profile')
@@ -93,7 +97,7 @@ await writeFile(join(queueDirectory, 'pending-test.csv'), queueFields.join(';') 
 const sourceHash = await sha256(sourceDatabasePath)
 
 const firstStarted = performance.now()
-runImport('first')
+const firstRun = runImport('first')
 const firstDurationMs = Math.round(performance.now() - firstStarted)
 const first = inspectTarget()
 if (first.vault - baselineVault !== requestedItems) {
@@ -110,14 +114,16 @@ if (first.softcore !== expectedSoftcore || first.hardcore !== expectedHardcore) 
     `expected ${expectedSoftcore} SC / ${expectedHardcore} HC.`
   )
 }
+assertPreflight(firstRun, false)
 
 const repeatStarted = performance.now()
-runImport('repeat')
+const repeatRun = runImport('repeat')
 const repeatDurationMs = Math.round(performance.now() - repeatStarted)
 const repeated = inspectTarget()
 if (repeated.vault !== first.vault || repeated.journal !== first.journal) {
   throw new Error('Repeated migration created duplicate vault items or journals.')
 }
+assertPreflight(repeatRun, true)
 if (await sha256(sourceDatabasePath) !== sourceHash) {
   throw new Error('Item Assistant source database changed during the migration test.')
 }
@@ -140,13 +146,18 @@ console.log(JSON.stringify({
   repeatCreatedDuplicates: false,
   verifiedBackups: backups.length,
   unchangedBackupReused: true,
+  preflightVerified: true,
+  namedStagesVerified: true,
   sourcePreserved: true,
   firstDurationMs,
   repeatDurationMs
 }, null, 2))
 
 function runImport(label) {
-  const result = spawnSync(appPath, [`--user-data-dir=${profileRoot}`], {
+  const result = spawnSync(appPath, [
+    ...(electronSource ? ['.'] : []),
+    `--user-data-dir=${profileRoot}`
+  ], {
     env: {
       ...process.env,
       CAIRN_CODEX_DATABASE_PATH: targetDatabasePath,
@@ -160,6 +171,45 @@ function runImport(label) {
   })
   if (result.status !== 0) {
     throw new Error(`${label} packaged migration failed (${result.status}): ${result.stderr || result.stdout}`)
+  }
+  for (const line of result.stdout.trim().split(/\r?\n/).reverse()) {
+    try {
+      const parsed = JSON.parse(line)
+      if (parsed.migration === 'gdia') return parsed
+    } catch {
+      // Startup diagnostics are plain text; only the final migration record is JSON.
+    }
+  }
+  throw new Error(`${label} packaged migration did not report its preflight and stage result: ${result.stdout}`)
+}
+
+function assertPreflight(run, reused) {
+  const preflight = run.preflight
+  if (!preflight) throw new Error('Packaged migration omitted its preflight result.')
+  if (
+    preflight.sourceItems !== requestedItems + 1 ||
+    preflight.sourceDatabaseItems !== requestedItems ||
+    preflight.sourceQueueItems !== 1 ||
+    preflight.sourceHardcoreItems !== expectedHardcore ||
+    preflight.sourceSoftcoreItems !== requestedItems + 1 - expectedHardcore ||
+    preflight.unsupportedItems !== 1
+  ) {
+    throw new Error(`Preflight counts did not match the generated source: ${JSON.stringify(preflight)}`)
+  }
+  if (
+    preflight.backupReused !== reused ||
+    preflight.requiredFreeBytes !== (reused ? 0 : preflight.backupBytes) ||
+    preflight.availableFreeBytes < preflight.requiredFreeBytes ||
+    !preflight.destinationMode.includes('Softcore and Hardcore kept separate')
+  ) {
+    throw new Error(`Preflight backup or destination details were incorrect: ${JSON.stringify(preflight)}`)
+  }
+  const expectedStages = ['verifying', 'backing-up', 'reading', 'importing', 'finalizing']
+  if (JSON.stringify(run.stages) !== JSON.stringify(expectedStages)) {
+    throw new Error(`Named migration stages were incomplete or unbounded: ${JSON.stringify(run.stages)}`)
+  }
+  if (run.backupReused !== reused) {
+    throw new Error(`Migration backup reuse result did not match preflight: ${JSON.stringify(run)}`)
   }
 }
 

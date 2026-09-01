@@ -5,6 +5,7 @@ import {
   createPlannerClassOptions,
   plannerSkillsForMasteries
 } from '../src/renderer/src/planner-setup.ts'
+import { masteryMatchesForItem } from '../src/renderer/src/planner-item-matches.ts'
 
 const classOptions = createPlannerClassOptions({
   'Occultist|Shaman': 'Conjurer',
@@ -31,6 +32,33 @@ assert.deepEqual(
   ),
   ['Raise Skeletons', 'Field Command']
 )
+
+const masteryItem = {
+  presentation: {
+    flavorText: null,
+    searchText: '',
+    grantedSkill: null,
+    sections: [{
+      kind: 'base',
+      heading: null,
+      lines: [
+        { label: 'to all skills in Shaman', minimum: 1, maximum: null, unit: '', tone: 'mastery', prefix: '+', suffix: '' },
+        { label: 'to all skills in SHAMAN', minimum: 2, maximum: null, unit: '', tone: 'mastery', prefix: '+', suffix: '' },
+        { label: 'to all skills in Occultist', minimum: 0, maximum: null, unit: '', tone: 'mastery', prefix: '+', suffix: '' },
+        { label: 'to all skills in Soldier', minimum: -1, maximum: null, unit: '', tone: 'mastery', prefix: '+', suffix: '' },
+        { label: 'to Summon Briarthorn', minimum: 3, maximum: null, unit: '', tone: 'skill', prefix: '+', suffix: '' },
+        { label: 'to All Skills', minimum: 1, maximum: null, unit: '', tone: 'mastery', prefix: '+', suffix: '' }
+      ]
+    }]
+  }
+}
+assert.deepEqual(
+  masteryMatchesForItem(masteryItem, ['Occultist', 'shaman', 'Shaman', 'Soldier']),
+  [{ mastery: 'Shaman', amount: 2 }]
+)
+assert.deepEqual(masteryMatchesForItem(masteryItem, ['Occultist', 'Soldier']), [])
+assert.deepEqual(masteryMatchesForItem(masteryItem, ['Soldier']), [])
+assert.deepEqual(masteryMatchesForItem(masteryItem, []), [])
 
 const blank = createManualPlannerProfile({
   source: 'blank',
@@ -116,6 +144,7 @@ console.log(JSON.stringify({
   passed: true,
   combinedMasteries: classOptions.length,
   masterySkillSuggestions: 2,
+  masteryWideItemMatches: true,
   blankPlan: true,
   clonedPlan: true,
   characterRefresh: true,

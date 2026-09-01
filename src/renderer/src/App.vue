@@ -25,6 +25,10 @@ import {
   createPlannerClassOptions,
   type PlannerSetupSubmission
 } from './planner-setup'
+import {
+  masteryMatchesForItem,
+  type PlannerMasteryMatch
+} from './planner-item-matches'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import {
   setCompletionCount,
@@ -1595,11 +1599,14 @@ const plannerCandidateRows = computed(() => plannerCatalogItems.value
     const matches = plannerSkills.value
       .map((skill) => skillMatchForItem(item, skill))
       .filter((match): match is SkillMatch => match !== null)
+    const masteryMatches = masteryMatchesForItem(item, selectedPlannerProfile.value?.masteries ?? [])
     const petBonuses = (item.presentation?.sections ?? [])
       .filter((section) => section.kind === 'pet')
       .flatMap((section) => section.lines)
       .map(formatPresentationLine)
-    return matches.length > 0 ? [{ item, matches, petBonuses }] : []
+    return matches.length > 0 || masteryMatches.length > 0
+      ? [{ item, matches, masteryMatches, petBonuses }]
+      : []
   })
   .sort((left, right) => {
     const direction = plannerSortDirection.value === 'asc' ? 1 : -1
@@ -1967,6 +1974,12 @@ function skillMatchForItem(item: CollectionItem, requestedSkill: string): SkillM
       .join('; '),
     special: specialLines.map(formatPresentationLine).join('; ')
   }
+}
+
+function masteryMatchEffect(match: PlannerMasteryMatch): string {
+  return match.amount > 0
+    ? `+${match.amount} rank${match.amount === 1 ? '' : 's'} to every ${match.mastery} skill`
+    : `Supports every ${match.mastery} skill`
 }
 
 function conversionTarget(label: string): string | null {
@@ -6618,7 +6631,7 @@ function formatPercentile(value: number | null | undefined): string {
             :page-size="50"
             :layout="plannerDisplay === 'list' ? 'table' : 'grid'"
             :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
-            :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select at least one skill, widen the item level range, or restore an ignored base.'"
+            :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select a mastery or skill, widen the item level range, or restore an ignored base.'"
             label="Leveling Planner item results"
             interactive
             item-described-by="item-tooltip"
@@ -6661,12 +6674,16 @@ function formatPercentile(value: number | null | undefined): string {
                   </span>
                   <span role="gridcell">
                     <span class="planner-match-skills">
+                      <em v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery`">All {{ match.mastery }} skills<b v-if="match.amount"> +{{ match.amount }}</b></em>
                       <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
                     </span>
                   </span>
                   <span role="gridcell" class="planner-effects">
                     <span v-if="row.petBonuses.length" class="planner-pet-bonuses">
                       <b>All pets</b> {{ row.petBonuses.join('; ') }}
+                    </span>
+                    <span v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery-effect`">
+                      <b>Mastery-wide</b> {{ masteryMatchEffect(match) }}
                     </span>
                     <span v-for="match in row.matches" :key="`${match.skill}:effect`">
                       <b v-if="match.conversionTarget">→ {{ match.conversionTarget }}</b>
@@ -6709,11 +6726,12 @@ function formatPercentile(value: number | null | undefined): string {
                   <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
                 </div>
                 <div class="planner-match-skills">
+                  <em v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery`">All {{ match.mastery }} skills<b> +{{ match.amount }}</b></em>
                   <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
                 </div>
                 <p v-if="row.petBonuses.length" class="planner-card-pets"><b>All pets</b> {{ row.petBonuses.join('; ') }}</p>
                 <p class="planner-card-effect">
-                  {{ row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support')).join(' · ') }}
+                  {{ [...row.masteryMatches.map(masteryMatchEffect), ...row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support'))].join(' · ') }}
                 </p>
                 <footer>
                   <b v-if="recipeStatus(row.item)" class="recipe-status" :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }">

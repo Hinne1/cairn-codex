@@ -86,6 +86,7 @@ import type {
   VaultSummary,
   WriteSafetyStatus
 } from '@shared/contracts'
+import type { AnyBackgroundJobSnapshot } from '@shared/background-jobs'
 
 type OwnershipFilter = 'all' | 'owned' | 'missing'
 type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'double-rare' | 'rare' | 'recipe'
@@ -318,6 +319,11 @@ const archiveRollHydrating = ref(false)
 const archiveRollHydrationCompleted = ref(0)
 const archiveRollHydrationTotal = ref(0)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
+const backgroundJobs = ref<AnyBackgroundJobSnapshot[]>([])
+const activeBackgroundJob = computed(() => backgroundJobs.value
+  .filter((job) => job.status === 'queued' || job.status === 'running')
+  .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0] ?? null)
+let stopBackgroundJobUpdates: (() => void) | null = null
 const startupPhaseStatus = ref<StartupStatus | null>(null)
 const notifications = createNotificationService()
 const currentNotification = notifications.current
@@ -2539,6 +2545,22 @@ async function waitForPaint(): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
 }
 
+function retainBackgroundJob(job: AnyBackgroundJobSnapshot): void {
+  const remaining = backgroundJobs.value.filter((candidate) => candidate.id !== job.id)
+  backgroundJobs.value = [job, ...remaining].slice(0, 50)
+}
+
+async function cancelActiveBackgroundJob(): Promise<void> {
+  const job = activeBackgroundJob.value
+  if (!job?.cancellation.canCancel) return
+  try {
+    const updated = await window.cairnCodex.cancelBackgroundJob(job.id)
+    if (updated) retainBackgroundJob(updated)
+  } catch (error) {
+    reportTransferProblem(readableError(error))
+  }
+}
+
 onMounted(async () => {
   if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual'
   window.scrollTo(0, 0)
@@ -2552,6 +2574,12 @@ onMounted(async () => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
+  stopBackgroundJobUpdates = window.cairnCodex.onBackgroundJobChanged(retainBackgroundJob)
+  try {
+    backgroundJobs.value = await window.cairnCodex.getBackgroundJobs()
+  } catch (error) {
+    console.warn('Background job state could not be restored after navigation.', error)
+  }
   void window.cairnCodex.reportPreferenceLoad(preferenceRepository.diagnostics).catch((error) => {
     console.warn('Preference migration diagnostics could not be recorded.', error)
   })
@@ -2637,6 +2665,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopBackgroundJobUpdates?.()
+  stopBackgroundJobUpdates = null
   document.body.classList.remove('onboarding-active')
   window.removeEventListener('popstate', handleAppHistory)
   window.removeEventListener('pageshow', handlePageShow)
@@ -5712,20 +5742,24 @@ function formatPercentile(value: number | null | undefined): string {
     >
     <FailureProbe v-if="simulateWorkspaceFailure" />
     <main>
-      <section v-if="appInitializing || scanning || archiveRollHydrating" class="background-scan" aria-live="polite">
+      <section v-if="appInitializing || activeBackgroundJob" class="background-scan" aria-live="polite">
         <span class="scan-spinner" aria-hidden="true" />
         <div>
-          <strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : archiveRollHydrating ? 'Rating archived item rolls' : scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>
+          <strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</strong>
           <small v-if="appInitializing && !snapshot">Loading the cached archive, game index, and live connection state.</small>
-          <small v-else-if="archiveRollHydrating">
-            The Codex remains usable while missing copy scores are calculated and saved.
-            <template v-if="archiveRollHydrationTotal > 0">
-              {{ archiveRollHydrationCompleted.toLocaleString() }} / {{ archiveRollHydrationTotal.toLocaleString() }} complete.
+          <small v-else-if="activeBackgroundJob">
+            {{ activeBackgroundJob.progress.detail }}
+            <template v-if="activeBackgroundJob.progress.total !== null">
+              {{ activeBackgroundJob.progress.completed.toLocaleString() }} / {{ activeBackgroundJob.progress.total.toLocaleString() }} {{ activeBackgroundJob.progress.unit }}.
             </template>
           </small>
-          <small v-else-if="scanActivity === 'game-data'">Your cached Codex remains usable while map regions, drop sources, and game records are reindexed.</small>
-          <small v-else>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
         </div>
+        <button
+          v-if="activeBackgroundJob?.cancellation.canCancel"
+          type="button"
+          class="secondary compact"
+          @click="cancelActiveBackgroundJob"
+        >Cancel safely</button>
       </section>
       <section v-if="activeView !== 'vault' && activeView !== 'settings'" class="hero">
         <div>

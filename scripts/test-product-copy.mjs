@@ -38,7 +38,7 @@ const allowedProductNameLines = new Set([
   "src/renderer/src/App.vue::'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while CC owns the game hook.'",
   'src/renderer/src/App.vue::<h1>Cairn Codex</h1>',
   'src/renderer/src/App.vue::<nav class="system-nav" aria-label="Cairn Codex system views">',
-  "src/renderer/src/App.vue::<strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : archiveRollHydrating ? 'Rating archived item rolls' : scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>",
+  "src/renderer/src/App.vue::<strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</strong>",
   'src/renderer/src/App.vue::<nav v-if="snapshot && activeView !== \'vault\' && activeView !== \'settings\'" class="workspace-tabs" aria-label="Cairn Codex workspace">',
   'src/renderer/src/App.vue::<section v-else-if="activeView === \'settings\'" class="settings-workspace" aria-label="Cairn Codex settings">',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::? "The bundled Cairn Codex live adapter is incomplete."',

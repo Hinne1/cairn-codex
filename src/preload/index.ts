@@ -35,8 +35,18 @@ import {
   type VaultSummary,
   type WriteSafetyStatus
 } from '@shared/contracts'
+import type { AnyBackgroundJobSnapshot } from '@shared/background-jobs'
 
 const api: CairnCodexApi = {
+  getBackgroundJobs: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getBackgroundJobs) as Promise<AnyBackgroundJobSnapshot[]>,
+  cancelBackgroundJob: (id) =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelBackgroundJob, { id }) as Promise<AnyBackgroundJobSnapshot | null>,
+  onBackgroundJobChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, job: AnyBackgroundJobSnapshot): void => listener(job)
+    ipcRenderer.on(IPC_CHANNELS.backgroundJobChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.backgroundJobChanged, handler)
+  },
   getAppStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getAppStatus) as Promise<AppStatus>,
   setZoomFactor: (factor) =>
     ipcRenderer.invoke(IPC_CHANNELS.setZoomFactor, { factor }) as Promise<number>,

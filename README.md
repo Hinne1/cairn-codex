@@ -257,6 +257,7 @@ Useful design references:
 
 - [Collection schema and discovery semantics](docs/architecture/collection-schema.md)
 - [Helper protocol](docs/architecture/helper-protocol.md)
+- [Background job lifecycle](docs/architecture/background-jobs.md)
 - [Character import](docs/architecture/character-import.md)
 - [Formula and recipe import](docs/architecture/formula-import.md)
 - [Live adapter compatibility history](docs/live-hook-compatibility.md)

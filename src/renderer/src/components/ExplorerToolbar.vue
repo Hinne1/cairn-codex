@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import type { SearchWorkspaceSchema } from '@shared/search-schema'
+import AdvancedSearchDialog from './AdvancedSearchDialog.vue'
 
 const props = withDefaults(defineProps<{
   modelValue: string
   searchLabel?: string
   searchHelp: string
   searchExamples: readonly string[]
+  searchSchema: SearchWorkspaceSchema
   placeholder?: string
   resultCount?: number
   resultLabel?: string
@@ -60,21 +63,29 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
     <div class="explorer-search">
       <div class="explorer-search-heading">
         <label :for="searchInputId">{{ searchLabel }}</label>
-        <details ref="searchHelpDetails" class="explorer-search-help">
-          <summary :aria-label="`${searchLabel} help and examples`">Search tips</summary>
-          <div :id="searchHelpId" class="explorer-search-help-panel">
-            <p>{{ searchHelp }}</p>
-            <span>Try an example</span>
-            <div class="explorer-search-examples">
-              <button
-                v-for="example in searchExamples"
-                :key="example"
-                type="button"
-                @click="applySearchExample(example)"
-              >{{ example }}</button>
+        <span class="explorer-search-actions">
+          <AdvancedSearchDialog
+            :model-value="modelValue"
+            :search-label="searchLabel"
+            :schema="searchSchema"
+            @update:model-value="emit('update:modelValue', $event)"
+          />
+          <details ref="searchHelpDetails" class="explorer-search-help">
+            <summary :aria-label="`${searchLabel} help and examples`">Search tips</summary>
+            <div :id="searchHelpId" class="explorer-search-help-panel">
+              <p>{{ searchHelp }}</p>
+              <span>Try an example</span>
+              <div class="explorer-search-examples">
+                <button
+                  v-for="example in searchExamples"
+                  :key="example"
+                  type="button"
+                  @click="applySearchExample(example)"
+                >{{ example }}</button>
+              </div>
             </div>
-          </div>
-        </details>
+          </details>
+        </span>
       </div>
       <span class="explorer-search-input">
         <input
@@ -147,6 +158,7 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
 .explorer-toolbar-before { flex: 1 0 100%; }
 .explorer-search { position: relative; display: grid; min-width: 240px; flex: 1 1 280px; gap: 5px; }
 .explorer-search-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.explorer-search-actions { display: flex; align-items: center; gap: 7px; }
 .explorer-search-heading > label,
 .explorer-toolbar :deep(label > span:first-child) {
   color: #807765;

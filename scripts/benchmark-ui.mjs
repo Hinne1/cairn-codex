@@ -7,9 +7,13 @@ function argument(name) {
   return index >= 0 ? process.argv[index + 1] : null
 }
 
-const appPath = resolve(argument('--app') ?? 'dist/win-unpacked/Cairn Codex.exe')
+const electronSource = process.argv.includes('--electron-source')
+const appPath = resolve(argument('--app') ?? (
+  electronSource ? 'node_modules/electron/dist/electron.exe' : 'dist/win-unpacked/Cairn Codex.exe'
+))
 const baseDatabase = argument('--base-db')
 const baseProfile = argument('--base-profile')
+const fixture = argument('--fixture')
 const query = argument('--query') ?? 'wendigo'
 const category = argument('--category')
 const miAffixFilter = argument('--mi-affix-filter')
@@ -17,12 +21,17 @@ const expectedMiRows = argument('--expected-mi-rows')
 const miNativeRestore = process.argv.includes('--mi-native-restore')
 const waitForBackgroundJobs = process.argv.includes('--wait-for-background-jobs')
 const hydrateAllModes = process.argv.includes('--hydrate-all-modes')
+const openSearchHelp = process.argv.includes('--open-search-help')
+const collapseTrackers = process.argv.includes('--collapse-trackers')
+const screenshotWidth = argument('--width')
+const screenshotHeight = argument('--height')
+const scrollTarget = argument('--scroll-target')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-|-$/g, '')
-if (!baseDatabase && !baseProfile) {
-  throw new Error('Pass --base-profile or --base-db with a closed/read-only Cairn snapshot.')
+if (!baseDatabase && !baseProfile && !fixture) {
+  throw new Error('Pass --base-profile, --base-db, or --fixture with an isolated data source.')
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
@@ -30,7 +39,9 @@ const profileRoot = resolve(testRoot, 'profile')
 const screenshotPath = resolve(testRoot, `${screenshotName || 'collection'}.png`)
 const reportPath = resolve(testRoot, 'performance.json')
 await rm(testRoot, { recursive: true, force: true })
-if (baseProfile) {
+if (fixture) {
+  await mkdir(profileRoot, { recursive: true })
+} else if (baseProfile) {
   await cp(resolve(baseProfile), profileRoot, { recursive: true, force: true })
 } else {
   await mkdir(profileRoot, { recursive: true })
@@ -42,6 +53,12 @@ const env = {
   CAIRN_CODEX_SCREENSHOT_PATH: screenshotPath,
   CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN: waitForBackgroundJobs ? '1' : '0',
   CAIRN_CODEX_SCREENSHOT_QUERY: query,
+  ...(fixture ? { CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture } : {}),
+  ...(openSearchHelp ? { CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP: '1' } : {}),
+  ...(collapseTrackers ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
+  ...(screenshotWidth ? { CAIRN_CODEX_SCREENSHOT_WIDTH: screenshotWidth } : {}),
+  ...(screenshotHeight ? { CAIRN_CODEX_SCREENSHOT_HEIGHT: screenshotHeight } : {}),
+  ...(scrollTarget ? { CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET: scrollTarget } : {}),
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(miAffixFilter ? { CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER: miAffixFilter } : {}),
   ...(miNativeRestore ? { CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE: '1' } : {}),
@@ -49,7 +66,10 @@ const env = {
   ...(category && category !== 'Collection' ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
   CAIRN_CODEX_PERF_REPORT_PATH: reportPath
 }
-const child = spawn(appPath, [`--user-data-dir=${profileRoot}`], {
+const child = spawn(appPath, [
+  ...(electronSource ? ['.'] : []),
+  `--user-data-dir=${profileRoot}`
+], {
   env,
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true
@@ -92,7 +112,7 @@ if (expectedMiRows !== null) {
 }
 console.log(JSON.stringify({
   passed: true,
-  source: resolve(baseProfile ?? baseDatabase),
+  source: fixture ? `fixture:${fixture}` : resolve(baseProfile ?? baseDatabase),
   readyMs: report.readyMs,
   searchMsIncludingDebounce: report.interactions?.searchMs,
   query,
@@ -101,6 +121,10 @@ console.log(JSON.stringify({
   miNativeRestore,
   waitForBackgroundJobs,
   hydrateAllModes,
+  openSearchHelp,
+  screenshotWidth: screenshotWidth ? Number(screenshotWidth) : null,
+  screenshotHeight: screenshotHeight ? Number(screenshotHeight) : null,
+  fixture,
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,
   renderedVaultRows: report.renderedState?.vaultRows,

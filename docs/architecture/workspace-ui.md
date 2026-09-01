@@ -9,6 +9,9 @@ responsive behavior.
 Searchable workspaces use `src/renderer/src/components/ExplorerToolbar.vue`.
 
 - Search is always first and always has an inline clear action.
+- Every search provides a short explanation of its indexed fields and click-to-apply examples
+  through the shared `Search tips` disclosure. Examples must only advertise syntax and fields
+  that the workspace actually supports.
 - Filters describe which records are included.
 - Sort controls describe how the included records are ordered.
 - Batch actions come after filters and sorting.

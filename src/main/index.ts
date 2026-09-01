@@ -708,6 +708,13 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.getCachedCollection,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot | null> => {
+      const screenshotFixture = process.env.CAIRN_CODEX_SCREENSHOT_PATH
+        ? process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE
+        : undefined
+      if (screenshotFixture) {
+        latestCollection = createScreenshotCollectionFixture(screenshotFixture)
+        return latestCollection
+      }
       latestCollection ??= await readCollectionCache(collectionCachePath)
       if (!latestCollection) {
         return null
@@ -1095,6 +1102,89 @@ function registerIpcHandlers(
     await archiveBackups.flush()
     diagnostics.info('startup', 'application.shutdown')
     await diagnostics.flush()
+  }
+}
+
+function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name !== 'search-help') throw new Error(`Unknown screenshot fixture: ${name}`)
+  return {
+    catalogPresentationVersion: CATALOG_PRESENTATION_VERSION,
+    cacheNeedsRefresh: false,
+    basis: 'stashes',
+    scannedAtUtc: '2026-09-01T00:00:00.000Z',
+    discovery: { installations: [], saveLocations: [] },
+    contentPacks: [],
+    scannedStashes: [],
+    availableStashes: [],
+    observedItems: [],
+    warnings: [],
+    rarities: [],
+    items: [{
+      record: 'records/items/synthetic/searchlight.dbr',
+      name: 'Mythical Searchlight',
+      rarity: 'legendary',
+      itemClass: 'armor_head',
+      slot: 'head',
+      levelRequirement: 84,
+      itemLevel: 84,
+      setName: null,
+      setRecord: null,
+      bitmap: null,
+      contentPack: 'Synthetic QA',
+      acquisition: {
+        sources: ['Synthetic QA source'],
+        sourceRecords: [],
+        locations: [{
+          name: 'QA Hollow',
+          routeName: 'Search Tips Route',
+          zoneRecord: 'records/levels/synthetic/qa_hollow.dbr',
+          levelFile: 'levels/synthetic/qa_hollow.map',
+          contentPack: 'Synthetic QA',
+          originX: 0,
+          originY: 0
+        }],
+        additionalLocationCount: 0,
+        factions: [],
+        crafting: null
+      },
+      presentation: {
+        flavorText: null,
+        sections: [{
+          kind: 'base',
+          heading: null,
+          lines: [{
+            label: 'Fire Resistance',
+            minimum: 100,
+            maximum: 100,
+            unit: '%',
+            tone: 'standard',
+            prefix: '+',
+            suffix: ''
+          }]
+        }],
+        grantedSkill: null,
+        searchText: 'fire resistance synthetic qa ward'
+      },
+      supplySlotFamilies: null,
+      availableCount: 0,
+      bestRollPercentile: null,
+      analyzedCopyCount: 0,
+      pinnedInstanceKey: null,
+      discovered: false,
+      recipeUnlocked: false,
+      firstDiscoveredAt: null
+    }],
+    recipeSummary: { total: 0, collected: 0, unlockedItems: 0 },
+    supplySummary: { rarity: 'supply', total: 0, collected: 0, availableCopies: 0 },
+    affixSummary: { total: 0, collected: 0, availableCopies: 0 },
+    affixes: [],
+    plannerItems: [],
+    supplies: [],
+    materials: [],
+    uiIcons: {},
+    accountStores: [],
+    skillMasteries: {},
+    skillClassNames: {}
   }
 }
 
@@ -3785,14 +3875,21 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
   const captureStartedAt = Date.now()
   const interactionTimings: Record<string, number> = {}
   try {
+    const requestedWidth = Number.parseInt(
+      process.env.CAIRN_CODEX_SCREENSHOT_WIDTH ?? '',
+      10
+    )
     const requestedHeight = Number.parseInt(
       process.env.CAIRN_CODEX_SCREENSHOT_HEIGHT ?? '',
       10
     )
+    const screenshotWidth = Number.isFinite(requestedWidth)
+      ? Math.min(Math.max(requestedWidth, 480), 1920)
+      : 1440
     const screenshotHeight = Number.isFinite(requestedHeight)
       ? Math.min(Math.max(requestedHeight, 720), 2400)
       : 1000
-    window.setContentSize(1440, screenshotHeight)
+    window.setContentSize(screenshotWidth, screenshotHeight)
     for (let attempt = 0; attempt < 240; attempt += 1) {
       const scanError = await window.webContents.executeJavaScript(
         "document.querySelector('.scan-error')?.textContent"
@@ -3932,6 +4029,18 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP === '1') {
+          const openedSearchHelp = await window.webContents.executeJavaScript(`
+            (() => {
+              const details = document.querySelector('.explorer-search-help')
+              if (!(details instanceof HTMLDetailsElement)) return false
+              details.open = true
+              details.querySelector('summary')?.focus()
+              return true
+            })()
+          `)
+          if (!openedSearchHelp) throw new Error('Search help control was not available for screenshot capture.')
+        }
         const miWorkshopQuery = process.env.CAIRN_CODEX_SCREENSHOT_MI_QUERY
         const miAffixFilter = process.env.CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER
         const miNativeRestore = process.env.CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE === '1'
@@ -4040,7 +4149,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           )
         }
         console.log(
-          JSON.stringify({ screenshotPath: path, width: 1440, height: 1000, ...performanceReport })
+          JSON.stringify({ screenshotPath: path, width: screenshotWidth, height: screenshotHeight, ...performanceReport })
         )
         app.quit()
         return

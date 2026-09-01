@@ -17,6 +17,7 @@ const cases = [
   ['imports', new Error('The Item Assistant database changed after preflight; analyze it again before importing.'), 'imports.source-changed'],
   ['collection', new Error('No Grim Dawn installation is available.'), 'collection.installation-unavailable'],
   ['live-transfers', new Error('The Microsoft Visual C++ 2015-2022 Redistributable (x64) 14.43 or newer is required by the Cairn Codex live adapter.'), 'live-transfers.prerequisite-missing'],
+  ['live-transfers', new Error('The bundled Cairn Codex live adapter is incomplete: missing DllInjector64.exe. Windows Security may have quarantined the file. Review Windows Security > Protection history.'), 'live-transfers.adapter-missing'],
   ['live-transfers', new Error('The game rejected the item without returning a durable queue receipt.'), 'live-transfers.receipt-missing'],
   ['diagnostics', new Error('The support bundle failed its privacy check and was not written.'), 'diagnostics.privacy-check-failed'],
   ['backups', new Error('The staged archive failed verification after copying. Restore was canceled.'), 'backups.verification-failed'],

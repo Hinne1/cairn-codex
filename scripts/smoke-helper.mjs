@@ -70,7 +70,8 @@ try {
     !live.staleReceiptRejected ||
     !live.queuePathGuardPassed ||
     !live.multiItemPassed ||
-    !live.unsupportedBuildRejected
+    !live.unsupportedBuildRejected ||
+    !live.adapterDiagnosticsPassed
   ) {
     throw new Error('Live queue self-test failed.')
   }

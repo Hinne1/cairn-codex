@@ -35,20 +35,21 @@ const allowedProductNameLines = new Set([
   "src/main/index.ts::title: 'Restore Cairn Codex archive?',",
   "src/main/index.ts::title: 'Save Cairn Codex support bundle',",
   "src/main/index.ts::console.log('[startup] Electron ready; opening Cairn Codex services.')",
+  "src/main/ipc/domain-error-transport.ts::known('live-transfers.adapter-missing', 'The native live adapter is missing. Repair or reinstall Cairn Codex, then review Windows Security Protection history.', /live adapter is incomplete: missing .*Protection history/i),",
   "src/renderer/src/App.vue::'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while CC owns the game hook.'",
   'src/renderer/src/App.vue::<h1>Cairn Codex</h1>',
   'src/renderer/src/App.vue::<nav class="system-nav" aria-label="Cairn Codex system views">',
   "src/renderer/src/App.vue::<strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</strong>",
   'src/renderer/src/App.vue::<nav v-if="snapshot && activeView !== \'vault\' && activeView !== \'settings\'" class="workspace-tabs" aria-label="Cairn Codex workspace">',
   'src/renderer/src/App.vue::<section v-else-if="activeView === \'settings\'" class="settings-workspace" aria-label="Cairn Codex settings">',
-  'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::? "The bundled Cairn Codex live adapter is incomplete."',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"Close Grim Dawn Item Assistant before enabling Cairn Codex live mode.");',
-  'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::?? throw new FileNotFoundException("The bundled Cairn Codex live adapter is incomplete.");',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::0, WindowClassName, "Cairn Codex live host", 0,',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::? $"User-approved exact Grim Dawn build {knownVersion} with verified Cairn Codex hook {hookVersion}."',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::: $"Verified Cairn Codex hook {hookVersion} for Grim Dawn {knownVersion}.",',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"Update Cairn Codex after a Grim Dawn patch. Until then, use Offline staging; do not bypass the compatibility check.");',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"the Cairn Codex live adapter. Re-run the Cairn Codex installer, or run the bundled " +',
+  'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::$"The bundled Cairn Codex live adapter is incomplete: missing {string.Join(" and ", missing)}. " +',
+  'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"Repair or reinstall Cairn Codex from its trusted release source, then review Windows Security > " +',
   'src/helper/CairnCodex.GrimDawn/Gdia/Stash/Stash.cs::throw new InvalidOperationException("Account component and potion stores are read-only in Cairn Codex.");'
 ])
 

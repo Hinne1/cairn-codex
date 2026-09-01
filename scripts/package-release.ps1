@@ -4,6 +4,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -Force
+
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $packageScript = Join-Path $PSScriptRoot 'package-windows.ps1'
 $packageJson = Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
@@ -26,6 +28,14 @@ function Get-CairnSha256([string] $Path) {
     $algorithm.Dispose()
     $stream.Dispose()
   }
+}
+
+function Get-UnsignedBetaSignatureStatus([string] $Path) {
+  $signature = Get-AuthenticodeSignature -LiteralPath $Path
+  if ($signature.Status -ne 'NotSigned') {
+    throw "The unsigned-beta release policy expected an unsigned Cairn binary, but $Path reported Authenticode status $($signature.Status). Review every release target and native fingerprint deliberately before changing the policy."
+  }
+  return [string]$signature.Status
 }
 
 $dirtyFiles = @(& git -c "safe.directory=$projectRoot" -C $projectRoot status --porcelain)
@@ -60,6 +70,18 @@ Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 Copy-Item -LiteralPath $installerSource -Destination $installerPath -Force
 
+$authenticode = [ordered]@{
+  portableApp = Get-UnsignedBetaSignatureStatus (Join-Path $packageRoot 'Cairn Codex.exe')
+  portableHelper = Get-UnsignedBetaSignatureStatus (Join-Path $packageRoot 'resources\helper\CairnCodex.GrimDawn.exe')
+  portableHook = Get-UnsignedBetaSignatureStatus (Join-Path $packageRoot 'resources\helper\native\ItemAssistantHook_x64.dll')
+  portableInjector = Get-UnsignedBetaSignatureStatus (Join-Path $packageRoot 'resources\helper\native\DllInjector64.exe')
+  installedApp = Get-UnsignedBetaSignatureStatus (Join-Path $installerPayload 'Cairn Codex.exe')
+  installedHelper = Get-UnsignedBetaSignatureStatus (Join-Path $installerPayload 'resources\helper\CairnCodex.GrimDawn.exe')
+  installedHook = Get-UnsignedBetaSignatureStatus (Join-Path $installerPayload 'resources\helper\native\ItemAssistantHook_x64.dll')
+  installedInjector = Get-UnsignedBetaSignatureStatus (Join-Path $installerPayload 'resources\helper\native\DllInjector64.exe')
+  installer = Get-UnsignedBetaSignatureStatus $installerPath
+}
+
 $hash = Get-CairnSha256 $zipPath
 $installerHash = Get-CairnSha256 $installerPath
 $hookPath = Join-Path $packageRoot 'resources\helper\native\ItemAssistantHook_x64.dll'
@@ -77,6 +99,8 @@ $manifest = [ordered]@{
   injectorSha256 = Get-CairnSha256 $injectorPath
   vcRedistVersion = [string]$vcRedistManifest.version
   vcRedistSha256 = [string]$vcRedistManifest.sha256
+  authenticodePolicy = 'unsigned-beta'
+  authenticode = $authenticode
   commit = (& git -c "safe.directory=$projectRoot" -C $projectRoot rev-parse HEAD).Trim()
   dirty = $dirtyFiles.Count -gt 0
 }

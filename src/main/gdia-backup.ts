@@ -198,7 +198,7 @@ async function loadBackupEntries(
     }
 
     // Reconcile backups published before their manifest, including legacy files.
-    // Only exact Cairn filename formats are managed; every other .bak is left alone.
+    // Only exact CC filename formats are managed; every other .bak is left alone.
     const metadata = await stat(backupPath)
     const sourceSha256 = await hashFile(backupPath)
     if (!sourceSha256.startsWith(expectedHashPrefix)) {

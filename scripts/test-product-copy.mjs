@@ -88,7 +88,7 @@ for (const path of files) {
   contents.set(repositoryPath, source)
   for (const line of source.split(/\r?\n/u)) {
     const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue
+    if (!trimmed) continue
     if (/\bCairn\b/u.test(trimmed)) cairnLines.add(`${repositoryPath}::${trimmed}`)
   }
 }

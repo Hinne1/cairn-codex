@@ -269,7 +269,7 @@ internal sealed class LiveGameAdapter : IDisposable
             if (!injectionWasDeferred) return Inspect();
 
             // The hook can be injected before Grim Dawn has published its game-engine
-            // pointer. It then unloads cleanly, but the Cairn handshake window remains.
+            // pointer. It then unloads cleanly, but the CC handshake window remains.
             // Tear down that stale attempt so a manual or automatic retry performs a
             // real injection after the character enters the world.
             StopConnection();
@@ -319,7 +319,7 @@ internal sealed class LiveGameAdapter : IDisposable
             StartWindow();
             var existingHook = ProcessHasModule(game[0], hook);
             // The upstream worker caches its last host-window lookup for one second.
-            // Wait out that cache before waking it so a newly-created Cairn window
+            // Wait out that cache before waking it so a newly-created CC window
             // replaces a stale handle from a previous app process.
             if (existingHook) Thread.Sleep(1100);
             var existingWorker = existingHook && SignalHookWorker();
@@ -1080,7 +1080,7 @@ internal sealed class LiveGameAdapter : IDisposable
         windowReady?.Dispose();
         // The injected hook caches its host-window lookup for one second and only checks
         // it when the named worker event fires. Wait out that cache, then wake it after
-        // our window is gone so interception cannot remain active without Cairn running.
+        // our window is gone so interception cannot remain active without CC running.
         Thread.Sleep(1100);
         _ = SignalHookWorker();
         lock (sync)

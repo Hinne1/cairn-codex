@@ -1,7 +1,9 @@
 import type {
   ArchiveRollHydrationResult,
+  CharacterSaveProfile,
   CollectionBasis,
-  CollectionSnapshot
+  CollectionSnapshot,
+  GrimDawnDiscovery
 } from '../../shared/contracts.ts'
 
 export const ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT = 256
@@ -74,6 +76,19 @@ export interface CollectionServiceDiagnostics {
   reportMapIndexFailure(error: unknown): void
 }
 
+export interface CollectionDiscoveryService {
+  discover(): Promise<GrimDawnDiscovery>
+  listCharacters(installationPath: string): Promise<CharacterSaveProfile[]>
+}
+
+export interface CollectionPreferenceStore {
+  setPinnedBest(record: string, instanceKey: string | null, isHardcore: boolean): void
+  getInfiniteSupplies(): boolean
+  setInfiniteSupplies(enabled: boolean): boolean
+  runExclusive<T>(operation: () => Promise<T>): Promise<T>
+  queueArchiveBackup(reason: string): void
+}
+
 export interface CollectionServiceDependencies {
   cache: CollectionSnapshotCache
   freshness: CollectionCacheFreshness
@@ -84,6 +99,8 @@ export interface CollectionServiceDependencies {
   projector: CollectionProjector
   hydration: CollectionRollHydrator
   diagnostics: CollectionServiceDiagnostics
+  discovery: CollectionDiscoveryService
+  preferences: CollectionPreferenceStore
   catalogPresentationVersion: number
 }
 
@@ -109,6 +126,43 @@ export class CollectionService {
 
   constructor(dependencies: CollectionServiceDependencies) {
     this.dependencies = dependencies
+  }
+
+  discoverGrimDawn(): Promise<GrimDawnDiscovery> {
+    return this.dependencies.discovery.discover()
+  }
+
+  async listCharacters(): Promise<CharacterSaveProfile[]> {
+    const cached = await this.loadLatest()
+    const discovered = cached?.discovery ?? await this.dependencies.discovery.discover()
+    const installationPath = discovered.installations[0]?.path
+    if (!installationPath) return []
+    return this.dependencies.discovery.listCharacters(installationPath)
+  }
+
+  setPinnedBest(input: {
+    record: string
+    instanceKey: string | null
+    isHardcore: boolean
+  }): Promise<void> {
+    return this.dependencies.preferences.runExclusive(async () => {
+      this.dependencies.preferences.setPinnedBest(
+        input.record, input.instanceKey, input.isHardcore
+      )
+      this.dependencies.preferences.queueArchiveBackup('pinned copy changed')
+    })
+  }
+
+  getInfiniteSupplies(): boolean {
+    return this.dependencies.preferences.getInfiniteSupplies()
+  }
+
+  setInfiniteSupplies(input: { enabled: boolean }): Promise<boolean> {
+    return this.dependencies.preferences.runExclusive(async () => {
+      const enabled = this.dependencies.preferences.setInfiniteSupplies(input.enabled)
+      this.dependencies.preferences.queueArchiveBackup('supply settings changed')
+      return enabled
+    })
   }
 
   async getCached(request: CollectionRequest): Promise<CollectionSnapshot | null> {

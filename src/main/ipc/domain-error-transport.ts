@@ -1,29 +1,11 @@
-/** Domains whose failures cross the main-process IPC boundary. */
-export type IpcErrorDomain =
-  | 'background-jobs'
-  | 'archive'
-  | 'imports'
-  | 'collection'
-  | 'live-transfers'
-  | 'diagnostics'
-  | 'backups'
-  | 'window-lifecycle'
+import {
+  IPC_ERROR_SCHEMA_VERSION,
+  type IpcErrorDomain,
+  type IpcErrorKind,
+  type IpcErrorPayload
+} from '../../shared/ipc-error-transport.ts'
 
-export type IpcErrorKind = 'validation' | 'known' | 'unknown'
-
-/**
- * Plain data only: this shape survives Electron structured cloning without
- * depending on custom properties attached to a thrown Error instance.
- */
-export interface IpcErrorPayload {
-  schemaVersion: 1
-  domain: IpcErrorDomain
-  kind: IpcErrorKind
-  code: string
-  message: string
-  retryable: boolean
-  uncertain: boolean
-}
+export type { IpcErrorDomain, IpcErrorKind, IpcErrorPayload } from '../../shared/ipc-error-transport.ts'
 
 export interface IpcFailureTransport {
   ok: false
@@ -36,6 +18,7 @@ interface ErrorRule {
   matches: RegExp
   retryable?: boolean
   uncertain?: boolean
+  sourceCodes?: readonly string[]
 }
 
 interface DomainErrorPolicy {
@@ -54,7 +37,7 @@ const known = (
   code: string,
   message: string,
   matches: RegExp,
-  options: Pick<ErrorRule, 'retryable' | 'uncertain'> = {}
+  options: Pick<ErrorRule, 'retryable' | 'uncertain' | 'sourceCodes'> = {}
 ): ErrorRule => ({ code, message, matches, ...options })
 
 const policies: Record<IpcErrorDomain, DomainErrorPolicy> = {
@@ -126,7 +109,10 @@ const policies: Record<IpcErrorDomain, DomainErrorPolicy> = {
       known('live-transfers.item-unavailable', 'One or more selected items are not available for transfer.', /vault item (?:does not exist|is not available)|vault items are not available|selected record is not a catalogued|has no verified faction-vendor requirement|cannot buy/i),
       known('live-transfers.destination-full', 'The in-game destination is full. No rejected item was lost.', /(?:inventory|stash|deposit tab).*full|game rejected.*because.*full|No augments were delivered/i, { retryable: true }),
       known('live-transfers.receipt-missing', 'Grim Dawn did not return a durable transfer receipt. Recovery is required.', /rejected.*without returning a durable queue receipt/i, { uncertain: true }),
-      known('live-transfers.outcome-uncertain', 'Transfer acknowledgement timed out. Do not retry until recovery resolves the pending operation.', /timed out waiting for (?:Grim Dawn|the live hook)/i, { uncertain: true })
+      known('live-transfers.outcome-uncertain', 'Transfer acknowledgement timed out. Do not retry until recovery resolves the pending operation.', /timed out waiting for (?:Grim Dawn|the live hook)/i, {
+        uncertain: true,
+        sourceCodes: ['live-transfer.outcome-uncertain']
+      })
     ]
   },
   diagnostics: {
@@ -172,7 +158,23 @@ const policies: Record<IpcErrorDomain, DomainErrorPolicy> = {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : ''
+  if (!(error instanceof Error)) return ''
+  try {
+    return typeof error.message === 'string' ? error.message : ''
+  } catch {
+    return ''
+  }
+}
+
+function errorCode(error: unknown): string {
+  if (!(error instanceof Error)) return ''
+  try {
+    if (!('code' in error)) return ''
+    const code: unknown = error.code
+    return typeof code === 'string' ? code : ''
+  } catch {
+    return ''
+  }
 }
 
 function matchRule(rules: readonly ErrorRule[], message: string): ErrorRule | undefined {
@@ -181,7 +183,7 @@ function matchRule(rules: readonly ErrorRule[], message: string): ErrorRule | un
 
 function payload(domain: IpcErrorDomain, kind: IpcErrorKind, rule: ErrorRule): IpcErrorPayload {
   return {
-    schemaVersion: 1,
+    schemaVersion: IPC_ERROR_SCHEMA_VERSION,
     domain,
     kind,
     code: rule.code,
@@ -195,6 +197,10 @@ function payload(domain: IpcErrorDomain, kind: IpcErrorKind, rule: ErrorRule): I
 export function classifyIpcDomainError(domain: IpcErrorDomain, error: unknown): IpcErrorPayload {
   const policy = policies[domain]
   const message = errorMessage(error)
+  const code = errorCode(error)
+  const codedKnownRule = policy.known.find((rule) => rule.sourceCodes?.includes(code))
+  if (codedKnownRule) return payload(domain, 'known', codedKnownRule)
+
   const validationRule = matchRule(policy.validation, message)
   if (validationRule) return payload(domain, 'validation', validationRule)
 
@@ -202,7 +208,7 @@ export function classifyIpcDomainError(domain: IpcErrorDomain, error: unknown): 
   if (knownRule) return payload(domain, 'known', knownRule)
 
   return {
-    schemaVersion: 1,
+    schemaVersion: IPC_ERROR_SCHEMA_VERSION,
     domain,
     kind: 'unknown',
     code: `${domain}.failed`,

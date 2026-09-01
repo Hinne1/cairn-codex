@@ -116,6 +116,7 @@ export interface ItemAssistantImportDependencies {
   backups: ItemAssistantArchiveBackupQueue
   diagnostics: ItemAssistantImportDiagnostics
   clock: ItemAssistantImportClock
+  runExclusive<T>(operation: () => Promise<T>): Promise<T>
 }
 
 const commitProgress: Record<
@@ -295,8 +296,9 @@ export class ItemAssistantImportService {
       // This is the last cancellation boundary. Once commit starts, backup and
       // archive operations must run to a known outcome.
       checkpoint()
-      const result = await this.dependencies.committer.commit({
-        sourcePath,
+      const commitSourcePath = sourcePath
+      const result = await this.dependencies.runExclusive(() => this.dependencies.committer.commit({
+        sourcePath: commitSourcePath,
         expectedSourceSha256: preflight.sourceSha256,
         expectedQueueFingerprint: analysis.queueFingerprint,
         expectedRequiredFreeBytes: preflight.requiredFreeBytes,
@@ -308,7 +310,7 @@ export class ItemAssistantImportService {
         onArchiveMutationCommitted: () => {
           archiveMutationCommitted = true
         }
-      })
+      }))
 
       const completedAtUtc = this.dependencies.clock.nowUtc()
       let summary: GdiaImportResult = {
@@ -382,6 +384,7 @@ export function migrationOptionsFromRequest(request: ItemAssistantCommitRequest)
     expectedSourceSha256: request.expectedSourceSha256,
     expectedQueueFingerprint: request.expectedQueueFingerprint,
     expectedRequiredFreeBytes: request.expectedRequiredFreeBytes,
-    onStage: request.onStage
+    onStage: request.onStage,
+    onArchiveMutationCommitted: request.onArchiveMutationCommitted
   }
 }

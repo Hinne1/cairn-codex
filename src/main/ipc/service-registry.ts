@@ -1,3 +1,9 @@
+import { encodeIpcErrorMessage } from '../../shared/ipc-error-transport.ts'
+import {
+  classifyIpcDomainError,
+  type IpcErrorDomain
+} from './domain-error-transport.ts'
+
 export interface IpcEventLike {
   sender: {
     isDestroyed(): boolean
@@ -16,8 +22,8 @@ export type IpcInputValidator<T> = (input: unknown) => T
 
 export function translateIpcServiceError(error: unknown, domain: IpcErrorDomain): Error {
   const classified = classifyIpcDomainError(domain, error)
-  const translated = new Error(classified.message)
-  translated.name = classified.code
+  const translated = new Error(encodeIpcErrorMessage(classified))
+  translated.stack = undefined
   return translated
 }
 
@@ -80,7 +86,3 @@ export class SerializedServiceQueue {
     await this.tail
   }
 }
-import {
-  classifyIpcDomainError,
-  type IpcErrorDomain
-} from './domain-error-transport.ts'

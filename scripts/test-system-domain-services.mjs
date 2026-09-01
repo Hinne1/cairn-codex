@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { BackgroundJobService } from '../src/main/ipc/background-job-service.ts'
 import { BackupService } from '../src/main/ipc/backup-service.ts'
 import { DiagnosticsService } from '../src/main/ipc/diagnostics-service.ts'
+import { LiveGameDomainService } from '../src/main/ipc/live-game-service.ts'
 import { WindowService } from '../src/main/ipc/window-service.ts'
 
 const listed = [{ id: 'fixture' }]
@@ -83,6 +84,56 @@ assert.deepEqual(await diagnostics.exportDiagnostics(), {
   canceled: false, path: 'fixture/support.zip'
 })
 assert.equal(diagnosticEvents.length, 1)
+
+const liveEvents = []
+const liveStatus = {
+  state: 'ready', detail: 'Ready.', grimDawnProcessIds: [1], itemAssistantProcessIds: [],
+  hookAvailable: true, adapterDirectory: 'fixture', hookVersion: 'fixture',
+  connectedProcessId: 1, isHardcore: false, activeCharacterName: 'Fixture',
+  ingestTabSetting: 4, depositTabSetting: 5, ingestTabDescription: 'ingest',
+  depositTabDescription: 'deposit', hostWindowReady: true, injectorOutput: null,
+  messages: [], gameVersion: 'fixture', gameBuildId: 'fixture',
+  gameDllSha256: 'a'.repeat(64), gameDllLastWriteUtc: new Date(0).toISOString(),
+  hookSha256: 'b'.repeat(64), recommendation: null
+}
+const live = new LiveGameDomainService({
+  visualDiagnosticsActive: () => false,
+  inspectWriteSafety: async () => ({ allowed: true, messages: [] }),
+  inspect: async () => liveStatus,
+  approveBuild: async () => liveStatus,
+  start: async () => liveStatus,
+  stop: async () => liveStatus,
+  syncIncoming: async () => ({ operationId: 'sync', status: 'committed', ingested: [], issues: [] }),
+  retrieveVaultItems: async () => ({
+    operationId: 'retrieve', status: 'committed',
+    retrieved: [{ vaultItemId: 'a', baseRecord: 'records/a.dbr', seed: 1 }],
+    receiptPaths: ['receipt/a.csv'], issues: []
+  }),
+  dispenseAugments: async () => ({
+    operationId: 'supply', status: 'committed', activeCharacter: 'Fixture',
+    dispensed: [{ record: 'records/a.dbr', name: 'A' }], receiptPaths: ['receipt/s.csv'], issues: []
+  }),
+  recoverSpecialItem: async ({ destination }) => ({
+    operationId: 'special', status: 'committed', activeCharacter: 'Fixture',
+    destination, record: 'records/special.dbr', receiptPaths: ['receipt/m.csv'], issues: []
+  }),
+  runTransferExclusive: async (operation) => {
+    liveEvents.push('exclusive')
+    return operation()
+  },
+  diagnostics: {
+    run: async (event, operation) => {
+      liveEvents.push(`diagnostic:${event}`)
+      return operation()
+    }
+  },
+  queueArchiveBackup: (reason) => liveEvents.push(`backup:${reason}`)
+})
+assert.equal((await live.inspect()).state, 'ready')
+assert.equal((await live.retrieve(['a'])).retrieved.length, 1)
+assert.deepEqual(liveEvents, [
+  'diagnostic:live-retrieval', 'exclusive', 'backup:live retrieval'
+])
 
 const startup = {
   startedAtUtc: new Date(0).toISOString(), cacheOutcome: 'pending', cachedPaintMs: null,

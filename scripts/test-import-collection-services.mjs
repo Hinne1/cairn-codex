@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import {
   ItemAssistantImportCanceledError,
   ItemAssistantImportInProgressError,
-  ItemAssistantImportService
+  ItemAssistantImportService,
+  migrationOptionsFromRequest
 } from '../src/main/ipc/import-service.ts'
 import {
   ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT,
@@ -104,6 +105,7 @@ function importDependencies(overrides = {}) {
       nowMs: () => now++,
       nowUtc: () => '2026-09-01T12:00:01.000Z'
     },
+    runExclusive: async (operation) => operation(),
     ...overrides
   }
 }
@@ -167,16 +169,23 @@ function importDependencies(overrides = {}) {
 {
   const backups = []
   const stages = []
+  const writeOrder = []
   const service = new ItemAssistantImportService(importDependencies({
     committer: {
-      commit: async ({ onStage, onArchiveMutationCommitted }) => {
-        onStage('importing')
-        onArchiveMutationCommitted()
-        onStage('finalizing')
+      commit: async (request) => {
+        writeOrder.push('commit')
+        const options = migrationOptionsFromRequest(request)
+        options.onStage('importing')
+        options.onArchiveMutationCommitted()
+        options.onStage('finalizing')
         throw new Error('receipt publication failed after archive commit')
       }
     },
-    backups: { enqueue: (reason) => backups.push(reason) }
+    backups: { enqueue: (reason) => backups.push(reason) },
+    runExclusive: async (operation) => {
+      writeOrder.push('exclusive')
+      return operation()
+    }
   }))
   await assert.rejects(
     service.start({
@@ -186,6 +195,7 @@ function importDependencies(overrides = {}) {
     /receipt publication failed after archive commit/
   )
   assert.deepEqual(backups, ['Item Assistant migration'])
+  assert.deepEqual(writeOrder, ['exclusive', 'commit'])
   assert.equal(stages.at(-1).stage, 'failed')
   assert.match(stages.at(-1).detail, /protective backup was queued/)
 }
@@ -222,9 +232,50 @@ function collectionDependencies(overrides = {}) {
       hydrateAll: async () => ({ processed: 0, pending: 0 })
     },
     diagnostics: { reportMapIndexFailure: () => undefined },
+    discovery: {
+      discover: async () => collectionSnapshot('discovered').discovery,
+      listCharacters: async (installationPath) => [{ name: 'Fixture', path: installationPath }]
+    },
+    preferences: {
+      setPinnedBest: () => undefined,
+      getInfiniteSupplies: () => false,
+      setInfiniteSupplies: (enabled) => enabled,
+      runExclusive: async (operation) => operation(),
+      queueArchiveBackup: () => undefined
+    },
     catalogPresentationVersion: 7,
     ...overrides
   }
+}
+
+// Discovery and character enumeration are concrete collection service methods,
+// not composition-root IPC closures.
+{
+  const service = new CollectionService(collectionDependencies())
+  assert.equal((await service.discoverGrimDawn()).installations.length, 1)
+  const characters = await service.listCharacters()
+  assert.equal(characters.length, 1)
+  assert.equal(characters[0].path, 'C:/fixtures/cached')
+}
+
+{
+  const events = []
+  const service = new CollectionService(collectionDependencies({
+    preferences: {
+      setPinnedBest: () => events.push('pin'),
+      getInfiniteSupplies: () => true,
+      setInfiniteSupplies: (enabled) => { events.push(`supplies:${enabled}`); return enabled },
+      runExclusive: async (operation) => { events.push('exclusive'); return operation() },
+      queueArchiveBackup: (reason) => events.push(`backup:${reason}`)
+    }
+  }))
+  await service.setPinnedBest({ record: 'records/a.dbr', instanceKey: null, isHardcore: false })
+  assert.equal(service.getInfiniteSupplies(), true)
+  assert.equal(await service.setInfiniteSupplies({ enabled: false }), false)
+  assert.deepEqual(events, [
+    'exclusive', 'pin', 'backup:pinned copy changed',
+    'exclusive', 'supplies:false', 'backup:supply settings changed'
+  ])
 }
 
 // Cache persistence failure propagates and leaves the previously loaded snapshot

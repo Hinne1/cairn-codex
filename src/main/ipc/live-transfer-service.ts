@@ -43,6 +43,14 @@ export interface LiveTransferJournal {
     completedAtUtc: string
     detail: Record<string, unknown>
   }): void
+  completePartialRetrieval(input: {
+    operationId: string
+    depositedVaultItemIds: string[]
+    rejectedVaultItemIds: string[]
+    receiptPaths: string[]
+    completedAtUtc: string
+    detail: Record<string, unknown>
+  }): void
   failRetrieval(operationId: string, vaultItemIds: readonly string[], error: unknown): void
   markRetrievalNeedsRecovery(operationId: string, error: unknown): void
 }
@@ -258,19 +266,60 @@ export class LiveTransferDomainService {
         }
       })
 
-      const deposited = terminal.filter((entry) => entry.state === 'deposited')
-      const rejected = terminal.filter((entry) => entry.state === 'rejected')
+      const outcomes = terminal.map((entry, index) => ({
+        ...entry,
+        item: selected[index]!,
+        queue: queues[index]!
+      }))
+      const deposited = outcomes.filter((entry) => entry.state === 'deposited')
+      const rejected = outcomes.filter((entry) => entry.state === 'rejected')
       if (deposited.length > 0 && rejected.length > 0) {
-        throw new LiveTransferServiceError(
-          'The live transfer produced mixed terminal outcomes and requires recovery review.',
-          'live-transfer.outcome-uncertain'
-        )
-      }
-      if (rejected.length === terminal.length) {
-        for (const [index, entry] of rejected.entries()) {
+        for (const entry of rejected) {
           await this.dependencies.adapter.acknowledgeRejectedReceipt({
             path: entry.receiptPath,
-            expectedSha256: queues[index]!.semanticSha256
+            expectedSha256: entry.queue.semanticSha256
+          })
+        }
+        const receiptPaths = deposited.map((entry) => entry.receiptPath)
+        const rejectedVaultItemIds = rejected.map((entry) => entry.item.id)
+        const completedAtUtc = new Date(this.clock.now()).toISOString()
+        const issue = `${deposited.length} of ${selected.length} selected items were deposited. ` +
+          `${rejected.length} ${rejected.length === 1 ? 'item remains' : 'items remain'} safely stored in ` +
+          `the Codex Archive because the ${status.depositTabDescription} could not accept them.`
+        this.dependencies.journal.completePartialRetrieval({
+          operationId,
+          depositedVaultItemIds: deposited.map((entry) => entry.item.id),
+          rejectedVaultItemIds,
+          receiptPaths,
+          completedAtUtc,
+          detail: {
+            phase: 'committed_partial',
+            adapter: 'gdia-live-v1',
+            receiptPaths,
+            rejectedReceiptPaths: rejected.map((entry) => entry.receiptPath),
+            vaultItemIds,
+            depositedVaultItemIds: deposited.map((entry) => entry.item.id),
+            rejectedVaultItemIds
+          }
+        })
+        prepared = false
+        return {
+          operationId,
+          status: 'committed',
+          retrieved: deposited.map((entry) => ({
+            vaultItemId: entry.item.id,
+            baseRecord: entry.item.baseRecord,
+            seed: entry.item.seed
+          })),
+          receiptPaths,
+          issues: [issue]
+        }
+      }
+      if (rejected.length === terminal.length) {
+        for (const entry of rejected) {
+          await this.dependencies.adapter.acknowledgeRejectedReceipt({
+            path: entry.receiptPath,
+            expectedSha256: entry.queue.semanticSha256
           })
         }
         const rejection = new LiveTransferServiceError(

@@ -106,6 +106,7 @@ import { CollectionService } from './ipc/collection-service.ts'
 import { DiagnosticsService } from './ipc/diagnostics-service.ts'
 import { ArchiveDomainService } from './ipc/archive-service.ts'
 import { LiveTransferDomainService } from './ipc/live-transfer-service.ts'
+import { LiveGameDomainService } from './ipc/live-game-service.ts'
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -629,7 +630,28 @@ async function finalizeLiveRecoveryOperation(
         new Error('The game rejected the retained retrieval; every archive copy remains stored.')
       )
     } else {
-      return false
+      const depositedVaultItemIds = entries.flatMap((entry, index) =>
+        entry.state === 'deposited' ? [vaultItemIds[index]!] : []
+      )
+      const rejectedVaultItemIds = entries.flatMap((entry, index) =>
+        entry.state === 'rejected' ? [vaultItemIds[index]!] : []
+      )
+      database.completePartialRetrievalOperation({
+        operationId: operation.id,
+        depositedVaultItemIds,
+        rejectedVaultItemIds,
+        receiptPaths: deposited.map((entry) => entry.receiptPath),
+        completedAtUtc,
+        detail: {
+          ...operation.detail,
+          phase: 'recovered_committed_partial',
+          receiptPaths: deposited.map((entry) => entry.receiptPath),
+          rejectedReceiptPaths: rejected.map((entry) => entry.receiptPath),
+          depositedVaultItemIds,
+          rejectedVaultItemIds,
+          vaultItemIds
+        }
+      })
     }
   }
   diagnostics.info('recovery', 'operation.resolved', {
@@ -961,13 +983,7 @@ function registerIpcHandlers(
         database,
         request.sourcePath,
         gdiaBackupDirectory,
-        {
-          ...migrationOptionsFromRequest(request),
-          onStage: (stage) => {
-            if (stage === 'finalizing') request.onArchiveMutationCommitted()
-            request.onStage(stage)
-          }
-        }
+        migrationOptionsFromRequest(request)
       )
     },
     receipts: { write: (result) => writeLastGdiaImportResult(gdiaBackupDirectory, result) },
@@ -977,7 +993,8 @@ function registerIpcHandlers(
         'item-assistant-import', `${boundary}.failed`, error
       )
     },
-    clock: { nowMs: () => Date.now(), nowUtc: () => new Date().toISOString() }
+    clock: { nowMs: () => Date.now(), nowUtc: () => new Date().toISOString() },
+    runExclusive
   })
   ipcDomains.imports.handle(IPC_CHANNELS.importGdiaDatabase, async (event): Promise<GdiaImportResult> => {
     const importJob = jobs.run({
@@ -1181,19 +1198,6 @@ function registerIpcHandlers(
     },
     validateZoomFactor
   )
-  ipcDomains.collection.handle(
-    IPC_CHANNELS.discoverGrimDawn,
-    (): Promise<GrimDawnDiscovery> => helper.request<GrimDawnDiscovery>('discover-grim-dawn')
-  )
-  ipcDomains.collection.handle(
-    IPC_CHANNELS.listCharacters,
-    async (): Promise<CharacterSaveProfile[]> => {
-      const discovered = latestCollection?.discovery ?? await helper.request<GrimDawnDiscovery>('discover-grim-dawn')
-      const installationPath = discovered.installations[0]?.path
-      if (!installationPath) return []
-      return helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
-    }
-  )
   const collectionService = new CollectionService({
     cache: {
       read: async () => {
@@ -1307,8 +1311,29 @@ function registerIpcHandlers(
     diagnostics: {
       reportMapIndexFailure: (error) => console.warn('Grim Dawn map locations could not be indexed.', error)
     },
+    discovery: {
+      discover: () => helper.request<GrimDawnDiscovery>('discover-grim-dawn'),
+      listCharacters: (installationPath) =>
+        helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
+    },
+    preferences: {
+      setPinnedBest: (record, instanceKey, isHardcore) =>
+        database.setPinnedBest(record, instanceKey, isHardcore),
+      getInfiniteSupplies: () => database.getInfiniteSupplies(),
+      setInfiniteSupplies: (enabled) => database.setInfiniteSupplies(enabled),
+      runExclusive,
+      queueArchiveBackup
+    },
     catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
   })
+  ipcDomains.collection.handle(
+    IPC_CHANNELS.discoverGrimDawn,
+    () => collectionService.discoverGrimDawn()
+  )
+  ipcDomains.collection.handle(
+    IPC_CHANNELS.listCharacters,
+    () => collectionService.listCharacters()
+  )
   ipcDomains.collection.handle(
     IPC_CHANNELS.getCachedCollection,
     (_event, input: { sourcePaths: string[]; basis: CollectionBasis }) =>
@@ -1380,23 +1405,17 @@ function registerIpcHandlers(
   )
   ipcDomains.collection.handle(
     IPC_CHANNELS.setPinnedBest,
-    (_event, input: { record: string; instanceKey: string | null; isHardcore: boolean }): void => {
-      database.setPinnedBest(input.record, input.instanceKey, input.isHardcore)
-      queueArchiveBackup('pinned copy changed')
-    },
+    (_event, input: { record: string; instanceKey: string | null; isHardcore: boolean }) =>
+      collectionService.setPinnedBest(input),
     validatePinnedBest
   )
   ipcDomains.collection.handle(
     IPC_CHANNELS.getInfiniteSupplies,
-    (): boolean => database.getInfiniteSupplies()
+    () => collectionService.getInfiniteSupplies()
   )
   ipcDomains.collection.handle(
     IPC_CHANNELS.setInfiniteSupplies,
-    async (_event, input: { enabled: boolean }): Promise<boolean> => {
-      const enabled = await runExclusive(async () => database.setInfiniteSupplies(input.enabled))
-      queueArchiveBackup('supply settings changed')
-      return enabled
-    },
+    (_event, input: { enabled: boolean }) => collectionService.setInfiniteSupplies(input),
     booleanField('enabled', 'Infinite supplies must be enabled or disabled explicitly.')
   )
   const archiveService = new ArchiveDomainService({
@@ -1435,10 +1454,6 @@ function registerIpcHandlers(
     simulateDismantling: (installationPath, items) =>
       helper.request<DismantlingPreview>('simulate-dismantling', { installationPath, items })
   })
-  ipcDomains.liveTransfers.handle(
-    IPC_CHANNELS.inspectWriteSafety,
-    (): Promise<WriteSafetyStatus> => helper.request<WriteSafetyStatus>('inspect-write-safety')
-  )
   ipcDomains.archive.handle(
     IPC_CHANNELS.inspectStagingTab,
     (_event, input: { path: string }): Promise<StagingTabInspection> =>
@@ -1542,6 +1557,7 @@ function registerIpcHandlers(
         completedAtUtc: input.completedAtUtc,
         detail: input.detail
       }),
+      completePartialRetrieval: (input) => database.completePartialRetrievalOperation(input),
       failRetrieval: (operationId, vaultItemIds, error) =>
         database.failRetrievalOperation(operationId, [...vaultItemIds], error),
       markRetrievalNeedsRecovery: (operationId, error) =>
@@ -1562,9 +1578,10 @@ function registerIpcHandlers(
       unresolvedCount: () => database.getRecoveryOperationCount()
     }
   })
-  ipcDomains.liveTransfers.handle(
-    IPC_CHANNELS.inspectLiveGame,
-    async (): Promise<LiveGameStatus> => {
+  const liveGameService = new LiveGameDomainService({
+    visualDiagnosticsActive: () => Boolean(process.env.CAIRN_CODEX_SCREENSHOT_PATH),
+    inspectWriteSafety: () => helper.request<WriteSafetyStatus>('inspect-write-safety'),
+    inspect: async () => {
       const status = await helper.request<LiveGameStatus>('inspect-live-game')
       if (!process.env.CAIRN_CODEX_SCREENSHOT_PATH) return status
       return {
@@ -1575,90 +1592,79 @@ function registerIpcHandlers(
         hostWindowReady: false,
         messages: []
       }
-    }
-  )
-  ipcDomains.liveTransfers.handle(
-    IPC_CHANNELS.approveLiveGameBuild,
-    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('approve-live-game-build')
-  )
-  ipcDomains.liveTransfers.handle(
-    IPC_CHANNELS.startLiveGame,
-    (): Promise<LiveGameStatus> => {
-      if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) {
-        throw new Error('Live transfers are disabled during visual diagnostics.')
-      }
-      return helper.request<LiveGameStatus>('start-live-game')
-    }
-  )
-  ipcDomains.liveTransfers.handle(
-    IPC_CHANNELS.stopLiveGame,
-    (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('stop-live-game')
-  )
-  ipcDomains.liveTransfers.handle(
-    IPC_CHANNELS.syncLiveGame,
-    async (): Promise<LiveGameSyncResult> => {
+    },
+    approveBuild: () => helper.request<LiveGameStatus>('approve-live-game-build'),
+    start: () => helper.request<LiveGameStatus>('start-live-game'),
+    stop: () => helper.request<LiveGameStatus>('stop-live-game'),
+    syncIncoming: async () => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
-      const result = await runTransferExclusive(() => syncLiveIncoming(
+      return syncLiveIncoming(
         helper,
         database,
         latestCollection?.discovery.installations[0]?.path
-      ))
-      if (result.ingested.length > 0) {
-        diagnostics.info('transfer', 'live-ingest.completed', { ingestedItems: result.ingested.length })
-        queueArchiveBackup('live ingest')
-      }
-      return result
-    }
+      )
+    },
+    retrieveVaultItems: (vaultItemIds) => liveTransferService.retrieveVaultItems(vaultItemIds),
+    dispenseAugments: async (input) => {
+      latestCollection ??= await readCollectionCache(collectionCachePath)
+      if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
+      return executeLiveAugmentDispense(
+        helper, database, latestCollection, input.records, input.expectedCharacterName
+      )
+    },
+    recoverSpecialItem: async (input) => {
+      latestCollection ??= await readCollectionCache(collectionCachePath)
+      if (!latestCollection) throw new Error('Build the game-data index before recovering Sahdina\'s Memento.')
+      return executeSahdinasMementoRecovery(
+        helper, database, latestCollection, input.destination, input.expectedCharacterName
+      )
+    },
+    runTransferExclusive,
+    diagnostics: {
+      run: (event, operation, startData, completedData) =>
+        runDiagnosticOperation('transfer', event, operation, startData, completedData)
+    },
+    queueArchiveBackup
+  })
+  ipcDomains.liveTransfers.handle(
+    IPC_CHANNELS.inspectWriteSafety,
+    () => liveGameService.inspectWriteSafety()
+  )
+  ipcDomains.liveTransfers.handle(
+    IPC_CHANNELS.inspectLiveGame,
+    () => liveGameService.inspect()
+  )
+  ipcDomains.liveTransfers.handle(
+    IPC_CHANNELS.approveLiveGameBuild,
+    () => liveGameService.approveBuild()
+  )
+  ipcDomains.liveTransfers.handle(
+    IPC_CHANNELS.startLiveGame,
+    () => liveGameService.start()
+  )
+  ipcDomains.liveTransfers.handle(
+    IPC_CHANNELS.stopLiveGame,
+    () => liveGameService.stop()
+  )
+  ipcDomains.liveTransfers.handle(
+    IPC_CHANNELS.syncLiveGame,
+    () => liveGameService.sync()
   )
   ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.retrieveLiveVaultItems,
-    async (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> => {
-      const result = await runDiagnosticOperation(
-        'transfer',
-        'live-retrieval',
-        () => liveTransferService.retrieveVaultItems(input.vaultItemIds),
-        { requestedItems: input.vaultItemIds.length },
-        (completed) => ({ retrievedItems: completed.retrieved.length })
-      )
-      if (result.retrieved.length > 0) queueArchiveBackup('live retrieval')
-      return result
-    },
+    (_event, input: { vaultItemIds: string[] }) => liveGameService.retrieve(input.vaultItemIds),
     validateVaultIds
   )
   ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.dispenseLiveAugments,
-    (_event, input: { records: string[]; expectedCharacterName?: string }): Promise<LiveSupplyDispenseResult> =>
-      runDiagnosticOperation('transfer', 'supply-dispense', () => runTransferExclusive(async () => {
-        latestCollection ??= await readCollectionCache(collectionCachePath)
-        if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
-        const result = await executeLiveAugmentDispense(
-          helper,
-          database,
-          latestCollection,
-          input.records,
-          input.expectedCharacterName
-        )
-        queueArchiveBackup('supply delivery')
-        return result
-      }), { requestedItems: input.records.length }, (completed) => ({ deliveredItems: completed.dispensed.length })),
+    (_event, input: { records: string[]; expectedCharacterName?: string }) =>
+      liveGameService.dispense(input),
     validateSupplyDispense
   )
   ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.recoverSahdinasMemento,
-    (_event, input: { destination: SpecialRecoveryDestination; expectedCharacterName?: string }): Promise<SpecialItemRecoveryResult> =>
-      runDiagnosticOperation('transfer', 'special-item-recovery', () => runTransferExclusive(async () => {
-        latestCollection ??= await readCollectionCache(collectionCachePath)
-        if (!latestCollection) throw new Error('Build the game-data index before recovering Sahdina\'s Memento.')
-        const result = await executeSahdinasMementoRecovery(
-          helper,
-          database,
-          latestCollection,
-          input.destination,
-          input.expectedCharacterName
-        )
-        queueArchiveBackup('special item recovery')
-        return result
-      }), { destination: input.destination }, () => ({ deliveredItems: 1 })),
+    (_event, input: { destination: SpecialRecoveryDestination; expectedCharacterName?: string }) =>
+      liveGameService.recover(input),
     validateSpecialRecovery
   )
   return async () => {

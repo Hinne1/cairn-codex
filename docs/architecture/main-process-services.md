@@ -32,14 +32,15 @@ remain outputs and are not request handlers.
 
 Validation happens before filesystem, database, helper, dialog, or native work. Bounds cover path
 and identifier lengths, batch sizes, paging limits, enums, booleans, preference JSON, and renderer
-diagnostic payloads. Domain errors are also available as a schema-versioned, structured-clone-safe
-envelope; neither the thrown error nor that envelope exposes internal messages, paths, stacks, or
-causes. Shared preload channel names and return shapes are unchanged by this split.
+diagnostic payloads. Domain errors cross Electron as a schema-versioned JSON envelope encoded in
+the ordinary error message and are decoded by preload to a typed client error. Neither side exposes
+internal messages, paths, stacks, or causes. Shared preload channel names and successful return
+shapes are unchanged by this split.
 
 ## Persistence and native serialization
 
 `MainOperationCoordinator` owns the rejection-safe write queue used by imports, collection writes,
-backups, and transfers. A failed operation does not poison later queued work. Transfer writes first
+backups, and every offline/live transfer. A failed operation does not poison later queued work. Transfer writes first
 reconcile retained journals and receipts and fail closed while any earlier outcome still needs
 attention. The same coordinator records correlated start/completion/failure diagnostics.
 
@@ -54,7 +55,8 @@ diagnostics, window, and application adapters; neither imports Electron nor boot
 they verify channel ownership, validation-before-delegation, one-call delegation, error translation
 and serialization, queue recovery after rejection, import cancellation and post-commit backups,
 bounded collection hydration, archive write serialization, transfer timeout/restart/replay safety,
-fail-closed recovery, correlated diagnostics, and deduplicated shutdown behavior.
+mixed-receipt atomic resolution, fail-closed recovery, correlated diagnostics, and deduplicated
+shutdown behavior.
 
 When adding a request channel:
 

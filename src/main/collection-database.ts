@@ -1428,6 +1428,86 @@ export class CollectionDatabase {
     }
   }
 
+  completePartialRetrievalOperation(input: CompletedPartialRetrievalOperation): void {
+    const depositedIds = [...input.depositedVaultItemIds]
+    const rejectedIds = [...input.rejectedVaultItemIds]
+    const resolvedIds = [...depositedIds, ...rejectedIds]
+    if (
+      depositedIds.length === 0 ||
+      rejectedIds.length === 0 ||
+      new Set(resolvedIds).size !== resolvedIds.length ||
+      input.receiptPaths.length === 0
+    ) {
+      throw new Error('A partial retrieval requires distinct deposited and rejected vault items.')
+    }
+
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const journalRow = this.database
+        .prepare(`
+          SELECT detail_json
+          FROM operation_journal
+          WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
+        `)
+        .get(input.operationId) as { detail_json: string } | undefined
+      if (!journalRow) throw new Error('Prepared retrieval journal entry is missing.')
+
+      const previous = JSON.parse(journalRow.detail_json) as Record<string, unknown>
+      const preparedIds = Array.isArray(previous.vaultItemIds)
+        ? previous.vaultItemIds.filter((value): value is string => typeof value === 'string')
+        : []
+      if (
+        preparedIds.length !== resolvedIds.length ||
+        preparedIds.some((vaultItemId) => !resolvedIds.includes(vaultItemId))
+      ) {
+        throw new Error('Partial retrieval outcomes do not match the prepared vault items.')
+      }
+
+      const deposit = this.database.prepare(`
+        UPDATE vault_item
+        SET state = CASE reusable WHEN 1 THEN 'ingested' ELSE 'retrieved' END,
+            retrieved_at_utc = ?
+        WHERE id = ? AND state = 'retrieval_pending'
+      `)
+      for (const vaultItemId of depositedIds) {
+        if (Number(deposit.run(input.completedAtUtc, vaultItemId).changes) !== 1) {
+          throw new Error('Vault item is not pending retrieval: ' + vaultItemId)
+        }
+      }
+
+      const reject = this.database.prepare(`
+        UPDATE vault_item
+        SET state = 'ingested', retrieved_at_utc = NULL
+        WHERE id = ? AND state = 'retrieval_pending'
+      `)
+      for (const vaultItemId of rejectedIds) {
+        if (Number(reject.run(vaultItemId).changes) !== 1) {
+          throw new Error('Vault item is not pending retrieval: ' + vaultItemId)
+        }
+      }
+
+      const journal = this.database
+        .prepare(`
+          UPDATE operation_journal
+          SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
+          WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
+        `)
+        .run(
+          input.receiptPaths[0]!,
+          input.completedAtUtc,
+          JSON.stringify(input.detail),
+          input.operationId
+        )
+      if (Number(journal.changes) !== 1) {
+        throw new Error('Prepared retrieval journal entry is missing.')
+      }
+      this.database.exec('COMMIT')
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
+  }
+
   failRetrievalOperation(operationId: string, vaultItemIds: string[], error: unknown): void {
     const detail = error instanceof Error ? error.message : String(error)
     this.database.exec('BEGIN IMMEDIATE')
@@ -2404,6 +2484,15 @@ export interface CompletedRetrievalOperation {
   backupPath: string
   completedAtUtc: string
   vaultItemIds: string[]
+  detail: unknown
+}
+
+export interface CompletedPartialRetrievalOperation {
+  operationId: string
+  depositedVaultItemIds: string[]
+  rejectedVaultItemIds: string[]
+  receiptPaths: string[]
+  completedAtUtc: string
   detail: unknown
 }
 

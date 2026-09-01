@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer as electronIpcRenderer } from 'electron'
 import {
   IPC_CHANNELS,
   type AppStatus,
@@ -36,6 +36,16 @@ import {
   type WriteSafetyStatus
 } from '@shared/contracts'
 import type { AnyBackgroundJobSnapshot } from '@shared/background-jobs'
+import { decodeIpcError } from '@shared/ipc-error-transport'
+
+const ipcRenderer = {
+  invoke: (channel: string, ...args: unknown[]): Promise<unknown> =>
+    electronIpcRenderer.invoke(channel, ...args).catch((error: unknown) => {
+      throw decodeIpcError(error) ?? error
+    }),
+  on: electronIpcRenderer.on.bind(electronIpcRenderer),
+  removeListener: electronIpcRenderer.removeListener.bind(electronIpcRenderer)
+}
 
 const api: CairnCodexApi = {
   getBackgroundJobs: () =>

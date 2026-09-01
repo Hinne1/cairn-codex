@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { CollectionDatabase } from '../src/main/collection-database.ts'
 import {
   ArchiveDomainService,
   ArchiveServiceError
@@ -228,7 +232,7 @@ function transferFixture(options = {}) {
   let now = 0
   let sequence = 0
   const events = []
-  const states = new Map([
+  const states = new Map(options.initialStates ?? [
     ['a', 'ingested'],
     ['b', 'ingested']
   ])
@@ -256,6 +260,17 @@ function transferFixture(options = {}) {
     completeRetrieval(input) {
       events.push(['complete', input.operationId, ...input.receiptPaths])
       for (const id of input.vaultItemIds) states.set(id, 'retrieved')
+    },
+    completePartialRetrieval(input) {
+      events.push([
+        'complete-partial',
+        input.operationId,
+        [...input.depositedVaultItemIds],
+        [...input.rejectedVaultItemIds],
+        [...input.receiptPaths]
+      ])
+      for (const id of input.depositedVaultItemIds) states.set(id, 'retrieved')
+      for (const id of input.rejectedVaultItemIds) states.set(id, 'ingested')
     },
     failRetrieval(operationId, ids) {
       events.push(['fail', operationId])
@@ -289,7 +304,10 @@ function transferFixture(options = {}) {
     }
   }
   const recovery = {
-    reconcile: async () => { events.push(['reconcile']) },
+    reconcile: async () => {
+      events.push(['reconcile'])
+      await options.reconcile?.({ journal, states, unresolved, events })
+    },
     unresolvedCount: () => unresolved.count
   }
   const clock = {
@@ -390,6 +408,81 @@ function transferFixture(options = {}) {
 
 {
   const fixture = transferFixture({
+    inspect: async (queue) => queue.operationId.endsWith('-0')
+      ? { state: 'deposited', receiptPath: `deposited/${queue.operationId}.csv` }
+      : { state: 'rejected', receiptPath: `rejected/${queue.operationId}.csv` }
+  })
+  const result = await fixture.service.retrieveVaultItems(['a', 'b'])
+  assert.deepEqual(result.retrieved, [
+    { vaultItemId: 'a', baseRecord: 'records/a.dbr', seed: 1 }
+  ])
+  assert.deepEqual(result.receiptPaths, ['deposited/operation-1-0.csv'])
+  assert.equal(result.issues.length, 1)
+  assert.match(result.issues[0], /1 of 2 selected items were deposited/i)
+  assert.match(result.issues[0], /1 item remains safely stored/i)
+  const phases = fixture.events.map(([event]) => event)
+  assert.ok(phases.indexOf('detail') < phases.indexOf('ack-rejected'),
+    'mixed terminal receipt details must persist before rejected acknowledgement')
+  assert.ok(phases.indexOf('ack-rejected') < phases.indexOf('complete-partial'),
+    'mixed completion must follow durable rejected-receipt acknowledgement')
+  assert.equal(fixture.events.some(([event]) => event === 'needs-recovery'), false)
+  assert.equal(fixture.states.get('a'), 'retrieved')
+  assert.equal(fixture.states.get('b'), 'ingested')
+}
+
+{
+  const fixture = transferFixture({
+    inspect: async (queue) => queue.operationId.endsWith('-0')
+      ? { state: 'deposited', receiptPath: `deposited/${queue.operationId}.csv` }
+      : { state: 'rejected', receiptPath: `rejected/${queue.operationId}.csv` },
+    ackError: new Error('durable acknowledgement failed')
+  })
+  await assert.rejects(
+    fixture.service.retrieveVaultItems(['a', 'b']),
+    /durable acknowledgement failed/
+  )
+  assert.equal(fixture.events.some(([event]) => event === 'complete-partial'), false)
+  assert.equal(fixture.events.some(([event]) => event === 'needs-recovery'), true)
+  assert.equal(fixture.states.get('a'), 'retrieval_pending')
+  assert.equal(fixture.states.get('b'), 'retrieval_pending')
+}
+
+{
+  const fixture = transferFixture({
+    unresolved: 1,
+    initialStates: [
+      ['a', 'retrieval_pending'],
+      ['b', 'retrieval_pending'],
+      ['c', 'ingested']
+    ],
+    reconcile: ({ journal, unresolved }) => {
+      journal.completePartialRetrieval({
+        operationId: 'restarted-mixed-operation',
+        depositedVaultItemIds: ['a'],
+        rejectedVaultItemIds: ['b'],
+        receiptPaths: ['deposited/restarted-mixed-operation-0.csv'],
+        completedAtUtc: new Date(0).toISOString(),
+        detail: { phase: 'recovered_committed_partial' }
+      })
+      unresolved.count = 0
+    }
+  })
+  const result = await fixture.service.retrieveVaultItems(['c'])
+  assert.equal(result.retrieved[0]?.vaultItemId, 'c')
+  assert.equal(fixture.states.get('a'), 'retrieved')
+  assert.equal(fixture.states.get('b'), 'ingested')
+  assert.equal(fixture.states.get('c'), 'retrieved')
+  assert.deepEqual(
+    fixture.events.filter(([event]) => event === 'reconcile' || event === 'complete-partial' || event === 'enqueue')
+      .map(([event]) => event),
+    ['reconcile', 'complete-partial', 'enqueue'],
+    'a fresh service must reconcile a retained mixed operation before accepting another native write'
+  )
+  assert.equal(fixture.unresolved.count, 0)
+}
+
+{
+  const fixture = transferFixture({
     inspect: async (queue) => ({ state: 'rejected', receiptPath: `rejected/${queue.operationId}.csv` })
   })
   await assert.rejects(
@@ -403,6 +496,115 @@ function transferFixture(options = {}) {
     'a rejected receipt must be acknowledged before releasing the archive copy')
   assert.equal(fixture.events.some(([event]) => event === 'needs-recovery'), false)
   assert.equal(fixture.states.get('a'), 'ingested')
+}
+
+{
+  const databaseRoot = await mkdtemp(join(tmpdir(), 'cairn-partial-retrieval-'))
+  const databasePath = join(databaseRoot, 'collection.sqlite')
+  let database = new CollectionDatabase(databasePath)
+  try {
+    const importedIds = []
+    for (const id of ['a', 'b', 'c', 'd']) {
+      const baseRecord = `records/${id}.dbr`
+      database.ensureQuarantineCatalogItem(baseRecord)
+      const imported = database.importVaultItems({
+        sourcePath: `fixture-${id}.db`,
+        sourceSha256: `fixture-${id}-sha`,
+        backupPath: `fixture-${id}.backup`,
+        importedAtUtc: new Date(0).toISOString(),
+        items: [{
+          externalId: id,
+          baseRecord,
+          isHardcore: false,
+          createdAtUtc: new Date(0).toISOString(),
+          payload: { baseRecord, seed: id.charCodeAt(0) }
+        }]
+      })
+      assert.equal(imported.importedIds.length, 1)
+      importedIds.push(imported.importedIds[0])
+    }
+
+    const operationId = 'database-mixed-operation'
+    const vaultItemIds = importedIds.slice(0, 2)
+    database.prepareRetrievalOperation({
+      operationId,
+      stashPath: 'live://gdia/sc',
+      sourceSha256: 'database-mixed-source',
+      startedAtUtc: new Date(1).toISOString(),
+      vaultItemIds,
+      detail: { phase: 'prepared', vaultItemIds }
+    })
+    database.completePartialRetrievalOperation({
+      operationId,
+      depositedVaultItemIds: [vaultItemIds[0]],
+      rejectedVaultItemIds: [vaultItemIds[1]],
+      receiptPaths: ['deposited/database-mixed-operation-0.csv'],
+      completedAtUtc: new Date(2).toISOString(),
+      detail: { phase: 'committed_partial', vaultItemIds }
+    })
+    const completedStates = new Map(
+      database.getVaultItems(vaultItemIds, false).map((item) => [item.id, item.state])
+    )
+    assert.equal(completedStates.get(vaultItemIds[0]), 'retrieved')
+    assert.equal(completedStates.get(vaultItemIds[1]), 'ingested')
+    assert.equal(database.hasCommittedOperation(operationId), true)
+    assert.equal(database.getRecoveryOperationCount(), 0)
+
+    const restartedOperationId = 'database-restarted-mixed-operation'
+    const restartedIds = importedIds.slice(2)
+    database.prepareRetrievalOperation({
+      operationId: restartedOperationId,
+      stashPath: 'live://gdia/sc',
+      sourceSha256: 'database-restarted-mixed-source',
+      startedAtUtc: new Date(3).toISOString(),
+      vaultItemIds: restartedIds,
+      detail: { phase: 'prepared', vaultItemIds: restartedIds }
+    })
+    database.updatePendingOperationDetail(restartedOperationId, {
+      phase: 'terminal-receipts-verified',
+      recoveryResolution: { entries: [
+        { state: 'deposited', receiptPath: 'deposited/restarted-0.csv' },
+        { state: 'rejected', receiptPath: 'rejected/restarted-1.csv' }
+      ] }
+    })
+    database.markRetrievalNeedsRecovery(restartedOperationId, new Error('simulated restart'))
+    database.close()
+    database = new CollectionDatabase(databasePath)
+    const circularDetail = { phase: 'recovered_committed_partial', vaultItemIds: restartedIds }
+    circularDetail.self = circularDetail
+    assert.throws(() => database.completePartialRetrievalOperation({
+      operationId: restartedOperationId,
+      depositedVaultItemIds: [restartedIds[0]],
+      rejectedVaultItemIds: [restartedIds[1]],
+      receiptPaths: ['deposited/restarted-0.csv'],
+      completedAtUtc: new Date(4).toISOString(),
+      detail: circularDetail
+    }), /circular/i)
+    assert.deepEqual(
+      database.getVaultItems(restartedIds, false).map((item) => item.state),
+      ['retrieval_pending', 'retrieval_pending'],
+      'a partial-completion failure must roll back every item state change'
+    )
+    assert.equal(database.getRecoveryOperationCount(), 1)
+    database.completePartialRetrievalOperation({
+      operationId: restartedOperationId,
+      depositedVaultItemIds: [restartedIds[0]],
+      rejectedVaultItemIds: [restartedIds[1]],
+      receiptPaths: ['deposited/restarted-0.csv'],
+      completedAtUtc: new Date(4).toISOString(),
+      detail: { phase: 'recovered_committed_partial', vaultItemIds: restartedIds }
+    })
+    const restartedStates = new Map(
+      database.getVaultItems(restartedIds, false).map((item) => [item.id, item.state])
+    )
+    assert.equal(restartedStates.get(restartedIds[0]), 'retrieved')
+    assert.equal(restartedStates.get(restartedIds[1]), 'ingested')
+    assert.equal(database.hasCommittedOperation(restartedOperationId), true)
+    assert.equal(database.getRecoveryOperationCount(), 0)
+  } finally {
+    database.close()
+    await rm(databaseRoot, { recursive: true, force: true })
+  }
 }
 
 console.log('Archive and live-transfer domain service checks passed.')

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { IPC_CHANNELS } from '../src/shared/contracts.ts'
+import { decodeIpcError, IpcClientError } from '../src/shared/ipc-error-transport.ts'
 import { createMainIpcDomains, MAIN_IPC_CHANNELS } from '../src/main/ipc/domains.ts'
 import {
   IpcDomainService,
@@ -23,6 +24,11 @@ function fakeEvent() {
       setZoomFactor: () => undefined
     }
   }
+}
+
+function asElectronClientError(error) {
+  const transported = structuredClone(error)
+  return decodeIpcError(new Error(`Error invoking remote method 'fixture': Error: ${transported.message}`))
 }
 
 const registered = new Map()
@@ -53,8 +59,12 @@ assert.equal(await debugHandler(fakeEvent(), { enabled: true }), true)
 assert.equal(serviceCalls, 1, 'a valid handler must delegate exactly once')
 await assert.rejects(
   debugHandler(fakeEvent(), { enabled: 'yes' }),
-  (error) => error.name === 'diagnostics.invalid-debug-setting' &&
-    error.message === 'Choose a valid debug-logging setting.'
+  (error) => {
+    const clientError = asElectronClientError(error)
+    return clientError instanceof IpcClientError &&
+      clientError.code === 'diagnostics.invalid-debug-setting' &&
+      clientError.message === 'Choose a valid debug-logging setting.'
+  }
 )
 assert.equal(serviceCalls, 1, 'invalid input must not reach the service')
 
@@ -79,14 +89,23 @@ failures.handle('known', () => { throw new Error('Vault item does not exist: pri
 failures.handle('unknown', () => { throw new Error('Native boundary failed at C:\\Users\\private') })
 await assert.rejects(
   failureHandlers.get('known')(fakeEvent()),
-  (error) => error.name === 'archive.item-unavailable' &&
-    error.message === 'One or more requested archive items are no longer available.'
+  (error) => {
+    const clientError = asElectronClientError(error)
+    return clientError instanceof IpcClientError &&
+      clientError.code === 'archive.item-unavailable' &&
+      clientError.message === 'One or more requested archive items are no longer available.'
+  }
 )
 await assert.rejects(
   failureHandlers.get('unknown')(fakeEvent()),
-  (error) => error.name === 'archive.failed' &&
-    error.message === 'The archive operation failed safely.' &&
-    !error.message.includes('private')
+  (error) => {
+    const clientError = asElectronClientError(error)
+    return clientError instanceof IpcClientError &&
+      clientError.code === 'archive.failed' &&
+      clientError.message === 'The archive operation failed safely.' &&
+      !error.message.includes('private') &&
+      !clientError.message.includes('private')
+  }
 )
 
 assert.throws(

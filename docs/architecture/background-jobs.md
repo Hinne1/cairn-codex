@@ -19,9 +19,10 @@ keys.
 ## Cancellation
 
 Cancellation is cooperative. `canCancel` is true only before a side effect or between bounded
-batches. A request outside such a boundary is rejected without changing job state. Once helper work,
-a database commit, or a verified file publication starts, the stage runs to completion. Operations
-must call `throwIfCancellationRequested()` at each advertised boundary before continuing.
+batches. Because a renderer click can cross an IPC boundary just after work enters an unsafe stage,
+supported jobs retain the request and honor it at their next safe boundary. Once helper work, a
+database commit, or a verified file publication starts, that bounded stage runs to completion.
+Operations must call `throwIfCancellationRequested()` at each advertised boundary before continuing.
 
 ## Lifetime and payload bounds
 

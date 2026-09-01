@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import {
   BackgroundJobCanceledError,
-  BackgroundJobCoordinator
+  BackgroundJobCoordinator,
+  isBackgroundJobId,
+  TrailingJobQueue
 } from '../src/main/background-jobs.ts'
 import { BACKGROUND_JOB_KINDS } from '../src/shared/background-jobs.ts'
 
@@ -27,6 +29,7 @@ const progress = {
 const coordinator = new BackgroundJobCoordinator()
 const events = []
 coordinator.subscribe((job) => events.push(job))
+coordinator.subscribe(() => { throw new Error('simulated renderer listener failure') })
 
 let release
 const gate = new Promise((resolve) => { release = resolve })
@@ -63,6 +66,9 @@ assert.equal(await duplicate.result, 42)
 assert.equal(executions, 1, 'duplicate work executes once')
 const completed = coordinator.list().find((job) => job.id === first.id)
 assert.equal(completed?.status, 'succeeded')
+assert.equal(completed?.progress.completed, completed?.progress.total,
+  'terminal progress completes its bounded count')
+assert.equal(completed?.progress.percent, 100)
 assert.equal(completed?.result?.metrics.value, 42)
 assert.equal(completed?.persistence.navigation, 'main-process-session')
 assert.equal(completed?.persistence.restart, 'discard-in-flight')
@@ -78,6 +84,7 @@ const cancelable = coordinator.run({
   dedupeKey: 'rolls:sc',
   stage: 'queued',
   progress: { ...progress, label: 'Rate archived rolls' },
+  supportsCancellation: true,
   completedStage: 'complete',
   failedStage: 'failed',
   canceledStage: 'canceled'
@@ -89,10 +96,11 @@ const cancelable = coordinator.run({
   return 1
 }, () => ({ summary: 'Unexpected.', metrics: {} }))
 await boundary
-assert.equal(coordinator.requestCancellation(cancelable.id)?.cancellation.requested, false,
-  'unsafe stages reject cancellation requests')
+assert.equal(coordinator.requestCancellation(cancelable.id)?.cancellation.requested, true,
+  'supported jobs retain a request made during an unsafe stage')
 continueJob()
-assert.equal(await cancelable.result, 1)
+await assert.rejects(cancelable.result, BackgroundJobCanceledError)
+assert.equal(coordinator.list().find((job) => job.id === cancelable.id)?.status, 'canceled')
 
 let releaseCancelable
 const cancellableGate = new Promise((resolve) => { releaseCancelable = resolve })
@@ -116,11 +124,33 @@ releaseCancelable()
 await assert.rejects(canceled.result, BackgroundJobCanceledError)
 assert.equal(coordinator.list().find((job) => job.id === canceled.id)?.status, 'canceled')
 
+let releaseFirstBackup
+const firstBackup = new Promise((resolve) => { releaseFirstBackup = resolve })
+const backupReasons = []
+const trailingBackups = new TrailingJobQueue(async (reason) => {
+  backupReasons.push(reason)
+  if (reason === 'first mutation') await firstBackup
+})
+trailingBackups.enqueue('first mutation')
+trailingBackups.enqueue('second mutation')
+trailingBackups.enqueue('latest mutation')
+releaseFirstBackup()
+await trailingBackups.flush()
+assert.deepEqual(backupReasons, ['first mutation', 'latest mutation'],
+  'mutations during a backup produce one trailing backup of the latest state')
+
+assert.equal(isBackgroundJobId(first.id), true)
+assert.equal(isBackgroundJobId('------------------------------------'), false)
+assert.equal(isBackgroundJobId('12345678-1234-1234-1234-123456789012'), false)
+
 console.log(JSON.stringify({
   passed: true,
   typedLifecycle: true,
   duplicateCoalescing: true,
+  trailingBackupCoalescing: true,
   safeCancellation: true,
+  listenerIsolation: true,
+  strictIdentityValidation: true,
   navigationPersistence: true,
   restartPolicy: 'discard-in-flight',
   lightweightProgress: true

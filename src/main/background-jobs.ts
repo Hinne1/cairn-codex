@@ -12,6 +12,11 @@ const TERMINAL_RETENTION = 50
 const MAX_LABEL_LENGTH = 120
 const MAX_DETAIL_LENGTH = 500
 const MAX_RESULT_BYTES = 8 * 1024
+const BACKGROUND_JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export function isBackgroundJobId(value: unknown): value is string {
+  return typeof value === 'string' && BACKGROUND_JOB_ID_PATTERN.test(value)
+}
 
 export class BackgroundJobCanceledError extends Error {
   constructor() {
@@ -40,6 +45,7 @@ export interface BackgroundJobDefinition<K extends BackgroundJobKind> {
   stage: BackgroundJobStage<K>
   progress: BackgroundJobProgress
   canCancel?: boolean
+  supportsCancellation?: boolean
   boundary?: string | null
   completedStage: Extract<BackgroundJobStage<K>, 'complete'>
   failedStage: Extract<BackgroundJobStage<K>, 'failed'>
@@ -126,7 +132,7 @@ export class BackgroundJobCoordinator {
     const active = this.jobs.get(id)
     if (!active) return null
     const snapshot = active.snapshot
-    if (!['queued', 'running'].includes(snapshot.status) || !snapshot.cancellation.canCancel) {
+    if (!['queued', 'running'].includes(snapshot.status) || !snapshot.cancellation.supported) {
       return structuredClone(snapshot)
     }
     snapshot.cancellation.requested = true
@@ -162,6 +168,7 @@ export class BackgroundJobCoordinator {
       status: 'queued',
       progress: normalizeProgress(definition.progress, {}),
       cancellation: {
+        supported: definition.supportsCancellation ?? definition.canCancel ?? false,
         requested: false,
         canCancel: definition.canCancel ?? false,
         boundary: definition.boundary ?? null
@@ -228,7 +235,10 @@ export class BackgroundJobCoordinator {
           snapshot.stage = definition.completedStage
           snapshot.status = 'succeeded'
         }
-        snapshot.progress = normalizeProgress(snapshot.progress, { percent: canceled ? snapshot.progress.percent : 100 })
+        snapshot.progress = normalizeProgress(snapshot.progress, canceled ? {} : {
+          completed: snapshot.progress.total ?? snapshot.progress.completed,
+          percent: 100
+        })
         snapshot.cancellation.canCancel = false
         snapshot.cancellation.boundary = null
         snapshot.result = canceled ? null : boundedResult(result(value))
@@ -263,6 +273,58 @@ export class BackgroundJobCoordinator {
 
   private publish(snapshot: AnyBackgroundJobSnapshot): void {
     const copy = structuredClone(snapshot)
-    for (const listener of this.listeners) listener(copy)
+    for (const listener of this.listeners) {
+      try {
+        listener(copy)
+      } catch {
+        // Progress delivery is best-effort. A renderer/listener failure must not
+        // strand the job or its dedupe key in the coordinator.
+      }
+    }
+  }
+}
+
+export class TrailingJobQueue<T> {
+  private active: Promise<void> | null = null
+  private trailing: T | null = null
+  private readonly operation: (value: T) => Promise<void>
+  private readonly merge: (current: T, incoming: T) => T
+
+  constructor(
+    operation: (value: T) => Promise<void>,
+    merge: (current: T, incoming: T) => T = (_current, incoming) => incoming
+  ) {
+    this.operation = operation
+    this.merge = merge
+  }
+
+  enqueue(value: T): void {
+    if (this.active) {
+      this.trailing = this.trailing === null ? value : this.merge(this.trailing, value)
+      return
+    }
+    this.active = this.drain(value)
+  }
+
+  async flush(): Promise<void> {
+    while (this.active) await this.active
+  }
+
+  private async drain(initial: T): Promise<void> {
+    let current: T | null = initial
+    try {
+      while (current !== null) {
+        await this.operation(current)
+        current = this.trailing
+        this.trailing = null
+      }
+    } finally {
+      this.active = null
+      if (this.trailing !== null) {
+        const trailing = this.trailing
+        this.trailing = null
+        this.enqueue(trailing)
+      }
+    }
   }
 }

@@ -63,7 +63,12 @@ import {
   redactDiagnosticValue
 } from './diagnostics'
 import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-recovery'
-import { BackgroundJobCanceledError, BackgroundJobCoordinator } from './background-jobs'
+import {
+  BackgroundJobCanceledError,
+  BackgroundJobCoordinator,
+  isBackgroundJobId,
+  TrailingJobQueue
+} from './background-jobs'
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -83,8 +88,8 @@ function runArchiveBackupJob(
       label: 'Prepare archive backup',
       detail: reason
     },
-    canCancel: true,
-    boundary: 'before the database checkpoint',
+    canCancel: false,
+    boundary: null,
     completedStage: 'complete',
     failedStage: 'failed',
     canceledStage: 'canceled'
@@ -710,12 +715,18 @@ function registerIpcHandlers(
       throw error
     }
   }
-  const queueArchiveBackup = (reason: string): void => {
-    void runArchiveBackupJob(jobs, 'archive-backup:create', reason, () =>
-      runExclusive(() => archiveBackups.createBackup(reason)))
-      .result.catch((error) => {
-      console.error(`[archive-backup] ${reason} failed`, error)
+  const queuedArchiveBackups = new TrailingJobQueue<string>(async (queuedReason) => {
+    await runArchiveBackupJob(
+      jobs,
+      `archive-backup:auto:${randomUUID()}`,
+      queuedReason,
+      () => runExclusive(() => archiveBackups.createBackup(queuedReason))
+    ).result.catch((error) => {
+      console.error(`[archive-backup] ${queuedReason} failed`, error)
     })
+  })
+  const queueArchiveBackup = (reason: string): void => {
+    queuedArchiveBackups.enqueue(reason)
   }
 
   const stopPublishingJobs = jobs.subscribe((job) => {
@@ -729,7 +740,7 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.cancelBackgroundJob,
     (_event, input: { id: string }) => {
-      if (!input || typeof input.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.id)) {
+      if (!input || !isBackgroundJobId(input.id)) {
         throw new Error('A valid background job ID is required.')
       }
       return jobs.requestCancellation(input.id)
@@ -979,6 +990,7 @@ function registerIpcHandlers(
         label: 'Prepare Item Assistant source', detail: 'Waiting for source selection.'
       },
       canCancel: true,
+      supportsCancellation: true,
       boundary: 'during source selection',
       completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
     }, async (job) => {
@@ -1112,6 +1124,7 @@ function registerIpcHandlers(
       'import',
       'item-assistant',
       () => runExclusive(async () => {
+        job.throwIfCancellationRequested()
         const result = await migrateGdiaDatabase(
           database,
           sourcePath,
@@ -1399,7 +1412,9 @@ function registerIpcHandlers(
       }
       const hydration = jobs.run({
         kind: 'roll-hydration',
-        dedupeKey: 'roll-hydration:archive',
+        dedupeKey: `roll-hydration:${createHash('sha256')
+          .update(JSON.stringify([...input.sourcePaths].map((path) => path.toLocaleLowerCase()).sort()))
+          .digest('hex').slice(0, 16)}`,
         stage: 'queued',
         progress: {
           completed: 0,
@@ -1410,6 +1425,7 @@ function registerIpcHandlers(
           detail: 'Preparing bounded analysis batches.'
         },
         canCancel: true,
+        supportsCancellation: true,
         boundary: 'before the next analysis batch',
         completedStage: 'complete',
         failedStage: 'failed',
@@ -1517,8 +1533,8 @@ function registerIpcHandlers(
           completed: 0, total: 4, percent: 0, unit: 'steps',
           label: 'Refresh collection', detail: 'Preparing the catalog scan.'
         },
-        canCancel: true,
-        boundary: 'before the helper scan',
+        canCancel: false,
+        boundary: null,
         completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
       }, async (job) => runDiagnosticOperation('background-job', 'collection-scan', async () => {
         const startedAt = Date.now()
@@ -1583,8 +1599,8 @@ function registerIpcHandlers(
           completed: 0, total: 4, percent: 0, unit: 'steps',
           label: 'Rebuild game-data index', detail: 'Preparing a complete catalog rebuild.'
         },
-        canCancel: true,
-        boundary: 'before the helper scan',
+        canCancel: false,
+        boundary: null,
         completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
       }, async (job) => runDiagnosticOperation('background-job', 'game-data-rebuild', async () => {
         job.throwIfCancellationRequested()
@@ -1611,8 +1627,7 @@ function registerIpcHandlers(
           catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
         }
         await writeCollectionCache(collectionCachePath, latestCollection)
-        const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-        return presentCollection(helper, database, projected, input.basis)
+        return latestCollection
       }, undefined, (result) => ({
         catalogItems: result.items.length,
         observedItems: result.observedItems.length,
@@ -1621,7 +1636,9 @@ function registerIpcHandlers(
         summary: 'Game-data rebuild complete.',
         metrics: { catalogItems: result.items.length, observedItems: result.observedItems.length }
       }))
-      return rebuild.result
+      const rebuilt = await rebuild.result
+      const projected = projectCollectionSources(rebuilt, input.sourcePaths)
+      return presentCollection(helper, database, projected, input.basis)
     }
   )
   ipcMain.handle(
@@ -1872,6 +1889,7 @@ function registerIpcHandlers(
   )
   return async () => {
     stopPublishingJobs()
+    await queuedArchiveBackups.flush()
     await writeQueue
     await archiveBackups.flush()
     diagnostics.info('startup', 'application.shutdown')
@@ -2756,8 +2774,8 @@ async function attachItemIcons(
       completed: 0, total: bitmaps.length, percent: 0, unit: 'items',
       label: 'Extract item icons', detail: 'Preparing the requested icon set.'
     },
-    canCancel: true,
-    boundary: 'before helper extraction',
+    canCancel: false,
+    boundary: null,
     completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
   }, async (job) => {
     job.throwIfCancellationRequested()
@@ -2845,8 +2863,8 @@ async function loadMapLocationIndex(
       completed: 0, total: 2, percent: 0, unit: 'steps',
       label: 'Build map location index', detail: 'Preparing installed map archives.'
     },
-    canCancel: true,
-    boundary: 'before helper indexing',
+    canCancel: false,
+    boundary: null,
     completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
   }, async (job) => {
     job.throwIfCancellationRequested()
@@ -5962,8 +5980,8 @@ app.whenReady().then(async () => {
       completed: 0, total: 1, percent: 0, unit: 'steps',
       label: 'Check automatic archive backup', detail: 'Reviewing the latest verified backup age.'
     },
-    canCancel: true,
-    boundary: 'before the backup age check',
+    canCancel: false,
+    boundary: null,
     completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
   }, async (job) => {
     job.throwIfCancellationRequested()

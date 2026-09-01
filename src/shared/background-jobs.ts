@@ -59,6 +59,7 @@ export interface BackgroundJobError {
 }
 
 export interface BackgroundJobCancellation {
+  supported: boolean
   requested: boolean
   canCancel: boolean
   boundary: string | null

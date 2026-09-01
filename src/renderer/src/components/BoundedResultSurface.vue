@@ -3,8 +3,10 @@ import { computed, nextTick, ref, watch } from 'vue'
 import {
   createBoundedResultWindow,
   moveBoundedResultKey,
+  updateBoundedSelection,
   type BoundedNavigationIntent,
-  type BoundedResultKey
+  type BoundedResultKey,
+  type BoundedSelectionMode
 } from '../bounded-results'
 
 const props = withDefaults(defineProps<{
@@ -20,8 +22,8 @@ const props = withDefaults(defineProps<{
   error?: string | null
   emptyTitle?: string
   emptyDetail?: string
-  selectable?: boolean
-  selectedKey?: BoundedResultKey | null
+  selectionMode?: BoundedSelectionMode
+  selectedKeys?: readonly BoundedResultKey[]
   keyboardColumns?: number
 }>(), {
   page: 1,
@@ -33,14 +35,14 @@ const props = withDefaults(defineProps<{
   error: null,
   emptyTitle: 'No results',
   emptyDetail: 'Try changing the search or filters.',
-  selectable: false,
-  selectedKey: null,
+  selectionMode: 'none',
+  selectedKeys: () => [],
   keyboardColumns: 1
 })
 
 const emit = defineEmits<{
   'update:page': [page: number]
-  'update:selectedKey': [key: BoundedResultKey | null]
+  'update:selectedKeys': [keys: BoundedResultKey[]]
   activate: [key: BoundedResultKey]
   retry: []
 }>()
@@ -57,17 +59,18 @@ const resultWindow = computed(() => createBoundedResultWindow({
 }))
 const entryKeys = computed(() => resultWindow.value.entries.map((entry) => entry.key))
 const showResults = computed(() => !props.loading && !props.error && resultWindow.value.entries.length > 0)
+const selectable = computed(() => props.selectionMode !== 'none')
 const collectionRole = computed(() => props.layout === 'list'
-  ? (props.selectable ? 'listbox' : 'list')
+  ? (selectable.value ? 'listbox' : 'list')
   : 'grid')
 const itemRole = computed(() => props.layout === 'list'
-  ? (props.selectable ? 'option' : 'listitem')
+  ? (selectable.value ? 'option' : 'listitem')
   : 'row')
 
 watch(entryKeys, (keys) => {
-  const selectedVisible = props.selectedKey !== null && keys.includes(props.selectedKey)
+  const selectedVisible = props.selectedKeys.find((key) => keys.includes(key)) ?? null
   const activeVisible = activeKey.value !== null && keys.includes(activeKey.value)
-  if (!activeVisible) activeKey.value = selectedVisible ? props.selectedKey : (keys[0] ?? null)
+  if (!activeVisible) activeKey.value = selectedVisible ?? (keys[0] ?? null)
 }, { immediate: true })
 
 watch(() => [props.page, resultWindow.value.pageCount] as const, () => {
@@ -81,7 +84,9 @@ function rememberElement(key: BoundedResultKey, element: Element | null): void {
 
 function select(key: BoundedResultKey): void {
   activeKey.value = key
-  if (props.selectable) emit('update:selectedKey', key)
+  if (selectable.value) {
+    emit('update:selectedKeys', updateBoundedSelection(props.selectedKeys, key, props.selectionMode))
+  }
 }
 
 function focusKey(key: BoundedResultKey | null): void {
@@ -150,15 +155,16 @@ function changePage(page: number): void {
       :class="['bounded-results-collection', `is-${layout}`]"
       :role="collectionRole"
       :aria-label="label"
+      :aria-multiselectable="selectionMode === 'multiple' ? true : undefined"
     >
       <div
         v-for="entry in resultWindow.entries"
         :key="entry.key"
         :ref="(element) => rememberElement(entry.key, element as Element | null)"
         class="bounded-results-item"
-        :class="{ 'is-selected': selectable && selectedKey === entry.key }"
+        :class="{ 'is-selected': selectable && selectedKeys.includes(entry.key) }"
         :role="itemRole"
-        :aria-selected="selectable ? selectedKey === entry.key : undefined"
+        :aria-selected="selectable ? selectedKeys.includes(entry.key) : undefined"
         :tabindex="selectable ? (activeKey === entry.key ? 0 : -1) : undefined"
         @focus="activeKey = entry.key"
         @click="select(entry.key)"
@@ -169,7 +175,7 @@ function changePage(page: number): void {
           :item="entry.item"
           :item-key="entry.key"
           :index="entry.index"
-          :selected="selectable && selectedKey === entry.key"
+          :selected="selectable && selectedKeys.includes(entry.key)"
         />
       </div>
     </div>

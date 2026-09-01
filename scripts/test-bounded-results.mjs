@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import {
   createBoundedResultWindow,
-  moveBoundedResultKey
+  moveBoundedResultKey,
+  updateBoundedSelection
 } from '../src/renderer/src/bounded-results.ts'
 
 function generatedItems(count) {
@@ -50,5 +51,10 @@ assert.equal(moveBoundedResultKey(keys, 'b', 'row-down', 2), 'd')
 assert.equal(moveBoundedResultKey(keys, 'a', 'previous'), 'a')
 assert.equal(moveBoundedResultKey(keys, 'f', 'next'), 'f')
 assert.equal(moveBoundedResultKey([], null, 'next'), null)
+
+assert.deepEqual(updateBoundedSelection([], 'a', 'none'), [])
+assert.deepEqual(updateBoundedSelection(['a'], 'b', 'single'), ['b'])
+assert.deepEqual(updateBoundedSelection(['a'], 'b', 'multiple'), ['a', 'b'])
+assert.deepEqual(updateBoundedSelection(['a', 'b'], 'a', 'multiple'), ['b'])
 
 console.log('Bounded result contract passed for 20k and 50k generated collections; mounted entries remained capped at 50.')

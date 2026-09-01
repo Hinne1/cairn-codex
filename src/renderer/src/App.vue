@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import BoundedResultSurface from './components/BoundedResultSurface.vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import FailureProbe from './components/FailureProbe.vue'
 import ItemAssistantImport from './components/ItemAssistantImport.vue'
@@ -804,9 +805,6 @@ const quarantinedVaultItems = computed(() => quarantineVaultPage.value.items)
 const visibleQuarantinedVaultItems = computed(() => quarantinedVaultItems.value)
 const vaultQuarantinePageCount = computed(() =>
   Math.max(1, Math.ceil(quarantineVaultPage.value.total / vaultPageSize))
-)
-const operationHistoryPageCount = computed(() =>
-  Math.max(1, Math.ceil(operationHistory.value.total / operationHistoryPageSize))
 )
 const activeHistoryKind = computed(() =>
   transferSection.value === 'ingest-history' ? 'ingest' as const : 'retrieve' as const
@@ -7585,36 +7583,44 @@ function formatPercentile(value: number | null | undefined): string {
             </template>
           </ExplorerToolbar>
 
-          <section class="operation-history" :aria-label="transferSection === 'ingest-history' ? 'Ingest history' : 'Dispense history'">
-            <article v-for="operation in operationHistory.items" :key="operation.id" class="operation-history-row">
-              <div class="operation-state" :class="`state-${operation.state}`">
-                <strong>{{ operation.state === 'committed' ? 'Completed' : operation.state === 'failed' ? 'Failed' : 'Needs attention' }}</strong>
-                <small>{{ operation.isHardcore === null ? 'Mode unknown' : operation.isHardcore ? 'Hardcore' : 'Softcore' }}</small>
-              </div>
-              <div class="operation-summary">
-                <h3>{{ operation.itemCount }} item{{ operation.itemCount === 1 ? '' : 's' }} · {{ formatOperationSource(operation.source) }}</h3>
-                <p v-if="operation.items.length">
-                  <span v-for="item in operation.items" :key="`${operation.id}:${item.record}:${item.seed}`">
-                    {{ item.name }}<small v-if="item.seed !== null">seed {{ item.seed }}</small>
-                  </span>
-                  <em v-if="operation.additionalItemCount">+{{ operation.additionalItemCount }} more</em>
-                </p>
-                <p v-else class="operation-empty">No retained item summary is available for this historical operation.</p>
-                <p v-if="operation.error" class="operation-error">{{ operation.error }}</p>
-              </div>
-              <dl class="operation-meta">
-                <div><dt>Started</dt><dd>{{ formatBackupDate(operation.startedAtUtc) }}</dd></div>
-                <div v-if="operation.completedAtUtc"><dt>Finished</dt><dd>{{ formatBackupDate(operation.completedAtUtc) }}</dd></div>
-                <div><dt>Correlation ID</dt><dd><code>{{ operation.id }}</code></dd></div>
-              </dl>
-            </article>
-            <div v-if="!operationHistoryLoading && operationHistory.items.length === 0" class="vault-empty">No operations match these filters.</div>
-            <nav v-if="operationHistoryPageCount > 1" class="pagination vault-pagination" aria-label="Operation history pages">
-              <button type="button" :disabled="transferHistoryPage === 1" @click="transferHistoryPage -= 1">Previous</button>
-              <span>Page {{ transferHistoryPage }} of {{ operationHistoryPageCount }}</span>
-              <button type="button" :disabled="transferHistoryPage === operationHistoryPageCount" @click="transferHistoryPage += 1">Next</button>
-            </nav>
-          </section>
+          <BoundedResultSurface
+            v-model:page="transferHistoryPage"
+            class="operation-history"
+            :items="operationHistory.items"
+            :get-key="operation => operation.id"
+            :label="transferSection === 'ingest-history' ? 'Ingest history' : 'Dispense history'"
+            :page-size="operationHistoryPageSize"
+            :total-count="operationHistory.total"
+            :loading="operationHistoryLoading"
+            remote
+            empty-title="No matching operations"
+            empty-detail="No operations match these filters."
+          >
+            <template #item="{ item: operation }">
+              <article class="operation-history-row">
+                <div class="operation-state" :class="`state-${operation.state}`">
+                  <strong>{{ operation.state === 'committed' ? 'Completed' : operation.state === 'failed' ? 'Failed' : 'Needs attention' }}</strong>
+                  <small>{{ operation.isHardcore === null ? 'Mode unknown' : operation.isHardcore ? 'Hardcore' : 'Softcore' }}</small>
+                </div>
+                <div class="operation-summary">
+                  <h3>{{ operation.itemCount }} item{{ operation.itemCount === 1 ? '' : 's' }} · {{ formatOperationSource(operation.source) }}</h3>
+                  <p v-if="operation.items.length">
+                    <span v-for="item in operation.items" :key="`${operation.id}:${item.record}:${item.seed}`">
+                      {{ item.name }}<small v-if="item.seed !== null">seed {{ item.seed }}</small>
+                    </span>
+                    <em v-if="operation.additionalItemCount">+{{ operation.additionalItemCount }} more</em>
+                  </p>
+                  <p v-else class="operation-empty">No retained item summary is available for this historical operation.</p>
+                  <p v-if="operation.error" class="operation-error">{{ operation.error }}</p>
+                </div>
+                <dl class="operation-meta">
+                  <div><dt>Started</dt><dd>{{ formatBackupDate(operation.startedAtUtc) }}</dd></div>
+                  <div v-if="operation.completedAtUtc"><dt>Finished</dt><dd>{{ formatBackupDate(operation.completedAtUtc) }}</dd></div>
+                  <div><dt>Correlation ID</dt><dd><code>{{ operation.id }}</code></dd></div>
+                </dl>
+              </article>
+            </template>
+          </BoundedResultSurface>
         </template>
 
         <template v-else>

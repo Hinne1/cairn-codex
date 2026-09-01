@@ -51,6 +51,30 @@ title, explanation, optional status summary, and primary view controls. Tone var
 the workspace's identity, but spacing, hierarchy, typography, and responsive behavior stay
 shared. Do not add another workspace-specific heading shell.
 
+## Bounded result surfaces
+
+Result-heavy workspaces use `src/renderer/src/components/BoundedResultSurface.vue` with the
+pure paging and keyboard model in `src/renderer/src/bounded-results.ts`.
+
+- Local collections pass the complete filtered array; the shared surface slices it to the
+  configured page size before mounting rows or cards.
+- Database-backed collections pass one server page with `remote`, `totalCount`, and the same
+  page size. The surface still refuses to mount more than one page if an endpoint over-delivers.
+- Every record supplies a stable, unique domain key. Array positions are not keys; duplicate
+  keys are contract failures.
+- Loading, empty, error/retry, range, and pagination presentation stay in the shared surface.
+  Workspaces customize the item slot and may customize state copy, but must not fork state or
+  paging behavior.
+- `list`, `grid`, and CSS-table layouts share the same result model. Selectable surfaces use
+  roving focus with Arrow keys, Home, End, Enter, and Space; grid callers declare the keyboard
+  column count used by row navigation.
+- Selection is keyed by domain identity and may survive sorting or paging when the owning tool
+  permits it. A workspace must clear selection explicitly when its safety rules require that.
+
+Transfers operation history is the first server-paged adopter. Remaining Transfers, MI
+Workshop, Planner, and Skills migrations are tracked incrementally under #21 so each change can
+be visually and behaviorally verified without an `App.vue` flag-day rewrite.
+
 ## Search and filter semantics
 
 - Every searchable workspace compiles its query through
@@ -106,7 +130,8 @@ piece being discovered. Surfaces must name those qualifications explicitly.
 2. Use `ExplorerToolbar` if the result set is searchable or filterable.
 3. Keep query, filters, sorting, and result count reactive from the same source of truth.
 4. Route item hover/focus through the global tooltip pipeline.
-5. Add an isolated screenshot interaction for any new control shape.
-6. Verify keyboard focus, narrow layouts, empty results, and restored history state.
-7. Declare the workspace once in `src/shared/search-schema.ts`; parser options, Search tips, and
+5. Use `BoundedResultSurface` for a result set that can exceed one bounded page.
+6. Add an isolated screenshot interaction for any new control shape.
+7. Verify keyboard focus, narrow layouts, empty results, and restored history state.
+8. Declare the workspace once in `src/shared/search-schema.ts`; parser options, Search tips, and
    Advanced search controls must consume that same definition.

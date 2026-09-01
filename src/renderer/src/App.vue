@@ -15,6 +15,13 @@ import DismantlingWorkspace from './workspaces/DismantlingWorkspace.vue'
 import { createDismantlingSession, type DismantlingControls } from './workspaces/dismantling'
 import StashOracleWorkspace from './workspaces/StashOracleWorkspace.vue'
 import type { StashOracleControls } from './workspaces/stash-oracle'
+import SkillExplorerWorkspace from './workspaces/SkillExplorerWorkspace.vue'
+import {
+  buildSkillNames,
+  skillMatchForItem,
+  type SkillExplorerControls,
+  type SkillMatch
+} from './workspaces/skill-explorer'
 import { createNotificationService, type AppNotification } from './notification-service'
 import {
   resetUiPreferences,
@@ -47,9 +54,6 @@ import {
   type SetFeatureFilter,
   type SetProgressFilter,
   type SetSortMode,
-  type SkillRarityFilter,
-  type SkillScope,
-  type SkillSort,
   type SortDirection,
   type SortMode,
   type SupplyCategory,
@@ -137,14 +141,6 @@ interface TooltipAffix {
   kind: 'prefix' | 'suffix'
   rarity: 'magical' | 'rare'
   presentation?: ItemPresentation
-}
-
-interface SkillMatch {
-  skill: string
-  amount: number
-  conversionTarget: string
-  conversionDetails: string
-  special: string
 }
 
 interface PresentedRollStat {
@@ -313,16 +309,16 @@ const setProgressFilter = ref<SetProgressFilter>('all')
 const setFeatureFilter = ref<SetFeatureFilter>('all')
 const setSortMode = ref<SetSortMode>('completion')
 const setSortDirection = ref<SortDirection>('desc')
-const selectedSkill = ref(initialPreferences.search.selectedSkill)
-const skillScope = ref<SkillScope>(initialPreferences.search.skillScope)
-const skillSort = ref<SkillSort>('amount')
-const skillSortDirection = ref<SortDirection>('desc')
-const skillItemPage = ref(1)
-const skillItemQuery = ref('')
-const skillRarityFilter = ref<SkillRarityFilter>('all')
-const skillSlotFilter = ref('all')
-const skillPickerOpen = ref(false)
-const skillPickerIndex = ref(0)
+const skillExplorerControls = ref<SkillExplorerControls>({
+  skill: initialPreferences.search.selectedSkill,
+  query: '',
+  scope: initialPreferences.search.skillScope,
+  rarity: 'all',
+  slot: 'all',
+  sort: 'amount',
+  direction: 'desc',
+  page: 1
+})
 const plannerProfiles = ref<PlannerProfile[]>(structuredClone(initialPreferences.planner.profiles))
 const selectedPlannerProfileId = ref(initialPreferences.planner.selectedProfileId)
 const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)
@@ -493,7 +489,6 @@ const collectionSearchQuery = computed(() => compileSearchQuery(
   searchQueryOptions(activeView.value === 'materials' ? searchSchemas.materials : searchSchemas.collection)
 ))
 const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, searchQueryOptions(searchSchemas.sets)))
-const skillItemsSearchQuery = computed(() => compileSearchQuery(skillItemQuery.value, searchQueryOptions(searchSchemas.skillItems)))
 const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
 const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
 const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, searchQueryOptions(searchSchemas.miWorkshop)))
@@ -1285,92 +1280,10 @@ const selectedStoredCopies = computed(() => {
     .sort((left, right) => (right.score ?? -1) - (left.score ?? -1))
 })
 
-const skillNames = computed(() => {
-  const names = new Set<string>(Object.keys(snapshot.value?.skillMasteries ?? {}))
-  for (const item of plannerCatalogItems.value) {
-    for (const section of item.presentation?.sections ?? []) {
-      if (section.kind === 'skill-modifier' && section.heading) names.add(section.heading)
-      for (const line of section.lines) {
-        if (line.tone === 'skill' && line.label.startsWith('to ')) names.add(line.label.slice(3))
-      }
-    }
-  }
-  return [...names].sort((left, right) => left.localeCompare(right))
-})
-
-const skillSuggestions = computed(() => {
-  const query = selectedSkill.value.trim().toLocaleLowerCase()
-  const matches = skillNames.value.filter((skill) =>
-    query.length === 0 || skill.toLocaleLowerCase().includes(query)
-  )
-  return matches
-    .sort((left, right) => {
-      const leftStarts = left.toLocaleLowerCase().startsWith(query)
-      const rightStarts = right.toLocaleLowerCase().startsWith(query)
-      if (leftStarts !== rightStarts) return leftStarts ? -1 : 1
-      return left.localeCompare(right)
-    })
-    .slice(0, 40)
-})
-
-const skillItemRows = computed(() => {
-  const skill = selectedSkill.value.trim().toLocaleLowerCase()
-  if (!skill) return []
-  const candidates = plannerCatalogItems.value.flatMap((item) => {
-    if (skillScope.value === 'archive' && !isArchivedItem(item)) return []
-    const match = skillMatchForItem(item, skill)
-    return match ? [{ item, ...match }] : []
-  })
-  const miByBase = new Map<string, (typeof candidates)[number]>()
-  const rows = candidates.filter((row) => {
-    if (row.item.rarity !== 'mi') return true
-    const key = `${row.item.name.toLocaleLowerCase()}|${row.item.slot}`
-    const current = miByBase.get(key)
-    if (!current || row.item.levelRequirement < current.item.levelRequirement) miByBase.set(key, row)
-    return false
-  })
-  rows.push(...miByBase.values())
-  const structuredQuery = skillItemsSearchQuery.value
-  return rows
-    .filter((row) => skillRarityFilter.value === 'all' || row.item.rarity === skillRarityFilter.value)
-    .filter((row) => skillSlotFilter.value === 'all' || row.item.slot === skillSlotFilter.value)
-    .filter((row) => {
-      const presentation = presentationSearchText(row.item.presentation)
-      return structuredQuery.matches({
-        text: [row.item.name, row.item.rarity, row.item.slot, row.item.levelRequirement, row.amount, row.conversionTarget, row.conversionDetails, row.special, presentation].join(' '),
-        fields: {
-          name: row.item.name,
-          skill: [row.skill, presentation],
-          damage: [row.conversionTarget, row.conversionDetails, presentation],
-          stat: [row.special, presentation],
-          slot: row.item.slot,
-          rarity: row.item.rarity,
-          level: row.item.levelRequirement,
-          conversion: [row.conversionTarget, row.conversionDetails],
-          owned: isArchivedItem(row.item)
-        }
-      })
-    })
-    .sort((left, right) => {
-    let comparison = 0
-    if (skillSort.value === 'amount') {
-      const leftHasModifier = left.conversionDetails.length > 0 || left.special.length > 0 ? 1 : 0
-      const rightHasModifier = right.conversionDetails.length > 0 || right.special.length > 0 ? 1 : 0
-      comparison = leftHasModifier - rightHasModifier || left.amount - right.amount
-    }
-    else if (skillSort.value === 'slot') comparison = left.item.slot.localeCompare(right.item.slot)
-    else if (skillSort.value === 'conversion') comparison = left.conversionTarget.localeCompare(right.conversionTarget)
-    else if (skillSort.value === 'special') comparison = left.special.localeCompare(right.special)
-    else if (skillSort.value === 'level') comparison = left.item.levelRequirement - right.item.levelRequirement
-    else comparison = left.item.name.localeCompare(right.item.name)
-    if (comparison === 0) comparison = left.item.name.localeCompare(right.item.name)
-    return skillSortDirection.value === 'asc' ? comparison : -comparison
-  })
-})
-
-const skillSlotOptions = computed(() => [...new Set(
-  plannerCatalogItems.value.map((item) => item.slot).filter(Boolean)
-)].sort((left, right) => left.localeCompare(right)))
+const skillNames = computed(() => buildSkillNames(
+  plannerCatalogItems.value,
+  snapshot.value?.skillMasteries
+))
 
 const plannerSkillOptions = computed(() => {
   const needle = plannerSkillDraft.value.trim().toLocaleLowerCase()
@@ -1721,92 +1634,10 @@ const miWorkshopRows = computed(() => {
     )
 })
 
-function skillMatchForItem(item: CollectionItem, requestedSkill: string): SkillMatch | null {
-  const normalizedSkill = requestedSkill.trim().toLocaleLowerCase()
-  if (!normalizedSkill) return null
-  const sections = item.presentation?.sections ?? []
-  const amount = Math.max(
-    0,
-    ...sections
-      .flatMap((section) => section.lines)
-      .filter(
-        (line) =>
-          line.tone === 'skill' &&
-          line.label.startsWith('to ') &&
-          line.label.slice(3).toLocaleLowerCase() === normalizedSkill
-      )
-      .map((line) => line.minimum ?? 0)
-  )
-  const modifiers = sections
-    .filter(
-      (section) =>
-        section.kind === 'skill-modifier' &&
-        section.heading?.toLocaleLowerCase() === normalizedSkill
-    )
-    .flatMap((section) => section.lines)
-  if (amount === 0 && modifiers.length === 0) return null
-  const conversionLines = modifiers.filter((line) => isDamageTypeConversion(line.label))
-  const globalConversionLines = sections
-    .filter((section) => section.kind === 'base')
-    .flatMap((section) => section.lines)
-    .filter((line) => isDamageTypeConversion(line.label))
-  const specialLines = modifiers.filter((line) => !isDamageTypeConversion(line.label))
-  const allConversionLines = [
-    ...conversionLines.map((line) => ({ scope: 'Skill', line })),
-    ...globalConversionLines.map((line) => ({ scope: 'Global', line }))
-  ]
-  const conversionTargets = [...new Set(
-    allConversionLines
-      .map(({ line }) => conversionTarget(line.label))
-      .filter((target): target is string => target !== null)
-  )]
-  return {
-    skill: requestedSkill,
-    amount,
-    conversionTarget: conversionTargets.join(', '),
-    conversionDetails: allConversionLines
-      .map(({ scope, line }) => `${scope}: ${formatPresentationLine(line)}`)
-      .join('; '),
-    special: specialLines.map(formatPresentationLine).join('; ')
-  }
-}
-
 function masteryMatchEffect(match: PlannerMasteryMatch): string {
   return match.amount > 0
     ? `+${match.amount} rank${match.amount === 1 ? '' : 's'} to every ${match.mastery} skill`
     : `Supports every ${match.mastery} skill`
-}
-
-function conversionTarget(label: string): string | null {
-  const match = label.match(/converted to\s+(.+)$/i)
-  const target = match?.[1]?.replace(/\s+Damage$/i, '').trim()
-  return target || null
-}
-
-function isDamageTypeConversion(label: string): boolean {
-  return /\bDamage converted to .+ Damage\b/i.test(label)
-}
-
-function setSkillSort(next: SkillSort): void {
-  if (skillSort.value === next) {
-    skillSortDirection.value = skillSortDirection.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    skillSort.value = next
-    skillSortDirection.value = ['item', 'slot', 'conversion', 'special'].includes(next) ? 'asc' : 'desc'
-  }
-}
-
-function openSkillPicker(): void {
-  skillPickerOpen.value = true
-  const exact = skillSuggestions.value.findIndex(
-    (skill) => skill.toLocaleLowerCase() === selectedSkill.value.trim().toLocaleLowerCase()
-  )
-  skillPickerIndex.value = exact >= 0 ? exact : 0
-}
-
-function selectSkill(skill: string): void {
-  selectedSkill.value = skill
-  skillPickerOpen.value = false
 }
 
 function addPlannerSkill(skill = plannerSkillDraft.value): void {
@@ -1983,34 +1814,6 @@ function togglePlannerIgnored(item: CollectionItem): void {
     : [...plannerIgnoredRecords.value, key]
 }
 
-function handleSkillPickerKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    skillPickerOpen.value = false
-    return
-  }
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-    event.preventDefault()
-    if (!skillPickerOpen.value) openSkillPicker()
-    const direction = event.key === 'ArrowDown' ? 1 : -1
-    const count = skillSuggestions.value.length
-    if (count > 0) skillPickerIndex.value = (skillPickerIndex.value + direction + count) % count
-    return
-  }
-  if (event.key === 'Enter' && skillPickerOpen.value) {
-    const suggestion = skillSuggestions.value[skillPickerIndex.value]
-    if (suggestion) {
-      event.preventDefault()
-      selectSkill(suggestion)
-    }
-  }
-}
-
-function handleSkillPickerFocusOut(event: FocusEvent): void {
-  const container = event.currentTarget as HTMLElement
-  if (event.relatedTarget instanceof Node && container.contains(event.relatedTarget)) return
-  skillPickerOpen.value = false
-}
-
 function currentAppRoute(): AppRoute {
   const itemRecord = selectedRecord.value
   switch (activeView.value) {
@@ -2027,8 +1830,7 @@ function currentAppRoute(): AppRoute {
       sort: sortMode.value, direction: sortDirection.value, page: currentPage.value
     } }
     case 'skills': return { version: 1, workspace: 'skills', itemRecord, controls: {
-      skill: selectedSkill.value, query: skillItemQuery.value, scope: skillScope.value, rarity: skillRarityFilter.value,
-      slot: skillSlotFilter.value, sort: skillSort.value, direction: skillSortDirection.value, page: skillItemPage.value
+      ...skillExplorerControls.value
     } }
     case 'planner': return { version: 1, workspace: 'planner', itemRecord, controls: {
       profileId: selectedPlannerProfileId.value, skills: [...plannerSkills.value], minimumLevel: plannerMinimumLevel.value,
@@ -2121,14 +1923,7 @@ function restoreAppRoute(route: AppRoute): void {
       currentPage.value = route.controls.page
       break
     case 'skills':
-      selectedSkill.value = route.controls.skill
-      skillItemQuery.value = route.controls.query
-      skillScope.value = route.controls.scope
-      skillRarityFilter.value = route.controls.rarity
-      skillSlotFilter.value = route.controls.slot
-      skillSort.value = route.controls.sort
-      skillSortDirection.value = route.controls.direction
-      skillItemPage.value = route.controls.page
+      skillExplorerControls.value = { ...route.controls }
       break
     case 'planner':
       applyingPlannerProfile = true
@@ -2256,8 +2051,13 @@ watch(setSortMode, (mode) => {
   setSortDirection.value = mode === 'completion' ? 'desc' : 'asc'
 })
 
-watch(selectedSkill, (selectedSkill) => preferenceRepository.update('search', { selectedSkill }))
-watch(skillScope, (skillScope) => preferenceRepository.update('search', { skillScope }))
+watch(
+  [
+    () => skillExplorerControls.value.skill,
+    () => skillExplorerControls.value.scope
+  ],
+  ([selectedSkill, skillScope]) => preferenceRepository.update('search', { selectedSkill, skillScope })
+)
 watch(miCountingMode, (miCountingMode) => preferenceRepository.update('workspace', { miCountingMode }))
 watch(
   () => [
@@ -2288,7 +2088,7 @@ watch(
     activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, currentPage,
     setProgressFilter, setFeatureFilter, setSortMode, setSortDirection,
     materialCategory,
-    selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, skillItemPage,
+    skillExplorerControls,
     oracleControls,
     miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, miWorkshopPage,
     plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
@@ -2318,10 +2118,6 @@ watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearanc
 watch([miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode], () => {
   if (restoringAppHistory) return
   miWorkshopPage.value = 1
-})
-watch([selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection], () => {
-  if (restoringAppHistory) return
-  skillItemPage.value = 1
 })
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (restoringAppHistory) return
@@ -3490,7 +3286,7 @@ function sendOracleCandidateToPlanner(candidate: OracleCandidate): void {
 }
 
 function inspectOracleSkill(skill: string): void {
-  selectedSkill.value = skill
+  skillExplorerControls.value = { ...skillExplorerControls.value, skill, page: 1 }
   activeView.value = 'skills'
 }
 
@@ -5999,174 +5795,20 @@ function formatPercentile(value: number | null | undefined): string {
         </template>
       </ExplorerToolbar>
 
-      <section v-if="activeView === 'skills'" class="skill-explorer" aria-label="Skill item explorer">
-        <ToolHeader
-          eyebrow="Build research prototype"
-          title="Items for a skill"
-          description="Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, and level requirements."
-        />
-        <div class="skill-picker">
-          <div class="skill-combobox" @focusout="handleSkillPickerFocusOut">
-            <label for="skill-picker-input">Skill</label>
-            <span class="skill-input-wrap">
-              <input
-                id="skill-picker-input"
-                v-model="selectedSkill"
-                type="text"
-                role="combobox"
-                autocomplete="off"
-                aria-autocomplete="list"
-                :aria-expanded="skillPickerOpen"
-                aria-controls="skill-name-options"
-                placeholder="Choose or type a skill…"
-                @focus="openSkillPicker"
-                @input="skillPickerOpen = true; skillPickerIndex = 0"
-                @keydown="handleSkillPickerKey"
-              />
-              <button
-                v-if="selectedSkill"
-                type="button"
-                aria-label="Clear selected skill"
-                @click="selectedSkill = ''; openSkillPicker()"
-              >
-                ×
-              </button>
-            </span>
-            <span
-              v-if="skillPickerOpen"
-              id="skill-name-options"
-              class="skill-suggestions"
-              role="listbox"
-            >
-              <button
-                v-for="(skill, index) in skillSuggestions"
-                :key="skill"
-                type="button"
-                role="option"
-                :aria-selected="index === skillPickerIndex"
-                :class="{ active: index === skillPickerIndex }"
-                @mouseenter="skillPickerIndex = index"
-                @click="selectSkill(skill)"
-              >
-                {{ skill }}
-              </button>
-              <small v-if="skillSuggestions.length === 0">No indexed skill matches that text.</small>
-            </span>
-          </div>
-        </div>
-        <ExplorerToolbar
-          class="skill-explorer-toolbar"
-          v-model="skillItemQuery"
-          v-bind="searchGuidance.skillItems"
-          search-label="Search matching items"
-          placeholder="Item, slot, modifier, damage type…"
-          :result-count="skillItemRows.length"
-          result-label="matching items"
-          :search-error="searchErrorMessage(skillItemsSearchQuery)"
-        >
-          <template #filters>
-            <label>
-              <span>Availability</span>
-              <select v-model="skillScope" autocomplete="off">
-                <option value="all">All catalog items</option>
-                <option value="archive">My Archive</option>
-              </select>
-            </label>
-            <label>
-              <span>Rarity</span>
-              <select v-model="skillRarityFilter" autocomplete="off">
-                <option value="all">All rarities</option>
-                <option value="legendary">Legendary</option>
-                <option value="epic">Epic</option>
-                <option value="mi">Monster Infrequent</option>
-                <option value="rare">Rare</option>
-              </select>
-            </label>
-            <label>
-              <span>Slot</span>
-              <select v-model="skillSlotFilter" autocomplete="off">
-                <option value="all">All slots</option>
-                <option v-for="slot in skillSlotOptions" :key="slot" :value="slot">{{ slot }}</option>
-              </select>
-            </label>
-          </template>
-          <template #sort>
-            <label>
-              <span>Sort by</span>
-              <select v-model="skillSort" autocomplete="off">
-                <option value="amount">Ranks & modifiers</option>
-                <option value="item">Item name</option>
-                <option value="slot">Slot</option>
-                <option value="conversion">Conversion target</option>
-                <option value="special">Special modifier</option>
-                <option value="level">Required level</option>
-              </select>
-            </label>
-            <label>
-              <span>Order</span>
-              <select v-model="skillSortDirection" autocomplete="off">
-                <option value="desc">Highest first</option>
-                <option value="asc">Lowest first</option>
-              </select>
-            </label>
-          </template>
-        </ExplorerToolbar>
-        <p id="skill-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
-        <BoundedResultSurface
-          v-model:page="skillItemPage"
-          class="skill-table-wrap skill-table-results bounded-tooltip-results"
-          :items="skillItemRows"
-          :get-key="row => row.item.record"
-          :page-size="50"
-          :empty-title="selectedSkill ? 'No matching items' : 'Choose a skill to begin'"
-          :empty-detail="selectedSkill ? (skillItemQuery || skillRarityFilter !== 'all' || skillSlotFilter !== 'all' ? 'No items match the current search and filters.' : 'No matching items in this availability scope.') : 'Select an indexed skill to compare its supporting items.'"
-          label="Items matching the selected skill"
-          aria-describedby="skill-table-scroll-help"
-          tabindex="0"
-          layout="table"
-          interactive
-          item-described-by="item-tooltip"
-          @activate="(_key, row) => openItem(row.item)"
-          @item-focus="(_key, row, element) => showTooltip(row.item, element)"
-          @item-blur="scheduleTooltipHide"
-        >
-          <template #header>
-            <div class="skill-table-header" role="row">
-              <span role="columnheader"><button type="button" @click="setSkillSort('item')">Item {{ skillSort === 'item' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
-              <span role="columnheader"><button type="button" @click="setSkillSort('slot')">Slot <template v-if="skillSort === 'slot'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</template></button></span>
-              <span role="columnheader"><button type="button" @click="setSkillSort('amount')">Ranks {{ skillSort === 'amount' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
-              <span role="columnheader"><button type="button" @click="setSkillSort('conversion')">Target {{ skillSort === 'conversion' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
-              <span role="columnheader">Conversion details</span>
-              <span role="columnheader"><button type="button" @click="setSkillSort('special')">Special modifier <template v-if="skillSort === 'special'">{{ skillSortDirection === 'asc' ? '↑' : '↓' }}</template></button></span>
-              <span role="columnheader"><button type="button" @click="setSkillSort('level')">Level {{ skillSort === 'level' ? (skillSortDirection === 'asc' ? '↑' : '↓') : '' }}</button></span>
-            </div>
-          </template>
-          <template #item="{ item: row }">
-            <div
-              class="skill-table-row"
-                @mouseenter="queueTooltip(row.item, $event)"
-                @mousemove="moveTooltip"
-                @mouseleave="scheduleTooltipHide"
-            >
-              <span role="gridcell">
-                <span class="skill-item-name">
-                  <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-                  <span>
-                    <strong>{{ row.item.name }}</strong>
-                    <small>{{ row.item.rarity }}<template v-if="plannerOwnershipLabel(row.item)"> · {{ plannerOwnershipLabel(row.item) }}</template></small>
-                  </span>
-                </span>
-              </span>
-              <span role="gridcell">{{ row.item.slot }}</span>
-              <span role="gridcell" class="skill-amount">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</span>
-              <span role="gridcell" class="skill-conversion-target">{{ row.conversionTarget || '—' }}</span>
-              <span role="gridcell">{{ row.conversionDetails || '—' }}</span>
-              <span role="gridcell">{{ row.special || '—' }}</span>
-              <span role="gridcell">{{ row.item.levelRequirement }}</span>
-            </div>
-          </template>
-        </BoundedResultSurface>
-      </section>
+      <SkillExplorerWorkspace
+        v-if="activeView === 'skills'"
+        v-model:controls="skillExplorerControls"
+        :items="plannerCatalogItems"
+        :skill-names="skillNames"
+        :is-archived-item="isArchivedItem"
+        :icon-url-for-item="itemIconUrl"
+        :ownership-label-for-item="plannerOwnershipLabel"
+        @queue-tooltip="queueTooltip"
+        @show-tooltip="showTooltip"
+        @move-tooltip="moveTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+      />
 
       <StashOracleWorkspace
         v-else-if="activeView === 'oracle'"

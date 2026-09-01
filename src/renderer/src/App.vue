@@ -22,6 +22,14 @@ import {
   type SkillExplorerControls,
   type SkillMatch
 } from './workspaces/skill-explorer'
+import SuppliesWorkspace from './workspaces/SuppliesWorkspace.vue'
+import {
+  buildReusableSupplySummary,
+  createSupplyAccessSummary,
+  createSupplySession,
+  type SupplyControls,
+  type SupplyOption
+} from './workspaces/supplies'
 import { createNotificationService, type AppNotification } from './notification-service'
 import {
   resetUiPreferences,
@@ -56,8 +64,6 @@ import {
   type SetSortMode,
   type SortDirection,
   type SortMode,
-  type SupplyCategory,
-  type SupplySlotFilter,
   type TransferMode,
   type TransferSection,
   type VaultRarityFilter,
@@ -184,29 +190,6 @@ interface CollectionTriviaFact {
   detail: string
   tone: 'gold' | 'purple' | 'blue' | 'green' | 'ember'
   itemRecord?: string
-}
-
-interface SupplyOption {
-  id: string
-  record: string
-  name: string
-  slot: string
-  slotFamilies: Array<Exclude<SupplySlotFilter, 'all'>>
-  isHardcore: boolean
-  reusable: boolean
-  stackCount: number
-  eligible: boolean
-  detail: string
-  source: 'archive' | 'faction'
-  catalogItem: CollectionItem | null
-  effects: string[]
-  effectCount: number
-}
-
-interface SupplyPresentationIndexEntry {
-  item: CollectionItem
-  effects: string[]
-  searchText: string
 }
 
 interface WorkspaceToolDefinition {
@@ -396,11 +379,14 @@ const transferHistoryQuery = ref('')
 const transferHistoryOutcome = ref<OperationHistoryOutcome>('all')
 const transferHistoryPage = ref(1)
 const operationHistoryPageSize = 50
-const selectedSupplyIds = ref<string[]>([])
-const reusableSupplyQuery = ref('')
-const supplyCategory = ref<SupplyCategory>('writs')
-const supplySlotFilter = ref<SupplySlotFilter>('all')
-const supplyPage = ref(1)
+const supplyControls = ref<SupplyControls>({
+  category: 'writs',
+  slot: 'all',
+  query: '',
+  mode: transferMode.value,
+  page: 1
+})
+const supplySession = createSupplySession()
 const experimentalToolsEnabled = ref(safeModeActive.value ? false : initialPreferences.workspace.experimentalToolsEnabled)
 const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>([...initialPreferences.workspace.visibleTools])
 const toolSettingsOpen = ref(false)
@@ -492,7 +478,6 @@ const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, sear
 const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
 const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
 const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, searchQueryOptions(searchSchemas.miWorkshop)))
-const supplyStructuredQuery = computed(() => compileSearchQuery(reusableSupplyQuery.value, searchQueryOptions(searchSchemas.supplies)))
 const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, searchQueryOptions(searchSchemas.vault)))
 const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, searchQueryOptions(searchSchemas.history)))
 
@@ -527,189 +512,14 @@ const transferableVaultItems = computed(() => storedVaultPage.value.items)
 const availableVaultItems = computed(() => storedVaultPage.value.items)
 const vaultPageCount = computed(() => Math.max(1, Math.ceil(storedVaultPage.value.total / vaultPageSize)))
 const visibleAvailableVaultItems = computed(() => availableVaultItems.value)
-const reusableSupplyUnlocks = computed(() => {
-  const unique = new Map<string, VaultListItem>()
-  for (const item of vaultItems.value) {
-    if (
-      item.rarity !== 'supply' ||
-      item.state !== 'ingested' ||
-      !['writ', 'mandate', 'warrant', 'merit', 'rune'].includes(item.slot)
-    ) continue
-    const key = item.baseRecord.toLocaleLowerCase()
-    if (!unique.has(key)) unique.set(key, item)
-  }
-  return [...unique.values()]
-})
-const reusableSupplySummary = computed<CollectionRaritySummary>(() => {
-  const catalogRecords = new Set(
-    (snapshot.value?.supplies ?? [])
-      .filter((item) => ['writ', 'mandate', 'warrant', 'merit', 'rune'].includes(item.slot))
-      .map((item) => item.record.toLocaleLowerCase())
-  )
-  return {
-    rarity: 'supply',
-    total: catalogRecords.size,
-    collected: reusableSupplyUnlocks.value.filter(
-      (item) => catalogRecords.has(item.baseRecord.toLocaleLowerCase())
-    ).length,
-    availableCopies: reusableSupplyUnlocks.value.length
-  }
-})
-const activeCharacterReputation = computed(() => new Map(
-  (activeCharacter.value?.factions ?? []).map((faction) => [normalizeFactionName(faction.name), faction])
+const reusableSupplySummary = computed<CollectionRaritySummary>(() => buildReusableSupplySummary(
+  snapshot.value?.supplies ?? [],
+  vaultItems.value
 ))
-const supplyPresentationByRecord = computed(() => {
-  const index = new Map<string, SupplyPresentationIndexEntry>()
-  for (const item of snapshot.value?.supplies ?? []) {
-    const effects = supplyEffectLines(item)
-    const requirements = (item.acquisition?.factions ?? [])
-      .flatMap((requirement) => [requirement.faction, requirement.reputation])
-    const searchText = [
-      item.name,
-      item.record,
-      item.slot,
-      ...(item.supplySlotFamilies ?? []),
-      ...requirements,
-      ...effects
-    ].join(' ').toLocaleLowerCase()
-    index.set(item.record.toLocaleLowerCase(), { item, effects, searchText })
-  }
-  return index
-})
-const eligibleFactionAugmentRecords = computed(() => new Set(
-  [...supplyPresentationByRecord.value.values()]
-    .filter(({ item }) => item.slot === 'augment')
-    .filter(({ item }) => (item.acquisition?.factions ?? []).some(
-      (requirement) => requirement.kind !== 'blueprint' &&
-        characterMeetsReputation(requirement.faction, requirement.reputation)
-    ))
-    .map(({ item }) => item.record.toLocaleLowerCase())
+const supplyAccessSummary = computed(() => createSupplyAccessSummary(
+  snapshot.value?.supplies ?? [],
+  activeCharacter.value
 ))
-const eligibleFactionAugmentCount = computed(() => eligibleFactionAugmentRecords.value.size)
-const factionAugmentCount = computed(() =>
-  [...supplyPresentationByRecord.value.values()].filter(({ item }) => item.slot === 'augment').length
-)
-const supplyAccessSummary = computed(() => activeCharacter.value
-  ? `${eligibleFactionAugmentCount.value} augments available to ${activeCharacter.value.name}`
-  : `${factionAugmentCount.value} augments indexed · connect a character to check access`
-)
-const supplyVaultItems = computed<SupplyOption[]>(() => {
-  const structuredQuery = supplyStructuredQuery.value
-  if (supplyCategory.value === 'augments') {
-    const factionAugments = [...supplyPresentationByRecord.value.values()]
-      .filter(({ item }) => item.slot === 'augment')
-      .map(({ item, effects, searchText }): SupplyOption & { searchText: string } => {
-        const requirements = item.acquisition?.factions ?? []
-        const eligible = eligibleFactionAugmentRecords.value.has(item.record.toLocaleLowerCase())
-        return {
-          id: `augment:${item.record}`,
-          record: item.record,
-          name: item.name,
-          slot: item.slot,
-          slotFamilies: item.supplySlotFamilies ?? [],
-          isHardcore: activeCharacter.value?.isHardcore ?? Boolean(activeTransferHardcore.value),
-          reusable: true,
-          stackCount: 1,
-          eligible,
-          detail: eligible
-            ? `Available to ${activeCharacter.value?.name ?? 'active character'} · ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' / ')}`
-            : !activeCharacter.value && liveStatus.value?.state === 'ready'
-              ? 'Waiting for active character save metadata · rechecking automatically'
-            : requirements.length
-              ? `Requires ${requirements.map((entry) => `${entry.faction} ${entry.reputation}`).join(' or ')}`
-              : 'Faction requirement is not indexed',
-          source: 'faction',
-          catalogItem: item,
-          effects: effects.slice(0, 5),
-          effectCount: effects.length,
-          searchText
-        }
-      })
-    const archivedRunes = vaultItems.value
-      .filter((item) => item.rarity === 'supply' && item.slot === 'rune' && item.state === 'ingested')
-      .map((item): SupplyOption => {
-        const eligible = activeTransferHardcore.value !== undefined &&
-          item.isHardcore === activeTransferHardcore.value
-        const presentation = supplyPresentationByRecord.value.get(item.baseRecord.toLocaleLowerCase())
-        const catalogItem = presentation?.item ?? null
-        const effects = presentation?.effects ?? []
-        return {
-          id: item.id,
-          record: item.baseRecord,
-          name: item.name,
-          slot: item.slot,
-          slotFamilies: catalogItem?.supplySlotFamilies ?? [],
-          isHardcore: item.isHardcore,
-          reusable: item.reusable,
-          stackCount: item.stackCount,
-          eligible,
-          detail: `${item.isHardcore ? 'HC' : 'SC'} · archived movement rune${eligible ? '' : ' · select a matching character or stash'}`,
-          source: 'archive',
-          catalogItem,
-          effects: effects.slice(0, 5),
-          effectCount: effects.length
-        }
-      })
-    return [...factionAugments, ...archivedRunes]
-      .filter((item) => supplySlotFilter.value === 'all' || item.slotFamilies.includes(supplySlotFilter.value))
-      .filter((item) => structuredQuery.matches(supplySearchDocument(item)))
-      .sort((left, right) => Number(right.eligible) - Number(left.eligible) || left.name.localeCompare(right.name))
-  }
-  const unique = new Map<string, VaultListItem>()
-  for (const item of vaultItems.value) {
-    if (item.rarity !== 'supply' || item.state !== 'ingested') continue
-    const key = item.slot === 'potion'
-      ? `${item.isHardcore ? 'hc' : 'sc'}:potion:${item.id}`
-      : `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
-    if (!unique.has(key)) unique.set(key, item)
-  }
-  return [...unique.values()]
-    .filter((item) => ['writ', 'mandate', 'warrant', 'merit', 'potion'].includes(item.slot))
-    .filter((item) => {
-      const presentation = supplyPresentationByRecord.value.get(item.baseRecord.toLocaleLowerCase())
-      return structuredQuery.matches({
-        text: [item.name, item.slot, presentation?.searchText, item.isHardcore ? 'hardcore' : 'softcore'].filter(Boolean).join(' '),
-        fields: {
-          name: item.name,
-          category: item.slot,
-          effect: presentation?.effects ?? [],
-          faction: presentation?.item.acquisition?.factions?.flatMap((entry) => [entry.faction, entry.reputation]) ?? [],
-          slot: presentation?.item.supplySlotFamilies ?? [],
-          source: 'archive',
-          mode: item.isHardcore ? 'hardcore' : 'softcore',
-          eligible: activeTransferHardcore.value !== undefined && item.isHardcore === activeTransferHardcore.value
-        }
-      })
-    })
-    .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
-    .map((item): SupplyOption => {
-      const eligible = activeTransferHardcore.value !== undefined &&
-        item.isHardcore === activeTransferHardcore.value
-      const presentation = supplyPresentationByRecord.value.get(item.baseRecord.toLocaleLowerCase())
-      const catalogItem = presentation?.item ?? null
-      const effects = presentation?.effects ?? []
-      return {
-        id: item.id,
-        record: item.baseRecord,
-        name: item.name,
-        slot: item.slot,
-        slotFamilies: catalogItem?.supplySlotFamilies ?? [],
-        isHardcore: item.isHardcore,
-        reusable: item.reusable,
-        stackCount: item.stackCount,
-        eligible,
-        detail: `${item.isHardcore ? 'HC' : 'SC'} · ${item.stackCount} stored · archived ${item.slot}${eligible ? '' : ' · select a matching character or stash'}`,
-        source: 'archive',
-        catalogItem,
-        effects: effects.slice(0, 5),
-        effectCount: effects.length
-      }
-    })
-})
-const visibleSupplyVaultItems = computed(() => {
-  const start = (supplyPage.value - 1) * 60
-  return supplyVaultItems.value.slice(start, start + 60)
-})
 const workspaceToolIdSet = computed(() => new Set(visibleWorkspaceToolIds.value))
 const visibleWorkspaceTools = computed(() =>
   workspaceToolDefinitions
@@ -1848,8 +1658,7 @@ function currentAppRoute(): AppRoute {
       metricDirection: miComparisonDirection.value, sort: miSortMode.value, page: miWorkshopPage.value
     } }
     case 'supplies': return { version: 1, workspace: 'supplies', itemRecord, controls: {
-      category: supplyCategory.value, slot: supplySlotFilter.value, query: reusableSupplyQuery.value,
-      mode: transferMode.value, page: supplyPage.value
+      ...supplyControls.value
     } }
     case 'farming': return { version: 1, workspace: 'farming', itemRecord, controls: {
       ...farmingControls.value
@@ -1959,11 +1768,8 @@ function restoreAppRoute(route: AppRoute): void {
       miWorkshopPage.value = route.controls.page
       break
     case 'supplies':
-      supplyCategory.value = route.controls.category
-      supplySlotFilter.value = route.controls.slot
-      reusableSupplyQuery.value = route.controls.query
+      supplyControls.value = { ...route.controls }
       transferMode.value = route.controls.mode
-      supplyPage.value = route.controls.page
       break
     case 'farming':
       farmingControls.value = { ...route.controls }
@@ -2094,7 +1900,7 @@ watch(
     plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
     plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
     plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
-    reusableSupplyQuery, supplyCategory, supplySlotFilter, supplyPage,
+    supplyControls,
     farmingControls,
     dismantlingControls,
     transferMode, transferHistoryQuery, transferHistoryOutcome, transferHistoryPage,
@@ -2166,11 +1972,14 @@ watch(visibleAtlasRegions, (regions) => {
   }
 }, { immediate: true })
 watch(transferMode, () => {
+  if (supplyControls.value.mode !== transferMode.value) {
+    supplyControls.value = { ...supplyControls.value, mode: transferMode.value }
+  }
   if (restoringAppHistory) return
   selectedVaultIds.value = []
   vaultPage.value = 1
   vaultQuarantinePage.value = 1
-  selectedSupplyIds.value = []
+  supplySession.selectedIds.value = []
 })
 watch(transferSection, (section) => {
   selectedVaultIds.value = []
@@ -2200,17 +2009,8 @@ watch(vaultQuarantinePage, () => {
 watch(vaultPageCount, (count) => {
   if (vaultPage.value > count) vaultPage.value = count
 })
-watch(supplyCategory, () => {
-  if (restoringAppHistory) return
-  supplySlotFilter.value = 'all'
-  selectedSupplyIds.value = []
-})
-watch(supplySlotFilter, () => {
-  selectedSupplyIds.value = []
-})
-watch([supplyCategory, supplySlotFilter, reusableSupplyQuery], () => {
-  if (restoringAppHistory) return
-  supplyPage.value = 1
+watch(() => supplyControls.value.mode, (mode) => {
+  if (transferMode.value !== mode) transferMode.value = mode
 })
 watch(visibleWorkspaceToolIds, (toolIds) => {
   preferenceRepository.update('workspace', { visibleTools: [...toolIds] })
@@ -3011,7 +2811,7 @@ async function setInfiniteSupplies(enabled: boolean): Promise<void> {
   infiniteSuppliesBusy.value = true
   try {
     infiniteSupplies.value = await window.cairnCodex.setInfiniteSupplies(enabled)
-    selectedSupplyIds.value = []
+    supplySession.selectedIds.value = []
     await refreshVault()
   } catch (error) {
     reportTransferProblem(readableError(error))
@@ -3292,48 +3092,15 @@ function inspectOracleSkill(skill: string): void {
 
 async function openSupplies(): Promise<void> {
   activeView.value = 'supplies'
-  reusableSupplyQuery.value = ''
-  supplySlotFilter.value = 'all'
-  supplyPage.value = 1
+  supplyControls.value = { ...supplyControls.value, query: '', slot: 'all', page: 1 }
   await refreshVault()
   await pollLiveLifecycle()
   if (liveStatus.value?.state === 'ready') await refreshHeaderCharacters()
 }
 
-function selectAllVisibleSupplies(): void {
-  selectedSupplyIds.value = visibleSupplyVaultItems.value.filter((item) => item.eligible).map((item) => item.id)
-}
-
-async function dispenseAllWrits(): Promise<void> {
-  supplyCategory.value = 'writs'
-  await nextTick()
-  selectedSupplyIds.value = supplyVaultItems.value
-    .filter((item) => ['writ', 'mandate', 'warrant'].includes(item.slot))
-    .map((item) => item.id)
-  await retrieveSupplies()
-}
-
 function percentage(summary: Pick<CollectionRaritySummary, 'total' | 'collected'> | undefined): string {
   if (!summary || summary.total === 0) return '0%'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
-}
-
-function characterMeetsReputation(factionName: string, requiredRank: string): boolean {
-  const thresholds: Record<string, number> = {
-    tolerated: 0,
-    friendly: 1_500,
-    respected: 5_000,
-    honored: 10_000,
-    revered: 25_000
-  }
-  const threshold = thresholds[requiredRank.toLocaleLowerCase()]
-  if (threshold === undefined || !activeCharacter.value) return false
-  const faction = activeCharacterReputation.value.get(normalizeFactionName(factionName))
-  return Boolean(faction?.isUnlocked && faction.value >= threshold)
-}
-
-function normalizeFactionName(value: string): string {
-  return value.toLocaleLowerCase().replaceAll('’', "'").replace(/[^a-z0-9]/g, '')
 }
 
 function affixPercentage(): string {
@@ -3410,7 +3177,7 @@ async function refreshFullVaultItems(): Promise<void> {
   const items = await window.cairnCodex.listVaultItems()
   vaultItems.value = items
   vaultItemsLoaded.value = true
-  selectedSupplyIds.value = selectedSupplyIds.value.filter((id) =>
+  supplySession.selectedIds.value = supplySession.selectedIds.value.filter((id) =>
     id.startsWith('augment:') ||
     items.some((item) => item.id === id && item.state === 'ingested' && item.rarity === 'supply')
   )
@@ -3677,12 +3444,11 @@ async function retrieveSelectedLive(): Promise<void> {
   }
 }
 
-async function retrieveSupplies(): Promise<void> {
-  if (selectedSupplyIds.value.length === 0 || vaultBusy.value) return
-  const selected = supplyVaultItems.value.filter((item) => selectedSupplyIds.value.includes(item.id))
+async function retrieveSupplies(selected: SupplyOption[], mode: TransferMode): Promise<void> {
+  if (selected.length === 0 || vaultBusy.value) return
   const factionAugments = selected.filter((item) => item.source === 'faction')
   const archived = selected.filter((item) => item.source === 'archive')
-  if (factionAugments.length > 0 && transferMode.value !== 'live') {
+  if (factionAugments.length > 0 && mode !== 'live') {
     reportTransferProblem('Soulbound augments require a live Grim Dawn connection and are delivered to the active character.')
     return
   }
@@ -3700,7 +3466,7 @@ async function retrieveSupplies(): Promise<void> {
         activeCharacter.value?.name
       )
       const delivered = new Set(result.dispensed.map((item) => `augment:${item.record}`))
-      selectedSupplyIds.value = selectedSupplyIds.value.filter((id) => !delivered.has(id))
+      supplySession.selectedIds.value = supplySession.selectedIds.value.filter((id) => !delivered.has(id))
       const deliveredNames = result.dispensed.map((item) => item.name).join(', ')
       reportSuccess(result.issues.length
         ? `Delivered ${result.dispensed.length} augment${result.dispensed.length === 1 ? '' : 's'} to ${result.activeCharacter} (${deliveredNames}); stopped safely: ${result.issues[0]}`
@@ -3714,10 +3480,10 @@ async function retrieveSupplies(): Promise<void> {
   }
   if (archived.length > 0) {
     selectedVaultIds.value = archived.map((item) => item.id)
-    if (transferMode.value === 'live') await retrieveSelectedLive()
+    if (mode === 'live') await retrieveSelectedLive()
     else await retrieveSelected()
   }
-  selectedSupplyIds.value = []
+  supplySession.selectedIds.value = []
 }
 
 async function retrieveArchivedCopyLive(vaultItemId: string): Promise<void> {
@@ -3958,12 +3724,6 @@ function toggleVaultItem(id: string): void {
     : [...selectedVaultIds.value, id]
 }
 
-function toggleSupply(id: string): void {
-  selectedSupplyIds.value = selectedSupplyIds.value.includes(id)
-    ? selectedSupplyIds.value.filter((candidate) => candidate !== id)
-    : [...selectedSupplyIds.value, id]
-}
-
 function readableError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
@@ -4159,23 +3919,6 @@ function plannerSearchDocument(item: CollectionItem): SearchDocument {
       area: areas,
       level: item.levelRequirement,
       owned: isArchivedItem(item)
-    }
-  }
-}
-
-function supplySearchDocument(item: SupplyOption): SearchDocument {
-  const factions = item.catalogItem?.acquisition?.factions?.flatMap((entry) => [entry.faction, entry.reputation]) ?? []
-  return {
-    text: [item.name, item.detail, item.slot, item.source, ...item.slotFamilies, ...item.effects, ...factions].join(' '),
-    fields: {
-      name: item.name,
-      category: item.slot,
-      effect: item.effects,
-      faction: factions,
-      slot: item.slotFamilies,
-      source: item.source,
-      mode: item.isHardcore ? 'hardcore' : 'softcore',
-      eligible: item.eligible
     }
   }
 }
@@ -4601,27 +4344,6 @@ function formatPresentationLine(line: ItemPresentationLine): string {
   const maximum = line.maximum === null ? '' : formatRollValue(line.maximum)
   const range = maximum ? `${minimum}${line.unit} - ${maximum}${line.unit}` : `${minimum}${line.unit}`
   return `${line.prefix}${range}${range ? ' ' : ''}${line.label}${line.suffix}`
-}
-
-function supplyEffectLines(item: CollectionItem): string[] {
-  const flavor = item.presentation?.flavorText ? [item.presentation.flavorText] : []
-  const direct = (item.presentation?.sections ?? [])
-    .flatMap((section) => section.lines.map((line) => {
-      const formatted = formatPresentationLine(line)
-      return section.kind === 'pet' ? `Pets · ${formatted}` : formatted
-    }))
-  const granted = item.presentation?.grantedSkill
-  if (!granted) return [...flavor, ...direct]
-  return [
-    ...flavor,
-    ...direct,
-    `Grants ${granted.name}${granted.trigger ? ` (${granted.trigger})` : ''}`,
-    ...granted.lines.map(formatPresentationLine)
-  ]
-}
-
-function queueSupplyTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLElement): void {
-  if (item.catalogItem) queueTooltip(item.catalogItem, event)
 }
 
 async function pinCopy(copy: ObservedStashItem): Promise<void> {
@@ -5803,8 +5525,8 @@ function formatPercentile(value: number | null | undefined): string {
         :is-archived-item="isArchivedItem"
         :icon-url-for-item="itemIconUrl"
         :ownership-label-for-item="plannerOwnershipLabel"
-        @queue-tooltip="queueTooltip"
         @show-tooltip="showTooltip"
+        @queue-tooltip="queueTooltip"
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
@@ -6355,111 +6077,28 @@ function formatPercentile(value: number | null | undefined): string {
         </BoundedResultSurface>
       </section>
 
-      <section v-else-if="activeView === 'supplies'" class="supplies-workspace" aria-label="Reusable supplies">
-        <ToolHeader
-          eyebrow="Reusable collection"
-          title="Supplies"
-          description="Archived faction boosts, difficulty merits, Nemesis warrants, and runes are reusable. Soulbound augments unlock per character from that character's faction reputation."
-        >
-          <template #aside>
-            <div class="tool-heading-summary">
-              <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</strong>
-              <small>{{ supplyAccessSummary }}</small>
-            </div>
-          </template>
-        </ToolHeader>
-        <ExplorerToolbar
-          v-model="reusableSupplyQuery"
-          v-bind="searchGuidance.supplies"
-          search-label="Search supplies"
-          placeholder="Name, effect, faction…"
-          :result-count="supplyVaultItems.length"
-          result-label="available supplies"
-          :search-error="searchErrorMessage(supplyStructuredQuery)"
-        >
-          <template #filters>
-            <label>
-              <span>Category</span>
-              <select v-model="supplyCategory" autocomplete="off">
-                <option value="writs">Boosts, merits & consumables</option>
-                <option value="augments">Augments & runes</option>
-              </select>
-            </label>
-            <label v-if="supplyCategory === 'augments'">
-              <span>Compatible slot</span>
-              <select v-model="supplySlotFilter" autocomplete="off">
-                <option value="all">All slots</option>
-                <option value="weapon">Weapons</option>
-                <option value="armor">Armor</option>
-                <option value="jewelry">Jewelry</option>
-              </select>
-            </label>
-          </template>
-          <template #actions>
-            <button type="button" :disabled="!visibleSupplyVaultItems.length" @click="selectAllVisibleSupplies">Select visible</button>
-            <button v-if="supplyCategory === 'writs'" type="button" :disabled="vaultBusy || !supplyVaultItems.length" @click="dispenseAllWrits">Dispense all unlocked boosts</button>
-          </template>
-        </ExplorerToolbar>
-        <div class="supply-status">
-          <span :class="'state-' + connectionColorState">{{ transferMode === 'live' ? gameConnectionLabel : writeSafety?.permitted ? 'Offline staging ready' : 'Offline staging locked' }}</span>
-          <div class="segmented-control" aria-label="Supply transfer method">
-            <button type="button" :class="{ active: transferMode === 'live' }" @click="transferMode = 'live'">Live</button>
-            <button type="button" :class="{ active: transferMode === 'offline' }" @click="transferMode = 'offline'">Offline</button>
-          </div>
-        </div>
-        <BoundedResultSurface
-          v-model:page="supplyPage"
-          v-model:selected-keys="selectedSupplyIds"
-          class="supply-results bounded-tooltip-results"
-          :items="supplyVaultItems"
-          :get-key="item => item.id"
-          :page-size="60"
-          :selection-disabled="vaultBusy"
-          :is-item-disabled="item => !item.eligible"
-          :empty-title="reusableSupplyQuery ? 'No matching supplies' : 'No supplies unlocked'"
-          :empty-detail="reusableSupplyQuery ? 'No unlocked supplies match this search and category.' : 'No supplies are unlocked in this category yet.'"
-          label="Available reusable supplies"
-          layout="grid"
-          selection-mode="multiple"
-          item-described-by="item-tooltip"
-          @item-focus="(_key, item, element) => queueSupplyTooltip(item, element)"
-          @item-blur="scheduleTooltipHide"
-        >
-          <template #item="{ item, selected }">
-          <article
-            class="supply-card"
-            :class="{ locked: !item.eligible }"
-            :title="item.catalogItem ? 'Hover for the full in-game tooltip' : undefined"
-            @mouseenter="queueSupplyTooltip(item, $event)"
-            @mousemove="moveTooltip"
-            @mouseleave="scheduleTooltipHide"
-            @focusin="queueSupplyTooltip(item, $event)"
-            @focusout="scheduleTooltipHide"
-          >
-            <input type="checkbox" :checked="selected" :disabled="vaultBusy || !item.eligible" @click.stop @change="toggleSupply(item.id)" />
-            <span class="supply-icon">
-              <img v-if="item.catalogItem && itemIconUrl(item.catalogItem)" :src="itemIconUrl(item.catalogItem)!" alt="" />
-            </span>
-            <span class="supply-card-copy">
-              <strong>{{ item.name }}</strong>
-              <small>{{ item.detail }}</small>
-              <ul v-if="item.effects.length" class="supply-effects">
-                <li v-for="(effect, index) in item.effects" :key="`${item.record}:${index}`">{{ effect }}</li>
-                <li v-if="item.effectCount > item.effects.length" class="more">+{{ item.effectCount - item.effects.length }} more in tooltip</li>
-              </ul>
-              <small v-else class="supply-no-effects">No visible stat effect is indexed.</small>
-            </span>
-            <b>{{ item.reusable ? '∞' : item.stackCount }}</b>
-          </article>
-          </template>
-        </BoundedResultSurface>
-        <button
-          class="supply-dispense"
-          type="button"
-          :disabled="vaultBusy || selectedSupplyIds.length === 0 || (supplyCategory === 'augments' && selectedSupplyIds.some((id) => id.startsWith('augment:')) ? liveStatus?.state !== 'ready' : transferMode === 'live' ? liveStatus?.state !== 'ready' : !writeSafety?.permitted || staging?.itemCount !== 0)"
-          @click="retrieveSupplies"
-        >{{ vaultBusy ? 'Verifying…' : (infiniteSupplies ? 'Dispense ' : 'Return ') + selectedSupplyIds.length + ' selected' }}</button>
-      </section>
+      <SuppliesWorkspace
+        v-else-if="activeView === 'supplies'"
+        v-model:controls="supplyControls"
+        :catalog-items="snapshot?.supplies ?? []"
+        :vault-items="vaultItems"
+        :active-character="activeCharacter"
+        :active-transfer-hardcore="activeTransferHardcore"
+        :live-ready="liveStatus?.state === 'ready'"
+        :live-status-label="gameConnectionLabel"
+        :connection-color-state="connectionColorState"
+        :offline-ready="Boolean(writeSafety?.permitted)"
+        :offline-staging-empty="staging?.itemCount === 0"
+        :busy="vaultBusy"
+        :infinite-supplies="infiniteSupplies"
+        :summary="reusableSupplySummary"
+        :session="supplySession"
+        :icon-url-for-item="itemIconUrl"
+        @queue-tooltip="queueTooltip"
+        @move-tooltip="moveTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @dispense="retrieveSupplies"
+      />
 
       <DismantlingWorkspace
         v-else-if="activeView === 'dismantling'"

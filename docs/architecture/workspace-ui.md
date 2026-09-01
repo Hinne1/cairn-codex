@@ -197,6 +197,16 @@ same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
 
+Supplies owns its typed category, compatible-slot, query, transfer-mode, and page controls plus
+its transient keyed selection in `SuppliesWorkspace.vue`. `supplies.ts` owns reusable-unlock
+counting, catalog presentation indexing, archived-copy identity, faction-reputation access,
+structured search, and deterministic option projection. `App.vue` supplies immutable catalog and
+archive inputs, active-character and transfer readiness, one global-tooltip adapter, and one
+narrow dispense callback; the workspace never reaches the preload API directly. Category and slot
+changes clear selection, query edits preserve selection while resetting page one, transfer-mode
+changes clear selection, and Back/Forward restores the complete typed control snapshot. Supplies
+retains its established delayed tooltip behavior for both pointer and keyboard focus.
+
 ## Semantic badges and Grim Dawn rarity
 
 Compact state labels use `src/renderer/src/components/SemanticBadge.vue` and the variables in

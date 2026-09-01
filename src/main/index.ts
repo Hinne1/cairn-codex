@@ -5688,6 +5688,145 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLIES_WORKSPACE === '1') {
+          interactionTimings.suppliesWorkspaceMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const root = document.querySelector('.supplies-workspace')
+              const resultRoot = document.querySelector('.supply-results')
+              const rows = () => [...document.querySelectorAll('.supply-results .bounded-results-item')]
+              const resultCount = () => Number((document.querySelector('.supplies-workspace .explorer-result-count')?.textContent ?? '').replace(/[^0-9]/g, ''))
+              const setQuery = async (value) => {
+                const input = document.querySelector('.supplies-workspace .explorer-search input')
+                if (!(input instanceof HTMLInputElement)) throw new Error('Supplies search control was not rendered.')
+                input.value = value
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                await wait(175)
+                await frames()
+              }
+              for (let attempt = 0; attempt < 40 && rows().length === 0; attempt += 1) await wait(50)
+              if (!root || !root.querySelector('.tool-header') || !root.querySelector('.explorer-toolbar')) {
+                throw new Error('Supplies did not render the shared workspace shell.')
+              }
+              if (!resultRoot || rows().length < 2 || rows().length > 60) {
+                throw new Error('Supplies did not mount a bounded non-empty result page.')
+              }
+              const originalTotal = resultCount()
+              const originalFirst = rows()[0]?.textContent?.replace(/\s+/g, ' ').trim()
+              if (!Number.isFinite(originalTotal) || originalTotal < rows().length) throw new Error('Supplies result count was invalid.')
+              const first = rows()[0]
+              const second = rows()[1]
+              const searchInput = document.querySelector('.supplies-workspace .explorer-search input')
+              if (!(searchInput instanceof HTMLInputElement)) throw new Error('Supplies search control was not rendered.')
+              first.dispatchEvent(new FocusEvent('blur'))
+              searchInput.focus()
+              await wait(120)
+              if (document.querySelector('.game-tooltip')) throw new Error('Supplies tooltip did not settle before keyboard verification.')
+              let nativeFocusEvents = 0
+              first.addEventListener('focus', () => { nativeFocusEvents += 1 })
+              first.focus()
+              if (document.activeElement !== first) throw new Error('The first Supply card was not keyboard focusable.')
+              if (nativeFocusEvents === 0) first.dispatchEvent(new FocusEvent('focus'))
+              if (document.querySelector('.game-tooltip')) throw new Error('Supply focus bypassed the established delayed tooltip queue.')
+              for (let attempt = 0; attempt < 40 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
+              if (!document.querySelector('.game-tooltip')) throw new Error('Supply keyboard focus did not use the global item tooltip.')
+              first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+              await wait(20)
+              if (document.activeElement !== second) throw new Error('ArrowRight did not move to the next Supply card.')
+              const next = resultRoot.querySelector('.bounded-results-footer nav button:last-of-type')
+              if (next instanceof HTMLButtonElement && !next.disabled) {
+                next.click()
+                await frames()
+                if (rows().length > 60 || rows()[0]?.textContent?.replace(/\s+/g, ' ').trim() === originalFirst) {
+                  throw new Error('Supplies paging did not replace its bounded cards.')
+                }
+              }
+              await setQuery('zz-no-supply-result-zz')
+              if (rows().length !== 0 || !resultRoot.querySelector('.bounded-results-state.is-empty')) {
+                throw new Error('Supplies did not render the shared empty state after an impossible search.')
+              }
+              await setQuery('')
+              if (rows().length < 2 || rows().length > 60 || resultCount() !== originalTotal) {
+                throw new Error('Supplies search reset did not restore the original bounded result set.')
+              }
+              const pageText = resultRoot.querySelector('.bounded-results-footer nav span')?.textContent ?? 'Page 1'
+              if (!pageText.includes('Page 1')) throw new Error('Editing Supplies search did not reset paging to page one.')
+              rows()[0]?.dispatchEvent(new FocusEvent('blur'))
+              searchInput.focus()
+              await wait(100)
+              const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
+                .find((button) => button.textContent?.trim() === label)
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
+                .find((button) => button.querySelector('span')?.textContent?.trim() === label)
+              const waitForPopState = () => new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('Supplies mode verification did not emit popstate.')), 1500)
+                window.addEventListener('popstate', () => {
+                  clearTimeout(timer)
+                  requestAnimationFrame(() => requestAnimationFrame(resolve))
+                }, { once: true })
+              })
+              const initialLiveSupply = document.querySelector('.supplies-workspace .segmented-control button:first-child')
+              if (!(initialLiveSupply instanceof HTMLButtonElement)) throw new Error('Live Supplies mode was unavailable to history verification.')
+              initialLiveSupply.click()
+              await frames()
+              const transfers = systemButton('Transfers')
+              if (!(transfers instanceof HTMLButtonElement)) throw new Error('Transfers navigation was unavailable to Supplies mode verification.')
+              transfers.click()
+              await frames()
+              const quarantine = [...document.querySelectorAll('.transfer-section-tabs button')]
+                .find((button) => button.textContent?.includes('Quarantined items'))
+              if (!(quarantine instanceof HTMLButtonElement)) throw new Error('Quarantine section was unavailable to Supplies mode verification.')
+              quarantine.click()
+              await frames()
+              const offlineTransfer = document.querySelector('.transfer-mode-tabs button:last-child')
+              if (!(offlineTransfer instanceof HTMLButtonElement)) throw new Error('Offline transfer mode was unavailable to Supplies mode verification.')
+              offlineTransfer.click()
+              await frames()
+              const backToTransfers = waitForPopState()
+              history.back()
+              await backToTransfers
+              if (!document.querySelector('.vault-workspace')) {
+                throw new Error('Back did not restore the prior Transfers section.')
+              }
+              const backToSupplies = waitForPopState()
+              history.back()
+              await backToSupplies
+              if (!document.querySelector('.supplies-workspace .segmented-control button:first-child.active')) {
+                throw new Error('Back did not restore the original live Supplies mode.')
+              }
+              const forwardToTransfers = waitForPopState()
+              history.forward()
+              await forwardToTransfers
+              if (!document.querySelector('.vault-workspace')) {
+                throw new Error('Forward did not restore the prior Transfers section.')
+              }
+              const forwardToOffline = waitForPopState()
+              history.forward()
+              await forwardToOffline
+              if (!document.querySelector('.transfer-mode-tabs button:last-child.active')) {
+                throw new Error('Forward did not restore the offline Transfers mode.')
+              }
+              const collection = systemButton('Collection')
+              if (!(collection instanceof HTMLButtonElement)) throw new Error('Collection navigation was unavailable to Supplies mode verification.')
+              collection.click()
+              await frames()
+              const supplies = workspaceButton('Supplies')
+              if (!(supplies instanceof HTMLButtonElement)) throw new Error('Supplies navigation was unavailable after Transfers restoration.')
+              supplies.click()
+              await frames()
+              const restoredOffline = document.querySelector('.supplies-workspace .segmented-control button:last-child')
+              if (!(restoredOffline instanceof HTMLButtonElement) || !restoredOffline.classList.contains('active')) {
+                throw new Error('Supplies did not inherit the restored offline transfer mode.')
+              }
+              const liveSupply = document.querySelector('.supplies-workspace .segmented-control button:first-child')
+              if (liveSupply instanceof HTMLButtonElement) liveSupply.click()
+              await frames()
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_DISMANTLING_PREVIEW === '1') {
           await window.webContents.executeJavaScript(`
             [...document.querySelectorAll('.dismantling-toolbar button')]

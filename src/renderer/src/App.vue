@@ -2211,14 +2211,15 @@ function currentAppRoute(): AppRoute {
     case 'oracle': return { version: 1, workspace: 'oracle', itemRecord, controls: {
       query: oracleQuery.value, characterClass: oracleClass.value, style: oracleStyle.value,
       readiness: oracleReadiness.value, minimumLevel: oracleMinimumLevel.value, maximumLevel: oracleMaximumLevel.value,
-      sort: oracleSortMode.value, direction: oracleSortDirection.value
+      sort: oracleSortMode.value, direction: oracleSortDirection.value, page: oraclePage.value
     } }
     case 'mi-workshop': return { version: 1, workspace: 'mi-workshop', itemRecord, controls: {
       query: miWorkshopQuery.value, affix: miAffixFilter.value, metric: miComparisonMetric.value,
       metricDirection: miComparisonDirection.value, sort: miSortMode.value, page: miWorkshopPage.value
     } }
     case 'supplies': return { version: 1, workspace: 'supplies', itemRecord, controls: {
-      category: supplyCategory.value, slot: supplySlotFilter.value, query: reusableSupplyQuery.value
+      category: supplyCategory.value, slot: supplySlotFilter.value, query: reusableSupplyQuery.value,
+      mode: transferMode.value, page: supplyPage.value
     } }
     case 'farming': return { version: 1, workspace: 'farming', itemRecord, controls: {
       query: farmingQuery.value, rarity: farmingRarity.value, page: farmingPage.value
@@ -2329,6 +2330,7 @@ function restoreAppRoute(route: AppRoute): void {
       oracleMaximumLevel.value = Math.max(route.controls.minimumLevel, route.controls.maximumLevel)
       oracleSortMode.value = route.controls.sort
       oracleSortDirection.value = route.controls.direction
+      oraclePage.value = route.controls.page
       break
     case 'mi-workshop':
       miWorkshopQuery.value = route.controls.query
@@ -2342,6 +2344,8 @@ function restoreAppRoute(route: AppRoute): void {
       supplyCategory.value = route.controls.category
       supplySlotFilter.value = route.controls.slot
       reusableSupplyQuery.value = route.controls.query
+      transferMode.value = route.controls.mode
+      supplyPage.value = route.controls.page
       break
     case 'farming':
       farmingQuery.value = route.controls.query
@@ -2424,10 +2428,12 @@ watch(query, (value) => {
 })
 
 watch(sortMode, (mode) => {
+  if (restoringAppHistory) return
   sortDirection.value = mode === 'name' ? 'asc' : 'desc'
 })
 
 watch(setSortMode, (mode) => {
+  if (restoringAppHistory) return
   setSortDirection.value = mode === 'completion' ? 'desc' : 'asc'
 })
 
@@ -2439,6 +2445,7 @@ watch(oracleStyle, (oracleStyle) => preferenceRepository.update('search', { orac
 watch(oracleMinimumLevel, (oracleMinimumLevel) => preferenceRepository.update('search', { oracleMinimumLevel }))
 watch(oracleMaximumLevel, (oracleMaximumLevel) => preferenceRepository.update('search', { oracleMaximumLevel }))
 watch([oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleQuery], () => {
+  if (restoringAppHistory) return
   oraclePage.value = 1
 })
 watch(selectedRecord, () => {
@@ -2457,12 +2464,12 @@ watch(
     setProgressFilter, setFeatureFilter, setSortMode, setSortDirection,
     materialCategory,
     selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, skillItemPage,
-    oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection,
+    oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection, oraclePage,
     miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, miWorkshopPage,
     plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
     plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
     plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
-    reusableSupplyQuery, supplyCategory, supplySlotFilter,
+    reusableSupplyQuery, supplyCategory, supplySlotFilter, supplyPage,
     farmingQuery, farmingRarity, farmingPage,
     dismantlingQuery, dismantlingMode, dismantlingRarity,
     transferMode, transferHistoryQuery, transferHistoryOutcome, transferHistoryPage,
@@ -2532,6 +2539,7 @@ watch(plannerFavoriteRecords, (records) => {
   preferenceRepository.update('planner', { favoriteRecords: [...records] })
 }, { deep: true })
 watch([plannerMapScope, plannerMinimumLevel, plannerLevelCap, plannerSkills], () => {
+  if (restoringAppHistory) return
   selectedAtlasRegion.value = null
 })
 watch(visibleAtlasRegions, (regions) => {
@@ -2583,6 +2591,7 @@ watch(supplySlotFilter, () => {
   selectedSupplyIds.value = []
 })
 watch([supplyCategory, supplySlotFilter, reusableSupplyQuery], () => {
+  if (restoringAppHistory) return
   supplyPage.value = 1
 })
 watch([dismantlingQuery, dismantlingMode, dismantlingRarity], () => {

@@ -90,7 +90,7 @@ const testRoot = resolve('local-cache', 'ui-benchmark')
 const profileRoot = resolve(testRoot, 'profile')
 const screenshotPath = resolve(testRoot, `${screenshotName || 'collection'}.png`)
 const reportPath = resolve(testRoot, 'performance.json')
-await rm(testRoot, { recursive: true, force: true })
+await rm(testRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 if (fixture) {
   await mkdir(profileRoot, { recursive: true })
 } else if (baseProfile) {
@@ -202,6 +202,15 @@ try {
   execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
 } catch {
   child.kill()
+}
+if (child.exitCode === null) {
+  await new Promise((resolveExit) => {
+    const timer = setTimeout(resolveExit, 2_000)
+    child.once('close', () => {
+      clearTimeout(timer)
+      resolveExit()
+    })
+  })
 }
 const itemCount = Number(String(report.renderedState?.results ?? '').replace(/[^0-9]/g, ''))
 const requestedViewport = {

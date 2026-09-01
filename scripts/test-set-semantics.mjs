@@ -89,13 +89,19 @@ assert.deepEqual(setItemBadges(missing).map(({ label, tone }) => ({ label, tone 
 
 const tokenSource = readFileSync(new URL('../src/renderer/src/semantic-tokens.css', import.meta.url), 'utf8')
 const semanticColors = [...tokenSource.matchAll(/--(?:gd-rarity|semantic)-[\w-]+:\s*(#[0-9a-f]{6})/gi)]
-  .map((match) => match[1])
+  .map((match) => ({ name: match[0].slice(2, match[0].indexOf(':')), color: match[1] }))
 assert(semanticColors.length >= 10, 'Expected every semantic tone to expose a hex token')
-for (const foreground of semanticColors) {
-  for (const background of ['#11110f', '#2d252a']) {
+for (const { name, color: foreground } of semanticColors) {
+  const backgrounds = ['#11110f', '#2d252a']
+  if (name.startsWith('gd-rarity-')) {
+    // The first set-card gradient stop mixes 9% rarity color into its base
+    // before SemanticBadge adds its own 12% tint.
+    backgrounds.push(compositeHex(foreground, '#2a2720', 0.09))
+  }
+  for (const background of backgrounds) {
     const badgeSurface = compositeHex(foreground, background, 0.12)
     assert(contrastRatio(foreground, badgeSurface) >= 4.5,
-      `${foreground} must meet 4.5:1 contrast against its ${badgeSurface} composited badge surface`)
+      `${name} ${foreground} must meet 4.5:1 contrast against its ${badgeSurface} composited badge surface`)
   }
 }
 

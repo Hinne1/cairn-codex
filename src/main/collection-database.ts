@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
+import { compileSearchQuery, type SearchExpression } from '../shared/search-query.ts'
 import type {
   CollectionItem,
   CollectionSnapshot,
@@ -16,6 +17,46 @@ import type {
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 export const CURRENT_COLLECTION_SCHEMA_VERSION = 12
+
+interface SqlSearchFragment {
+  sql: string
+  parameters: Array<string | number>
+}
+
+function escapedLike(value: string): string {
+  return `%${value.replace(/[\\%_]/g, '\\$&')}%`
+}
+
+function textSearchSql(expression: string, value: string): SqlSearchFragment {
+  return {
+    sql: `LOWER(COALESCE(${expression}, '')) LIKE ? ESCAPE char(92)`,
+    parameters: [escapedLike(value)]
+  }
+}
+
+function numericSearchSql(expression: string, value: string): SqlSearchFragment {
+  const match = /^(>=|<=|>|<|=)?\s*(-?\d+(?:\.\d+)?)$/.exec(value)
+  if (!match) return { sql: '0', parameters: [] }
+  const operator = match[1] ?? '='
+  return { sql: `CAST(${expression} AS REAL) ${operator} ?`, parameters: [Number(match[2])] }
+}
+
+function searchExpressionSql(
+  expression: SearchExpression,
+  resolveTerm: (term: Extract<SearchExpression, { kind: 'term' }>) => SqlSearchFragment
+): SqlSearchFragment {
+  if (expression.kind === 'term') return resolveTerm(expression)
+  if (expression.kind === 'not') {
+    const operand = searchExpressionSql(expression.operand, resolveTerm)
+    return { sql: `(NOT (${operand.sql}))`, parameters: operand.parameters }
+  }
+  const left = searchExpressionSql(expression.left, resolveTerm)
+  const right = searchExpressionSql(expression.right, resolveTerm)
+  return {
+    sql: `((${left.sql}) ${expression.kind === 'and' ? 'AND' : 'OR'} (${right.sql}))`,
+    parameters: [...left.parameters, ...right.parameters]
+  }
+}
 
 export interface ValidatedCollectionDatabase {
   schemaVersion: number
@@ -895,19 +936,40 @@ export class CollectionDatabase {
     }
     const query = request.query?.trim().toLocaleLowerCase() ?? ''
     if (query) {
-      clauses.push(`
-        LOWER(
-          catalog_item.name || ' ' ||
-          vault_item.base_record || ' ' ||
-          catalog_item.slot || ' ' ||
-          catalog_item.rarity || ' ' ||
-          catalog_item.item_level || ' ' ||
-          COALESCE(json_extract(CAST(vault_item.serialized_item AS TEXT), '$.seed'), '') || ' ' ||
-          COALESCE(json_extract(CAST(vault_item.serialized_item AS TEXT), '$.prefixRecord'), '') || ' ' ||
-          COALESCE(json_extract(CAST(vault_item.serialized_item AS TEXT), '$.suffixRecord'), '')
-        ) LIKE ? ESCAPE char(92)
-      `)
-      parameters.push(`%${query.replace(/[\\%_]/g, '\\$&')}%`)
+      const compiled = compileSearchQuery(query, {
+        fields: ['name', 'base', 'prefix', 'suffix', 'affix', 'slot', 'rarity', 'level', 'seed', 'mode', 'pack'],
+        numericFields: ['level', 'seed']
+      })
+      if (compiled.error || !compiled.expression) throw new Error(compiled.error?.message ?? 'Invalid vault search query.')
+      const payload = 'CAST(vault_item.serialized_item AS TEXT)'
+      const prefix = `json_extract(${payload}, '$.prefixRecord')`
+      const suffix = `json_extract(${payload}, '$.suffixRecord')`
+      const everything = `
+        catalog_item.name || ' ' || vault_item.base_record || ' ' || catalog_item.slot || ' ' ||
+        catalog_item.rarity || ' ' || catalog_item.level_requirement || ' ' || catalog_item.content_pack || ' ' ||
+        CASE WHEN vault_item.is_hardcore = 1 THEN 'hardcore' ELSE 'softcore' END || ' ' ||
+        COALESCE(json_extract(${payload}, '$.seed'), '') || ' ' ||
+        COALESCE(${prefix}, '') || ' ' || COALESCE(${suffix}, '')
+      `
+      const fragment = searchExpressionSql(compiled.expression, (term) => {
+        if (!term.field) return textSearchSql(everything, term.value)
+        if (term.field === 'level') return numericSearchSql('catalog_item.level_requirement', term.value)
+        if (term.field === 'seed') return numericSearchSql(`json_extract(${payload}, '$.seed')`, term.value)
+        const fields: Record<string, string> = {
+          name: 'catalog_item.name',
+          base: 'vault_item.base_record',
+          prefix,
+          suffix,
+          affix: `COALESCE(${prefix}, '') || ' ' || COALESCE(${suffix}, '')`,
+          slot: 'catalog_item.slot',
+          rarity: 'catalog_item.rarity',
+          mode: "CASE WHEN vault_item.is_hardcore = 1 THEN 'hardcore' ELSE 'softcore' END",
+          pack: 'catalog_item.content_pack'
+        }
+        return textSearchSql(fields[term.field]!, term.value)
+      })
+      clauses.push(fragment.sql)
+      parameters.push(...fragment.parameters)
     }
     const where = clauses.join(' AND ')
     const totalRow = this.database.prepare(`
@@ -976,45 +1038,106 @@ export class CollectionDatabase {
         ON direct_history_catalog.record = direct_history_item.base_record
     ` : ''
     if (query) {
-      clauses.push(`(
-        LOWER(
-          operation_journal.id || ' ' || operation_journal.state || ' ' ||
+      const compiled = compileSearchQuery(query, {
+        fields: ['item', 'name', 'base', 'seed', 'outcome', 'state', 'id', 'mode', 'source', 'time'],
+        aliases: { correlation: 'id', date: 'time' },
+        numericFields: ['seed']
+      })
+      if (compiled.error || !compiled.expression) throw new Error(compiled.error?.message ?? 'Invalid operation-history search query.')
+      const itemTerm = (
+        field: string,
+        value: string,
+        itemAlias: string,
+        catalogAlias: string
+      ): SqlSearchFragment => {
+        if (field === 'seed') {
+          return numericSearchSql(`json_extract(CAST(${itemAlias}.serialized_item AS TEXT), '$.seed')`, value)
+        }
+        if (field === 'name') return textSearchSql(`${catalogAlias}.name`, value)
+        if (field === 'base') return textSearchSql(`${itemAlias}.base_record`, value)
+        return textSearchSql(
+          `${catalogAlias}.name || ' ' || ${itemAlias}.base_record || ' ' || CAST(${itemAlias}.serialized_item AS TEXT)`,
+          value
+        )
+      }
+      const relatedItemTerm = (field: string, value: string): SqlSearchFragment => {
+        const direct = itemTerm(field, value, 'direct_history_item', 'direct_history_catalog')
+        const listed = itemTerm(field, value, 'history_item', 'history_catalog')
+        const timestamp = itemTerm(field, value, 'history_item', 'history_catalog')
+        return {
+          sql: `(
+            (${direct.sql}) OR
+            (operation_journal.vault_item_id IS NULL AND EXISTS (
+              SELECT 1
+              FROM json_each(
+                CASE WHEN json_valid(operation_journal.detail_json) THEN operation_journal.detail_json ELSE '{}' END,
+                '$.vaultItemIds'
+              ) history_id
+              JOIN vault_item history_item ON history_item.id = history_id.value
+              JOIN catalog_item history_catalog ON history_catalog.record = history_item.base_record
+              WHERE ${listed.sql}
+            )) OR
+            (operation_journal.vault_item_id IS NULL AND EXISTS (
+              SELECT 1
+              FROM vault_item history_item
+              JOIN catalog_item history_catalog ON history_catalog.record = history_item.base_record
+              WHERE (
+                (operation_journal.operation = 'ingest' AND history_item.ingested_at_utc = operation_journal.completed_at_utc) OR
+                (operation_journal.operation = 'retrieve' AND history_item.retrieved_at_utc = operation_journal.completed_at_utc)
+              ) AND ${timestamp.sql}
+            ))
+          )`,
+          parameters: [...direct.parameters, ...listed.parameters, ...timestamp.parameters]
+        }
+      }
+      const fragment = searchExpressionSql(compiled.expression, (term) => {
+        const field = term.field === 'correlation' ? 'id' : term.field === 'date' ? 'time' : term.field
+        if (field === 'item' || field === 'name' || field === 'base' || field === 'seed') {
+          return relatedItemTerm(field, term.value)
+        }
+        const historySourceSql = `CASE
+          WHEN operation_journal.id LIKE 'gdia-import-%' THEN 'item assistant'
+          WHEN LOWER(operation_journal.stash_path) LIKE ('live' || char(58) || '%') THEN 'live game'
+          ELSE 'offline shared stash'
+        END`
+        const relatedMode = `(SELECT history_mode_item.is_hardcore
+          FROM vault_item history_mode_item
+          WHERE operation_journal.vault_item_id IS NULL AND (
+            (operation_journal.operation = 'ingest' AND history_mode_item.ingested_at_utc = operation_journal.completed_at_utc) OR
+            (operation_journal.operation = 'retrieve' AND history_mode_item.retrieved_at_utc = operation_journal.completed_at_utc)
+          )
+          ORDER BY history_mode_item.id
+          LIMIT 1)`
+        const mode = `CASE COALESCE(
+          direct_history_item.is_hardcore,
+          json_extract(
+            CASE WHEN json_valid(operation_journal.detail_json) THEN operation_journal.detail_json ELSE '{}' END,
+            '$.isHardcore'
+          ),
+          ${relatedMode}
+        ) WHEN 1 THEN 'hardcore' WHEN 0 THEN 'softcore' ELSE 'unknown' END`
+        const metadata = `
+          operation_journal.id || ' ' || operation_journal.state || ' ' || ${historySourceSql} || ' ' || ${mode} || ' ' ||
           operation_journal.started_at_utc || ' ' || COALESCE(operation_journal.completed_at_utc, '') || ' ' ||
           operation_journal.detail_json
-        ) LIKE ? ESCAPE char(92)
-        OR LOWER(
-          COALESCE(direct_history_catalog.name, '') || ' ' ||
-          COALESCE(direct_history_item.base_record, '') || ' ' ||
-          COALESCE(CAST(direct_history_item.serialized_item AS TEXT), '')
-        ) LIKE ? ESCAPE char(92)
-        OR (operation_journal.vault_item_id IS NULL AND EXISTS (
-          SELECT 1
-          FROM json_each(
-            CASE WHEN json_valid(operation_journal.detail_json) THEN operation_journal.detail_json ELSE '{}' END,
-            '$.vaultItemIds'
-          ) history_id
-          JOIN vault_item history_item ON history_item.id = history_id.value
-          JOIN catalog_item history_catalog ON history_catalog.record = history_item.base_record
-          WHERE LOWER(
-            history_catalog.name || ' ' || history_item.base_record || ' ' ||
-            CAST(history_item.serialized_item AS TEXT)
-          ) LIKE ? ESCAPE char(92)
-        ))
-        OR (operation_journal.vault_item_id IS NULL AND EXISTS (
-          SELECT 1
-          FROM vault_item history_item
-          JOIN catalog_item history_catalog ON history_catalog.record = history_item.base_record
-          WHERE (
-            (operation_journal.operation = 'ingest' AND history_item.ingested_at_utc = operation_journal.completed_at_utc) OR
-            (operation_journal.operation = 'retrieve' AND history_item.retrieved_at_utc = operation_journal.completed_at_utc)
-          ) AND LOWER(
-            history_catalog.name || ' ' || history_item.base_record || ' ' ||
-            CAST(history_item.serialized_item AS TEXT)
-          ) LIKE ? ESCAPE char(92)
-        ))
-      )`)
-      const escaped = `%${query.replace(/[\\%_]/g, '\\$&')}%`
-      parameters.push(escaped, escaped, escaped, escaped)
+        `
+        if (!field) {
+          const journal = textSearchSql(metadata, term.value)
+          const related = relatedItemTerm('item', term.value)
+          return { sql: `((${journal.sql}) OR (${related.sql}))`, parameters: [...journal.parameters, ...related.parameters] }
+        }
+        const fields: Record<string, string> = {
+          outcome: 'operation_journal.state',
+          state: 'operation_journal.state',
+          id: 'operation_journal.id',
+          mode,
+          source: historySourceSql,
+          time: `operation_journal.started_at_utc || ' ' || COALESCE(operation_journal.completed_at_utc, '')`
+        }
+        return textSearchSql(fields[field]!, term.value)
+      })
+      clauses.push(fragment.sql)
+      parameters.push(...fragment.parameters)
     }
     const where = clauses.join(' AND ')
     const totalRow = this.database.prepare(`

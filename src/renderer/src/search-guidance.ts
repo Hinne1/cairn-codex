@@ -5,51 +5,55 @@ export interface SearchGuidance {
 
 export const searchGuidance = {
   collection: {
-    searchHelp: 'Match item names, sets, stats, skills, slots, rarities, content packs, and sources. Separate terms narrow the results. Fields include name, set, skill, slot, type, rarity, pack, and level.',
-    searchExamples: ['skill:wendigo', 'rarity:legendary level:>=75', '"aether damage" slot:amulet']
+    searchHelp: 'Terms use AND by default. You can also use explicit AND/OR, parentheses, quoted phrases, and NOT or -term. Fields: name, set, skill, damage, slot, type, rarity, pack, level, and owned.',
+    searchExamples: ['skill:wendigo AND "vitality damage"', 'rarity:legendary level:>=75', '(slot:amulet OR slot:medal) -damage:aether']
   },
   sets: {
-    searchHelp: 'Match set names, piece names, set bonuses, skills, stats, slots, and levels. Separate terms narrow the results, and the collection field prefixes are supported.',
-    searchExamples: ['set:ultos', '"aether damage"', 'skill:wendigo']
+    searchHelp: 'Search set and piece data with AND/OR, parentheses, quotes, and negation. Fields: set, name, skill, damage, slot, rarity, pack, level, and owned.',
+    searchExamples: ['set:ultos AND damage:lightning', 'skill:wendigo OR skill:briarthorn', 'rarity:legendary level:>=94']
   },
   materials: {
-    searchHelp: 'Match component and consumable names, effects, skills, item types, content packs, and levels. Separate terms narrow the results.',
-    searchExamples: ['"fire resistance"', 'skill:wendigo', 'pack:gdx1']
+    searchHelp: 'Search effects and metadata with AND/OR, quotes, parentheses, and negation. Fields: name, skill, damage, slot, type, rarity, pack, level, and owned.',
+    searchExamples: ['"fire resistance" AND slot:component', 'skill:wendigo', 'pack:gdx1 -damage:cold']
   },
   skillItems: {
-    searchHelp: 'Match the selected skill’s items by name, rarity, slot, level, modifier text, conversion, damage type, or other displayed stats.',
-    searchExamples: ['amulet', 'cold damage', 'converted']
+    searchHelp: 'Combine terms with AND/OR, parentheses, quotes, and negation. Fields: name, skill, damage, stat, slot, rarity, level, conversion, and owned.',
+    searchExamples: ['slot:amulet AND damage:cold', 'conversion:vitality OR stat:recharge', 'level:>=75 -rarity:rare']
   },
   oracle: {
-    searchHelp: 'Match build archetypes by class, mastery, skill, damage type, play style, supporting set, or evidence item.',
-    searchExamples: ['Warder', 'vitality', 'Wendigo']
+    searchHelp: 'Search build evidence with Boolean logic and quoted phrases. Fields: name, class, mastery, skill, damage, style, set, item, readiness, and score.',
+    searchExamples: ['class:conjurer AND damage:vitality', 'skill:wendigo OR skill:briarthorn', 'readiness:ready score:>=75']
   },
   planner: {
-    searchHelp: 'Match shopping-list items by name, type, slot, rarity, stats, skills, acquisition source, or area.',
-    searchExamples: ['amulet', 'vitality damage', 'Ugdenbog']
+    searchHelp: 'Search shopping-list items with Boolean logic. Fields: name, type, slot, rarity, skill, damage, source, area, level, and owned. location: is an alias for area:.',
+    searchExamples: ['skill:wendigo AND "vitality damage"', 'area:ugdenbog OR source:zaria', 'level:<=50 -owned:true']
   },
   atlas: {
-    searchHelp: 'Match source regions by area name, Monster Infrequent item, monster, or other indexed source text.',
-    searchExamples: ['Ugdenbog', 'Zaria', 'Cronley']
+    searchHelp: 'Search source regions with AND/OR, quotes, and negation. Fields: name, area, item, monster, source, pack, and level.',
+    searchExamples: ['area:ugdenbog AND monster:wendigo', 'item:"zaria’s pendant"', 'pack:gdx1 level:>=75']
   },
   miWorkshop: {
-    searchHelp: 'Match archived Monster Infrequents by base item, slot, level, prefix, suffix, stat, skill, or damage type.',
-    searchExamples: ["Zaria's Pendant", 'of the Abyss', 'vitality damage']
+    searchHelp: 'Search retained MI combinations with Boolean logic. Fields: name, slot, level, prefix, suffix, affix, skill, damage, stat, and copies.',
+    searchExamples: ['name:"bloodsworn codex" AND damage:vitality', 'prefix:devouring OR suffix:"of the wild"', 'copies:>=2 -damage:aether']
   },
   supplies: {
-    searchHelp: 'Match supplies by name, category, effect, faction requirement, slot family, or other indexed item text.',
-    searchExamples: ["Devil's Crossing", 'reputation gain', 'movement']
+    searchHelp: 'Search supply effects and access with Boolean logic. Fields: name, category, effect, faction, slot, source, mode, and eligible.',
+    searchExamples: ['effect:"aether resistance" AND slot:armor', 'faction:homestead eligible:true', 'category:rune OR category:merit']
   },
   dismantling: {
-    searchHelp: 'Match eligible archived copies by item or base name, or by a prefix, suffix, or base record path. Use the adjacent filters for game mode and rarity.',
-    searchExamples: ['Stoneplate', 'records/items/gearfeet', 'records/items/gearweapons']
+    searchHelp: 'Search eligible copies with Boolean logic. Fields: name, base, prefix, suffix, affix, rarity, mode, and level. Adjacent filters still apply.',
+    searchExamples: ['name:stoneplate AND rarity:rare', 'prefix:devouring OR suffix:"of decay"', 'mode:hardcore level:>=75']
   },
   farming: {
-    searchHelp: 'Match missing items by name, stat, skill, monster, source, or area. Cairn ranks the remaining source areas by useful missing drops.',
-    searchExamples: ['Ugdenbog', 'Cronley', 'skill:wendigo']
+    searchHelp: 'Search missing drops and their sources with Boolean logic. Fields: name, skill, damage, monster, source, area, rarity, and level.',
+    searchExamples: ['skill:wendigo AND area:ugdenbog', 'monster:cronley OR source:zaria', 'rarity:mi level:>=75']
   },
   vault: {
-    searchHelp: 'Match stored copies by item or base name, slot, rarity, level, seed, or base, prefix, and suffix record paths.',
-    searchExamples: ['legendary', 'amulet', 'records/items/']
+    searchHelp: 'Search stored copies with AND/OR, parentheses, quotes, and negation. Fields: name, base, prefix, suffix, affix, slot, rarity, level, seed, mode, and pack.',
+    searchExamples: ['rarity:legendary AND level:>=94', 'affix:devouring -mode:hardcore', 'seed:3100000000 OR slot:amulet']
+  },
+  history: {
+    searchHelp: 'Search durable operations with Boolean logic. Fields: item, name, base, seed, outcome, state, id, mode, source, and time. correlation: aliases id:; date: aliases time:.',
+    searchExamples: ['source:"item assistant" AND mode:hardcore', 'outcome:failed OR state:needs_recovery', 'correlation:gdia-import seed:>=3100000000']
   }
 } satisfies Record<string, SearchGuidance>

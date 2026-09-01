@@ -11,13 +11,15 @@ const props = withDefaults(defineProps<{
   resultLabel?: string
   tone?: 'gold' | 'green'
   loading?: boolean
+  searchError?: string | null
 }>(), {
   searchLabel: 'Search',
   placeholder: 'Search…',
   resultCount: 0,
   resultLabel: 'results',
   tone: 'gold',
-  loading: false
+  loading: false,
+  searchError: null
 })
 
 const emit = defineEmits<{
@@ -28,6 +30,7 @@ const searchInput = ref<HTMLInputElement | null>(null)
 const searchHelpDetails = ref<HTMLDetailsElement | null>(null)
 const searchInputId = `explorer-search-${useId()}`
 const searchHelpId = `${searchInputId}-help`
+const searchErrorId = `${searchInputId}-error`
 
 function syncSearchInput(): void {
   void nextTick(() => {
@@ -80,6 +83,8 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
           :value="modelValue"
           type="search"
           autocomplete="off"
+          :aria-invalid="Boolean(searchError)"
+          :aria-describedby="searchError ? `${searchHelpId} ${searchErrorId}` : undefined"
           :aria-details="searchHelpId"
           :placeholder="placeholder"
           @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
@@ -91,6 +96,7 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
           @click="emit('update:modelValue', '')"
         >×</button>
       </span>
+      <p v-if="searchError" :id="searchErrorId" class="explorer-search-error" role="alert">{{ searchError }}</p>
     </div>
 
     <div v-if="$slots.filters" class="explorer-toolbar-group explorer-toolbar-filters">
@@ -247,6 +253,8 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
   transform: translateY(-50%);
   cursor: pointer;
 }
+.explorer-search input[aria-invalid='true'] { border-color: #a95d4c; box-shadow: 0 0 0 2px rgba(169,93,76,.12); }
+.explorer-search-error { margin: 0; color: #cf8e7e; font-size: 9px; line-height: 1.4; }
 .explorer-toolbar-group { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: end; gap: 8px; }
 .explorer-toolbar-group :deep(label) { display: grid; min-width: 150px; gap: 5px; }
 .explorer-toolbar-sort :deep(label:first-child) { min-width: 190px; }

@@ -46,7 +46,9 @@ history, while the browser presents a clean canonical entry for each base item.
   roll ranges, granted skills, set bonuses, acquisition sources, and scrollable
   Grim Dawn-style tooltips.
 - **Full-text and structured search:** names, flavor text, stats, skills, sets,
-  item types, content packs, and level expressions such as `level:>=75`.
+  item types, content packs, Boolean expressions such as
+  `skill:wendigo AND "vitality damage"`, and level comparisons such as
+  `level:>=75`.
 - **Exact copy comparison:** seed-applied values, affixes, pet bonuses,
   percentile breakdowns, automatic best-copy selection, and user-pinned picks.
 - **Build research:** Skill Explorer, Leveling Planner, MI Workshop, Stash
@@ -56,6 +58,21 @@ history, while the browser presents a clean canonical entry for each base item.
 - **Item Assistant migration:** verified, repeatable import of Softcore and
   Hardcore copies plus retained incoming queue items.
 - **Local-first:** no account, cloud service, telemetry, or bundled game data.
+
+### Searching the Codex
+
+All searchable tools share one query language. Start with ordinary words, then combine fields,
+phrases, Boolean operators, and numeric comparisons when you need precision:
+
+```text
+skill:wendigo AND "vitality damage"
+(slot:amulet OR slot:medal) level:>=75 -damage:aether
+source:"item assistant" AND mode:hardcore
+```
+
+See the [complete search guide](docs/search.md) for syntax, workspace field tables, practical
+recipes, and troubleshooting. The **Search tips** control beside each in-app search box shows
+examples valid for that particular tool.
 
 <table>
   <tr>

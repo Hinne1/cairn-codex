@@ -21,6 +21,12 @@ import {
   isCollectionOwned,
   withAwakeningAvailability
 } from '@shared/collection-availability'
+import {
+  compileSearchQuery,
+  type CompiledSearchQuery,
+  type SearchDocument,
+  type SearchFieldValue
+} from '@shared/search-query'
 import type {
   ArchiveBackupStatus,
   CharacterSaveProfile,
@@ -82,6 +88,18 @@ type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `item:${string}` |
 type WorkspaceToolId = 'sets' | 'materials' | 'skills' | 'oracle' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'dismantling' | 'trivia' | 'todo'
 type DismantlingModeFilter = 'all' | 'softcore' | 'hardcore'
 type DismantlingRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
+
+const collectionSearchFields = ['name', 'set', 'skill', 'damage', 'slot', 'type', 'rarity', 'pack', 'level', 'owned'] as const
+const skillItemSearchFields = ['name', 'skill', 'damage', 'stat', 'slot', 'rarity', 'level', 'conversion', 'owned'] as const
+const oracleSearchFields = ['name', 'class', 'mastery', 'skill', 'damage', 'style', 'set', 'item', 'readiness', 'score'] as const
+const plannerSearchFields = ['name', 'type', 'slot', 'rarity', 'skill', 'damage', 'source', 'area', 'level', 'owned'] as const
+const atlasSearchFields = ['name', 'area', 'item', 'monster', 'source', 'pack', 'level'] as const
+const miSearchFields = ['name', 'slot', 'level', 'prefix', 'suffix', 'affix', 'skill', 'damage', 'stat', 'copies'] as const
+const supplySearchFields = ['name', 'category', 'effect', 'faction', 'slot', 'source', 'mode', 'eligible'] as const
+const dismantlingSearchFields = ['name', 'base', 'prefix', 'suffix', 'affix', 'rarity', 'mode', 'level'] as const
+const farmingSearchFields = ['name', 'skill', 'damage', 'monster', 'source', 'area', 'rarity', 'level'] as const
+const vaultSearchFields = ['name', 'base', 'prefix', 'suffix', 'affix', 'slot', 'rarity', 'level', 'seed', 'mode', 'pack'] as const
+const historySearchFields = ['item', 'name', 'base', 'seed', 'outcome', 'state', 'id', 'mode', 'source', 'time'] as const
 
 interface AppHistoryState {
   cairnCodex: true
@@ -497,6 +515,30 @@ let appHistoryIndex = 0
 let appHistoryMaximum = 0
 const pageSize = 48
 
+const collectionSearchQuery = computed(() => compileSearchQuery(searchQuery.value, {
+  fields: collectionSearchFields,
+  aliases: { class: 'type' },
+  numericFields: ['level']
+}))
+const skillItemsSearchQuery = computed(() => compileSearchQuery(skillItemQuery.value, { fields: skillItemSearchFields, numericFields: ['level'] }))
+const oracleStructuredQuery = computed(() => compileSearchQuery(oracleQuery.value, { fields: oracleSearchFields, numericFields: ['score'] }))
+const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, {
+  fields: plannerSearchFields,
+  aliases: { location: 'area' },
+  numericFields: ['level']
+}))
+const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, { fields: atlasSearchFields, numericFields: ['level'] }))
+const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, { fields: miSearchFields, numericFields: ['level', 'copies'] }))
+const supplyStructuredQuery = computed(() => compileSearchQuery(reusableSupplyQuery.value, { fields: supplySearchFields }))
+const dismantlingStructuredQuery = computed(() => compileSearchQuery(dismantlingQuery.value, { fields: dismantlingSearchFields, numericFields: ['level'] }))
+const farmingStructuredQuery = computed(() => compileSearchQuery(farmingQuery.value, { fields: farmingSearchFields, numericFields: ['level'] }))
+const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, { fields: vaultSearchFields, numericFields: ['level', 'seed'] }))
+const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, {
+  fields: historySearchFields,
+  aliases: { correlation: 'id', date: 'time' },
+  numericFields: ['seed']
+}))
+
 const archiveModeCount = computed(() =>
   [false, true].filter((isHardcore) => archiveModeEnabled(isHardcore)).length
 )
@@ -537,13 +579,24 @@ const dismantlingCandidates = computed(() =>
   )
 )
 const filteredDismantlingCandidates = computed(() => {
-  const needle = dismantlingQuery.value.trim().toLocaleLowerCase()
+  const structuredQuery = dismantlingStructuredQuery.value
   return dismantlingCandidates.value.filter((item) =>
     (dismantlingMode.value === 'all' ||
       (dismantlingMode.value === 'hardcore') === item.isHardcore) &&
     (dismantlingRarity.value === 'all' || item.rarity === dismantlingRarity.value) &&
-    (!needle || [item.name, item.baseRecord, item.prefixRecord, item.suffixRecord]
-      .some((value) => value.toLocaleLowerCase().includes(needle)))
+    structuredQuery.matches({
+      text: [item.name, item.baseRecord, item.prefixRecord, item.suffixRecord, item.rarity, item.isHardcore ? 'hardcore' : 'softcore'].join(' '),
+      fields: {
+        name: item.name,
+        base: item.baseRecord,
+        prefix: item.prefixRecord,
+        suffix: item.suffixRecord,
+        affix: [item.prefixRecord, item.suffixRecord],
+        rarity: item.rarity,
+        mode: item.isHardcore ? 'hardcore' : 'softcore',
+        level: item.levelRequirement
+      }
+    })
   )
 })
 const visibleDismantlingCandidates = computed(() =>
@@ -622,7 +675,7 @@ const supplyAccessSummary = computed(() => activeCharacter.value
   : `${factionAugmentCount.value} augments indexed · connect a character to check access`
 )
 const supplyVaultItems = computed<SupplyOption[]>(() => {
-  const needle = reusableSupplyQuery.value.trim().toLocaleLowerCase()
+  const structuredQuery = supplyStructuredQuery.value
   if (supplyCategory.value === 'augments') {
     const factionAugments = [...supplyPresentationByRecord.value.values()]
       .filter(({ item }) => item.slot === 'augment')
@@ -680,10 +733,7 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
       })
     return [...factionAugments, ...archivedRunes]
       .filter((item) => supplySlotFilter.value === 'all' || item.slotFamilies.includes(supplySlotFilter.value))
-      .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle) ||
-        item.detail.toLocaleLowerCase().includes(needle) ||
-        item.effects.some((effect) => effect.toLocaleLowerCase().includes(needle)) ||
-        ('searchText' in item && typeof item.searchText === 'string' && item.searchText.includes(needle)))
+      .filter((item) => structuredQuery.matches(supplySearchDocument(item)))
       .sort((left, right) => Number(right.eligible) - Number(left.eligible) || left.name.localeCompare(right.name))
   }
   const unique = new Map<string, VaultListItem>()
@@ -697,10 +747,20 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
   return [...unique.values()]
     .filter((item) => ['writ', 'mandate', 'warrant', 'merit', 'potion'].includes(item.slot))
     .filter((item) => {
-      if (!needle) return true
       const presentation = supplyPresentationByRecord.value.get(item.baseRecord.toLocaleLowerCase())
-      return item.name.toLocaleLowerCase().includes(needle) || item.slot.includes(needle) ||
-        Boolean(presentation?.searchText.includes(needle))
+      return structuredQuery.matches({
+        text: [item.name, item.slot, presentation?.searchText, item.isHardcore ? 'hardcore' : 'softcore'].filter(Boolean).join(' '),
+        fields: {
+          name: item.name,
+          category: item.slot,
+          effect: presentation?.effects ?? [],
+          faction: presentation?.item.acquisition?.factions?.flatMap((entry) => [entry.faction, entry.reputation]) ?? [],
+          slot: presentation?.item.supplySlotFamilies ?? [],
+          source: 'archive',
+          mode: item.isHardcore ? 'hardcore' : 'softcore',
+          eligible: activeTransferHardcore.value !== undefined && item.isHardcore === activeTransferHardcore.value
+        }
+      })
     })
     .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
     .map((item): SupplyOption => {
@@ -951,7 +1011,7 @@ const categoryProgressByName = computed(() => {
 
 const filteredItems = computed(() => {
   if (!snapshot.value) return []
-  const needle = searchQuery.value.trim().toLocaleLowerCase()
+  const structuredQuery = collectionSearchQuery.value
   const sourceItems = activeView.value === 'materials'
     ? (snapshot.value.materials ?? [])
     : snapshot.value.items
@@ -976,8 +1036,7 @@ const filteredItems = computed(() => {
       return true
     })
     .filter((item) => {
-      if (!needle) return true
-      return matchesSearch(item, needle)
+      return structuredQuery.matches(itemStructuredSearchDocument(item))
     })
     .sort(compareItems)
 })
@@ -1023,7 +1082,7 @@ const collectionSets = computed<CollectionSet[]>(() => {
 })
 
 const visibleSets = computed(() => {
-  const needle = searchQuery.value.trim().toLocaleLowerCase()
+  const structuredQuery = collectionSearchQuery.value
   const sets = collectionSets.value
     .filter(
       (set) =>
@@ -1039,14 +1098,8 @@ const visibleSets = computed(() => {
     })
     .filter((set) => setFeatureFilter.value === 'all' || setHasVisualChanges(set))
     .filter((set) => {
-      if (!needle) return true
-      return (
-        set.name.toLocaleLowerCase().includes(needle) ||
-        (set.items[0]?.setPresentation?.tiers ?? []).some((tier) =>
-          tier.lines.some((line) => formatPresentationLine(line).toLocaleLowerCase().includes(needle))
-        ) ||
-        set.items.some((item) => matchesSearch(item, needle))
-      )
+      if (!structuredQuery.expression || structuredQuery.error) return structuredQuery.matches({ text: '' })
+      return set.items.some((item) => structuredQuery.matches(itemStructuredSearchDocument(item)))
     })
   return sets.sort(compareSets)
 })
@@ -1350,14 +1403,13 @@ const oracleCandidates = computed(() => oracleClass.value === 'all'
   ? allOracleCandidates.value
   : allOracleCandidates.value.filter((candidate) => normalizeLoose(candidate.className) === normalizeLoose(oracleClass.value)))
 const filteredOracleCandidates = computed(() => {
-  const needle = normalizeLoose(oracleQuery.value)
+  const structuredQuery = oracleStructuredQuery.value
   const direction = oracleSortDirection.value === 'asc' ? 1 : -1
   const readinessRank: Record<OracleReadiness, number> = { ready: 3, near: 2, wildcard: 1 }
   return oracleCandidates.value
     .filter((candidate) => {
       if (oracleReadiness.value !== 'all' && candidate.readiness !== oracleReadiness.value) return false
-      if (!needle) return true
-      return normalizeLoose([
+      const text = [
         candidate.title,
         candidate.skill,
         candidate.damageType,
@@ -1367,7 +1419,22 @@ const filteredOracleCandidates = computed(() => {
         ...candidate.relatedSkills,
         ...candidate.sets.map((set) => set.name),
         ...candidate.evidence.flatMap((evidence) => [evidence.item.name, ...evidence.reasons])
-      ].join(' ')).includes(needle)
+      ].join(' ')
+      return structuredQuery.matches({
+        text,
+        fields: {
+          name: candidate.title,
+          class: candidate.className,
+          mastery: candidate.masteries,
+          skill: [candidate.skill, ...candidate.relatedSkills],
+          damage: candidate.damageType,
+          style: candidate.style,
+          set: candidate.sets.map((set) => set.name),
+          item: candidate.evidence.map((evidence) => evidence.item.name),
+          readiness: candidate.readiness,
+          score: candidate.score
+        }
+      })
     })
     .sort((left, right) => {
       let comparison = 0
@@ -1418,21 +1485,27 @@ const skillItemRows = computed(() => {
     return false
   })
   rows.push(...miByBase.values())
-  const needle = normalizeLoose(skillItemQuery.value)
+  const structuredQuery = skillItemsSearchQuery.value
   return rows
     .filter((row) => skillRarityFilter.value === 'all' || row.item.rarity === skillRarityFilter.value)
     .filter((row) => skillSlotFilter.value === 'all' || row.item.slot === skillSlotFilter.value)
-    .filter((row) => !needle || normalizeLoose([
-      row.item.name,
-      row.item.rarity,
-      row.item.slot,
-      row.item.levelRequirement,
-      row.amount,
-      row.conversionTarget,
-      row.conversionDetails,
-      row.special,
-      presentationSearchText(row.item.presentation)
-    ].join(' ')).includes(needle))
+    .filter((row) => {
+      const presentation = presentationSearchText(row.item.presentation)
+      return structuredQuery.matches({
+        text: [row.item.name, row.item.rarity, row.item.slot, row.item.levelRequirement, row.amount, row.conversionTarget, row.conversionDetails, row.special, presentation].join(' '),
+        fields: {
+          name: row.item.name,
+          skill: [row.skill, presentation],
+          damage: [row.conversionTarget, row.conversionDetails, presentation],
+          stat: [row.special, presentation],
+          slot: row.item.slot,
+          rarity: row.item.rarity,
+          level: row.item.levelRequirement,
+          conversion: [row.conversionTarget, row.conversionDetails],
+          owned: isArchivedItem(row.item)
+        }
+      })
+    })
     .sort((left, right) => {
     let comparison = 0
     if (skillSort.value === 'amount') {
@@ -1456,20 +1529,27 @@ const skillSlotOptions = computed(() => [...new Set(
 
 const farmTargets = computed<FarmTarget[]>(() => {
   if (!snapshot.value) return []
-  const query = farmingQuery.value.trim().toLocaleLowerCase()
-  const locationNeedle = normalizeLoose(query)
+  const structuredQuery = farmingStructuredQuery.value
   const grouped = new Map<string, FarmTarget>()
   for (const item of snapshot.value.items) {
     if (isCollectionOwned(item)) continue
     if (farmingRarity.value !== 'all' && item.rarity !== farmingRarity.value) continue
     const locations = item.acquisition?.locations ?? []
-    const matchesLocation = locations.some((location) => normalizeLoose([
-      location.name,
-      location.routeName ?? '',
-      location.contentPack
-    ].join(' ')).includes(locationNeedle))
-    if (query && !matchesSearch(item, query) && !matchesLocation) continue
     for (const location of locations) {
+      const itemDocument = itemStructuredSearchDocument(item)
+      if (!structuredQuery.matches({
+        text: [itemDocument.text, location.name, location.routeName, location.contentPack, ...(item.acquisition?.sources ?? [])].filter(Boolean).join(' '),
+        fields: {
+          name: item.name,
+          skill: itemDocument.fields?.skill,
+          damage: itemDocument.fields?.damage,
+          monster: item.acquisition?.sources ?? [],
+          source: item.acquisition?.sources ?? [],
+          area: [location.name, location.routeName ?? ''],
+          rarity: item.rarity,
+          level: item.levelRequirement
+        }
+      })) continue
       const key = `${location.contentPack}:${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
       const existing = grouped.get(key)
       if (existing) {
@@ -1508,7 +1588,7 @@ const plannerCandidateRows = computed(() => plannerCatalogItems.value
     if (plannerOwnership.value === 'missing') return !archived
     return true
   })
-  .filter((item) => matchesPlannerQuery(item, plannerQuery.value))
+  .filter((item) => plannerStructuredQuery.value.matches(plannerSearchDocument(item)))
   .flatMap((item) => {
     const matches = plannerSkills.value
       .map((skill) => skillMatchForItem(item, skill))
@@ -1585,14 +1665,21 @@ const unlocatedPlannerMiItems = computed(() =>
 )
 
 const visibleAtlasRegions = computed(() => {
-  const needle = normalizeLoose(atlasRegionQuery.value)
+  const structuredQuery = atlasStructuredQuery.value
   const direction = plannerMapSortDirection.value === 'asc' ? 1 : -1
   return atlasRegions.value
-    .filter((region) => !needle || normalizeLoose([
-        region.name,
-        ...region.items.map((item) => item.name),
-        ...region.items.flatMap((item) => item.acquisition?.sources ?? [])
-      ].join(' ')).includes(needle))
+    .filter((region) => structuredQuery.matches({
+      text: [region.name, region.contentPack, ...region.items.map((item) => item.name), ...region.items.flatMap((item) => item.acquisition?.sources ?? [])].join(' '),
+      fields: {
+        name: region.name,
+        area: [region.name, region.location.routeName ?? ''],
+        item: region.items.map((item) => item.name),
+        monster: region.items.flatMap((item) => item.acquisition?.sources ?? []),
+        source: region.items.flatMap((item) => item.acquisition?.sources ?? []),
+        pack: region.contentPack,
+        level: region.minimumItemLevel
+      }
+    }))
     .sort((left, right) => {
       let comparison = 0
       if (plannerMapSortMode.value === 'name') comparison = left.name.localeCompare(right.name)
@@ -1761,7 +1848,7 @@ const miWorkshopRows = computed(() => {
       })
     }
   }
-  const needle = normalizeLoose(miWorkshopQuery.value)
+  const structuredQuery = miStructuredQuery.value
   const direction = miComparisonDirection.value === 'asc' ? 1 : -1
   return [...grouped.values()]
     .map((group) => {
@@ -1777,19 +1864,30 @@ const miWorkshopRows = computed(() => {
     })
     .filter((group) => miAffixFilter.value === 'all' ||
       (group.prefixRarity === 'rare' && group.suffixRarity === 'rare'))
-    .filter((group) => !needle || normalizeLoose([
-      group.base.name,
-      group.base.record,
-      group.base.slot,
-      group.base.levelRequirement,
-      group.prefix,
-      group.suffix,
-      presentationSearchText(group.base.presentation),
-      ...group.copies.flatMap((copy) => [
+    .filter((group) => {
+      const presentation = [
+        presentationSearchText(group.base.presentation),
+        ...group.copies.flatMap((copy) => [
         presentationSearchText(affixByRecord.value.get(copy.prefixRecord.toLocaleLowerCase())?.presentation),
         presentationSearchText(affixByRecord.value.get(copy.suffixRecord.toLocaleLowerCase())?.presentation)
-      ])
-    ].join(' ')).includes(needle))
+        ])
+      ].join(' ')
+      return structuredQuery.matches({
+        text: [group.base.name, group.base.record, group.base.slot, group.base.levelRequirement, group.prefix, group.suffix, presentation].join(' '),
+        fields: {
+          name: group.base.name,
+          slot: group.base.slot,
+          level: group.base.levelRequirement,
+          prefix: group.prefix,
+          suffix: group.suffix,
+          affix: [group.prefix, group.suffix],
+          skill: presentation,
+          damage: presentation,
+          stat: presentation,
+          copies: group.copies.length
+        }
+      })
+    })
     .sort(
       (left, right) => {
         if (miSortMode.value === 'metric') {
@@ -3626,6 +3724,10 @@ async function refreshFullVaultItems(): Promise<void> {
 function scheduleVaultPageRefresh(): void {
   if (activeView.value !== 'vault') return
   if (vaultPageTimer) clearTimeout(vaultPageTimer)
+  if (vaultStructuredQuery.value.error) {
+    vaultPageLoading.value = false
+    return
+  }
   vaultPageTimer = setTimeout(() => {
     vaultPageTimer = null
     void refreshVaultPages()
@@ -3638,6 +3740,10 @@ function scheduleOperationHistoryRefresh(): void {
     (transferSection.value !== 'ingestion-history' && transferSection.value !== 'retrieval-history')
   ) return
   if (operationHistoryTimer) clearTimeout(operationHistoryTimer)
+  if (historyStructuredQuery.value.error) {
+    operationHistoryLoading.value = false
+    return
+  }
   operationHistoryLoading.value = true
   operationHistoryTimer = setTimeout(() => {
     operationHistoryTimer = null
@@ -3647,6 +3753,7 @@ function scheduleOperationHistoryRefresh(): void {
 
 async function refreshOperationHistory(): Promise<void> {
   if (transferSection.value !== 'ingestion-history' && transferSection.value !== 'retrieval-history') return
+  if (historyStructuredQuery.value.error) return
   const requestId = ++operationHistoryRequestId
   operationHistoryLoading.value = true
   try {
@@ -3670,6 +3777,7 @@ async function refreshOperationHistory(): Promise<void> {
 }
 
 async function refreshVaultPages(): Promise<void> {
+  if (vaultStructuredQuery.value.error) return
   const requestId = ++vaultPageRequestId
   const isHardcore = activeTransferHardcore.value
   if (isHardcore === undefined) {
@@ -3696,6 +3804,7 @@ async function refreshVaultPages(): Promise<void> {
         state: 'ingested',
         isHardcore,
         catalogued: false,
+        query: vaultQuery.value,
         sort: 'recent',
         direction: 'desc',
         offset: (vaultQuarantinePage.value - 1) * vaultPageSize,
@@ -4425,19 +4534,49 @@ function normalizeLoose(value: string): string {
   return value.normalize('NFKD').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
 }
 
-function matchesPlannerQuery(item: CollectionItem, rawQuery: string): boolean {
-  const needle = normalizeLoose(rawQuery)
-  if (!needle) return true
-  const haystack = [
-    item.name,
-    item.itemClass,
-    item.slot,
-    item.rarity,
-    item.presentation?.searchText,
-    ...(item.acquisition?.sources ?? []),
-    ...(item.acquisition?.locations ?? []).map((location) => location.name)
-  ].filter(Boolean).join(' ')
-  return normalizeLoose(haystack).includes(needle)
+function plannerSearchDocument(item: CollectionItem): SearchDocument {
+  const itemDocument = itemStructuredSearchDocument(item)
+  const sources = item.acquisition?.sources ?? []
+  const areas = (item.acquisition?.locations ?? []).flatMap((location) => [location.name, location.routeName ?? ''])
+  return {
+    text: [itemDocument.text, ...sources, ...areas].join(' '),
+    fields: {
+      name: item.name,
+      type: item.itemClass,
+      slot: item.slot,
+      rarity: item.rarity,
+      skill: itemDocument.fields?.skill,
+      damage: itemDocument.fields?.damage,
+      source: sources,
+      area: areas,
+      level: item.levelRequirement,
+      owned: isArchivedItem(item)
+    }
+  }
+}
+
+function supplySearchDocument(item: SupplyOption): SearchDocument {
+  const factions = item.catalogItem?.acquisition?.factions?.flatMap((entry) => [entry.faction, entry.reputation]) ?? []
+  return {
+    text: [item.name, item.detail, item.slot, item.source, ...item.slotFamilies, ...item.effects, ...factions].join(' '),
+    fields: {
+      name: item.name,
+      category: item.slot,
+      effect: item.effects,
+      faction: factions,
+      slot: item.slotFamilies,
+      source: item.source,
+      mode: item.isHardcore ? 'hardcore' : 'softcore',
+      eligible: item.eligible
+    }
+  }
+}
+
+function searchErrorMessage(query: CompiledSearchQuery): string | null {
+  if (!query.error) return null
+  return query.error.fragment
+    ? `${query.error.message} Check “${query.error.fragment}”.`
+    : query.error.message
 }
 
 function itemTypeLabel(item: CollectionItem): string {
@@ -4510,7 +4649,7 @@ function tooltipHasMore(item: CollectionItem): boolean {
 
 interface ItemSearchDocument {
   everything?: string
-  fields: Record<string, string>
+  fields: Record<string, SearchFieldValue>
 }
 
 const itemSearchDocumentCache = new WeakMap<CollectionItem, ItemSearchDocument>()
@@ -4551,17 +4690,21 @@ function warmSearchDocuments(items: CollectionItem[]): void {
 function itemSearchDocument(item: CollectionItem): ItemSearchDocument {
   const cached = itemSearchDocumentCache.get(item)
   if (cached) return cached
-  const fields: Record<string, string> = {
+  const presentationText = `${item.presentation?.searchText ?? ''} ${setSearchText(item)}`
+  const fields: Record<string, SearchFieldValue> = {
     name: item.name.toLocaleLowerCase(),
     set: (item.setName ?? '').toLocaleLowerCase(),
     // The helper already materializes the item's searchable presentation text.
     // Reuse it here instead of walking every deeply nested skill line for every
     // keystroke; set bonuses are shared and cached once per set presentation.
-    skill: `${item.presentation?.searchText ?? ''} ${setSearchText(item)}`.toLocaleLowerCase(),
+    skill: presentationText,
+    damage: presentationText,
     slot: item.slot.toLocaleLowerCase(),
     type: item.itemClass.toLocaleLowerCase(),
     rarity: item.rarity.toLocaleLowerCase(),
-    pack: item.contentPack.toLocaleLowerCase()
+    pack: item.contentPack.toLocaleLowerCase(),
+    level: item.levelRequirement,
+    owned: isCollectionOwned(item)
   }
   const document = { fields }
   itemSearchDocumentCache.set(item, document)
@@ -4616,19 +4759,9 @@ function itemSearchEverything(item: CollectionItem, document: ItemSearchDocument
   return document.everything
 }
 
-function matchesSearch(item: CollectionItem, normalizedQuery: string): boolean {
-  const tokens = normalizedQuery.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []
+function itemStructuredSearchDocument(item: CollectionItem): SearchDocument {
   const document = itemSearchDocument(item)
-
-  return tokens.every((rawToken) => {
-    const token = rawToken.replaceAll('"', '')
-    const separator = token.indexOf(':')
-    if (separator < 1) return itemSearchEverything(item, document).includes(token)
-    const field = token.slice(0, separator)
-    const value = token.slice(separator + 1)
-    if (field === 'level') return matchesLevel(item.levelRequirement, value)
-    return document.fields[field]?.includes(value) ?? false
-  })
+  return { text: itemSearchEverything(item, document), fields: document.fields }
 }
 
 function skillSearchText(item: CollectionItem): string {
@@ -4674,17 +4807,6 @@ function setHasVisualChanges(set: CollectionSet): boolean {
     (set.items[0]?.setPresentation?.tiers ?? []).some((tier) =>
       (tier.skillModifiers ?? []).some((section) => section.kind === 'visual-modifier')
     )
-}
-
-function matchesLevel(level: number, expression: string): boolean {
-  const match = /^(>=|<=|>|<|=)?(\d+)$/.exec(expression)
-  if (!match) return false
-  const target = Number(match[2])
-  if (match[1] === '>=') return level >= target
-  if (match[1] === '<=') return level <= target
-  if (match[1] === '>') return level > target
-  if (match[1] === '<') return level < target
-  return level === target
 }
 
 function queueTooltip(
@@ -5938,6 +6060,7 @@ function formatPercentile(value: number | null | undefined): string {
         placeholder="Name, stat, skill… (try skill:wendigo)"
         :result-count="displayedResultCount"
         :result-label="activeView === 'sets' ? 'sets' : 'results'"
+        :search-error="searchErrorMessage(collectionSearchQuery)"
       >
         <template #filters>
           <label v-if="activeView === 'collection' || activeView === 'materials'">
@@ -6087,6 +6210,7 @@ function formatPercentile(value: number | null | undefined): string {
           placeholder="Item, slot, modifier, damage type…"
           :result-count="skillItemRows.length"
           result-label="matching items"
+          :search-error="searchErrorMessage(skillItemsSearchQuery)"
         >
           <template #filters>
             <label>
@@ -6207,6 +6331,7 @@ function formatPercentile(value: number | null | undefined): string {
           placeholder="Skill, damage type, set, item…"
           :result-count="filteredOracleCandidates.length"
           result-label="build archetypes"
+          :search-error="searchErrorMessage(oracleStructuredQuery)"
         >
           <template #filters>
             <label>
@@ -6470,6 +6595,7 @@ function formatPercentile(value: number | null | undefined): string {
             placeholder="Item, monster, area… (try zarias)"
             :result-count="plannerRows.length"
             result-label="relevant item tiers"
+            :search-error="searchErrorMessage(plannerStructuredQuery)"
           >
             <template #filters>
               <label>
@@ -6633,6 +6759,7 @@ function formatPercentile(value: number | null | undefined): string {
             placeholder="Area, MI, monster…"
             :result-count="visibleAtlasRegions.length"
             result-label="source areas"
+            :search-error="searchErrorMessage(atlasStructuredQuery)"
           >
             <template #filters>
               <label>
@@ -6761,6 +6888,7 @@ function formatPercentile(value: number | null | undefined): string {
           :result-count="miWorkshopRows.length"
           result-label="affix combinations"
           tone="green"
+          :search-error="searchErrorMessage(miStructuredQuery)"
         >
           <template #filters>
             <label>
@@ -6883,6 +7011,7 @@ function formatPercentile(value: number | null | undefined): string {
           placeholder="Name, effect, faction…"
           :result-count="supplyVaultItems.length"
           result-label="available supplies"
+          :search-error="searchErrorMessage(supplyStructuredQuery)"
         >
           <template #filters>
             <label>
@@ -6989,6 +7118,7 @@ function formatPercentile(value: number | null | undefined): string {
           placeholder="Item, base, prefix, suffix…"
           :result-count="filteredDismantlingCandidates.length"
           result-label="candidate copies"
+          :search-error="searchErrorMessage(dismantlingStructuredQuery)"
         >
           <template #filters>
             <label>
@@ -7099,6 +7229,7 @@ function formatPercentile(value: number | null | undefined): string {
           placeholder="Item, monster, area…"
           :result-count="farmTargets.length"
           result-label="useful areas"
+          :search-error="searchErrorMessage(farmingStructuredQuery)"
         >
           <template #filters>
             <label>
@@ -7454,6 +7585,7 @@ function formatPercentile(value: number | null | undefined): string {
           :result-count="storedVaultPage.total"
           result-label="stored copies"
           :loading="vaultPageLoading"
+          :search-error="searchErrorMessage(vaultStructuredQuery)"
         >
           <template #filters>
             <label>
@@ -7733,13 +7865,14 @@ function formatPercentile(value: number | null | undefined): string {
         <template v-else-if="transferSection === 'ingestion-history' || transferSection === 'retrieval-history'">
           <ExplorerToolbar
             v-model="transferHistoryQuery"
-            v-bind="searchGuidance.vault"
+            v-bind="searchGuidance.history"
             class="vault-explorer-toolbar"
             :search-label="transferSection === 'ingestion-history' ? 'Search ingestion history' : 'Search retrieval history'"
             placeholder="Item, seed, outcome, correlation ID…"
             :result-count="operationHistory.total"
             result-label="operations"
             :loading="operationHistoryLoading"
+            :search-error="searchErrorMessage(historyStructuredQuery)"
           >
             <template #filters>
               <label>
@@ -7796,6 +7929,7 @@ function formatPercentile(value: number | null | undefined): string {
             :result-count="quarantineVaultPage.total"
             result-label="quarantined copies"
             :loading="vaultPageLoading"
+            :search-error="searchErrorMessage(vaultStructuredQuery)"
           />
           <section class="vault-quarantine quarantine-workspace">
             <header>

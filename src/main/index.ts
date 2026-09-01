@@ -3525,6 +3525,22 @@ async function runSmokeTest(
       offset: 0,
       limit: 100
     })
+    const structuredSearchPage = database.queryVaultItems({
+      state: 'ingested',
+      query: `base:"${warrant.record}" AND seed:42 AND mode:hardcore`,
+      sort: 'level',
+      direction: 'desc',
+      offset: 0,
+      limit: 100
+    })
+    const negatedSearchPage = database.queryVaultItems({
+      state: 'ingested',
+      query: `base:"${warrant.record}" AND NOT seed:42`,
+      sort: 'recent',
+      direction: 'desc',
+      offset: 0,
+      limit: 100
+    })
     const ingestionHistory = database.queryOperationHistory({
       operation: 'ingest',
       outcome: 'committed',
@@ -3539,9 +3555,36 @@ async function runSmokeTest(
       offset: 0,
       limit: 100
     })
+    const structuredHistory = database.queryOperationHistory({
+      operation: 'ingest',
+      outcome: 'all',
+      query: `id:${ingestOperationId} AND mode:hardcore AND seed:${journalPayload.seed}`,
+      offset: 0,
+      limit: 100
+    })
+    let invalidStructuredSearchRejected = false
+    try {
+      database.queryVaultItems({
+        state: 'ingested', query: 'level:ancient', sort: 'recent', direction: 'desc', offset: 0, limit: 100
+      })
+    } catch (error) {
+      invalidStructuredSearchRejected = error instanceof Error && error.message.includes('needs a number')
+    }
     const journalIngest = ingestionHistory.items.find((entry) => entry.id === ingestOperationId)
     const journalRetrieval = retrievalHistory.items.find((entry) => entry.id === retrievalOperationId)
     const vaultSummary = database.getVaultSummary()
+    if (!structuredSearchPage.items.some((item) => item.id === reusableVaultItemId)) {
+      throw new Error(`Structured vault search missed its fixture (${structuredSearchPage.total} matches).`)
+    }
+    if (negatedSearchPage.items.some((item) => item.id === reusableVaultItemId)) {
+      throw new Error('Negated structured vault search retained the excluded fixture.')
+    }
+    if (structuredHistory.items[0]?.id !== ingestOperationId) {
+      throw new Error(`Structured operation search missed its fixture (${structuredHistory.total} matches).`)
+    }
+    if (!invalidStructuredSearchRejected) {
+      throw new Error('Invalid numeric structured search did not return an actionable error.')
+    }
     if (
       ingestedPage.total < 1 ||
       ingestedPage.items.length !== 1 ||

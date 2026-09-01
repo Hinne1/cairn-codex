@@ -36,6 +36,20 @@ shared. Do not add another workspace-specific heading shell.
 
 ## Search and filter semantics
 
+- Every searchable workspace compiles its query through
+  `src/shared/search-query.ts`. Do not split terms manually or introduce a
+  tool-local query grammar.
+- Whitespace is implicit `AND`. Explicit `AND`, `OR`, parentheses, quoted
+  phrases, `NOT`, and the `-term` shorthand are supported. Precedence is
+  `NOT`, then `AND`, then `OR`.
+- Fields are declared per workspace and must be listed in that workspace's
+  Search tips. Unknown fields and invalid numeric comparisons produce an
+  inline error and preserve the unfiltered result surface while the user edits.
+- Numeric fields accept equality or `>=`, `<=`, `>`, and `<`. Boolean fields
+  accept `true`/`false` and `yes`/`no`.
+- Large persisted collections use the same parsed expression tree translated
+  to parameterized SQLite predicates. Renderer-only collections evaluate a
+  typed `SearchDocument`; neither path may interpolate user values into SQL.
 - Search matches the visible subject and its useful metadata, not only its display name.
 - A subject picker (for example, the skill combobox) is separate from searching the result set.
 - Filters combine with search using AND semantics.
@@ -62,3 +76,5 @@ behave identically everywhere.
 4. Route item hover/focus through the global tooltip pipeline.
 5. Add an isolated screenshot interaction for any new control shape.
 6. Verify keyboard focus, narrow layouts, empty results, and restored history state.
+7. Declare the workspace's search fields in its query compiler and document
+   meaningful examples in `src/renderer/src/search-guidance.ts`.

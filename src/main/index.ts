@@ -6,6 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } fr
 import {
   IPC_CHANNELS,
   type ArchiveBackupActionResult,
+  type ArchiveRollHydrationResult,
   type AppStatus,
   type CharacterSaveProfile,
   type CollectionBasis,
@@ -272,6 +273,7 @@ function registerIpcHandlers(
   let writeQueue: Promise<void> = Promise.resolve()
   let latestCollection: CollectionSnapshot | null = null
   let collectionScan: Promise<CollectionSnapshot> | null = null
+  let archiveRollHydrationBatch: Promise<ArchiveRollHydrationResult | null> | null = null
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
   const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -565,18 +567,80 @@ function registerIpcHandlers(
       const cacheNeedsRefresh = !(await collectionStashesAreFresh(latestCollection))
       const projected = projectCollectionSources(latestCollection, input.sourcePaths)
       return {
-        ...(await presentCollection(helper, database, projected, input.basis, false)),
+        ...(await presentCollection(helper, database, projected, input.basis)),
         cacheNeedsRefresh
       }
     }
   )
   ipcMain.handle(
     IPC_CHANNELS.hydrateArchiveRolls,
-    async (_event, input: { sourcePaths: string[] }): Promise<CollectionSnapshot | null> => {
-      latestCollection ??= await readCollectionCache(collectionCachePath)
-      if (!latestCollection) return null
-      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return presentCollection(helper, database, projected, 'archive', true, 24)
+    async (_event, input: { sourcePaths: string[] }): Promise<ArchiveRollHydrationResult | null> => {
+      if (archiveRollHydrationBatch) return archiveRollHydrationBatch
+      const batch = (async (): Promise<ArchiveRollHydrationResult | null> => {
+        latestCollection ??= await readCollectionCache(collectionCachePath)
+        if (!latestCollection) return null
+        const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+        const mode = lifetimeMode(projected)
+        const installation = projected.discovery.installations[0]
+        if (!installation) {
+          return {
+            processed: 0,
+            pending: 0,
+            snapshot: await presentCollection(helper, database, projected, 'archive')
+          }
+        }
+        const candidates = database.listArchiveRollAnalysisCandidates(
+          ROLL_ANALYSIS_VERSION,
+          256,
+          mode
+        )
+        if (candidates.length === 0) {
+          return {
+            processed: 0,
+            pending: 0,
+            snapshot: await presentCollection(helper, database, projected, 'archive')
+          }
+        }
+        const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
+          installationPath: installation.path,
+          items: candidates.map(({ payload }) => {
+            const item = payload as LiveVaultPayload
+            return {
+              baseRecord: item.baseRecord,
+              prefixRecord: item.prefixRecord,
+              suffixRecord: item.suffixRecord,
+              seed: item.seed
+            }
+          })
+        })
+        if (analyzed.items.length !== candidates.length) {
+          throw new Error(
+            `Roll analysis returned ${analyzed.items.length} results for ${candidates.length} archived copies.`
+          )
+        }
+        await runExclusive(async () => {
+          database.setVaultRollAnalyses(
+            candidates.map((candidate, index) => ({
+              id: candidate.id,
+              rollAnalysis: analyzed.items[index]!
+            }))
+          )
+        })
+        const pending = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
+        return {
+          processed: candidates.length,
+          pending,
+          snapshot: pending === 0
+            ? await presentCollection(helper, database, projected, 'archive')
+            : null
+        }
+      })()
+      archiveRollHydrationBatch = batch
+      try {
+        return await batch
+      } finally {
+        if (archiveRollHydrationBatch === batch) archiveRollHydrationBatch = null
+      }
     }
   )
   ipcMain.handle(
@@ -617,7 +681,7 @@ function registerIpcHandlers(
       // Re-analyzing older archived rolls can take minutes after a game-data/schema
       // change; keeping it inside this foreground promise left the renderer on a
       // zero-item loading screen even though the completed cache was already on disk.
-      return presentCollection(helper, database, projected, input.basis, false)
+      return presentCollection(helper, database, projected, input.basis)
     }
   )
   ipcMain.handle(
@@ -639,7 +703,7 @@ function registerIpcHandlers(
       }
       await writeCollectionCache(collectionCachePath, latestCollection)
       const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return presentCollection(helper, database, projected, input.basis, false)
+      return presentCollection(helper, database, projected, input.basis)
     }
   )
   ipcMain.handle(
@@ -1773,9 +1837,7 @@ async function presentCollection(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase,
   snapshot: CollectionSnapshot,
-  basis: CollectionBasis,
-  analyzeMissing = true,
-  analysisLimit = Number.POSITIVE_INFINITY
+  basis: CollectionBasis
 ): Promise<CollectionSnapshot> {
   await resolveQuarantinedArchiveItems(helper, database, snapshot)
   const mode = lifetimeMode(snapshot)
@@ -1792,37 +1854,6 @@ async function presentCollection(
     return withRecipeCollection(database.presentArchiveSnapshot(snapshot, [], mode), mode)
   }
   const payloads = archived.map((item) => item.payload as LiveVaultPayload)
-  const missingAnalysis = archived
-    .map((item, index) => ({ item, payload: payloads[index]! }))
-    .filter(
-      ({ item }) =>
-        item.rollAnalysis === null ||
-        item.rollAnalysis.modelVersion !== ROLL_ANALYSIS_VERSION ||
-        item.rollAnalysis.baseEstimatedPercentile === undefined ||
-        item.rollAnalysis.prefixEstimatedPercentile === undefined ||
-        item.rollAnalysis.suffixEstimatedPercentile === undefined
-    )
-  const analysisBatch = missingAnalysis.slice(0, analysisLimit)
-  if (analyzeMissing && analysisBatch.length > 0) {
-    const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
-      installationPath: installation.path,
-      items: analysisBatch.map(({ payload }) => ({
-        baseRecord: payload.baseRecord,
-        prefixRecord: payload.prefixRecord,
-        suffixRecord: payload.suffixRecord,
-        seed: payload.seed
-      }))
-    })
-    database.setVaultRollAnalyses(
-      analysisBatch.map(({ item }, index) => ({
-        id: item.id,
-        rollAnalysis: analyzed.items[index]!
-      }))
-    )
-    for (const [index, entry] of analysisBatch.entries()) {
-      entry.item.rollAnalysis = analyzed.items[index] ?? null
-    }
-  }
   const observedItems = archived.map((item, index): ObservedStashItem => {
     const payload = payloads[index]!
     return {
@@ -1852,9 +1883,7 @@ async function presentCollection(
   })
   return {
     ...withRecipeCollection(database.presentArchiveSnapshot(snapshot, observedItems, mode), mode),
-    rollHydrationPending: analyzeMissing
-      ? Math.max(0, missingAnalysis.length - analysisBatch.length)
-      : missingAnalysis.length
+    rollHydrationPending: database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
   }
 }
 
@@ -2839,12 +2868,35 @@ async function runSmokeTest(
     if (!rollCacheCandidate || !sourceRoll) {
       throw new Error('Smoke test needs an archived analyzed copy to verify roll caching.')
     }
+    const pendingRollsBefore = database.countArchiveRollAnalysisCandidates(
+      ROLL_ANALYSIS_VERSION,
+      true
+    )
+    if (
+      !database
+        .listArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, 1_000, true)
+        .some((item) => item.id === rollCacheCandidate.id)
+    ) {
+      throw new Error('Missing archive roll analysis was not selected for bounded hydration.')
+    }
     database.setVaultRollAnalyses([{ id: rollCacheCandidate.id, rollAnalysis: sourceRoll }])
     if (
       database.listAvailableArchiveItems(true).find((item) => item.id === rollCacheCandidate.id)
         ?.rollAnalysis?.overallEstimatedPercentile !== sourceRoll.overallEstimatedPercentile
     ) {
       throw new Error('Archive roll analysis did not survive a database round trip.')
+    }
+    if (
+      database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, true) !==
+        pendingRollsBefore - 1 ||
+      database
+        .listArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, 1_000, true)
+        .some((item) => item.id === rollCacheCandidate.id) ||
+      !database
+        .listArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION + 1, 1_000, true)
+        .some((item) => item.id === rollCacheCandidate.id)
+    ) {
+      throw new Error('Bounded archive roll hydration did not respect cached model versions.')
     }
     const discovery = snapshot.discovery
     const stashCount = discovery.saveLocations.reduce(
@@ -3478,6 +3530,27 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
            : true)`
       )
       if (ready) {
+        if (process.env.CAIRN_CODEX_SCREENSHOT_HYDRATE_ALL_MODES === '1') {
+          interactionTimings.allModeHydrationMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const cached = await window.cairnCodex.getCachedCollection([], 'archive')
+              const sourcePaths = (cached?.availableStashes ?? cached?.scannedStashes ?? [])
+                .map((stash) => stash.path)
+              let pending = 1
+              while (pending > 0) {
+                const result = await window.cairnCodex.hydrateArchiveRolls(sourcePaths)
+                if (!result) throw new Error('Archive hydration returned no result.')
+                pending = result.pending
+                if (result.processed === 0 && pending > 0) {
+                  throw new Error('Archive hydration made no progress.')
+                }
+                if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 0))
+              }
+              return performance.now() - started
+            })()
+          `)
+        }
         const category = process.env.CAIRN_CODEX_SCREENSHOT_CATEGORY
         if (category) {
           interactionTimings.categoryMs = await window.webContents.executeJavaScript(`

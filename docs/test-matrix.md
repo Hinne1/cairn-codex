@@ -36,7 +36,8 @@ a supported game installation and records the manual live-transfer results here.
 | Large-archive startup and search | packaged app, isolated copy of 5,525-item / 4,514-copy profile | 2026-08-30 recorded 3.1–3.5 s; 2026-09-01 screenshot harness settled in 33.5–36.3 s while ordinary search remained about 153–166 ms. Instrument cached first paint separately from background refresh before treating either number as user-perceived startup. |
 | 20k Item Assistant migration | packaged app, synthetic 20,000-copy mixed-mode database plus queue receipt | Passed 2026-09-01: 20,000 imported in 818 ms; repeat completed in 493 ms with no duplicates; source unchanged; two backups verified |
 | 20k archive renderer scale | packaged app, isolated 24,514-copy profile | **Gate failed 2026-09-01:** 41.5 s benchmark-ready startup; unfiltered Transfers mounted 14,509 rows and took 1.8 s to switch |
-| 20k archive roll hydration | packaged app, isolated 20,002 newly unscored copies | **Gate failed 2026-09-01:** only 96 new copies scored during capture; 24-copy batches repeatedly projected and serialized the full archive |
+| 20k archive roll hydration | packaged app, isolated 20,000 newly unscored copies across SC/HC | **Passed 2026-09-01:** all 24,509 applicable copies ended on roll model v4 with zero missing scores in 81.8 s; batches persisted 256 scores at a time and transmitted the full snapshot only at completion |
+| Interrupted archive roll hydration | packaged app terminated during isolated 20k run | **Passed 2026-09-01:** 1,280 newly completed scores remained committed and the next run had exactly 8,720 active-mode copies left to process |
 | Package personal-data/art audit | `scripts/audit-package.mjs` | Passed, 282 files |
 | Installer install/first run/uninstall | `npm run test:installer` | Passed; app removed and isolated user data retained |
 | Dependency vulnerability audit | `npm audit --audit-level=high` | Passed, 0 vulnerabilities |
@@ -46,6 +47,11 @@ The 2026-08-30 installed-game run indexed one installation, two save locations,
 six transfer stashes, and 5,525 catalog items. It analyzed 97 owned copies and
 withheld no roll scores as untrusted. The same run completed the isolated archive
 backup/restore round trip without touching the user archive or game files.
+
+The strict 20k “fully initialized” checkpoint still took 46.1 seconds while scoring continued
+in the background. Inspection showed that startup independently loads the entire 24k retrieval
+archive before clearing initialization; this remains tracked as SCALE-03 rather than being
+attributed to roll hydration.
 
 ## Manual live-transfer gates
 

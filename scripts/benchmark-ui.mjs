@@ -15,6 +15,8 @@ const category = argument('--category')
 const miAffixFilter = argument('--mi-affix-filter')
 const expectedMiRows = argument('--expected-mi-rows')
 const miNativeRestore = process.argv.includes('--mi-native-restore')
+const waitForBackgroundJobs = process.argv.includes('--wait-for-background-jobs')
+const hydrateAllModes = process.argv.includes('--hydrate-all-modes')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -38,11 +40,12 @@ if (baseProfile) {
 const env = {
   ...process.env,
   CAIRN_CODEX_SCREENSHOT_PATH: screenshotPath,
-  CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN: '0',
+  CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN: waitForBackgroundJobs ? '1' : '0',
   CAIRN_CODEX_SCREENSHOT_QUERY: query,
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(miAffixFilter ? { CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER: miAffixFilter } : {}),
   ...(miNativeRestore ? { CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE: '1' } : {}),
+  ...(hydrateAllModes ? { CAIRN_CODEX_SCREENSHOT_HYDRATE_ALL_MODES: '1' } : {}),
   ...(category && category !== 'Collection' ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
   CAIRN_CODEX_PERF_REPORT_PATH: reportPath
 }
@@ -57,7 +60,7 @@ child.stdout.on('data', (chunk) => { stdout += chunk })
 child.stderr.on('data', (chunk) => { stderr += chunk })
 
 let report
-for (let attempt = 0; attempt < 240; attempt += 1) {
+for (let attempt = 0; attempt < (hydrateAllModes ? 480 : 240); attempt += 1) {
   try {
     report = JSON.parse(await readFile(reportPath, 'utf8'))
     break
@@ -96,6 +99,8 @@ console.log(JSON.stringify({
   category: category ?? 'Collection',
   miAffixFilter: miAffixFilter ?? null,
   miNativeRestore,
+  waitForBackgroundJobs,
+  hydrateAllModes,
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,
   screenshotPath,

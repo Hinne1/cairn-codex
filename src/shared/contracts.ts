@@ -114,7 +114,7 @@ export interface CairnCodexApi {
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>
   listCharacters: () => Promise<CharacterSaveProfile[]>
   getCachedCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot | null>
-  hydrateArchiveRolls: (sourcePaths: string[]) => Promise<CollectionSnapshot | null>
+  hydrateArchiveRolls: (sourcePaths: string[]) => Promise<ArchiveRollHydrationResult | null>
   scanCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   rebuildGameDataIndex: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>
@@ -134,6 +134,12 @@ export interface CairnCodexApi {
   retrieveLiveVaultItems: (vaultItemIds: string[]) => Promise<LiveRetrievalResult>
   dispenseLiveAugments: (records: string[], expectedCharacterName?: string) => Promise<LiveSupplyDispenseResult>
   recoverSahdinasMemento: (destination: SpecialRecoveryDestination, expectedCharacterName?: string) => Promise<SpecialItemRecoveryResult>
+}
+
+export interface ArchiveRollHydrationResult {
+  processed: number
+  pending: number
+  snapshot: CollectionSnapshot | null
 }
 
 export interface WriteSafetyStatus {

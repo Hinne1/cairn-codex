@@ -358,6 +358,75 @@ export class CollectionDatabase {
     }))
   }
 
+  listArchiveRollAnalysisCandidates(
+    modelVersion: number,
+    limit: number,
+    isHardcore?: boolean
+  ): ArchiveRollAnalysisCandidate[] {
+    const safeLimit = Math.max(1, Math.min(1_000, Math.trunc(limit)))
+    const rows = this.database
+      .prepare(`
+        SELECT vault_item.id, vault_item.base_record, vault_item.serialized_item
+        FROM vault_item
+        JOIN catalog_item ON catalog_item.record = vault_item.base_record
+        WHERE state = 'ingested'
+          AND catalog_item.content_pack != 'cairn-quarantine'
+          AND catalog_item.rarity != 'supply'
+          ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
+          AND CASE
+            WHEN roll_json IS NULL OR json_valid(roll_json) = 0 THEN 1
+            WHEN COALESCE(CAST(json_extract(roll_json, '$.modelVersion') AS INTEGER), -1) != ? THEN 1
+            WHEN json_type(roll_json, '$.baseEstimatedPercentile') IS NULL THEN 1
+            WHEN json_type(roll_json, '$.prefixEstimatedPercentile') IS NULL THEN 1
+            WHEN json_type(roll_json, '$.suffixEstimatedPercentile') IS NULL THEN 1
+            ELSE 0
+          END = 1
+        ORDER BY ingested_at_utc ASC, id ASC
+        LIMIT ?
+      `)
+      .all(
+        ...(isHardcore === undefined
+          ? [modelVersion, safeLimit]
+          : [isHardcore ? 1 : 0, modelVersion, safeLimit])
+      ) as Array<{
+      id: string
+      base_record: string
+      serialized_item: Uint8Array
+    }>
+    return rows.map((row) => ({
+      id: row.id,
+      baseRecord: row.base_record,
+      payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown
+    }))
+  }
+
+  countArchiveRollAnalysisCandidates(modelVersion: number, isHardcore?: boolean): number {
+    const row = this.database
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM vault_item
+        JOIN catalog_item ON catalog_item.record = vault_item.base_record
+        WHERE state = 'ingested'
+          AND catalog_item.content_pack != 'cairn-quarantine'
+          AND catalog_item.rarity != 'supply'
+          ${isHardcore === undefined ? '' : 'AND is_hardcore = ?'}
+          AND CASE
+            WHEN roll_json IS NULL OR json_valid(roll_json) = 0 THEN 1
+            WHEN COALESCE(CAST(json_extract(roll_json, '$.modelVersion') AS INTEGER), -1) != ? THEN 1
+            WHEN json_type(roll_json, '$.baseEstimatedPercentile') IS NULL THEN 1
+            WHEN json_type(roll_json, '$.prefixEstimatedPercentile') IS NULL THEN 1
+            WHEN json_type(roll_json, '$.suffixEstimatedPercentile') IS NULL THEN 1
+            ELSE 0
+          END = 1
+      `)
+      .get(
+        ...(isHardcore === undefined
+          ? [modelVersion]
+          : [isHardcore ? 1 : 0, modelVersion])
+      ) as { count: number }
+    return Number(row.count)
+  }
+
   listQuarantineCatalogRecords(): string[] {
     const rows = this.database
       .prepare(`
@@ -1696,6 +1765,12 @@ export interface ArchiveVaultItem {
   baseRecord: string
   payload: unknown
   rollAnalysis: ItemRollAnalysis | null
+}
+
+export interface ArchiveRollAnalysisCandidate {
+  id: string
+  baseRecord: string
+  payload: unknown
 }
 
 export interface ResolvedArchiveCatalogItem {

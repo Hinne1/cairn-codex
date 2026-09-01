@@ -265,6 +265,8 @@ const enabledStashPaths = computed<string[]>({
 const scanning = ref(false)
 const appInitializing = ref(true)
 const archiveRollHydrating = ref(false)
+const archiveRollHydrationCompleted = ref(0)
+const archiveRollHydrationTotal = ref(0)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
 const scanError = ref<string | null>(null)
 const cacheIssue = ref<string | null>(null)
@@ -3113,18 +3115,30 @@ async function loadSelectedSources(): Promise<void> {
 async function hydrateArchiveRolls(): Promise<void> {
   if (archiveRollHydrating.value || collectionBasis.value !== 'archive' || !snapshot.value) return
   archiveRollHydrating.value = true
+  archiveRollHydrationCompleted.value = 0
+  archiveRollHydrationTotal.value = 0
   const requestedSources = [...enabledStashPaths.value]
+  const requestedSourceKey = JSON.stringify([...requestedSources].sort())
   try {
     let pending = 1
     while (pending > 0 && collectionBasis.value === 'archive' && liveStatus.value?.state !== 'ready') {
-      const hydrated = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
+      const result = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
       if (
-        !hydrated ||
+        !result ||
         collectionBasis.value !== 'archive' ||
-        JSON.stringify([...enabledStashPaths.value].sort()) !== JSON.stringify(requestedSources.sort())
+        JSON.stringify([...enabledStashPaths.value].sort()) !== requestedSourceKey
       ) break
-      applySnapshot(hydrated)
-      pending = hydrated.rollHydrationPending ?? 0
+      archiveRollHydrationCompleted.value += result.processed
+      pending = result.pending
+      archiveRollHydrationTotal.value = Math.max(
+        archiveRollHydrationTotal.value,
+        archiveRollHydrationCompleted.value + pending
+      )
+      if (result.snapshot) applySnapshot(result.snapshot)
+      if (result.processed === 0 && pending > 0) {
+        console.warn('Archived roll hydration made no progress; stopping this background run.')
+        break
+      }
       if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
     }
   } catch (error) {
@@ -5157,7 +5171,12 @@ function formatPercentile(value: number | null | undefined): string {
         <div>
           <strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : archiveRollHydrating ? 'Rating archived item rolls' : scanActivity === 'game-data' ? 'Rebuilding the game-data index' : 'Refreshing collection in the background' }}</strong>
           <small v-if="appInitializing && !snapshot">Loading the cached archive, game index, and live connection state.</small>
-          <small v-else-if="archiveRollHydrating">The Codex remains usable while missing copy scores are calculated and saved.</small>
+          <small v-else-if="archiveRollHydrating">
+            The Codex remains usable while missing copy scores are calculated and saved.
+            <template v-if="archiveRollHydrationTotal > 0">
+              {{ archiveRollHydrationCompleted.toLocaleString() }} / {{ archiveRollHydrationTotal.toLocaleString() }} complete.
+            </template>
+          </small>
           <small v-else-if="scanActivity === 'game-data'">Your cached Codex remains usable while map regions, drop sources, and game records are reindexed.</small>
           <small v-else>Your cached Codex is ready; stash counts and rolls are being rechecked.</small>
         </div>

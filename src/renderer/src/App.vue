@@ -28,7 +28,7 @@ import {
 } from './set-semantics'
 import {
   ONBOARDING_STEP_COUNT,
-  continueWithoutImportDecision,
+  applyContinueWithoutImport,
   type OnboardingStatus
 } from './onboarding'
 import ToolHeader from './components/ToolHeader.vue'
@@ -402,6 +402,7 @@ const vaultSummary = ref<VaultSummary>({
   quarantined: 0,
   supplies: 0
 })
+const vaultSummaryStatus = ref<'loading' | 'ready' | 'unavailable'>('loading')
 const storedVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0, limit: 100 })
 const quarantineVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0, limit: 100 })
 const vaultPageLoading = ref(false)
@@ -2904,10 +2905,15 @@ async function handleOnboardingImportCompleted(result: GdiaImportResult): Promis
 }
 
 function continueWithoutImport(): void {
-  const decision = continueWithoutImportDecision()
-  collectionBasis.value = decision.collectionBasis
-  preferenceRepository.update('sources', { collectionBasis: decision.collectionBasis })
-  persistOnboarding(decision.onboarding.status, decision.onboarding.step)
+  applyContinueWithoutImport({
+    updateCollectionBasis: (basis) => {
+      collectionBasis.value = basis
+      preferenceRepository.update('sources', { collectionBasis: basis })
+    },
+    updateOnboarding: (preference) => {
+      persistOnboarding(preference.status, preference.step)
+    }
+  })
 }
 
 function reportTransferProblem(message: string): void {
@@ -3600,8 +3606,13 @@ async function refreshVault(): Promise<void> {
       window.cairnCodex.inspectWriteSafety(),
       window.cairnCodex.inspectLiveGame()
     ])
-    if (summary.status === 'fulfilled') vaultSummary.value = summary.value
-    else console.warn('Archive summary could not be refreshed.', summary.reason)
+    if (summary.status === 'fulfilled') {
+      vaultSummary.value = summary.value
+      vaultSummaryStatus.value = 'ready'
+    } else {
+      vaultSummaryStatus.value = 'unavailable'
+      console.warn('Archive summary could not be refreshed.', summary.reason)
+    }
     if (safety.status === 'fulfilled') writeSafety.value = safety.value
     else console.warn('Offline write safety could not be refreshed.', safety.reason)
     if (live.status === 'fulfilled') liveStatus.value = live.value
@@ -5520,6 +5531,7 @@ function formatPercentile(value: number | null | undefined): string {
       :install-count="onboardingInstallCount"
       :save-count="onboardingSaveCount"
       :archived-copy-count="archivedCopyCount"
+      :archive-summary-status="vaultSummaryStatus"
       :snapshot-available="Boolean(snapshot)"
       @skip="skipOnboarding"
       @settings="openOnboardingSettings"

@@ -9,6 +9,7 @@ const props = defineProps<{
   installCount: number
   saveCount: number
   archivedCopyCount: number
+  archiveSummaryStatus: 'loading' | 'ready' | 'unavailable'
   snapshotAvailable: boolean
 }>()
 
@@ -62,6 +63,7 @@ function handleDialogKeydown(event: KeyboardEvent): void {
     <section
       ref="dialog"
       class="onboarding-dialog"
+      :data-onboarding-step="step"
       role="dialog"
       tabindex="-1"
       aria-modal="true"
@@ -106,7 +108,7 @@ function handleDialogKeydown(event: KeyboardEvent): void {
       <div v-else-if="step === 1" class="onboarding-page onboarding-import-page">
         <p class="section-label">Choose your starting point</p>
         <h3>Import an archive—or continue without importing.</h3>
-        <p>Both paths are safe. This choice only decides whether Cairn imports Item Assistant now.</p>
+        <p>Both paths are safe. Continuing without an import switches Collection to your existing Codex Archive view and adds nothing to it.</p>
         <div class="onboarding-safety" role="note">
           <span class="onboarding-safety-mark" aria-hidden="true">✓</span>
           <div>
@@ -127,7 +129,9 @@ function handleDialogKeydown(event: KeyboardEvent): void {
             <span class="choice-number">02</span>
             <p class="choice-kicker">No import</p>
             <h4>Continue without importing</h4>
-            <p v-if="archivedCopyCount > 0"><strong class="retained-count">{{ archivedCopyCount.toLocaleString() }} archived {{ archivedCopyCount === 1 ? 'copy' : 'copies' }}</strong> will remain exactly where they are.</p>
+            <p v-if="archiveSummaryStatus === 'loading'">Cairn is checking your existing Codex Archive. You can continue now; the archive will not be changed.</p>
+            <p v-else-if="archiveSummaryStatus === 'unavailable'">Cairn could not read the archive count right now. Continuing still will not clear or replace the archive.</p>
+            <p v-else-if="archivedCopyCount > 0"><strong class="retained-count">{{ archivedCopyCount.toLocaleString() }} archived {{ archivedCopyCount === 1 ? 'copy' : 'copies' }}</strong> will remain exactly where they are.</p>
             <p v-else>Your Codex Archive currently has no stored copies. Cairn will simply continue without adding any.</p>
             <ul class="onboarding-untouched-list">
               <li>Does not clear your Codex Archive</li>

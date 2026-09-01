@@ -14,6 +14,11 @@ export interface ContinueWithoutImportDecision {
   onboarding: OnboardingPreference
 }
 
+export interface ContinueWithoutImportEffects {
+  updateCollectionBasis: (basis: 'archive') => void
+  updateOnboarding: (preference: OnboardingPreference) => void
+}
+
 function boundedStep(value: unknown): number {
   const parsed = Number(value)
   return Number.isInteger(parsed)
@@ -40,5 +45,14 @@ export function continueWithoutImportDecision(): ContinueWithoutImportDecision {
     collectionBasis: 'archive',
     onboarding: onboardingPreference('in-progress', 2)
   }
+}
+
+export function applyContinueWithoutImport(
+  effects: ContinueWithoutImportEffects
+): ContinueWithoutImportDecision {
+  const decision = continueWithoutImportDecision()
+  effects.updateCollectionBasis(decision.collectionBasis)
+  effects.updateOnboarding(decision.onboarding)
+  return decision
 }
 

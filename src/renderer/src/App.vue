@@ -381,6 +381,7 @@ const plannerMinimumLevelDraft = ref(plannerMinimumLevel.value)
 const plannerLevelCapDraft = ref(plannerLevelCap.value)
 let applyingPlannerProfile = false
 const plannerDisplay = ref<PlannerDisplay>(initialPreferences.appearance.plannerDisplay)
+const plannerPage = ref(1)
 const plannerMapScope = ref<PlannerMapScope>('selected')
 const plannerMapSortMode = ref<PlannerMapSortMode>('items')
 const plannerMapSortDirection = ref<SortDirection>('desc')
@@ -2409,6 +2410,9 @@ watch([miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection
 })
 watch([selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection], () => {
   skillItemPage.value = 1
+})
+watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
+  plannerPage.value = 1
 })
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (applyingPlannerProfile) return
@@ -6606,27 +6610,42 @@ function formatPercentile(value: number | null | undefined): string {
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.acquisition?.crafting).length }}</strong> craftable</span>
           </div>
-          <div v-if="plannerDisplay === 'list'" class="planner-table-wrap">
-            <table class="planner-table">
-              <thead>
-                <tr><th>Level</th><th>Item</th><th>Supports</th><th>What it does</th><th>How to get it</th></tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="row in plannerRows"
-                  :key="row.item.record"
-                  :class="{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }"
-                  tabindex="0"
+          <BoundedResultSurface
+            v-model:page="plannerPage"
+            :class="['planner-results bounded-tooltip-results', plannerDisplay === 'list' ? 'planner-table-wrap planner-table-results' : 'planner-card-results']"
+            :items="plannerRows"
+            :get-key="row => row.item.record"
+            :page-size="50"
+            :layout="plannerDisplay === 'list' ? 'table' : 'grid'"
+            :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
+            :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select at least one skill, widen the item level range, or restore an ignored base.'"
+            label="Leveling Planner item results"
+            interactive
+            item-described-by="item-tooltip"
+            @activate="(_key, row) => openItem(row.item)"
+            @item-focus="(_key, row, element) => showTooltip(row.item, element)"
+            @item-blur="scheduleTooltipHide"
+          >
+            <template v-if="plannerDisplay === 'list'" #header>
+              <div class="planner-table-header" role="row">
+                <span role="columnheader">Level</span>
+                <span role="columnheader">Item</span>
+                <span role="columnheader">Supports</span>
+                <span role="columnheader">What it does</span>
+                <span role="columnheader">How to get it</span>
+              </div>
+            </template>
+            <template #item="{ item: row }">
+              <div
+                v-if="plannerDisplay === 'list'"
+                class="planner-table-row"
+                :class="{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }"
                   @mouseenter="queueTooltip(row.item, $event)"
                   @mousemove="moveTooltip"
                   @mouseleave="scheduleTooltipHide"
-                  @focus="queueTooltip(row.item, $event)"
-                  @blur="scheduleTooltipHide"
-                  @click="openItem(row.item)"
-                  @keydown.enter="openItem(row.item)"
-                >
-                  <td class="planner-level">{{ row.item.levelRequirement }}</td>
-                  <td>
+              >
+                  <span role="gridcell" class="planner-level">{{ row.item.levelRequirement }}</span>
+                  <span role="gridcell">
                     <span class="planner-item-cell">
                       <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
                       <span>
@@ -6639,13 +6658,13 @@ function formatPercentile(value: number | null | undefined): string {
                         <small>{{ row.item.rarity === 'faction' ? 'Faction rare' : row.item.rarity }} · {{ row.item.slot }}</small>
                       </span>
                     </span>
-                  </td>
-                  <td>
+                  </span>
+                  <span role="gridcell">
                     <span class="planner-match-skills">
                       <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
                     </span>
-                  </td>
-                  <td class="planner-effects">
+                  </span>
+                  <span role="gridcell" class="planner-effects">
                     <span v-if="row.petBonuses.length" class="planner-pet-bonuses">
                       <b>All pets</b> {{ row.petBonuses.join('; ') }}
                     </span>
@@ -6653,8 +6672,8 @@ function formatPercentile(value: number | null | undefined): string {
                       <b v-if="match.conversionTarget">→ {{ match.conversionTarget }}</b>
                       {{ [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support') }}
                     </span>
-                  </td>
-                  <td class="planner-acquisition">
+                  </span>
+                  <span role="gridcell" class="planner-acquisition">
                     <span
                       v-if="recipeStatus(row.item)"
                       class="recipe-status"
@@ -6667,55 +6686,44 @@ function formatPercentile(value: number | null | undefined): string {
                     </span>
                     <span v-if="!(row.item.acquisition?.factions?.length)">{{ row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
                     <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map(locationDisplayName).slice(0, 2).join(', ') }}</small>
-                  </td>
-                </tr>
-                <tr v-if="plannerRows.length === 0"><td colspan="5" class="skill-empty">Select at least one skill, or widen the item level range, to build a shopping list.</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="planner-card-grid">
-            <article
-              v-for="row in plannerRows"
-              :key="row.item.record"
-              class="planner-card"
-              :class="[{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }, `rarity-${row.item.rarity}`]"
-              tabindex="0"
-              @mouseenter="queueTooltip(row.item, $event)"
-              @mousemove="moveTooltip"
-              @mouseleave="scheduleTooltipHide"
-              @focus="queueTooltip(row.item, $event)"
-              @blur="scheduleTooltipHide"
-              @click="openItem(row.item)"
-              @keydown.enter="openItem(row.item)"
-            >
-              <header>
-                <span class="planner-card-level">Lv{{ row.item.levelRequirement }}</span>
-                <span class="planner-card-actions">
-                  <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
-                  <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore' }}</button>
-                </span>
-              </header>
-              <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-              <div class="planner-card-title">
-                <strong>{{ row.item.name }}</strong>
-                <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
+                  </span>
               </div>
-              <div class="planner-match-skills">
-                <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
-              </div>
-              <p v-if="row.petBonuses.length" class="planner-card-pets"><b>All pets</b> {{ row.petBonuses.join('; ') }}</p>
-              <p class="planner-card-effect">
-                {{ row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support')).join(' · ') }}
-              </p>
-              <footer>
-                <b v-if="recipeStatus(row.item)" class="recipe-status" :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }">
-                  {{ recipeStatus(row.item)?.label }}
-                </b>
-                <span>{{ row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
-              </footer>
-            </article>
-            <p v-if="plannerRows.length === 0" class="skill-empty planner-card-empty">Select at least one skill, or restore an ignored base, to build a shopping list.</p>
-          </div>
+              <article
+                v-else
+                class="planner-card"
+                :class="[{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }, `rarity-${row.item.rarity}`]"
+                @mouseenter="queueTooltip(row.item, $event)"
+                @mousemove="moveTooltip"
+                @mouseleave="scheduleTooltipHide"
+              >
+                <header>
+                  <span class="planner-card-level">Lv{{ row.item.levelRequirement }}</span>
+                  <span class="planner-card-actions">
+                    <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
+                    <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore' }}</button>
+                  </span>
+                </header>
+                <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
+                <div class="planner-card-title">
+                  <strong>{{ row.item.name }}</strong>
+                  <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
+                </div>
+                <div class="planner-match-skills">
+                  <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
+                </div>
+                <p v-if="row.petBonuses.length" class="planner-card-pets"><b>All pets</b> {{ row.petBonuses.join('; ') }}</p>
+                <p class="planner-card-effect">
+                  {{ row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support')).join(' · ') }}
+                </p>
+                <footer>
+                  <b v-if="recipeStatus(row.item)" class="recipe-status" :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }">
+                    {{ recipeStatus(row.item)?.label }}
+                  </b>
+                  <span>{{ row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
+                </footer>
+              </article>
+            </template>
+          </BoundedResultSurface>
         </template>
 
         <template v-else>

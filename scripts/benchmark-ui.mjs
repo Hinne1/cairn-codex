@@ -18,6 +18,7 @@ const query = argument('--query') ?? 'wendigo'
 const category = argument('--category')
 const skillQuery = argument('--skill-query')
 const skillSelectFirst = process.argv.includes('--skill-select-first')
+const plannerDisplay = argument('--planner-display')
 const miAffixFilter = argument('--mi-affix-filter')
 const expectedMiRows = argument('--expected-mi-rows')
 const expectedMiTotal = argument('--expected-mi-total')
@@ -40,6 +41,7 @@ const transferSection = argument('--transfer-section')
 const verifyNavigation = process.argv.includes('--verify-navigation')
 const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
+const verifyPlannerActions = process.argv.includes('--verify-planner-actions')
 const verifyBoundedKeyboard = process.argv.includes('--verify-bounded-keyboard')
 const simulateWorkspaceError = process.argv.includes('--simulate-workspace-error')
 const safeMode = process.argv.includes('--safe-mode')
@@ -61,6 +63,9 @@ if (screenshotHeight !== null && (!Number.isInteger(Number(screenshotHeight)) ||
 }
 if (onboardingStep !== null && (!Number.isInteger(Number(onboardingStep)) || Number(onboardingStep) < 0 || Number(onboardingStep) > 3)) {
   throw new Error(`--onboarding-step must be an integer from 0 through 3; received ${onboardingStep}.`)
+}
+if (plannerDisplay !== null && !['table', 'cards', 'map'].includes(plannerDisplay)) {
+  throw new Error(`--planner-display must be table, cards, or map; received ${plannerDisplay}.`)
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
@@ -118,10 +123,12 @@ const env = {
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(skillQuery ? { CAIRN_CODEX_SCREENSHOT_SKILL_QUERY: skillQuery } : {}),
   ...(skillSelectFirst ? { CAIRN_CODEX_SCREENSHOT_SKILL_SELECT_FIRST: '1' } : {}),
+  ...(plannerDisplay ? { CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY: plannerDisplay } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
   ...(openPlannerSetup ? { CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP: '1' } : {}),
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
+  ...(verifyPlannerActions ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS: '1' } : {}),
   ...(verifyBoundedKeyboard ? { CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD: '1' } : {}),
   ...(simulateWorkspaceError ? { CAIRN_CODEX_SCREENSHOT_RENDER_ERROR: '1' } : {}),
   ...(safeMode ? { CAIRN_CODEX_SCREENSHOT_SAFE_MODE: '1' } : {}),
@@ -260,6 +267,7 @@ console.log(JSON.stringify({
   category: category ?? 'Collection',
   skillQuery,
   skillSelectFirst,
+  plannerDisplay,
   miAffixFilter: miAffixFilter ?? null,
   miNativeRestore,
   waitForBackgroundJobs,
@@ -268,6 +276,7 @@ console.log(JSON.stringify({
   verifyNavigation,
   openPlannerSetup,
   verifyPlannerNavigation,
+  verifyPlannerActions,
   verifyBoundedKeyboard,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
@@ -280,6 +289,7 @@ console.log(JSON.stringify({
   renderedVaultRows: report.renderedState?.vaultRows,
   renderedOperationRows: report.renderedState?.operationRows,
   renderedPlannerRows: report.renderedState?.plannerRows,
+  renderedPlannerCards: report.renderedState?.plannerCards,
   renderedBoundedRows: report.renderedState?.boundedRows,
   screenshotPath,
   reportPath

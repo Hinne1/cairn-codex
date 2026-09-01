@@ -116,7 +116,16 @@ function focusKey(key: BoundedResultKey | null): void {
 }
 
 function navigate(intent: BoundedNavigationIntent): void {
-  focusKey(moveBoundedResultKey(entryKeys.value, activeKey.value, intent, props.keyboardColumns))
+  const columns = props.layout === 'grid' ? visibleGridColumns() : props.keyboardColumns
+  focusKey(moveBoundedResultKey(entryKeys.value, activeKey.value, intent, columns))
+}
+
+function visibleGridColumns(): number {
+  const first = itemElements.get(entryKeys.value[0] ?? '')
+  if (!first) return Math.max(1, props.keyboardColumns)
+  const firstTop = first.offsetTop
+  const count = entryKeys.value.findIndex((key) => itemElements.get(key)?.offsetTop !== firstTop)
+  return count > 0 ? count : Math.max(1, entryKeys.value.length)
 }
 
 function handleKeydown(event: KeyboardEvent, entry: { key: BoundedResultKey, item: T }): void {

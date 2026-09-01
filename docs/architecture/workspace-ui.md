@@ -65,9 +65,9 @@ pure paging and keyboard model in `src/renderer/src/bounded-results.ts`.
 - Loading, empty, error/retry, range, and pagination presentation stay in the shared surface.
   Workspaces customize the item slot and may customize state copy, but must not fork state or
   paging behavior.
-- `list`, `grid`, and CSS-table layouts share the same result model. Selectable surfaces use
-  roving focus with Arrow keys, Home, End, Enter, and Space; grid callers declare the keyboard
-  column count used by row navigation.
+- `list`, `grid`, and CSS-table layouts share the same result model. Selectable and interactive
+  surfaces use roving focus with Arrow keys, Home, End, Enter, and Space. Grid surfaces derive
+  the visible column count from rendered rows unless a fixed keyboard column count is required.
 - Selection is keyed by domain identity and may survive sorting or paging when the owning tool
   permits it. A workspace must clear selection explicitly when its safety rules require that.
 
@@ -76,9 +76,10 @@ the shared multi-selection model while retaining its fail-closed transfer contro
 is the first local CSS-table adopter: it mounts 50 affix combinations per page, exposes the
 existing affixed item tooltip on pointer hover and keyboard focus, and opens the item on Enter,
 Space, or click. Skill Explorer uses the same local table pattern for item-to-skill comparisons,
-including its rank, conversion, special-modifier, and level sorts. The Planner migration remains
-tracked incrementally under #21 so each change can be visually and behaviorally verified without
-an `App.vue` flag-day rewrite.
+including its rank, conversion, special-modifier, and level sorts. Leveling Planner uses one
+bounded result window for both its table and card modes; favorites and ignored-base controls stop
+row activation and remain keyed to item records. Grid navigation derives its column count from
+the rendered row so ArrowUp and ArrowDown remain correct as the responsive card grid reflows.
 
 ## Search and filter semantics
 

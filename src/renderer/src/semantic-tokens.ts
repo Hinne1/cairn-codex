@@ -1,0 +1,12 @@
+export type SemanticTone =
+  | 'epic'
+  | 'legendary'
+  | 'level'
+  | 'complete'
+  | 'progress'
+  | 'owned'
+  | 'discovered'
+  | 'crafting'
+  | 'awakening'
+  | 'fx'
+  | 'missing'

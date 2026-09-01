@@ -9,8 +9,8 @@ export const searchGuidance = {
     searchExamples: ['skill:wendigo AND "vitality damage"', 'rarity:legendary level:>=75', '(slot:amulet OR slot:medal) -damage:aether']
   },
   sets: {
-    searchHelp: 'Search set and piece data with AND/OR, parentheses, quotes, and negation. Fields: set, name, skill, damage, slot, rarity, pack, level, and owned.',
-    searchExamples: ['set:ultos AND damage:lightning', 'skill:wendigo OR skill:briarthorn', 'rarity:legendary level:>=94']
+    searchHelp: 'Search set and piece data with AND/OR, parentheses, quotes, and negation. Fields: set, name, skill, damage, slot, rarity, pack, level, owned, complete, craftable, awakening, and fx. owned: means discovered, while qualified sources remain separate.',
+    searchExamples: ['set:ultos AND damage:lightning', 'craftable:true OR awakening:true', 'rarity:legendary complete:false fx:true']
   },
   materials: {
     searchHelp: 'Search effects and metadata with AND/OR, quotes, parentheses, and negation. Fields: name, skill, damage, slot, type, rarity, pack, level, and owned.',

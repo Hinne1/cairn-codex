@@ -68,6 +68,17 @@ The tooltip remains global because only one hover target can be active at a time
 mouse-wheel scrolling, viewport placement, held details, affix composition, and item links must
 behave identically everywhere.
 
+## Semantic badges and Grim Dawn rarity
+
+Compact state labels use `src/renderer/src/components/SemanticBadge.vue` and the variables in
+`src/renderer/src/semantic-tokens.css`. Epic and Legendary accents must come from the shared
+rarity tokens; completion, current ownership, recipes, awakening qualifications, and visual FX
+must use distinct semantic tones instead of workspace-local pill styles.
+
+Collection completion and qualified readiness are separate concepts. A learned recipe or an
+owned awakening base may qualify a missing set piece for readiness, but neither counts as that
+piece being discovered. Surfaces must name those qualifications explicitly.
+
 ## Adding a workspace
 
 1. Use `ToolHeader` for the workspace heading.

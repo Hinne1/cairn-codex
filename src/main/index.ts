@@ -10,6 +10,7 @@ import {
   type AppStatus,
   type CharacterSaveProfile,
   type CollectionBasis,
+  type CollectionItem,
   type CollectionSnapshot,
   type DismantlingPreview,
   type DebugLoggingStatus,
@@ -1173,6 +1174,13 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.hydrateArchiveRolls,
     async (_event, input: { sourcePaths: string[] }): Promise<ArchiveRollHydrationResult | null> => {
+      const screenshotFixture = process.env.CAIRN_CODEX_SCREENSHOT_PATH
+        ? process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE
+        : undefined
+      if (screenshotFixture) {
+        latestCollection = createScreenshotCollectionFixture(screenshotFixture)
+        return { processed: 0, pending: 0, snapshot: latestCollection }
+      }
       if (archiveRollHydrationBatch) return archiveRollHydrationBatch
       const batch = runDiagnosticOperation(
         'background-job',
@@ -1566,6 +1574,75 @@ function registerIpcHandlers(
 }
 
 function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'sets-semantics') {
+    const setPresentation = {
+      name: 'Veil of the Cairn',
+      description: 'Synthetic set used only for isolated UI verification.',
+      members: ['Cairn Hood', 'Cairn Mantle', 'Cairn Sigil'],
+      tiers: [{
+        requiredPieces: 2,
+        lines: [{
+          label: 'Vitality Damage', minimum: 80, maximum: 80, unit: '%' as const,
+          tone: 'standard' as const, prefix: '+', suffix: ''
+        }],
+        petLines: [],
+        skillModifiers: [{
+          kind: 'visual-modifier' as const,
+          heading: 'Wendigo Totem · Visual transformation',
+          lines: [{
+            label: 'Alternate crimson spirit effect', minimum: null, maximum: null, unit: '' as const,
+            tone: 'visual' as const, prefix: '', suffix: ''
+          }]
+        }],
+        grantedSkill: null
+      }]
+    }
+    const items = [
+      createScreenshotSetItem({
+        record: 'records/items/synthetic/cairn_hood.dbr', name: 'Cairn Hood', rarity: 'legendary',
+        slot: 'head', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',
+        availableCount: 2, discovered: true, setPresentation, visual: true
+      }),
+      createScreenshotSetItem({
+        record: 'records/items/synthetic/cairn_mantle.dbr', name: 'Cairn Mantle', rarity: 'legendary',
+        slot: 'shoulders', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',
+        recipeUnlocked: true, setPresentation
+      }),
+      createScreenshotSetItem({
+        record: 'records/items/synthetic/cairn_sigil.dbr', name: 'Cairn Sigil', rarity: 'legendary',
+        slot: 'medal', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',
+        availableViaAwakening: true, awakeningSourceAvailableCount: 1,
+        awakeningSourceName: 'Cairn Mark', setPresentation
+      }),
+      createScreenshotSetItem({
+        record: 'records/items/synthetic/warden_guard.dbr', name: "Warden's Guard", rarity: 'epic',
+        slot: 'chest', level: 50, setName: "Warden's Vigil", setRecord: 'records/items/synthetic/warden_set.dbr',
+        availableCount: 1, discovered: true
+      }),
+      createScreenshotSetItem({
+        record: 'records/items/synthetic/warden_step.dbr', name: "Warden's Step", rarity: 'epic',
+        slot: 'feet', level: 50, setName: "Warden's Vigil", setRecord: 'records/items/synthetic/warden_set.dbr',
+        availableCount: 1, discovered: true
+      }),
+      createScreenshotSetItem({
+        record: 'records/items/synthetic/forgotten_crown.dbr', name: 'Forgotten Crown', rarity: 'legendary',
+        slot: 'head', level: 75, setName: 'Forgotten Oath', setRecord: 'records/items/synthetic/forgotten_set.dbr',
+        discovered: true
+      }),
+      createScreenshotSetItem({
+        record: 'records/items/synthetic/forgotten_blade.dbr', name: 'Forgotten Blade', rarity: 'legendary',
+        slot: 'sword', level: 75, setName: 'Forgotten Oath', setRecord: 'records/items/synthetic/forgotten_set.dbr'
+      })
+    ]
+    return {
+      ...createScreenshotCollectionFixture('search-help'),
+      items,
+      rarities: [
+        { rarity: 'epic', total: 2, collected: 2, availableCopies: 2 },
+        { rarity: 'legendary', total: 5, collected: 2, availableCopies: 2 }
+      ]
+    }
+  }
   if (name !== 'search-help') throw new Error(`Unknown screenshot fixture: ${name}`)
   return {
     catalogPresentationVersion: CATALOG_PRESENTATION_VERSION,
@@ -1645,6 +1722,63 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
     accountStores: [],
     skillMasteries: {},
     skillClassNames: {}
+  }
+}
+
+function createScreenshotSetItem(input: {
+  record: string
+  name: string
+  rarity: 'epic' | 'legendary'
+  slot: string
+  level: number
+  setName: string
+  setRecord: string
+  availableCount?: number
+  discovered?: boolean
+  recipeUnlocked?: boolean
+  availableViaAwakening?: boolean
+  awakeningSourceAvailableCount?: number
+  awakeningSourceName?: string
+  setPresentation?: CollectionItem['setPresentation']
+  visual?: boolean
+}): CollectionItem {
+  return {
+    record: input.record,
+    name: input.name,
+    rarity: input.rarity,
+    itemClass: `armor_${input.slot}`,
+    slot: input.slot,
+    levelRequirement: input.level,
+    itemLevel: input.level,
+    setName: input.setName,
+    setRecord: input.setRecord,
+    bitmap: null,
+    contentPack: 'Synthetic QA',
+    setPresentation: input.setPresentation ?? null,
+    presentation: input.visual ? {
+      flavorText: null,
+      sections: [{
+        kind: 'visual-modifier',
+        heading: 'Wendigo Totem · Visual transformation',
+        lines: [{
+          label: 'Alternate crimson spirit effect', minimum: null, maximum: null,
+          unit: '', tone: 'visual', prefix: '', suffix: ''
+        }]
+      }],
+      grantedSkill: null,
+      searchText: 'wendigo totem vitality damage alternate crimson spirit effect'
+    } : undefined,
+    availableCount: input.availableCount ?? 0,
+    bestRollPercentile: null,
+    analyzedCopyCount: 0,
+    pinnedInstanceKey: null,
+    discovered: input.discovered ?? false,
+    recipeUnlocked: input.recipeUnlocked ?? false,
+    availableViaAwakening: input.availableViaAwakening ?? false,
+    awakeningSourceRecord: input.availableViaAwakening ? `${input.record}.base` : null,
+    awakeningSourceName: input.awakeningSourceName ?? null,
+    awakeningSourceAvailableCount: input.awakeningSourceAvailableCount ?? 0,
+    firstDiscoveredAt: input.discovered ? '2026-09-01T00:00:00.000Z' : null
   }
 }
 

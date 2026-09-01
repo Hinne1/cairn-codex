@@ -30,6 +30,9 @@ withDefaults(defineProps<{
   --tool-header-copy: var(--cc-text-muted);
   --tool-header-accent: var(--cc-accent);
   display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   align-items: end;
   justify-content: space-between;
   gap: var(--cc-space-9);
@@ -74,5 +77,6 @@ h2 { margin: var(--cc-space-1) 0 var(--cc-space-3); color: var(--tool-header-hea
 @media (max-width: 760px) {
   .tool-header { align-items: stretch; flex-direction: column; }
   .tool-header-aside { justify-content: flex-start; }
+  h2, .tool-header-copy > p:last-child { overflow-wrap: anywhere; }
 }
 </style>

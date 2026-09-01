@@ -47,6 +47,8 @@ const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
 const verifyPlannerActions = process.argv.includes('--verify-planner-actions')
 const verifyBoundedKeyboard = process.argv.includes('--verify-bounded-keyboard')
+const verifyResponsiveTools = process.argv.includes('--verify-responsive-tools')
+const assertNoOverflow = process.argv.includes('--assert-no-overflow')
 const simulateWorkspaceError = process.argv.includes('--simulate-workspace-error')
 const safeMode = process.argv.includes('--safe-mode')
 const safeModeSuggested = process.argv.includes('--safe-mode-suggested')
@@ -138,6 +140,7 @@ const env = {
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
   ...(verifyPlannerActions ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS: '1' } : {}),
   ...(verifyBoundedKeyboard ? { CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD: '1' } : {}),
+  ...(verifyResponsiveTools ? { CAIRN_CODEX_SCREENSHOT_VERIFY_RESPONSIVE_TOOLS: '1' } : {}),
   ...(simulateWorkspaceError ? { CAIRN_CODEX_SCREENSHOT_RENDER_ERROR: '1' } : {}),
   ...(safeMode ? { CAIRN_CODEX_SCREENSHOT_SAFE_MODE: '1' } : {}),
   ...(safeModeSuggested ? {
@@ -199,6 +202,12 @@ if (
 }
 if (scrollTarget && !report.renderedState?.scrollTargetFound) {
   throw new Error(`Screenshot scroll target was not rendered: ${scrollTarget}.`)
+}
+if (assertNoOverflow && report.renderedState?.horizontalOverflow) {
+  throw new Error(
+    `Document overflowed the ${requestedViewport.width}px viewport: ` +
+    JSON.stringify(report.renderedState?.overflowingElements ?? [])
+  )
 }
 if (expectedMiRows !== null) {
   const expected = Number(expectedMiRows)
@@ -290,6 +299,8 @@ console.log(JSON.stringify({
   verifyPlannerNavigation,
   verifyPlannerActions,
   verifyBoundedKeyboard,
+  verifyResponsiveTools,
+  assertNoOverflow,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
   scrollTarget,

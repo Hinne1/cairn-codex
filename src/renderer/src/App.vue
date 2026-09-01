@@ -6285,6 +6285,7 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
           </template>
         </ExplorerToolbar>
+        <p id="skill-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
         <BoundedResultSurface
           v-model:page="skillItemPage"
           class="skill-table-wrap skill-table-results bounded-tooltip-results"
@@ -6294,6 +6295,8 @@ function formatPercentile(value: number | null | undefined): string {
           :empty-title="selectedSkill ? 'No matching items' : 'Choose a skill to begin'"
           :empty-detail="selectedSkill ? (skillItemQuery || skillRarityFilter !== 'all' || skillSlotFilter !== 'all' ? 'No items match the current search and filters.' : 'No matching items in this availability scope.') : 'Select an indexed skill to compare its supporting items.'"
           label="Items matching the selected skill"
+          aria-describedby="skill-table-scroll-help"
+          tabindex="0"
           layout="table"
           interactive
           item-described-by="item-tooltip"
@@ -6655,6 +6658,7 @@ function formatPercentile(value: number | null | undefined): string {
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.acquisition?.crafting).length }}</strong> craftable</span>
           </div>
+          <p v-if="plannerDisplay === 'list'" id="planner-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
           <BoundedResultSurface
             v-model:page="plannerPage"
             :class="['planner-results bounded-tooltip-results', plannerDisplay === 'list' ? 'planner-table-wrap planner-table-results' : 'planner-card-results']"
@@ -6665,6 +6669,8 @@ function formatPercentile(value: number | null | undefined): string {
             :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
             :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select a mastery or skill, widen the item level range, or restore an ignored base.'"
             label="Leveling Planner item results"
+            :aria-describedby="plannerDisplay === 'list' ? 'planner-table-scroll-help' : undefined"
+            :tabindex="plannerDisplay === 'list' ? 0 : undefined"
             interactive
             item-described-by="item-tooltip"
             @activate="(_key, row) => openItem(row.item)"
@@ -6958,6 +6964,7 @@ function formatPercentile(value: number | null | undefined): string {
             </label>
           </template>
         </ExplorerToolbar>
+        <p id="mi-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
         <BoundedResultSurface
           v-model:page="miWorkshopPage"
           class="mi-table-wrap mi-table-results bounded-tooltip-results"
@@ -6967,6 +6974,8 @@ function formatPercentile(value: number | null | undefined): string {
           :empty-title="miWorkshopQuery ? 'No matching Monster Infrequents' : miAffixFilter === 'double-rare' ? 'No double-rare combinations retained' : 'The Workshop is empty'"
           :empty-detail="miWorkshopQuery ? `No stored MI matches “${miWorkshopQuery}”.` : miAffixFilter === 'double-rare' ? 'No stored MI has both a rare prefix and a rare suffix.' : 'Archive a Monster Infrequent to start building the Workshop.'"
           label="Monster Infrequent affix combinations"
+          aria-describedby="mi-table-scroll-help"
+          tabindex="0"
           layout="table"
           interactive
           item-described-by="item-tooltip"

@@ -5589,6 +5589,90 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           `)
           if (!openedSearchHelp) throw new Error('Search help control was not available for screenshot capture.')
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_RESPONSIVE_TOOLS === '1') {
+          await window.webContents.executeJavaScript(`
+            (async () => {
+              const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const details = document.querySelector('.explorer-search-help')
+              const summary = details?.querySelector('summary')
+              if (!(details instanceof HTMLDetailsElement) || !(summary instanceof HTMLElement)) {
+                throw new Error('Search tips were not rendered for responsive verification.')
+              }
+              summary.scrollIntoView({ block: 'center', inline: 'nearest' })
+              await waitForFrames()
+              details.open = true
+              await waitForFrames()
+              await new Promise((resolve) => setTimeout(resolve, 50))
+              const panel = document.querySelector('.explorer-search-help-panel')
+              if (!(panel instanceof HTMLElement)) throw new Error('Search tips panel did not open.')
+              const panelRect = panel.getBoundingClientRect()
+              if (
+                panelRect.left < 0 || panelRect.right > window.innerWidth + 1 ||
+                panelRect.top < 0 || panelRect.bottom > window.innerHeight + 1
+              ) {
+                throw new Error('Search tips escaped the viewport: ' + JSON.stringify({
+                  left: panelRect.left, right: panelRect.right, top: panelRect.top, bottom: panelRect.bottom,
+                  viewport: { width: window.innerWidth, height: window.innerHeight }
+                }))
+              }
+              panel.focus()
+              panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+              await waitForFrames()
+              if (details.open || document.activeElement !== summary) {
+                throw new Error('Escape did not close Search tips and restore focus to its trigger.')
+              }
+
+              const advancedTrigger = document.querySelector('.advanced-search-trigger')
+              if (!(advancedTrigger instanceof HTMLButtonElement)) {
+                throw new Error('Advanced search trigger was not rendered for responsive verification.')
+              }
+              advancedTrigger.click()
+              await waitForFrames()
+              const dialog = document.querySelector('.advanced-search-dialog')
+              if (!(dialog instanceof HTMLDialogElement) || !dialog.open) {
+                throw new Error('Advanced search dialog did not open.')
+              }
+              const dialogRect = dialog.getBoundingClientRect()
+              if (
+                dialogRect.left < 0 || dialogRect.right > window.innerWidth + 1 ||
+                dialogRect.top < 0 || dialogRect.bottom > window.innerHeight + 1 ||
+                !dialog.contains(document.activeElement)
+              ) {
+                throw new Error('Advanced search is clipped or did not receive focus: ' + JSON.stringify({
+                  left: dialogRect.left, right: dialogRect.right, top: dialogRect.top, bottom: dialogRect.bottom,
+                  focused: document.activeElement?.tagName,
+                  viewport: { width: window.innerWidth, height: window.innerHeight }
+                }))
+              }
+              dialog.querySelector('.advanced-search-close')?.click()
+              await waitForFrames()
+              if (dialog.open || document.activeElement !== advancedTrigger) {
+                throw new Error('Advanced search did not close and restore focus to its trigger.')
+              }
+              const localScroller = [...document.querySelectorAll('.skill-table-wrap, .planner-table-wrap, .mi-table-wrap')]
+                .find((element) => element instanceof HTMLElement && element.offsetParent !== null)
+              if (localScroller instanceof HTMLElement && localScroller.scrollWidth > localScroller.clientWidth) {
+                const descriptionId = localScroller.getAttribute('aria-describedby')
+                const description = descriptionId ? document.getElementById(descriptionId) : null
+                if (
+                  localScroller.tabIndex < 0 ||
+                  !(description instanceof HTMLElement) ||
+                  (window.innerWidth <= 1180 && getComputedStyle(description).display === 'none')
+                ) {
+                  throw new Error('Wide result table is not exposed as a labeled, keyboard-focusable local scroller.')
+                }
+                localScroller.focus()
+                if (document.activeElement !== localScroller) {
+                  throw new Error('Wide result table could not receive keyboard focus.')
+                }
+              }
+              if (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP === '1')}) {
+                details.open = true
+                await waitForFrames()
+              }
+            })()
+          `)
+        }
         const miWorkshopQuery = process.env.CAIRN_CODEX_SCREENSHOT_MI_QUERY
         const miAffixFilter = process.env.CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER
         const miNativeRestore = process.env.CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE === '1'

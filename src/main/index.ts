@@ -27,6 +27,9 @@ import {
   type ObservedStashItem,
   type StagingTabInspection,
   type VaultListItem,
+  type VaultItemPage,
+  type VaultPageRequest,
+  type VaultSummary,
   type WriteSafetyStatus
 } from '@shared/contracts'
 import {
@@ -738,6 +741,38 @@ function registerIpcHandlers(
     IPC_CHANNELS.listVaultItems,
     (_event, input?: { isHardcore?: boolean }): VaultListItem[] =>
       database.listVaultItems(input?.isHardcore)
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.queryVaultItems,
+    (_event, input: VaultPageRequest): VaultItemPage => {
+      if (!input || !['ingested', 'retrieval_pending', 'retrieved'].includes(input.state)) {
+        throw new Error('A valid vault state is required.')
+      }
+      if (!['recent', 'name', 'level', 'roll'].includes(input.sort)) {
+        throw new Error('A valid vault sort is required.')
+      }
+      if (!['asc', 'desc'].includes(input.direction)) {
+        throw new Error('A valid vault sort direction is required.')
+      }
+      if (
+        input.rarity !== undefined &&
+        !['epic', 'legendary', 'mi', 'rare', 'faction', 'supply'].includes(input.rarity)
+      ) {
+        throw new Error('The requested vault rarity is not supported.')
+      }
+      if (
+        !Number.isInteger(input.offset) || input.offset < 0 || input.offset > 10_000_000 ||
+        !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 250 ||
+        (input.query?.length ?? 0) > 200
+      ) {
+        throw new Error('Vault paging parameters are outside their safe bounds.')
+      }
+      return database.queryVaultItems(input)
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.getVaultSummary,
+    (): VaultSummary => database.getVaultSummary()
   )
   ipcMain.handle(
     IPC_CHANNELS.previewDismantling,
@@ -2711,6 +2746,51 @@ async function runSmokeTest(
     ) {
       throw new Error('Dispensing a reusable supply consumed its stored unlock.')
     }
+    const ingestedPage = database.queryVaultItems({
+      state: 'ingested',
+      isHardcore: true,
+      sort: 'recent',
+      direction: 'desc',
+      offset: 0,
+      limit: 1
+    })
+    const retrievedPage = database.queryVaultItems({
+      state: 'retrieved',
+      sort: 'name',
+      direction: 'asc',
+      offset: 0,
+      limit: 1
+    })
+    const searchedPage = database.queryVaultItems({
+      state: 'ingested',
+      query: listedReusable.name,
+      sort: 'level',
+      direction: 'desc',
+      offset: 0,
+      limit: 100
+    })
+    const escapedSearchPage = database.queryVaultItems({
+      state: 'ingested',
+      query: '%_',
+      sort: 'roll',
+      direction: 'desc',
+      offset: 0,
+      limit: 100
+    })
+    const vaultSummary = database.getVaultSummary()
+    if (
+      ingestedPage.total < 1 ||
+      ingestedPage.items.length !== 1 ||
+      retrievedPage.total < 1 ||
+      retrievedPage.items.length !== 1 ||
+      !searchedPage.items.some((item) => item.id === reusableVaultItemId) ||
+      escapedSearchPage.total !== 0 ||
+      vaultSummary.total < 2 ||
+      vaultSummary.ingested < 1 ||
+      vaultSummary.retrieved < 1
+    ) {
+      throw new Error('Paged vault querying did not preserve filtering, sorting, or summary counts.')
+    }
     const clarityVaultItemId = randomUUID()
     const clarityIngestOperationId = randomUUID()
     database.prepareIngestOperation({
@@ -2956,6 +3036,7 @@ async function runSmokeTest(
         retrievalRoundTrips: retrievalRoundTrips.length,
         retrievalJournal: 'verified',
         vaultListing: 'verified',
+        vaultPaging: 'verified',
         analyzedCopies: analyzedCopies.length,
         trustedRolls: trustedRolls.length,
         withheldRolls: analyzedCopies.length - trustedRolls.length,

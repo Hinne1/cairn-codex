@@ -22,6 +22,8 @@ export const IPC_CHANNELS = {
   inspectWriteSafety: 'vault:inspect-write-safety',
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
+  queryVaultItems: 'vault:query-items',
+  getVaultSummary: 'vault:get-summary',
   previewDismantling: 'vault:preview-dismantling',
   ingestStagingTab: 'vault:ingest-staging-tab',
   retrieveVaultItems: 'vault:retrieve-items',
@@ -123,6 +125,8 @@ export interface CairnCodexApi {
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>
+  queryVaultItems: (request: VaultPageRequest) => Promise<VaultItemPage>
+  getVaultSummary: () => Promise<VaultSummary>
   previewDismantling: (vaultItemIds: string[]) => Promise<DismantlingPreview>
   ingestStagingTab: (path: string) => Promise<IngestResult>
   retrieveVaultItems: (path: string, vaultItemIds: string[]) => Promise<RetrievalResult>
@@ -263,6 +267,37 @@ export interface VaultListItem {
   rollAnalysis: ItemRollAnalysis | null
   ingestedAtUtc: string
   retrievedAtUtc: string | null
+}
+
+export type VaultPageSort = 'recent' | 'name' | 'level' | 'roll'
+
+export interface VaultPageRequest {
+  state: VaultItemState
+  isHardcore?: boolean
+  catalogued?: boolean
+  excludeSupplies?: boolean
+  rarity?: CollectionItemRarity
+  query?: string
+  sort: VaultPageSort
+  direction: 'asc' | 'desc'
+  offset: number
+  limit: number
+}
+
+export interface VaultItemPage {
+  items: VaultListItem[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface VaultSummary {
+  total: number
+  ingested: number
+  retrievalPending: number
+  retrieved: number
+  quarantined: number
+  supplies: number
 }
 
 export interface DismantlingPreview {

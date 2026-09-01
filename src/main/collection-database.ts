@@ -5,11 +5,14 @@ import type {
   CollectionSnapshot,
   ItemRollAnalysis,
   ObservedStashItem,
-  VaultListItem
+  VaultItemPage,
+  VaultListItem,
+  VaultPageRequest,
+  VaultSummary
 } from '@shared/contracts'
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 10
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 11
 
 export interface ValidatedCollectionDatabase {
   schemaVersion: number
@@ -787,24 +790,126 @@ export class CollectionDatabase {
         ${isHardcore === undefined ? '' : 'WHERE vault_item.is_hardcore = ?'}
         ORDER BY vault_item.ingested_at_utc DESC, vault_item.id
       `)
-      .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as Array<{
-      id: string
-      base_record: string
-      state: VaultItemState
-      serialized_item: Uint8Array
-      ingested_at_utc: string
-      retrieved_at_utc: string | null
-      name: string
-      rarity: 'epic' | 'legendary' | 'mi' | 'rare' | 'faction' | 'supply'
-      slot: string
-      level_requirement: number
-      item_level: number
-      content_pack: string
-      is_hardcore: number
-      reusable: number
-      roll_json: string | null
-    }>
+      .all(...(isHardcore === undefined ? [] : [isHardcore ? 1 : 0])) as unknown as VaultListRow[]
 
+    return this.presentVaultRows(rows)
+  }
+
+  queryVaultItems(request: VaultPageRequest): VaultItemPage {
+    const clauses = ['vault_item.state = ?']
+    const parameters: Array<string | number> = [request.state]
+    if (request.isHardcore !== undefined) {
+      clauses.push('vault_item.is_hardcore = ?')
+      parameters.push(request.isHardcore ? 1 : 0)
+    }
+    if (request.catalogued !== undefined) {
+      clauses.push(
+        request.catalogued
+          ? "catalog_item.content_pack != 'cairn-quarantine'"
+          : "catalog_item.content_pack = 'cairn-quarantine'"
+      )
+    }
+    if (request.excludeSupplies) clauses.push("catalog_item.rarity != 'supply'")
+    if (request.rarity) {
+      clauses.push('catalog_item.rarity = ?')
+      parameters.push(request.rarity)
+    }
+    const query = request.query?.trim().toLocaleLowerCase() ?? ''
+    if (query) {
+      clauses.push(`
+        LOWER(
+          catalog_item.name || ' ' ||
+          vault_item.base_record || ' ' ||
+          catalog_item.slot || ' ' ||
+          catalog_item.rarity || ' ' ||
+          catalog_item.item_level || ' ' ||
+          COALESCE(json_extract(CAST(vault_item.serialized_item AS TEXT), '$.seed'), '') || ' ' ||
+          COALESCE(json_extract(CAST(vault_item.serialized_item AS TEXT), '$.prefixRecord'), '') || ' ' ||
+          COALESCE(json_extract(CAST(vault_item.serialized_item AS TEXT), '$.suffixRecord'), '')
+        ) LIKE ? ESCAPE char(92)
+      `)
+      parameters.push(`%${query.replace(/[\\%_]/g, '\\$&')}%`)
+    }
+    const where = clauses.join(' AND ')
+    const totalRow = this.database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM vault_item
+      JOIN catalog_item ON catalog_item.record = vault_item.base_record
+      WHERE ${where}
+    `).get(...parameters) as { count: number }
+    const sortColumn = request.sort === 'name'
+      ? 'catalog_item.name COLLATE NOCASE'
+      : request.sort === 'level'
+        ? 'catalog_item.item_level'
+        : request.sort === 'roll'
+          ? "COALESCE(json_extract(vault_item.roll_json, '$.overallEstimatedPercentile'), -1)"
+          : request.state === 'retrieved'
+            ? 'vault_item.retrieved_at_utc'
+            : 'vault_item.ingested_at_utc'
+    const direction = request.direction === 'asc' ? 'ASC' : 'DESC'
+    const limit = Math.max(1, Math.min(250, Math.trunc(request.limit)))
+    const offset = Math.max(0, Math.trunc(request.offset))
+    const rows = this.database.prepare(`
+      SELECT
+        vault_item.id,
+        vault_item.base_record,
+        vault_item.state,
+        vault_item.serialized_item,
+        vault_item.ingested_at_utc,
+        vault_item.retrieved_at_utc,
+        vault_item.is_hardcore,
+        vault_item.reusable,
+        vault_item.roll_json,
+        catalog_item.name,
+        catalog_item.rarity,
+        catalog_item.slot,
+        catalog_item.level_requirement,
+        catalog_item.item_level,
+        catalog_item.content_pack
+      FROM vault_item
+      JOIN catalog_item ON catalog_item.record = vault_item.base_record
+      WHERE ${where}
+      ORDER BY ${sortColumn} ${direction}, catalog_item.name COLLATE NOCASE, vault_item.id
+      LIMIT ? OFFSET ?
+    `).all(...parameters, limit, offset) as unknown as VaultListRow[]
+    return {
+      items: this.presentVaultRows(rows),
+      total: Number(totalRow.count),
+      offset,
+      limit
+    }
+  }
+
+  getVaultSummary(): VaultSummary {
+    const row = this.database.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN vault_item.state = 'ingested' THEN 1 ELSE 0 END) AS ingested,
+        SUM(CASE WHEN vault_item.state = 'retrieval_pending' THEN 1 ELSE 0 END) AS retrieval_pending,
+        SUM(CASE WHEN vault_item.state = 'retrieved' THEN 1 ELSE 0 END) AS retrieved,
+        SUM(CASE WHEN vault_item.state = 'ingested' AND catalog_item.content_pack = 'cairn-quarantine' THEN 1 ELSE 0 END) AS quarantined,
+        SUM(CASE WHEN vault_item.state = 'ingested' AND catalog_item.rarity = 'supply' THEN 1 ELSE 0 END) AS supplies
+      FROM vault_item
+      JOIN catalog_item ON catalog_item.record = vault_item.base_record
+    `).get() as {
+      total: number
+      ingested: number | null
+      retrieval_pending: number | null
+      retrieved: number | null
+      quarantined: number | null
+      supplies: number | null
+    }
+    return {
+      total: Number(row.total),
+      ingested: Number(row.ingested ?? 0),
+      retrievalPending: Number(row.retrieval_pending ?? 0),
+      retrieved: Number(row.retrieved ?? 0),
+      quarantined: Number(row.quarantined ?? 0),
+      supplies: Number(row.supplies ?? 0)
+    }
+  }
+
+  private presentVaultRows(rows: VaultListRow[]): VaultListItem[] {
     return rows.map((row) => {
       const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as {
         seed?: number
@@ -1482,6 +1587,18 @@ export class CollectionDatabase {
       `)
       version = 10
     }
+    if (version === 10) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE INDEX vault_item_browse_idx
+          ON vault_item(state, is_hardcore, ingested_at_utc DESC, id);
+        CREATE INDEX vault_item_history_idx
+          ON vault_item(state, retrieved_at_utc DESC, id);
+        PRAGMA user_version = 11;
+        COMMIT;
+      `)
+      version = 11
+    }
   }
 
   private persistCatalog(items: CollectionItem[]): void {
@@ -1821,6 +1938,24 @@ export interface CompletedIngestOperation {
 }
 
 export type VaultItemState = 'ingested' | 'retrieval_pending' | 'retrieved'
+
+interface VaultListRow {
+  id: string
+  base_record: string
+  state: VaultItemState
+  serialized_item: Uint8Array
+  ingested_at_utc: string
+  retrieved_at_utc: string | null
+  name: string
+  rarity: 'epic' | 'legendary' | 'mi' | 'rare' | 'faction' | 'supply'
+  slot: string
+  level_requirement: number
+  item_level: number
+  content_pack: string
+  is_hardcore: number
+  reusable: number
+  roll_json: string | null
+}
 
 export interface VaultItem {
   id: string

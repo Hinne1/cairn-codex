@@ -22,6 +22,9 @@ import {
   type RecoveryStatus,
   type StagingTabInspection,
   type VaultListItem,
+  type VaultItemPage,
+  type VaultPageRequest,
+  type VaultSummary,
   type WriteSafetyStatus
 } from '@shared/contracts'
 
@@ -71,6 +74,10 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.inspectStagingTab, { path }) as Promise<StagingTabInspection>,
   listVaultItems: () =>
     ipcRenderer.invoke(IPC_CHANNELS.listVaultItems) as Promise<VaultListItem[]>,
+  queryVaultItems: (request: VaultPageRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.queryVaultItems, request) as Promise<VaultItemPage>,
+  getVaultSummary: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getVaultSummary) as Promise<VaultSummary>,
   previewDismantling: (vaultItemIds) =>
     ipcRenderer.invoke(IPC_CHANNELS.previewDismantling, { vaultItemIds }) as Promise<DismantlingPreview>,
   ingestStagingTab: (path) =>

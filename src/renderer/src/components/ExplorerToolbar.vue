@@ -8,12 +8,14 @@ const props = withDefaults(defineProps<{
   resultCount?: number
   resultLabel?: string
   tone?: 'gold' | 'green'
+  loading?: boolean
 }>(), {
   searchLabel: 'Search',
   placeholder: 'Search…',
   resultCount: 0,
   resultLabel: 'results',
-  tone: 'gold'
+  tone: 'gold',
+  loading: false
 })
 
 const emit = defineEmits<{
@@ -33,7 +35,7 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
 </script>
 
 <template>
-  <div :class="['explorer-toolbar', `tone-${tone}`]">
+  <div :class="['explorer-toolbar', `tone-${tone}`]" :aria-busy="loading">
     <div v-if="$slots.before" class="explorer-toolbar-before">
       <slot name="before" />
     </div>
@@ -70,9 +72,12 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
       <slot name="actions" />
     </div>
 
-    <output class="explorer-result-count">
-      <strong>{{ resultCount.toLocaleString() }}</strong>
-      <span>{{ resultLabel }}</span>
+    <output class="explorer-result-count" aria-live="polite">
+      <span class="explorer-result-value">
+        <span v-if="loading" class="explorer-result-spinner" aria-hidden="true" />
+        <strong>{{ resultCount.toLocaleString() }}</strong>
+      </span>
+      <span>{{ loading ? 'Updating…' : resultLabel }}</span>
     </output>
   </div>
 </template>
@@ -176,8 +181,20 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
   text-align: right;
 }
 .explorer-result-count strong { color: #d3aa55; font: 500 16px Georgia, serif; }
+.explorer-result-value { display: flex; align-items: center; gap: 6px; }
+.explorer-result-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1px solid rgba(211, 170, 85, .3);
+  border-top-color: #d3aa55;
+  border-radius: 50%;
+  animation: explorer-spin .75s linear infinite;
+}
 .tone-green .explorer-result-count strong { color: #91bd73; }
+.tone-green .explorer-result-spinner { border-color: rgba(145, 189, 115, .3); border-top-color: #91bd73; }
 .explorer-result-count span { font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
+
+@keyframes explorer-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1180px) {
   .explorer-search { flex-basis: 100%; }

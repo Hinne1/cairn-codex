@@ -52,6 +52,7 @@ const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigati
 const verifyPlannerActions = process.argv.includes('--verify-planner-actions')
 const verifyBoundedKeyboard = process.argv.includes('--verify-bounded-keyboard')
 const verifySupplySelection = process.argv.includes('--verify-supply-selection')
+const verifySuppliesWorkspace = process.argv.includes('--verify-supplies-workspace')
 const verifyResponsiveTools = process.argv.includes('--verify-responsive-tools')
 const assertNoOverflow = process.argv.includes('--assert-no-overflow')
 const verifyFarmingPaging = process.argv.includes('--verify-farming-paging')
@@ -160,6 +161,7 @@ const env = {
   ...(verifyPlannerActions ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS: '1' } : {}),
   ...(verifyBoundedKeyboard ? { CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD: '1' } : {}),
   ...(verifySupplySelection ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLY_SELECTION: '1' } : {}),
+  ...(verifySuppliesWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLIES_WORKSPACE: '1' } : {}),
   ...(verifyResponsiveTools ? { CAIRN_CODEX_SCREENSHOT_VERIFY_RESPONSIVE_TOOLS: '1' } : {}),
   ...(verifyFarmingPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING: '1' } : {}),
   ...(verifyOracleWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ORACLE_WORKSPACE: '1' } : {}),
@@ -364,6 +366,7 @@ console.log(JSON.stringify({
   verifyPlannerActions,
   verifyBoundedKeyboard,
   verifySupplySelection,
+  verifySuppliesWorkspace,
   verifyResponsiveTools,
   assertNoOverflow,
   verifyFarmingPaging,

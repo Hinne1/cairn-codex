@@ -817,7 +817,9 @@ internal static class ItemCatalogBuilder
                     sawDropTable = true;
                 if (isVendor)
                 {
-                    var requirement = ParseFactionRequirement(path);
+                    var requirement = ParseFactionRequirement(
+                        path,
+                        route == AcquisitionRoute.Blueprint ? "blueprint" : "item");
                     if (route == AcquisitionRoute.Blueprint)
                     {
                         sawBlueprintVendor = true;
@@ -852,8 +854,7 @@ internal static class ItemCatalogBuilder
         // A boss-specific item table can also be reachable through broad reward
         // chests. When a real monster consumer exists, that is the actionable farming
         // source and its placement graph must not be polluted by every generic chest.
-        var preferredSources = SelectClosestSources(monsterSources);
-        if (preferredSources.Count == 0) preferredSources = SelectClosestSources(containerSources);
+        var preferredSources = SelectClosestSources(monsterSources, containerSources);
         hints.AddRange(preferredSources.Select(source => source.Hint).OfType<string>());
 
         if (blueprintRecords.Count > 0) hints.Add("Craftable from a blueprint");
@@ -875,8 +876,8 @@ internal static class ItemCatalogBuilder
             hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
             preferredSources.Select(source => source.Record)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray(),
-            factionRequirements
-                .DistinctBy(requirement => $"{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)
+            factionRequirements.Concat(blueprintFactionRequirements)
+                .DistinctBy(requirement => $"{requirement.Kind}\0{requirement.Faction}\0{requirement.Reputation}", StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
             blueprintRecords.Count == 0
                 ? null
@@ -890,7 +891,9 @@ internal static class ItemCatalogBuilder
                         : blueprintRecords.Any(knownFormulas.HardcoreRecords.Contains)));
     }
 
-    private static ItemFactionRequirement? ParseFactionRequirement(string path)
+    private static ItemFactionRequirement? ParseFactionRequirement(
+        string path,
+        string kind = "item")
     {
         const string marker = "/merchants/factiontables/";
         var markerIndex = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -905,7 +908,8 @@ internal static class ItemCatalogBuilder
             return new ItemFactionRequirement(
                 FactionDisplayName(key),
                 char.ToUpperInvariant(reputation[0]) + reputation[1..],
-                path);
+                path,
+                kind);
         }
         return null;
     }
@@ -948,10 +952,21 @@ internal static class ItemCatalogBuilder
         type.Contains("Formula", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<AcquisitionSourceCandidate> SelectClosestSources(
-        IReadOnlyList<AcquisitionSourceCandidate> sources)
+        IReadOnlyList<AcquisitionSourceCandidate> monsterSources,
+        IReadOnlyList<AcquisitionSourceCandidate> containerSources)
     {
-        if (sources.Count == 0) return [];
-        var closestDepth = sources.Min(source => source.Depth);
+        var closestMonsterDepth = monsterSources.Count == 0
+            ? int.MaxValue
+            : monsterSources.Min(source => source.Depth);
+        var closestContainerDepth = containerSources.Count == 0
+            ? int.MaxValue
+            : containerSources.Min(source => source.Depth);
+        var closestDepth = Math.Min(closestMonsterDepth, closestContainerDepth);
+        if (closestDepth == int.MaxValue) return [];
+
+        // At equal distance a monster is the more actionable farming answer. A direct
+        // chest, however, must beat a monster inherited through a deeper broad pool.
+        var sources = closestMonsterDepth == closestDepth ? monsterSources : containerSources;
         return sources.Where(source => source.Depth == closestDepth).ToArray();
     }
 
@@ -1141,4 +1156,8 @@ internal sealed record ItemCraftingPresentation(
     IReadOnlyList<string> BlueprintRecords,
     bool? KnownSoftcore,
     bool? KnownHardcore);
-internal sealed record ItemFactionRequirement(string Faction, string Reputation, string VendorRecord);
+internal sealed record ItemFactionRequirement(
+    string Faction,
+    string Reputation,
+    string VendorRecord,
+    string Kind = "item");

@@ -24,6 +24,11 @@ internal static class AcquisitionResolverSelfTest
     private const string VariantTable = "records/items/loottables/fixture_variant_table.dbr";
     private const string VariantMonsterA = "records/creatures/enemies/fixture_variant_a.dbr";
     private const string VariantMonsterB = "records/creatures/enemies/fixture_variant_b.dbr";
+    private const string ChestItem = "records/items/gearweapons/fixture_chest_item.dbr";
+    private const string DirectChest = "records/interactiveobjects/lootcontainers/fixture_chest.dbr";
+    private const string ChestItemTable = "records/items/loottables/fixture_chest_item_table.dbr";
+    private const string ChestBroadPool = "records/items/loottables/fixture_chest_broad_pool.dbr";
+    private const string DistantChestMonster = "records/creatures/enemies/fixture_chest_monster.dbr";
 
     public static AcquisitionResolverSelfTestResult Run()
     {
@@ -41,7 +46,9 @@ internal static class AcquisitionResolverSelfTest
             ["tagGroble"] = "Groble ~ Void Clan Elder",
             ["tagSteward"] = "The Steward",
             ["tagVariantA"] = "Fixture Alpha",
-            ["tagVariantB"] = "Fixture Beta"
+            ["tagVariantB"] = "Fixture Beta",
+            ["tagChest"] = "Fixture Chest",
+            ["tagDistantMonster"] = "Distant Fixture Monster"
         };
         var references = ItemCatalogBuilder.BuildAcquisitionReferences(records);
 
@@ -64,13 +71,13 @@ internal static class AcquisitionResolverSelfTest
             "A formula artifactName edge was not recognized as a producer.");
         Check(crafted.Sources.Contains("Blueprint vendor: Cult of Dreeg · Revered"),
             "A vendor-sold producing blueprint was not labeled distinctly.");
-        Check(crafted.Factions.Count == 0 &&
+        Check(crafted.Factions.Count == 1 && crafted.Factions[0].Kind == "blueprint" &&
               crafted.Crafting?.BlueprintRecords.SequenceEqual([ProducingFormula]) == true,
-            "A blueprint vendor was exposed as direct faction item stock.");
+            "A blueprint vendor was not retained as a typed faction requirement.");
 
         var directVendor = Resolve(DirectVendorItem);
         Check(directVendor.Sources.Contains("Faction vendor: Cult of Dreeg · Revered") &&
-              directVendor.Factions.Count == 1,
+              directVendor.Factions.Count == 1 && directVendor.Factions[0].Kind == "item",
             "Direct faction stock was not preserved.");
 
         var variants = Resolve(VariantItem);
@@ -81,6 +88,11 @@ internal static class AcquisitionResolverSelfTest
         Check(variants.SourceRecords.Count == 2,
             "Equally direct source records were unexpectedly collapsed.");
 
+        var chest = Resolve(ChestItem);
+        Check(chest.Sources.SequenceEqual(["Found in Fixture Chest"]) &&
+              chest.SourceRecords.SequenceEqual([DirectChest]),
+            "A distant monster outranked a directly actionable container.");
+
         return new AcquisitionResolverSelfTestResult(
             Passed: true,
             Assertions: assertions,
@@ -88,7 +100,8 @@ internal static class AcquisitionResolverSelfTest
             ReagentFormulaRejected: true,
             BlueprintVendorPassed: true,
             DirectVendorPassed: true,
-            EqualDepthVariantsPassed: true);
+            EqualDepthVariantsPassed: true,
+            CrossTypeDepthPassed: true);
 
         ItemAcquisitionPresentation Resolve(string itemRecord) =>
             ItemCatalogBuilder.BuildAcquisition(itemRecord, references, records, tags, knownFormulas: null);
@@ -117,7 +130,13 @@ internal static class AcquisitionResolverSelfTest
             [VariantItem] = Source(VariantItem, "Item"),
             [VariantTable] = Source(VariantTable, "LootItemTable_DynWeight", ("lootName1", Text(VariantItem))),
             [VariantMonsterA] = Source(VariantMonsterA, "Monster", ("description", Text("tagVariantA")), ("lootTable", Text(VariantTable))),
-            [VariantMonsterB] = Source(VariantMonsterB, "Monster", ("description", Text("tagVariantB")), ("lootTable", Text(VariantTable)))
+            [VariantMonsterB] = Source(VariantMonsterB, "Monster", ("description", Text("tagVariantB")), ("lootTable", Text(VariantTable))),
+
+            [ChestItem] = Source(ChestItem, "Item"),
+            [DirectChest] = Source(DirectChest, "LootContainer", ("description", Text("tagChest")), ("lootName1", Text(ChestItem))),
+            [ChestItemTable] = Source(ChestItemTable, "LootItemTable_DynWeight", ("lootName1", Text(ChestItem))),
+            [ChestBroadPool] = Source(ChestBroadPool, "LootMasterTable", ("lootName1", Text(ChestItemTable))),
+            [DistantChestMonster] = Source(DistantChestMonster, "Monster", ("description", Text("tagDistantMonster")), ("lootTable", Text(ChestBroadPool)))
         };
 
     private static CatalogSourceRecord Source(
@@ -140,4 +159,5 @@ internal sealed record AcquisitionResolverSelfTestResult(
     bool ReagentFormulaRejected,
     bool BlueprintVendorPassed,
     bool DirectVendorPassed,
-    bool EqualDepthVariantsPassed);
+    bool EqualDepthVariantsPassed,
+    bool CrossTypeDepthPassed);

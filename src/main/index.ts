@@ -2456,7 +2456,8 @@ async function executeLiveAugmentDispense(
   const selected = uniqueRecords.map((record) => {
     const item = catalog.get(record)
     if (!item) throw new Error(`The selected record is not a catalogued faction augment: ${record}`)
-    const requirements = item.acquisition?.factions ?? []
+    const requirements = (item.acquisition?.factions ?? [])
+      .filter((requirement) => requirement.kind !== 'blueprint')
     if (requirements.length === 0) {
       throw new Error(`${item.name} has no verified faction-vendor requirement and cannot be injected.`)
     }

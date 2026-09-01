@@ -681,7 +681,8 @@ const eligibleFactionAugmentRecords = computed(() => new Set(
   [...supplyPresentationByRecord.value.values()]
     .filter(({ item }) => item.slot === 'augment')
     .filter(({ item }) => (item.acquisition?.factions ?? []).some(
-      (requirement) => characterMeetsReputation(requirement.faction, requirement.reputation)
+      (requirement) => requirement.kind !== 'blueprint' &&
+        characterMeetsReputation(requirement.faction, requirement.reputation)
     ))
     .map(({ item }) => item.record.toLocaleLowerCase())
 ))
@@ -6698,8 +6699,8 @@ function formatPercentile(value: number | null | undefined): string {
                     >
                       <b>Blueprint</b> · {{ recipeStatus(row.item)?.label }}
                     </span>
-                    <span v-for="faction in row.item.acquisition?.factions ?? []" :key="faction.vendorRecord">
-                      <b>{{ faction.faction }}</b> · {{ faction.reputation }}
+                    <span v-for="faction in row.item.acquisition?.factions ?? []" :key="`${faction.kind ?? 'item'}:${faction.vendorRecord}`">
+                      <b>{{ faction.kind === 'blueprint' ? 'Blueprint vendor: ' : '' }}{{ faction.faction }}</b> · {{ faction.reputation }}
                     </span>
                     <span v-if="!(row.item.acquisition?.factions?.length)">{{ row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
                     <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map(locationDisplayName).slice(0, 2).join(', ') }}</small>
@@ -6737,7 +6738,7 @@ function formatPercentile(value: number | null | undefined): string {
                   <b v-if="recipeStatus(row.item)" class="recipe-status" :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }">
                     {{ recipeStatus(row.item)?.label }}
                   </b>
-                  <span>{{ row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
+                  <span>{{ row.item.acquisition?.factions?.[0]?.kind === 'blueprint' ? `Blueprint: ${row.item.acquisition.factions[0].faction}` : row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
                 </footer>
               </article>
             </template>

@@ -70,7 +70,8 @@ try {
     !acquisition.reagentFormulaRejected ||
     !acquisition.blueprintVendorPassed ||
     !acquisition.directVendorPassed ||
-    !acquisition.equalDepthVariantsPassed
+    !acquisition.equalDepthVariantsPassed ||
+    !acquisition.crossTypeDepthPassed
   ) {
     throw new Error('Acquisition producer-path self-test failed.')
   }

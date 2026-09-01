@@ -783,6 +783,8 @@ export interface ItemFactionRequirement {
   faction: string
   reputation: 'Friendly' | 'Respected' | 'Honored' | 'Revered' | string
   vendorRecord: string
+  /** Omitted by older cached catalogs, where every requirement represented direct item stock. */
+  kind?: 'item' | 'blueprint'
 }
 
 export interface MapRegionLocation {

@@ -194,7 +194,7 @@ export const CAIRN_GAMEPLAY_TOKENS: ProtectedGameplayTokenValues = {
 export const CAIRN_THEME_MANIFEST: ThemeManifestV1 = {
   version: THEME_MANIFEST_VERSION,
   id: DEFAULT_THEME_ID,
-  name: 'Cairn',
+  name: 'Cairn Codex',
   colorScheme: 'dark',
   tokens: {}
 }
@@ -224,6 +224,10 @@ const contrastRequirements: ReadonlyArray<{
   { foreground: '--cc-text-primary', background: '--cc-surface-input', minimum: 4.5 },
   { foreground: '--cc-accent', background: '--cc-surface-1', minimum: 4.5 },
   { foreground: '--cc-accent', background: '--cc-canvas', minimum: 4.5 },
+  { foreground: '--cc-accent-strong', background: '--cc-surface-1', minimum: 4.5 },
+  { foreground: '--cc-accent-soft', background: '--cc-canvas', minimum: 4.5 },
+  { foreground: '--cc-accent-soft', background: '--cc-surface-1', minimum: 4.5 },
+  { foreground: '--cc-accent-soft', background: '--cc-accent-surface', minimum: 4.5 },
   { foreground: '--cc-text-inverse', background: '--cc-accent', minimum: 4.5 },
   { foreground: '--cc-focus', background: '--cc-canvas', minimum: 3 },
   { foreground: '--cc-focus', background: '--cc-surface-1', minimum: 3 },
@@ -234,7 +238,9 @@ const contrastRequirements: ReadonlyArray<{
   { foreground: '--cc-info', background: '--cc-info-surface', minimum: 4.5 },
   { foreground: '--cc-tone-green-heading', background: '--cc-tone-green-surface', minimum: 4.5 },
   { foreground: '--cc-tone-green-accent', background: '--cc-tone-green-surface', minimum: 4.5 },
+  { foreground: '--cc-tone-green-accent-soft', background: '--cc-tone-green-surface', minimum: 4.5 },
   { foreground: '--cc-tone-green-muted', background: '--cc-tone-green-surface', minimum: 3 },
+  { foreground: '--cc-tone-green-focus', background: '--cc-tone-green-surface', minimum: 3 },
   { foreground: '--cc-tone-blue-heading', background: '--cc-tone-blue-surface', minimum: 4.5 },
   { foreground: '--cc-tone-blue-accent', background: '--cc-tone-blue-surface', minimum: 4.5 },
   { foreground: '--cc-tone-blue-muted', background: '--cc-tone-blue-surface', minimum: 3 },

@@ -143,6 +143,22 @@ const gameplayCollisionTheme = resolveThemeManifest({
 assert.equal(gameplayCollisionTheme.fallback, 'cairn')
 assert.ok(gameplayCollisionTheme.issues.some((issue) => issue.token === '--gd-rarity-epic'))
 
+for (const [token, background] of [
+  ['--cc-accent-soft', '--cc-accent-surface'],
+  ['--cc-tone-green-accent-soft', '--cc-tone-green-surface'],
+  ['--cc-tone-green-focus', '--cc-tone-green-surface']
+]) {
+  const hiddenRoleTheme = resolveThemeManifest({
+    version: THEME_MANIFEST_VERSION,
+    id: `${token.slice(5)}-contrast-test`,
+    name: `${token} contrast test`,
+    colorScheme: 'dark',
+    tokens: { [token]: CAIRN_THEME_TOKENS[background] }
+  })
+  assert.equal(hiddenRoleTheme.fallback, 'cairn', `${token} cannot disappear against ${background}`)
+  assert.ok(hiddenRoleTheme.issues.some((issue) => issue.token === token))
+}
+
 const appliedProperties = new Map()
 const target = {
   dataset: {},

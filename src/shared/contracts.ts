@@ -22,6 +22,8 @@ export const IPC_CHANNELS = {
   getDebugLogging: 'settings:get-debug-logging',
   setDebugLogging: 'settings:set-debug-logging',
   recordNavigation: 'diagnostics:record-navigation',
+  getStartupStatus: 'diagnostics:get-startup-status',
+  reportStartupPhase: 'diagnostics:report-startup-phase',
   inspectWriteSafety: 'vault:inspect-write-safety',
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
@@ -58,6 +60,30 @@ export interface DebugLoggingStatus {
   maxFiles: number
   maxFileBytes: number
   maxAgeDays: number
+}
+
+export type StartupPhaseEvent =
+  | 'cache-hit'
+  | 'cache-miss'
+  | 'cached-paint'
+  | 'interactive'
+  | 'scan-started'
+  | 'scan-settled'
+  | 'scan-skipped'
+  | 'roll-analysis-started'
+  | 'roll-analysis-settled'
+  | 'roll-analysis-skipped'
+
+export interface StartupStatus {
+  startedAtUtc: string
+  cacheOutcome: 'pending' | 'hit' | 'miss'
+  cachedPaintMs: number | null
+  interactiveMs: number | null
+  scanState: 'pending' | 'running' | 'settled' | 'skipped'
+  scanSettledMs: number | null
+  rollAnalysisState: 'pending' | 'running' | 'settled' | 'skipped'
+  rollAnalysisSettledMs: number | null
+  backgroundPhase: 'opening-cache' | 'collection-scan' | 'roll-analysis' | 'idle'
 }
 
 export interface ArchiveBackupEntry {
@@ -135,6 +161,8 @@ export interface CairnCodexApi {
   getDebugLogging: () => Promise<DebugLoggingStatus>
   setDebugLogging: (enabled: boolean) => Promise<DebugLoggingStatus>
   recordNavigation: (view: string) => Promise<void>
+  getStartupStatus: () => Promise<StartupStatus>
+  reportStartupPhase: (phase: StartupPhaseEvent) => Promise<StartupStatus>
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>

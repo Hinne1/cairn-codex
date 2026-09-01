@@ -33,6 +33,8 @@ import type {
   RecoveryStatus,
   RolledStat,
   StagingTabInspection,
+  StartupPhaseEvent,
+  StartupStatus,
   VaultItemPage,
   VaultListItem,
   VaultSummary,
@@ -271,8 +273,18 @@ const archiveRollHydrating = ref(false)
 const archiveRollHydrationCompleted = ref(0)
 const archiveRollHydrationTotal = ref(0)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
+const startupPhaseStatus = ref<StartupStatus | null>(null)
 const scanError = ref<string | null>(null)
 const cacheIssue = ref<string | null>(null)
+const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
+  appInitializing.value && !snapshot.value
+    ? 'opening-cache'
+    : scanning.value
+      ? 'collection-scan'
+      : archiveRollHydrating.value
+        ? 'roll-analysis'
+        : 'idle'
+)
 const zoomFactor = ref(readStoredZoomFactor())
 const activeCategory = ref('All')
 const activeView = ref<ActiveView>('collection')
@@ -2348,6 +2360,19 @@ watch(scanError, (message) => {
   if (message) scanErrorTimer = setTimeout(() => { scanError.value = null }, 12_000)
 })
 
+async function reportStartupPhase(phase: StartupPhaseEvent): Promise<void> {
+  try {
+    startupPhaseStatus.value = await window.cairnCodex.reportStartupPhase(phase)
+  } catch (error) {
+    console.warn(`Startup phase ${phase} could not be recorded.`, error)
+  }
+}
+
+async function waitForPaint(): Promise<void> {
+  await nextTick()
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+}
+
 onMounted(async () => {
   if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual'
   window.scrollTo(0, 0)
@@ -2391,16 +2416,28 @@ onMounted(async () => {
       console.warn('Cached collection was unavailable; falling back to a full scan.', error)
     }
     if (cached) {
+      await reportStartupPhase('cache-hit')
       applySnapshot(cached)
+      await waitForPaint()
+      await reportStartupPhase('cached-paint')
+      await reportStartupPhase('interactive')
       // While live mode owns the hook, keep the helper responsive to durable queue work.
       // The cached catalog is complete enough to browse; heavy scan/roll refreshes remain
       // manual and run automatically once the game session ends.
-      if (cached.cacheNeedsRefresh && liveStatus.value?.state !== 'ready') void scanCollection()
-      if (!cached.cacheNeedsRefresh || liveStatus.value?.state === 'ready') void hydrateArchiveRolls()
+      if (cached.cacheNeedsRefresh && liveStatus.value?.state !== 'ready') {
+        void scanCollection(true)
+      } else {
+        await reportStartupPhase('scan-skipped')
+        void hydrateArchiveRolls(true)
+      }
     } else {
-      await scanCollection()
+      await reportStartupPhase('cache-miss')
+      await scanCollection(true, false)
+      await waitForPaint()
+      await reportStartupPhase('interactive')
+      void hydrateArchiveRolls(true)
     }
-    await refreshVault()
+    void refreshVault()
     await nextTick()
     window.scrollTo({ top: 0, behavior: 'auto' })
   } finally {
@@ -2426,7 +2463,7 @@ onBeforeUnmount(() => {
   cancelSearchDocumentWarmup()
 })
 
-async function scanCollection(): Promise<void> {
+async function scanCollection(startupRun = false, hydrateAfter = true): Promise<void> {
   const requestedSources = [...enabledStashPaths.value]
   const requestedBasis = collectionBasis.value
   const requestedKey = JSON.stringify({
@@ -2436,6 +2473,8 @@ async function scanCollection(): Promise<void> {
   scanActivity.value = 'collection'
   scanning.value = true
   scanError.value = null
+  let shouldHydrate = false
+  if (startupRun) await reportStartupPhase('scan-started')
   try {
     const result = await window.cairnCodex.scanCollection(requestedSources, requestedBasis)
     const currentKey = JSON.stringify({
@@ -2444,7 +2483,7 @@ async function scanCollection(): Promise<void> {
     })
     if (requestedKey === currentKey) {
       applySnapshot(result)
-      if (liveStatus.value?.state !== 'ready') void hydrateArchiveRolls()
+      shouldHydrate = liveStatus.value?.state !== 'ready'
     } else {
       const current = await window.cairnCodex.getCachedCollection(
         [...enabledStashPaths.value],
@@ -2456,7 +2495,10 @@ async function scanCollection(): Promise<void> {
     scanError.value = error instanceof Error ? error.message : 'Collection scan failed.'
   } finally {
     scanning.value = false
+    if (startupRun) await reportStartupPhase('scan-settled')
   }
+  if (hydrateAfter && shouldHydrate) void hydrateArchiveRolls(startupRun)
+  else if (hydrateAfter && startupRun) await reportStartupPhase('roll-analysis-skipped')
 }
 
 async function rebuildGameDataIndex(): Promise<void> {
@@ -3159,16 +3201,25 @@ async function loadSelectedSources(): Promise<void> {
   await refreshVault()
 }
 
-async function hydrateArchiveRolls(): Promise<void> {
-  if (archiveRollHydrating.value || collectionBasis.value !== 'archive' || !snapshot.value) return
+async function hydrateArchiveRolls(startupRun = false): Promise<void> {
+  if (
+    archiveRollHydrating.value ||
+    collectionBasis.value !== 'archive' ||
+    !snapshot.value ||
+    liveGameIsReady()
+  ) {
+    if (startupRun) await reportStartupPhase('roll-analysis-skipped')
+    return
+  }
   archiveRollHydrating.value = true
   archiveRollHydrationCompleted.value = 0
   archiveRollHydrationTotal.value = 0
   const requestedSources = [...enabledStashPaths.value]
   const requestedSourceKey = JSON.stringify([...requestedSources].sort())
+  if (startupRun) await reportStartupPhase('roll-analysis-started')
   try {
     let pending = 1
-    while (pending > 0 && collectionBasis.value === 'archive' && liveStatus.value?.state !== 'ready') {
+    while (pending > 0 && collectionBasis.value === 'archive' && !liveGameIsReady()) {
       const result = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
       if (
         !result ||
@@ -3192,7 +3243,12 @@ async function hydrateArchiveRolls(): Promise<void> {
     console.warn('Archived item rolls could not be hydrated in the background.', error)
   } finally {
     archiveRollHydrating.value = false
+    if (startupRun) await reportStartupPhase('roll-analysis-settled')
   }
+}
+
+function liveGameIsReady(): boolean {
+  return liveStatus.value?.state === 'ready'
 }
 
 function rarity(name: 'epic' | 'legendary' | 'mi'): CollectionRaritySummary | undefined {
@@ -5104,7 +5160,12 @@ function formatPercentile(value: number | null | undefined): string {
 </script>
 
 <template>
-  <div class="app-shell" :data-cache-issue="cacheIssue">
+  <div
+    class="app-shell"
+    :data-cache-issue="cacheIssue"
+    :data-startup-phase="startupBackgroundPhase"
+    :data-startup-interactive-ms="startupPhaseStatus?.interactiveMs ?? ''"
+  >
     <header class="topbar">
       <div class="brand-lockup">
         <nav class="history-nav" aria-label="View history">
@@ -5365,7 +5426,7 @@ function formatPercentile(value: number | null | undefined): string {
             </template>
           </p>
         </div>
-        <button class="primary-action" type="button" :disabled="scanning" @click="scanCollection">
+        <button class="primary-action" type="button" :disabled="scanning" @click="scanCollection()">
           {{ scanning ? 'Reading the archives…' : 'Refresh collection' }}
         </button>
       </section>

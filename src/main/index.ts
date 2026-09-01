@@ -27,6 +27,8 @@ import {
   type RetrievalResult,
   type ObservedStashItem,
   type StagingTabInspection,
+  type StartupPhaseEvent,
+  type StartupStatus,
   type VaultListItem,
   type VaultItemPage,
   type VaultPageRequest,
@@ -68,6 +70,71 @@ const SAHDINAS_MEMENTO = {
   record: 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr',
   name: "Sahdina's Memento"
 } as const
+const applicationStartedAt = Date.now()
+const startupStatus: StartupStatus = {
+  startedAtUtc: new Date(applicationStartedAt).toISOString(),
+  cacheOutcome: 'pending',
+  cachedPaintMs: null,
+  interactiveMs: null,
+  scanState: 'pending',
+  scanSettledMs: null,
+  rollAnalysisState: 'pending',
+  rollAnalysisSettledMs: null,
+  backgroundPhase: 'opening-cache'
+}
+
+function presentStartupStatus(): StartupStatus {
+  return { ...startupStatus }
+}
+
+function recordStartupPhase(phase: StartupPhaseEvent, diagnostics: DiagnosticLogger): StartupStatus {
+  const elapsedMs = Date.now() - applicationStartedAt
+  let changed = false
+  if (phase === 'cache-hit' && startupStatus.cacheOutcome === 'pending') {
+    startupStatus.cacheOutcome = 'hit'
+    changed = true
+  } else if (phase === 'cache-miss' && startupStatus.cacheOutcome === 'pending') {
+    startupStatus.cacheOutcome = 'miss'
+    changed = true
+  } else if (phase === 'cached-paint' && startupStatus.cachedPaintMs === null) {
+    startupStatus.cachedPaintMs = elapsedMs
+    changed = true
+  } else if (phase === 'interactive' && startupStatus.interactiveMs === null) {
+    startupStatus.interactiveMs = elapsedMs
+    changed = true
+  } else if (phase === 'scan-started' && startupStatus.scanState === 'pending') {
+    startupStatus.scanState = 'running'
+    changed = true
+  } else if (phase === 'scan-settled' && startupStatus.scanState === 'running') {
+    startupStatus.scanState = 'settled'
+    startupStatus.scanSettledMs = elapsedMs
+    changed = true
+  } else if (phase === 'scan-skipped' && startupStatus.scanState === 'pending') {
+    startupStatus.scanState = 'skipped'
+    startupStatus.scanSettledMs = elapsedMs
+    changed = true
+  } else if (phase === 'roll-analysis-started' && startupStatus.rollAnalysisState === 'pending') {
+    startupStatus.rollAnalysisState = 'running'
+    changed = true
+  } else if (phase === 'roll-analysis-settled' && startupStatus.rollAnalysisState === 'running') {
+    startupStatus.rollAnalysisState = 'settled'
+    startupStatus.rollAnalysisSettledMs = elapsedMs
+    changed = true
+  } else if (phase === 'roll-analysis-skipped' && startupStatus.rollAnalysisState === 'pending') {
+    startupStatus.rollAnalysisState = 'skipped'
+    startupStatus.rollAnalysisSettledMs = elapsedMs
+    changed = true
+  }
+  startupStatus.backgroundPhase = startupStatus.interactiveMs === null
+    ? 'opening-cache'
+    : startupStatus.scanState === 'running'
+      ? 'collection-scan'
+      : startupStatus.rollAnalysisState === 'running'
+        ? 'roll-analysis'
+        : 'idle'
+  if (changed) diagnostics.info('startup-phase', phase, { elapsedMs })
+  return presentStartupStatus()
+}
 
 interface IngestCommand {
   path: string
@@ -392,6 +459,19 @@ function registerIpcHandlers(
       diagnostics.info('navigation', 'workspace.opened', { view: input.view })
     }
   )
+  ipcMain.handle(IPC_CHANNELS.getStartupStatus, (): StartupStatus => presentStartupStatus())
+  ipcMain.handle(
+    IPC_CHANNELS.reportStartupPhase,
+    (_event, input: { phase: StartupPhaseEvent }): StartupStatus => {
+      const phases: StartupPhaseEvent[] = [
+        'cache-hit', 'cache-miss', 'cached-paint', 'interactive',
+        'scan-started', 'scan-settled', 'scan-skipped',
+        'roll-analysis-started', 'roll-analysis-settled', 'roll-analysis-skipped'
+      ]
+      if (!phases.includes(input?.phase)) throw new Error('Unknown startup phase event.')
+      return recordStartupPhase(input.phase, diagnostics)
+    }
+  )
   ipcMain.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
     return shell.openPath(app.getPath('userData'))
   })
@@ -652,6 +732,7 @@ function registerIpcHandlers(
       } : null,
       writeSafety: await safely(() => helper.request<WriteSafetyStatus>('inspect-write-safety')),
       live: safeLive,
+      startup: presentStartupStatus(),
       logging: diagnostics.getRetentionPolicy(),
       jobTimings: logs
         .filter((entry) => entry.durationMs !== undefined)
@@ -4026,8 +4107,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
           mainX: document.querySelector('main')?.getBoundingClientRect().x
         })`)
+        const startup = await window.webContents.executeJavaScript(
+          'window.cairnCodex.getStartupStatus()'
+        ) as StartupStatus
         const performanceReport = {
           readyMs: Date.now() - captureStartedAt,
+          startup,
           interactions: interactionTimings,
           renderedState
         }

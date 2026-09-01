@@ -14,6 +14,7 @@ const query = argument('--query') ?? 'wendigo'
 const category = argument('--category')
 const miAffixFilter = argument('--mi-affix-filter')
 const expectedMiRows = argument('--expected-mi-rows')
+const warmBudgetMs = argument('--warm-budget-ms')
 const miNativeRestore = process.argv.includes('--mi-native-restore')
 const waitForBackgroundJobs = process.argv.includes('--wait-for-background-jobs')
 const hydrateAllModes = process.argv.includes('--hydrate-all-modes')
@@ -90,10 +91,26 @@ if (expectedMiRows !== null) {
     )
   }
 }
+if (warmBudgetMs !== null) {
+  const budget = Number(warmBudgetMs)
+  if (!Number.isFinite(budget) || budget <= 0) {
+    throw new Error(`--warm-budget-ms must be a positive number; received ${warmBudgetMs}.`)
+  }
+  if (report.startup?.cacheOutcome !== 'hit') {
+    throw new Error(`Warm-start budget requires a cache hit; observed ${report.startup?.cacheOutcome ?? 'missing status'}.`)
+  }
+  if (!Number.isFinite(report.startup?.interactiveMs) || report.startup.interactiveMs > budget) {
+    throw new Error(
+      `Warm startup exceeded ${budget} ms: interactive at ${report.startup?.interactiveMs ?? 'unknown'} ms.`
+    )
+  }
+}
 console.log(JSON.stringify({
   passed: true,
   source: resolve(baseProfile ?? baseDatabase),
   readyMs: report.readyMs,
+  startup: report.startup,
+  warmBudgetMs: warmBudgetMs === null ? null : Number(warmBudgetMs),
   searchMsIncludingDebounce: report.interactions?.searchMs,
   query,
   category: category ?? 'Collection',

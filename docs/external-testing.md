@@ -8,9 +8,8 @@ until every P0 gate in `docs/roadmap.md` is complete.
 1. Record the exact Cairn version or commit and the tester's Grim Dawn version.
 2. Ask the tester to close Item Assistant during import. Cairn reads and backs up its database;
    it does not modify or delete the source.
-3. Confirm enough free disk space for Cairn's archive, a verified Item Assistant source backup,
-   and rotating Cairn backups. Until free-space preflight ships, allow at least twice the size of
-   `userdata.db` plus 1 GB.
+3. Review the import preflight's free-space result for Cairn's archive, a verified Item Assistant
+   source backup, and rotating Cairn backups before confirming the import.
 4. Keep live transfers off for the first pass. Collection browsing and Item Assistant import do
    not require Grim Dawn to be running.
 5. Do not ask the tester to upload saves, `userdata.db`, the Cairn SQLite archive, or raw live
@@ -46,7 +45,7 @@ until every P0 gate in `docs/roadmap.md` is complete.
   Histories must remain read-only; only quarantined copies can be selected and returned. No view
   should mount all archived copies.
 - Trigger several quick informational messages and one error. The unified notification queue must
-  keep them readable without overlap once `NOTICE-01` is complete.
+  keep them readable without overlap.
 
 ## Support handoff
 

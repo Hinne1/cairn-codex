@@ -57,6 +57,8 @@ a supported game installation and records the manual live-transfer results here.
 | Interrupted archive roll hydration | packaged app terminated during isolated 20k run | **Passed 2026-09-01:** 1,280 newly completed scores remained committed and the next run had exactly 8,720 active-mode copies left to process |
 | Package personal-data/art audit | `scripts/audit-package.mjs` | Passed, 282 files |
 | Installer install/first run/uninstall | `npm run test:installer` | Passed; app removed and isolated user data retained |
+| v0.1.0-beta.2 combined release candidate | clean `d6fd0b8` baseline plus version-only release commit; `npm run test:release-local`, isolated packaged UI matrix, and independent hash audit | **Passed 2026-09-01:** repository verification passed twice; the read-only installed-game smoke indexed 1 installation, 2 save locations, 6 transfer stashes, and 5,525 catalog entries; both the 282-file portable package and 277-file installer payload passed provenance audits; install/first-run/uninstall retained isolated user data; ZIP and installer hashes matched the clean manifest; 0 dependency vulnerabilities were reported |
+| v0.1.0-beta.2 packaged interaction and scale pass | packaged app, isolated fixtures, and copied 24,553-copy profile at 1,440×1,000 and 520×900 | **Passed 2026-09-01:** cached paint 2.471 s and interactive 2.528 s (5 s budget); a 335-result Collection search took 248.2 ms including debounce and mounted 48 cards; a double-rare Bloodsworn MI search returned one combination in 151.1 ms; onboarding, Settings, Transfers, Sets, Skill Explorer, and Leveling Planner were visually reviewed at representative widths; Back/Forward restored Settings, Dispense history, Quarantined items, and planner selection; the MI tooltip displayed exact prefix and suffix sections, mouse-wheel scrolling stayed inside the scrollbar-free tooltip, and Escape closed onboarding with focus restored to its launch button |
 | Dependency vulnerability audit | `npm audit --audit-level=high` | Passed, 0 vulnerabilities |
 | Tracked-file privacy/provenance audit | `npm run audit:repo` | Passed; native fingerprints verified |
 
@@ -118,3 +120,9 @@ and installer SHA-256
 `dfe2c9cc99e44b8904f0d94fed8670e389fb77a644bb7a744ca89148668d709e`.
 The live confirmation row must additionally record the exact supported `Game.dll` hash
 reported by the support bundle; compatibility remains fail-closed when that fingerprint differs.
+
+The `0.1.0-beta.2` release candidate retained helper protocol 1 and the same verified native
+fingerprints: hook SHA-256
+`419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5` and injector SHA-256
+`569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`. Exact published
+portable and installer hashes are carried by the release's `.sha256` and manifest assets.

@@ -137,10 +137,6 @@
   --semantic-missing: #c3bcb0;
 }
 
-[data-theme='cairn'] {
-  --cc-theme-name: 'Cairn';
-}
-
 @media (prefers-reduced-motion: reduce) {
   :root { --cc-transition-fast: 0ms; }
 }

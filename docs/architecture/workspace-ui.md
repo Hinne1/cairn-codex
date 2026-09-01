@@ -179,6 +179,14 @@ the typed route-control snapshot, preference persistence, planner navigation, an
 global tooltip and item drawer. A restored route preserves its requested page, while user edits to
 search or filters reset the workspace to page one.
 
+Dismantling Lab keeps its read-only safety boundary while following the same ownership model.
+`DismantlingWorkspace.vue` owns query and filter edits, transient copy selection, safe-duplicate
+selection, progressive disclosure, preview state, and result/preview markup; `dismantling.ts` owns
+pure eligibility, structured filtering, and duplicate-preservation policy. `App.vue` supplies the
+typed route-control snapshot, immutable vault-item input, a narrow preview adapter, and the shared
+redacted-error formatter. The workspace never reaches the preload API directly, and no destructive
+dismantling path is introduced by the extraction.
+
 ## Semantic badges and Grim Dawn rarity
 
 Compact state labels use `src/renderer/src/components/SemanticBadge.vue` and the variables in

@@ -11,6 +11,8 @@ import WorkspaceSwitcher from './components/WorkspaceSwitcher.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
 import type { CollectionFarmingControls } from './workspaces/collection-farming'
+import DismantlingWorkspace from './workspaces/DismantlingWorkspace.vue'
+import { createDismantlingSession, type DismantlingControls } from './workspaces/dismantling'
 import StashOracleWorkspace from './workspaces/StashOracleWorkspace.vue'
 import type { StashOracleControls } from './workspaces/stash-oracle'
 import { createNotificationService, type AppNotification } from './notification-service'
@@ -32,8 +34,6 @@ import {
   type ActiveView,
   type AppHistoryEntry,
   type AppRoute,
-  type DismantlingModeFilter,
-  type DismantlingRarityFilter,
   type MaterialCategory,
   type MiAffixFilter,
   type MiMetricKey,
@@ -104,7 +104,6 @@ import type {
   CollectionItem,
   CollectionRaritySummary,
   CollectionSnapshot,
-  DismantlingPreview,
   DebugLoggingStatus,
   GdiaImportResult,
   GrimDawnDiscovery,
@@ -411,14 +410,8 @@ const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>([...initialPreferences.wo
 const toolSettingsOpen = ref(false)
 const materialCategory = ref<MaterialCategory>('all')
 const farmingControls = ref<CollectionFarmingControls>({ query: '', rarity: 'all', page: 1 })
-const dismantlingQuery = ref('')
-const dismantlingMode = ref<DismantlingModeFilter>('all')
-const dismantlingRarity = ref<DismantlingRarityFilter>('all')
-const dismantlingVisibleCount = ref(120)
-const selectedDismantlingIds = ref<string[]>([])
-const dismantlingPreview = ref<DismantlingPreview | null>(null)
-const dismantlingBusy = ref(false)
-const dismantlingError = ref<string | null>(null)
+const dismantlingControls = ref<DismantlingControls>({ query: '', mode: 'all', rarity: 'all' })
+const dismantlingSession = createDismantlingSession()
 const infiniteSupplies = ref(true)
 const infiniteSuppliesBusy = ref(false)
 const diagnosticsBusy = ref(false)
@@ -505,7 +498,6 @@ const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.va
 const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
 const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, searchQueryOptions(searchSchemas.miWorkshop)))
 const supplyStructuredQuery = computed(() => compileSearchQuery(reusableSupplyQuery.value, searchQueryOptions(searchSchemas.supplies)))
-const dismantlingStructuredQuery = computed(() => compileSearchQuery(dismantlingQuery.value, searchQueryOptions(searchSchemas.dismantling)))
 const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, searchQueryOptions(searchSchemas.vault)))
 const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, searchQueryOptions(searchSchemas.history)))
 
@@ -540,45 +532,6 @@ const transferableVaultItems = computed(() => storedVaultPage.value.items)
 const availableVaultItems = computed(() => storedVaultPage.value.items)
 const vaultPageCount = computed(() => Math.max(1, Math.ceil(storedVaultPage.value.total / vaultPageSize)))
 const visibleAvailableVaultItems = computed(() => availableVaultItems.value)
-const dismantlingCandidates = computed(() =>
-  vaultItems.value.filter((item) =>
-    item.catalogued &&
-    !item.reusable &&
-    item.state === 'ingested' &&
-    ['epic', 'legendary', 'mi', 'rare'].includes(item.rarity)
-  )
-)
-const filteredDismantlingCandidates = computed(() => {
-  const structuredQuery = dismantlingStructuredQuery.value
-  return dismantlingCandidates.value.filter((item) =>
-    (dismantlingMode.value === 'all' ||
-      (dismantlingMode.value === 'hardcore') === item.isHardcore) &&
-    (dismantlingRarity.value === 'all' || item.rarity === dismantlingRarity.value) &&
-    structuredQuery.matches({
-      text: [item.name, item.baseRecord, item.prefixRecord, item.suffixRecord, item.rarity, item.isHardcore ? 'hardcore' : 'softcore'].join(' '),
-      fields: {
-        name: item.name,
-        base: item.baseRecord,
-        prefix: item.prefixRecord,
-        suffix: item.suffixRecord,
-        affix: [item.prefixRecord, item.suffixRecord],
-        rarity: item.rarity,
-        mode: item.isHardcore ? 'hardcore' : 'softcore',
-        level: item.levelRequirement
-      }
-    })
-  )
-})
-const visibleDismantlingCandidates = computed(() =>
-  filteredDismantlingCandidates.value.slice(0, dismantlingVisibleCount.value)
-)
-const selectedDismantlingCandidates = computed(() => {
-  const selected = new Set(selectedDismantlingIds.value)
-  return dismantlingCandidates.value.filter((item) => selected.has(item.id))
-})
-const selectedDismantlingAttachments = computed(() =>
-  selectedDismantlingCandidates.value.filter((item) => item.componentRecord || item.augmentRecord).length
-)
 const reusableSupplyUnlocks = computed(() => {
   const unique = new Map<string, VaultListItem>()
   for (const item of vaultItems.value) {
@@ -2100,7 +2053,7 @@ function currentAppRoute(): AppRoute {
       ...farmingControls.value
     } }
     case 'dismantling': return { version: 1, workspace: 'dismantling', itemRecord, controls: {
-      query: dismantlingQuery.value, mode: dismantlingMode.value, rarity: dismantlingRarity.value
+      ...dismantlingControls.value
     } }
     case 'vault': return { version: 1, workspace: 'vault', itemRecord, controls: {
       mode: transferMode.value, section: transferSection.value, historyQuery: transferHistoryQuery.value,
@@ -2221,9 +2174,7 @@ function restoreAppRoute(route: AppRoute): void {
       farmingControls.value = { ...route.controls }
       break
     case 'dismantling':
-      dismantlingQuery.value = route.controls.query
-      dismantlingMode.value = route.controls.mode
-      dismantlingRarity.value = route.controls.rarity
+      dismantlingControls.value = { ...route.controls }
       break
     case 'vault':
       transferMode.value = route.controls.mode
@@ -2345,7 +2296,7 @@ watch(
     plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
     reusableSupplyQuery, supplyCategory, supplySlotFilter, supplyPage,
     farmingControls,
-    dismantlingQuery, dismantlingMode, dismantlingRarity,
+    dismantlingControls,
     transferMode, transferHistoryQuery, transferHistoryOutcome, transferHistoryPage,
     vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, vaultPage, vaultQuarantinePage
   ],
@@ -2465,13 +2416,6 @@ watch([supplyCategory, supplySlotFilter, reusableSupplyQuery], () => {
   if (restoringAppHistory) return
   supplyPage.value = 1
 })
-watch([dismantlingQuery, dismantlingMode, dismantlingRarity], () => {
-  dismantlingVisibleCount.value = 120
-})
-watch(selectedDismantlingIds, () => {
-  dismantlingPreview.value = null
-  dismantlingError.value = null
-}, { deep: true })
 watch(visibleWorkspaceToolIds, (toolIds) => {
   preferenceRepository.update('workspace', { visibleTools: [...toolIds] })
 }, { deep: true })
@@ -3674,9 +3618,6 @@ async function refreshFullVaultItems(): Promise<void> {
     id.startsWith('augment:') ||
     items.some((item) => item.id === id && item.state === 'ingested' && item.rarity === 'supply')
   )
-  selectedDismantlingIds.value = selectedDismantlingIds.value.filter((id) =>
-    items.some((item) => item.id === id && item.state === 'ingested')
-  )
 }
 
 function scheduleVaultPageRefresh(): void {
@@ -3781,52 +3722,8 @@ async function refreshVaultPages(): Promise<void> {
   }
 }
 
-function toggleDismantlingCandidate(id: string): void {
-  selectedDismantlingIds.value = selectedDismantlingIds.value.includes(id)
-    ? selectedDismantlingIds.value.filter((candidate) => candidate !== id)
-    : [...selectedDismantlingIds.value, id]
-}
-
-function selectVisibleDismantlingCandidates(): void {
-  selectedDismantlingIds.value = [...new Set([
-    ...selectedDismantlingIds.value,
-    ...visibleDismantlingCandidates.value.map((item) => item.id)
-  ])]
-}
-
-function selectRedundantDismantlingCandidates(): void {
-  const groups = new Map<string, VaultListItem[]>()
-  for (const item of filteredDismantlingCandidates.value) {
-    const key = `${item.isHardcore ? 'hc' : 'sc'}:${item.baseRecord.toLocaleLowerCase()}`
-    const group = groups.get(key) ?? []
-    group.push(item)
-    groups.set(key, group)
-  }
-  const redundant: string[] = []
-  for (const copies of groups.values()) {
-    copies.sort((left, right) =>
-      (right.rollAnalysis?.overallEstimatedPercentile ?? -1) -
-        (left.rollAnalysis?.overallEstimatedPercentile ?? -1) ||
-      Date.parse(right.ingestedAtUtc) - Date.parse(left.ingestedAtUtc)
-    )
-    redundant.push(...copies.slice(1)
-      .filter((item) => !item.componentRecord && !item.augmentRecord)
-      .map((item) => item.id))
-  }
-  selectedDismantlingIds.value = redundant
-}
-
-async function buildDismantlingPreview(): Promise<void> {
-  if (dismantlingBusy.value || selectedDismantlingIds.value.length === 0) return
-  dismantlingBusy.value = true
-  dismantlingError.value = null
-  try {
-    dismantlingPreview.value = await window.cairnCodex.previewDismantling([...selectedDismantlingIds.value])
-  } catch (error) {
-    dismantlingError.value = readableError(error)
-  } finally {
-    dismantlingBusy.value = false
-  }
+function previewDismantling(itemIds: string[]) {
+  return window.cairnCodex.previewDismantling(itemIds)
 }
 
 async function startLiveMode(): Promise<void> {
@@ -6922,132 +6819,14 @@ function formatPercentile(value: number | null | undefined): string {
         >{{ vaultBusy ? 'Verifying…' : (infiniteSupplies ? 'Dispense ' : 'Return ') + selectedSupplyIds.length + ' selected' }}</button>
       </section>
 
-      <section v-else-if="activeView === 'dismantling'" class="dismantling-workspace" aria-label="Read-only dismantling simulator">
-        <ToolHeader
-          eyebrow="Inventor research · read only"
-          title="Dismantling Lab"
-          description="Select exact archived copies and preview what Grim Dawn's installed dismantling tables can produce. Nothing here changes the archive, game, Iron, Dynamite, components, or materials."
-        >
-          <template #aside><span class="read-only-seal">No write path</span></template>
-        </ToolHeader>
-
-        <div class="dismantling-resource-gaps">
-          <article>
-            <small>Iron Bits</small><strong>Balance not indexed</strong>
-            <p>CC can calculate the exact fee, but does not yet read or debit character money.</p>
-          </article>
-          <article>
-            <small>Dynamite</small><strong>Balance not indexed</strong>
-            <p>Account materials live outside the transfer tabs CC currently owns.</p>
-          </article>
-          <article>
-            <small>Material store</small><strong>Untouched</strong>
-            <p>Expected rewards are simulated only; the component/material stash remains read-only.</p>
-          </article>
-        </div>
-
-        <ExplorerToolbar
-          v-model="dismantlingQuery"
-          v-bind="searchGuidance.dismantling"
-          search-label="Search candidates"
-          placeholder="Item, base, prefix, suffix…"
-          :result-count="filteredDismantlingCandidates.length"
-          result-label="candidate copies"
-          :search-error="searchErrorMessage(dismantlingStructuredQuery)"
-        >
-          <template #filters>
-            <label>
-              <span>Game mode</span>
-              <select v-model="dismantlingMode" autocomplete="off">
-                <option value="all">Hardcore + Softcore</option>
-                <option value="hardcore">Hardcore</option>
-                <option value="softcore">Softcore</option>
-              </select>
-            </label>
-            <label>
-              <span>Rarity</span>
-              <select v-model="dismantlingRarity" autocomplete="off">
-                <option value="all">All eligible rarities</option>
-                <option value="legendary">Legendary</option>
-                <option value="epic">Epic</option>
-                <option value="mi">Monster Infrequent</option>
-                <option value="rare">Rare</option>
-              </select>
-            </label>
-          </template>
-          <template #actions>
-            <button type="button" @click="selectVisibleDismantlingCandidates">Select visible</button>
-            <button type="button" title="Keeps the highest-scored or newest copy of each base; skips socketed and augmented extras." @click="selectRedundantDismantlingCandidates">Select safe duplicates</button>
-            <button type="button" :disabled="selectedDismantlingIds.length === 0" @click="selectedDismantlingIds = []">Clear</button>
-          </template>
-        </ExplorerToolbar>
-
-        <div class="dismantling-layout">
-          <section class="dismantling-candidates">
-            <header>
-              <div><p class="section-label">Codex Archive</p><h3>Candidate copies</h3></div>
-              <strong>{{ selectedDismantlingIds.length.toLocaleString() }} selected</strong>
-            </header>
-            <p class="dismantling-help">
-              “Safe duplicates” preserves one best-scored copy per base and game mode, then excludes extras carrying a component or augment.
-            </p>
-            <div class="dismantling-list">
-              <label v-for="item in visibleDismantlingCandidates" :key="item.id" :class="['dismantling-row', item.rarity, { attached: item.componentRecord || item.augmentRecord }]">
-                <input type="checkbox" :checked="selectedDismantlingIds.includes(item.id)" @change="toggleDismantlingCandidate(item.id)" />
-                <div>
-                  <strong>{{ item.name }}</strong>
-                  <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.rarity === 'mi' ? 'Monster Infrequent' : item.rarity }} · Lv{{ item.itemLevel }} · Seed {{ item.seed }}</small>
-                  <em v-if="item.componentRecord || item.augmentRecord">
-                    {{ [item.componentRecord && 'component', item.augmentRecord && 'augment'].filter(Boolean).join(' + ') }} attached
-                  </em>
-                </div>
-                <span>{{ formatPercentile(item.rollAnalysis?.overallEstimatedPercentile) }}</span>
-              </label>
-            </div>
-            <button v-if="visibleDismantlingCandidates.length < filteredDismantlingCandidates.length" class="dismantling-more" type="button" @click="dismantlingVisibleCount += 120">
-              Show 120 more · {{ (filteredDismantlingCandidates.length - visibleDismantlingCandidates.length).toLocaleString() }} remaining
-            </button>
-            <p v-if="filteredDismantlingCandidates.length === 0" class="vault-empty">No archived copies match these filters.</p>
-          </section>
-
-          <aside class="dismantling-preview">
-            <header>
-              <div><p class="section-label">Probability model</p><h3>Inventor preview</h3></div>
-              <small v-if="dismantlingPreview">Rules: {{ dismantlingPreview.contentPack.toUpperCase() }}</small>
-            </header>
-            <p v-if="selectedDismantlingAttachments" class="dismantling-warning">{{ selectedDismantlingAttachments }} selected {{ selectedDismantlingAttachments === 1 ? 'copy has' : 'copies have' }} a component or augment. A future destructive workflow must make their fate explicit.</p>
-            <button class="dismantling-run" type="button" :disabled="dismantlingBusy || selectedDismantlingIds.length === 0" @click="buildDismantlingPreview">
-              {{ dismantlingBusy ? 'Reading installed loot tables…' : `Preview ${selectedDismantlingIds.length.toLocaleString()} selected` }}
-            </button>
-            <p v-if="dismantlingError" class="vault-notice error">{{ dismantlingError }}</p>
-            <template v-if="dismantlingPreview">
-              <div class="dismantling-costs">
-                <article><small>Iron fee</small><strong>{{ dismantlingPreview.ironCost.toLocaleString() }}</strong></article>
-                <article><small>Dynamite</small><strong>{{ dismantlingPreview.dynamiteCost.toLocaleString() }}</strong></article>
-                <article><small>Scrap</small><strong>{{ dismantlingPreview.scrapExpected.toFixed(1) }} expected</strong><span>{{ dismantlingPreview.scrapMinimum }}–{{ dismantlingPreview.scrapMaximum }} possible</span></article>
-              </div>
-              <section class="scrap-distribution">
-                <h4>Scrap per item</h4>
-                <div><span v-for="outcome in dismantlingPreview.scrapOutcomes" :key="outcome.count"><b>{{ outcome.count }}</b><small>{{ (outcome.probability * 100).toFixed(0) }}%</small></span></div>
-              </section>
-              <section class="dismantling-rewards">
-                <h4>Bonus reward expectations</h4>
-                <p>Expected count is the long-run average for this batch; “any” is the chance this run yields at least one.</p>
-                <div v-for="reward in dismantlingPreview.rewards" :key="reward.record" :class="`reward-${reward.category}`">
-                  <span><strong>{{ reward.name }}</strong><small>{{ reward.category }}</small></span>
-                  <b>{{ reward.expectedCount.toFixed(3) }} expected</b>
-                  <em>{{ (reward.chanceAtLeastOne * 100).toFixed(1) }}% any</em>
-                </div>
-              </section>
-              <footer>This is probability math from <code>{{ dismantlingPreview.ruleRecord }}</code>. No random roll has been performed or saved.</footer>
-            </template>
-            <div v-else class="dismantling-empty">
-              <strong>Assemble a hypothetical batch.</strong>
-              <p>The preview will show exact costs, Scrap range, and installed component/material probabilities.</p>
-            </div>
-          </aside>
-        </div>
-      </section>
+      <DismantlingWorkspace
+        v-else-if="activeView === 'dismantling'"
+        v-model:controls="dismantlingControls"
+        :items="vaultItems"
+        :session="dismantlingSession"
+        :preview-dismantling="previewDismantling"
+        :format-error="readableError"
+      />
 
       <CollectionFarmingWorkspace
         v-else-if="activeView === 'farming'"

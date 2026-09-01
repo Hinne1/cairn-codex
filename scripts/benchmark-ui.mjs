@@ -56,6 +56,7 @@ const verifyResponsiveTools = process.argv.includes('--verify-responsive-tools')
 const assertNoOverflow = process.argv.includes('--assert-no-overflow')
 const verifyFarmingPaging = process.argv.includes('--verify-farming-paging')
 const verifyOracleWorkspace = process.argv.includes('--verify-oracle-workspace')
+const verifyDismantlingWorkspace = process.argv.includes('--verify-dismantling-workspace')
 const simulateWorkspaceError = process.argv.includes('--simulate-workspace-error')
 const safeMode = process.argv.includes('--safe-mode')
 const safeModeSuggested = process.argv.includes('--safe-mode-suggested')
@@ -161,6 +162,7 @@ const env = {
   ...(verifyResponsiveTools ? { CAIRN_CODEX_SCREENSHOT_VERIFY_RESPONSIVE_TOOLS: '1' } : {}),
   ...(verifyFarmingPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING: '1' } : {}),
   ...(verifyOracleWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ORACLE_WORKSPACE: '1' } : {}),
+  ...(verifyDismantlingWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE: '1' } : {}),
   ...(simulateWorkspaceError ? { CAIRN_CODEX_SCREENSHOT_RENDER_ERROR: '1' } : {}),
   ...(safeMode ? { CAIRN_CODEX_SCREENSHOT_SAFE_MODE: '1' } : {}),
   ...(safeModeSuggested ? {
@@ -364,6 +366,7 @@ console.log(JSON.stringify({
   assertNoOverflow,
   verifyFarmingPaging,
   verifyOracleWorkspace,
+  verifyDismantlingWorkspace,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
   scrollTarget,

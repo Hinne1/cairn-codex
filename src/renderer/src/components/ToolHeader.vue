@@ -24,31 +24,51 @@ withDefaults(defineProps<{
 
 <style scoped>
 .tool-header {
+  --tool-header-border: var(--cc-accent-border);
+  --tool-header-surface: linear-gradient(145deg, var(--cc-surface-3), var(--cc-surface-1));
+  --tool-header-heading: var(--cc-text-strong);
+  --tool-header-copy: var(--cc-text-muted);
+  --tool-header-accent: var(--cc-accent);
   display: flex;
   align-items: end;
   justify-content: space-between;
-  gap: 28px;
-  padding: 24px;
-  border: 1px solid #443c2e;
-  border-radius: 9px;
-  background: linear-gradient(145deg, #24211b, #171714);
+  gap: var(--cc-space-9);
+  padding: var(--cc-space-8);
+  border: 1px solid var(--tool-header-border);
+  border-radius: var(--cc-radius-lg);
+  background: var(--tool-header-surface);
 }
-.tool-header.tone-green { border-color: #3d4c31; background: linear-gradient(135deg, rgba(37,49,31,.94), rgba(24,23,19,.92)); }
-.tool-header.tone-blue { border-color: #3b4c54; background: linear-gradient(135deg, rgba(29,40,45,.94), rgba(23,24,22,.92)); }
-.tool-header.tone-ember { align-items: center; border-color: #55462c; background: radial-gradient(circle at 78% 10%, rgba(132,91,35,.2), transparent 35%), linear-gradient(145deg, #292319, #151513); }
+.tool-header.tone-green {
+  --tool-header-border: var(--cc-tone-green-border);
+  --tool-header-surface: linear-gradient(135deg, color-mix(in srgb, var(--cc-tone-green-surface), var(--cc-mix-light) 5%), var(--cc-tone-green-surface));
+  --tool-header-heading: var(--cc-tone-green-heading);
+  --tool-header-copy: var(--cc-tone-green-muted);
+  --tool-header-accent: var(--cc-tone-green-accent);
+}
+.tool-header.tone-blue {
+  --tool-header-border: var(--cc-tone-blue-border);
+  --tool-header-surface: linear-gradient(135deg, color-mix(in srgb, var(--cc-tone-blue-surface), var(--cc-mix-light) 5%), var(--cc-tone-blue-surface));
+  --tool-header-heading: var(--cc-tone-blue-heading);
+  --tool-header-copy: var(--cc-tone-blue-muted);
+  --tool-header-accent: var(--cc-tone-blue-accent);
+}
+.tool-header.tone-ember {
+  --tool-header-border: var(--cc-tone-ember-border);
+  --tool-header-surface: radial-gradient(circle at 78% 10%, var(--cc-tone-ember-glow), transparent 35%), linear-gradient(145deg, var(--cc-tone-ember-surface), var(--cc-surface-1));
+  --tool-header-accent: var(--cc-tone-ember-accent);
+  align-items: center;
+}
 .tool-header-copy { min-width: 0; flex: 1 1 auto; }
-.tool-header-eyebrow { margin: 0; color: #ac9669 !important; font-size: 9px !important; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; }
-h2 { margin: 4px 0 8px; color: #eadfc8; font: 500 30px/1.08 Georgia, serif; }
-.tone-green h2 { color: #dcebd2; }
-.tone-blue h2 { color: #d7e6eb; }
+.tool-header-eyebrow { margin: 0; color: var(--tool-header-accent) !important; font-size: var(--cc-font-size-xs) !important; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; }
+h2 { margin: var(--cc-space-1) 0 var(--cc-space-3); color: var(--tool-header-heading); font: 500 var(--cc-font-size-5xl)/1.08 var(--cc-font-display); }
 .tone-ember h2 { max-width: 790px; font-size: clamp(27px, 2.4vw, 40px); }
-.tool-header-copy > p:last-child { max-width: 820px; margin: 0; color: #8d8575; font-size: 12px; line-height: 1.5; }
-.tone-green .tool-header-copy > p:last-child { color: #8d987f; }
-.tone-blue .tool-header-copy > p:last-child { color: #82949b; }
+.tool-header-copy > p:last-child { max-width: 820px; margin: 0; color: var(--tool-header-copy); font-size: var(--cc-font-size-lg); line-height: var(--cc-line-body); }
 .tool-header-aside { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 10px; }
-.tool-header-aside :deep(strong) { color: #d3aa55; font: 500 20px Georgia, serif; }
-.tool-header-aside :deep(small) { max-width: 320px; color: #827967; font-size: 10px; }
-.tool-header-aside :deep(button) { padding: 10px 14px; border: 1px solid #55472f; border-radius: 5px; color: #d5ba7b; background: #2a241b; cursor: pointer; }
+.tool-header-aside :deep(strong) { color: var(--tool-header-accent); font: 500 var(--cc-font-size-3xl) var(--cc-font-display); }
+.tool-header-aside :deep(small) { max-width: 320px; color: var(--cc-text-subtle); font-size: var(--cc-font-size-sm); }
+.tool-header-aside :deep(button) { min-height: var(--cc-control-height); padding: 0 var(--cc-space-5); border: 1px solid var(--cc-accent-border); border-radius: var(--cc-radius-sm); color: var(--cc-accent-soft); background: var(--cc-accent-surface); cursor: pointer; }
+.tool-header-aside :deep(button:hover:not(:disabled)) { border-color: var(--tool-header-accent); background: var(--cc-accent-surface-hover); }
+.tool-header-aside :deep(button:focus-visible) { outline: 2px solid var(--tool-header-accent); outline-offset: 1px; }
 .tool-header-aside :deep(button:disabled) { opacity: .4; cursor: default; }
 
 @media (max-width: 760px) {

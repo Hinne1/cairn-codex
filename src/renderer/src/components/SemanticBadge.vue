@@ -24,12 +24,12 @@ withDefaults(defineProps<{
   min-height: 22px;
   align-items: center;
   justify-content: center;
-  padding: 3px 7px;
+  padding: 3px var(--cc-space-2);
   border: 1px solid color-mix(in srgb, var(--badge-color), transparent 45%);
-  border-radius: 999px;
+  border-radius: var(--cc-radius-pill);
   color: var(--badge-color);
   background: var(--badge-surface);
-  font-size: 8px;
+  font-size: var(--cc-font-size-2xs);
   font-weight: 700;
   letter-spacing: .07em;
   line-height: 1.2;
@@ -37,7 +37,7 @@ withDefaults(defineProps<{
   white-space: nowrap;
 }
 
-.semantic-badge.compact { min-height: 18px; padding: 2px 6px; font-size: 7px; }
+.semantic-badge.compact { min-height: 18px; padding: 2px var(--cc-space-2); font-size: 7px; }
 .tone-legendary { --badge-color: var(--gd-rarity-legendary); }
 .tone-epic { --badge-color: var(--gd-rarity-epic); }
 .tone-level { --badge-color: var(--semantic-level); }

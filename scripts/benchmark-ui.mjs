@@ -30,8 +30,15 @@ const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-|-$/g, '')
-if (!baseDatabase && !baseProfile && !fixture) {
-  throw new Error('Pass --base-profile, --base-db, or --fixture with an isolated data source.')
+const sourceCount = [baseDatabase, baseProfile, fixture].filter(Boolean).length
+if (sourceCount !== 1) {
+  throw new Error('Pass exactly one of --base-profile, --base-db, or --fixture with an isolated data source.')
+}
+if (screenshotWidth !== null && (!Number.isInteger(Number(screenshotWidth)) || Number(screenshotWidth) < 480 || Number(screenshotWidth) > 1920)) {
+  throw new Error(`--width must be an integer from 480 through 1920; received ${screenshotWidth}.`)
+}
+if (screenshotHeight !== null && (!Number.isInteger(Number(screenshotHeight)) || Number(screenshotHeight) < 720 || Number(screenshotHeight) > 2400)) {
+  throw new Error(`--height must be an integer from 720 through 2400; received ${screenshotHeight}.`)
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
@@ -53,7 +60,7 @@ const env = {
   CAIRN_CODEX_SCREENSHOT_PATH: screenshotPath,
   CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN: waitForBackgroundJobs ? '1' : '0',
   CAIRN_CODEX_SCREENSHOT_QUERY: query,
-  ...(fixture ? { CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture } : {}),
+  CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture ?? '',
   ...(openSearchHelp ? { CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP: '1' } : {}),
   ...(collapseTrackers ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
   ...(screenshotWidth ? { CAIRN_CODEX_SCREENSHOT_WIDTH: screenshotWidth } : {}),
@@ -98,6 +105,20 @@ try {
   child.kill()
 }
 const itemCount = Number(String(report.renderedState?.results ?? '').replace(/[^0-9]/g, ''))
+const requestedViewport = {
+  width: screenshotWidth ? Number(screenshotWidth) : 1440,
+  height: screenshotHeight ? Number(screenshotHeight) : 1000
+}
+if (
+  report.renderedState?.viewport?.width !== requestedViewport.width ||
+  report.renderedState?.viewport?.height !== requestedViewport.height
+) {
+  throw new Error(
+    `Screenshot viewport mismatch: requested ${requestedViewport.width}x${requestedViewport.height}, ` +
+    `rendered ${report.renderedState?.viewport?.width ?? 'unknown'}x` +
+    `${report.renderedState?.viewport?.height ?? 'unknown'}.`
+  )
+}
 if (expectedMiRows !== null) {
   const expected = Number(expectedMiRows)
   const rendered = report.renderedState?.miRows?.length ?? 0
@@ -122,8 +143,8 @@ console.log(JSON.stringify({
   waitForBackgroundJobs,
   hydrateAllModes,
   openSearchHelp,
-  screenshotWidth: screenshotWidth ? Number(screenshotWidth) : null,
-  screenshotHeight: screenshotHeight ? Number(screenshotHeight) : null,
+  screenshotWidth: report.renderedState.viewport.width,
+  screenshotHeight: report.renderedState.viewport.height,
   fixture,
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,

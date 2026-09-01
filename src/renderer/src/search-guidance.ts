@@ -14,11 +14,11 @@ export const searchGuidance = {
   },
   materials: {
     searchHelp: 'Match component and consumable names, effects, skills, item types, content packs, and levels. Separate terms narrow the results.',
-    searchExamples: ['"fire resistance"', 'skill:wendigo', 'pack:ashes']
+    searchExamples: ['"fire resistance"', 'skill:wendigo', 'pack:gdx1']
   },
   skillItems: {
     searchHelp: 'Match the selected skill’s items by name, rarity, slot, level, modifier text, conversion, damage type, or other displayed stats.',
-    searchExamples: ['amulet', 'cold damage', 'conversion']
+    searchExamples: ['amulet', 'cold damage', 'converted']
   },
   oracle: {
     searchHelp: 'Match build archetypes by class, mastery, skill, damage type, play style, supporting set, or evidence item.',
@@ -41,15 +41,15 @@ export const searchGuidance = {
     searchExamples: ["Devil's Crossing", 'reputation gain', 'movement']
   },
   dismantling: {
-    searchHelp: 'Match eligible archived copies by item or base name, prefix, or suffix. Use the adjacent filters for game mode and rarity.',
-    searchExamples: ['Stoneplate', 'Thunderstruck', 'of Kings']
+    searchHelp: 'Match eligible archived copies by item or base name, or by a prefix, suffix, or base record path. Use the adjacent filters for game mode and rarity.',
+    searchExamples: ['Stoneplate', 'records/items/gearfeet', 'records/items/gearweapons']
   },
   farming: {
     searchHelp: 'Match missing items by name, stat, skill, monster, source, or area. Cairn ranks the remaining source areas by useful missing drops.',
     searchExamples: ['Ugdenbog', 'Cronley', 'skill:wendigo']
   },
   vault: {
-    searchHelp: 'Match stored copies by item or base name, affix, slot, rarity, level, seed, or record path.',
-    searchExamples: ['legendary', 'amulet', 'of Kings']
+    searchHelp: 'Match stored copies by item or base name, slot, rarity, level, seed, or base, prefix, and suffix record paths.',
+    searchExamples: ['legendary', 'amulet', 'records/items/']
   }
 } satisfies Record<string, SearchGuidance>

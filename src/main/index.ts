@@ -3818,7 +3818,7 @@ async function createWindow(): Promise<void> {
     width: savedBounds?.width ?? 1280,
     height: savedBounds?.height ?? 800,
     ...(savedBounds ? { x: savedBounds.x, y: savedBounds.y } : {}),
-    minWidth: 960,
+    minWidth: screenshotPath ? 480 : 960,
     minHeight: 640,
     show: false,
     backgroundColor: '#10100f',
@@ -3890,6 +3890,13 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       ? Math.min(Math.max(requestedHeight, 720), 2400)
       : 1000
     window.setContentSize(screenshotWidth, screenshotHeight)
+    const [actualContentWidth, actualContentHeight] = window.getContentSize()
+    if (actualContentWidth !== screenshotWidth || actualContentHeight !== screenshotHeight) {
+      throw new Error(
+        `Screenshot viewport mismatch: requested ${screenshotWidth}x${screenshotHeight}, ` +
+        `received ${actualContentWidth}x${actualContentHeight}.`
+      )
+    }
     for (let attempt = 0; attempt < 240; attempt += 1) {
       const scanError = await window.webContents.executeJavaScript(
         "document.querySelector('.scan-error')?.textContent"
@@ -4133,7 +4140,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           })),
           scrollX: window.scrollX,
           titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
-          mainX: document.querySelector('main')?.getBoundingClientRect().x
+          mainX: document.querySelector('main')?.getBoundingClientRect().x,
+          viewport: { width: window.innerWidth, height: window.innerHeight }
         })`)
         const performanceReport = {
           readyMs: Date.now() - captureStartedAt,
@@ -4149,7 +4157,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           )
         }
         console.log(
-          JSON.stringify({ screenshotPath: path, width: screenshotWidth, height: screenshotHeight, ...performanceReport })
+          JSON.stringify({
+            screenshotPath: path,
+            width: actualContentWidth,
+            height: actualContentHeight,
+            ...performanceReport
+          })
         )
         app.quit()
         return

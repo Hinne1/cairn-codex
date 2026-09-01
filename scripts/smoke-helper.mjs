@@ -76,6 +76,17 @@ try {
     throw new Error('Acquisition producer-path self-test failed.')
   }
 
+  const itemPresentation = await request('self-test-item-presentation')
+  if (
+    !itemPresentation.passed ||
+    itemPresentation.assertions < 10 ||
+    !itemPresentation.finalTierPassed ||
+    !itemPresentation.textLevelPassed ||
+    !itemPresentation.inheritedLevelsPassed
+  ) {
+    throw new Error('Item-presentation linked-skill self-test failed.')
+  }
+
   const live = await request('self-test-live-queue')
   if (
     !live.passed ||
@@ -93,7 +104,7 @@ try {
     throw new Error('Native adapter fingerprints were not reported correctly.')
   }
 
-  console.log(JSON.stringify({ health, write, dismantling, acquisition, live }, null, 2))
+  console.log(JSON.stringify({ health, write, dismantling, acquisition, itemPresentation, live }, null, 2))
 } finally {
   child.stdin.end()
   lines.close()

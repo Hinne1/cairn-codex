@@ -31,6 +31,15 @@ The app-owned live hook and bundled injector are built/copied from the same
 MIT-licensed project. Build provenance and compatibility fingerprints are recorded in
 `docs/live-hook-compatibility.md`.
 
+## Microsoft Visual C++ Redistributable
+
+Release packages include Microsoft's signed x64 Visual C++ v14 Redistributable as
+the supported prerequisite for the native live hook and injector. Redistribution is
+subject to the Microsoft Visual Studio license terms and distributable-code list.
+The package is obtained from Microsoft's official latest-supported permalink,
+signature-checked during packaging, and recorded by version and SHA-256 in the
+release manifest. It is not used to bypass Cairn Codex's native fingerprint gates.
+
 ## Boost
 
 The app-owned live hook statically links selected parts of

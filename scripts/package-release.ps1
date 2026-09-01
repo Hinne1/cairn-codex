@@ -64,6 +64,7 @@ $hash = Get-CairnSha256 $zipPath
 $installerHash = Get-CairnSha256 $installerPath
 $hookPath = Join-Path $packageRoot 'resources\helper\native\ItemAssistantHook_x64.dll'
 $injectorPath = Join-Path $packageRoot 'resources\helper\native\DllInjector64.exe'
+$vcRedistManifest = Get-Content (Join-Path $packageRoot 'resources\prerequisites\vc-redist-manifest.json') -Raw | ConvertFrom-Json
 $manifest = [ordered]@{
   product = 'Cairn Codex'
   version = $version
@@ -74,6 +75,8 @@ $manifest = [ordered]@{
   installerSha256 = $installerHash
   hookSha256 = Get-CairnSha256 $hookPath
   injectorSha256 = Get-CairnSha256 $injectorPath
+  vcRedistVersion = [string]$vcRedistManifest.version
+  vcRedistSha256 = [string]$vcRedistManifest.sha256
   commit = (& git -c "safe.directory=$projectRoot" -C $projectRoot rev-parse HEAD).Trim()
   dirty = $dirtyFiles.Count -gt 0
 }

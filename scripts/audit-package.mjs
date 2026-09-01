@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join, relative, resolve } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
+import { readPeImports } from './pe-imports.mjs'
 
 const root = resolve(process.argv[2] ?? '')
 if (!process.argv[2]) throw new Error('Usage: node scripts/audit-package.mjs <package-directory>')
@@ -14,7 +15,9 @@ const required = [
   join('resources', 'helper', 'CairnCodex.GrimDawn.exe'),
   join('resources', 'helper', 'coreclr.dll'),
   join('resources', 'helper', 'native', 'ItemAssistantHook_x64.dll'),
-  join('resources', 'helper', 'native', 'DllInjector64.exe')
+  join('resources', 'helper', 'native', 'DllInjector64.exe'),
+  join('resources', 'prerequisites', 'vc_redist.x64.exe'),
+  join('resources', 'prerequisites', 'vc-redist-manifest.json')
 ]
 for (const path of required) await stat(join(root, path))
 try {
@@ -65,6 +68,43 @@ for (const [name, expectedHash] of Object.entries(expected)) {
   if (actual !== expectedHash) throw new Error(`${name} has unexpected SHA-256 ${actual}.`)
 }
 
+const nativeDependencyPolicy = {
+  'ItemAssistantHook_x64.dll': new Set([
+    'kernel32.dll', 'user32.dll', 'shell32.dll', 'ole32.dll',
+    'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'
+  ]),
+  'DllInjector64.exe': new Set([
+    'kernel32.dll', 'user32.dll', 'advapi32.dll', 'vcruntime140.dll'
+  ])
+}
+for (const [name, allowed] of Object.entries(nativeDependencyPolicy)) {
+  const bytes = await readFile(join(root, 'resources', 'helper', 'native', name))
+  const imports = readPeImports(bytes)
+  const unexpected = imports.filter((dependency) =>
+    !allowed.has(dependency) && !dependency.startsWith('api-ms-win-crt-')
+  )
+  if (unexpected.length > 0) {
+    throw new Error(`${name} has unallowlisted PE dependencies: ${unexpected.join(', ')}.`)
+  }
+  for (const requiredRuntime of [...allowed].filter((dependency) => /^(?:msvcp|vcruntime)/.test(dependency))) {
+    if (!imports.includes(requiredRuntime)) {
+      throw new Error(`${name} no longer imports expected runtime dependency ${requiredRuntime}; review packaging deliberately.`)
+    }
+  }
+}
+
+const prerequisiteRoot = join(root, 'resources', 'prerequisites')
+const redistBytes = await readFile(join(prerequisiteRoot, 'vc_redist.x64.exe'))
+const redistManifest = JSON.parse(await readFile(join(prerequisiteRoot, 'vc-redist-manifest.json'), 'utf8'))
+const redistHash = createHash('sha256').update(redistBytes).digest('hex')
+if (redistManifest.schemaVersion !== 1 || redistManifest.sha256 !== redistHash) {
+  throw new Error('The packaged VC++ prerequisite does not match its verified staging manifest.')
+}
+const redistVersion = String(redistManifest.version ?? '').split('.').map(Number)
+if (redistVersion.length < 2 || redistVersion[0] < 14 || (redistVersion[0] === 14 && redistVersion[1] < 43)) {
+  throw new Error(`The packaged VC++ prerequisite ${redistManifest.version ?? '<missing>'} is older than 14.43.`)
+}
+
 const appFiles = files.filter((path) => relative(root, path).replaceAll('\\', '/').startsWith('resources/app/'))
 for (const path of appFiles) {
   if (!/\.(?:js|cjs|css|html|json)$/i.test(path)) continue
@@ -83,5 +123,6 @@ for (const entry of archiveEntries) {
 
 console.log(
   `Package audit passed: ${basename(root)}, ${files.length} files, ` +
-  `${archiveEntries.length > 0 ? `${archiveEntries.length} ASAR entries, ` : ''}self-contained helper.`
+  `${archiveEntries.length > 0 ? `${archiveEntries.length} ASAR entries, ` : ''}` +
+  `self-contained helper, VC++ prerequisite ${redistManifest.version}.`
 )

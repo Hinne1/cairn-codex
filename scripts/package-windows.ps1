@@ -10,6 +10,7 @@ $packageRoot = Join-Path (Join-Path $projectRoot 'dist\package') $PackageDirecto
 $electronRoot = Join-Path $projectRoot 'node_modules\electron\dist'
 $helperProject = Join-Path $projectRoot 'src\helper\CairnCodex.GrimDawn\CairnCodex.GrimDawn.csproj'
 $helperPublish = Join-Path $projectRoot 'dist\helper-win-x64'
+$prerequisiteRoot = Join-Path $projectRoot 'dist\prerequisites'
 
 function Get-FileSha256 {
   param([Parameter(Mandatory)] [string] $Path)
@@ -104,6 +105,7 @@ try {
   # Public packages must not depend on a separately installed .NET runtime.
   & dotnet publish $helperProject --configuration Release --runtime win-x64 --self-contained true --output $helperPublish
   if ($LASTEXITCODE -ne 0) { throw 'Grim Dawn helper publish failed.' }
+  & (Join-Path $PSScriptRoot 'prepare-vc-redist.ps1') -OutputDirectory $prerequisiteRoot
 
   $hookName = 'ItemAssistantHook_x64.dll'
   $packagedHook = Join-Path $packageRoot "resources\helper\native\$hookName"
@@ -151,7 +153,8 @@ try {
   $appRoot = Join-Path $resourcesRoot 'app'
   $appOut = Join-Path $appRoot 'out'
   $packagedHelper = Join-Path $resourcesRoot 'helper'
-  New-Item -ItemType Directory -Path $appRoot, $appOut, $packagedHelper -Force | Out-Null
+  $packagedPrerequisites = Join-Path $resourcesRoot 'prerequisites'
+  New-Item -ItemType Directory -Path $appRoot, $appOut, $packagedHelper, $packagedPrerequisites -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $projectRoot 'package.json') -Destination $appRoot -Force
   Copy-Item -Path (Join-Path $projectRoot 'out\*') -Destination $appOut -Recurse -Force
   if ($preserveLiveHook) {
@@ -159,6 +162,7 @@ try {
   } else {
     Copy-Item -Path (Join-Path $helperPublish '*') -Destination $packagedHelper -Recurse -Force
   }
+  Copy-Item -Path (Join-Path $prerequisiteRoot '*') -Destination $packagedPrerequisites -Recurse -Force
 
   # Electron ships its own top-level LICENSE. Keep that file and add Cairn's
   # license under an unambiguous name rather than overwriting it.

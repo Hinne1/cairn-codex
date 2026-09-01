@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Win32;
 
 namespace CairnCodex.GrimDawn;
 
@@ -23,6 +25,8 @@ internal sealed class LiveGameAdapter : IDisposable
         "419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5";
     private const string VerifiedInjectorSha256 =
         "569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c";
+    private const int MinimumVisualCppRuntimeMajor = 14;
+    private const int MinimumVisualCppRuntimeMinor = 43;
     private static readonly IReadOnlyDictionary<string, string> VerifiedRetailGameDlls =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -193,10 +197,11 @@ internal sealed class LiveGameAdapter : IDisposable
                 var hook = install is null ? null : Path.Combine(install, "ItemAssistantHook_x64.dll");
                 var injector = install is null ? null : Path.Combine(install, "DllInjector64.exe");
                 var filesPresent = hook is not null && injector is not null && File.Exists(hook) && File.Exists(injector);
+                var runtimeAvailable = HasCompatibleVisualCppRuntime(out _);
                 var compatibility = game.Count == 1 && filesPresent
                     ? GetCompatibility(game[0], hook!)
                     : new LiveHookCompatibility(false, null);
-                var compatible = filesPresent && compatibility.Verified;
+                var compatible = filesPresent && runtimeAvailable && compatibility.Verified;
                 var queueSettings = ReadQueueSettings();
                 var currentState = state;
                 var currentDetail = detail;
@@ -213,10 +218,12 @@ internal sealed class LiveGameAdapter : IDisposable
                 if (window == IntPtr.Zero)
                 {
                     currentState = game.Count == 0 || !compatible ? "unavailable" : "available";
-                    currentDetail = game.Count == 0
-                        ? "Start Grim Dawn and enter the world before enabling live mode."
-                        : !filesPresent
-                            ? "The bundled Cairn Codex live adapter is incomplete."
+                    currentDetail = !filesPresent
+                        ? "The bundled Cairn Codex live adapter is incomplete."
+                        : !runtimeAvailable
+                            ? VisualCppRuntimeRequirement()
+                        : game.Count == 0
+                            ? "Start Grim Dawn and enter the world before enabling live mode."
                             : !compatible
                                 ? compatibility.Reason ?? "This game and hook combination has not been verified for live transfers."
                             : itemAssistant.Count > 0
@@ -282,6 +289,10 @@ internal sealed class LiveGameAdapter : IDisposable
                     "Close Grim Dawn Item Assistant before enabling Cairn Codex live mode.");
             }
             foreach (var process in itemAssistant) process.Dispose();
+            if (!HasCompatibleVisualCppRuntime(out _))
+            {
+                throw new WriteSafetyException(VisualCppRuntimeRequirement());
+            }
             var game = FindProcesses(["Grim Dawn", "GrimDawn"]);
             if (game.Count != 1)
             {
@@ -1015,6 +1026,36 @@ internal sealed class LiveGameAdapter : IDisposable
                File.Exists(Path.Combine(bundled, "DllInjector64.exe"))
             ? bundled
             : null;
+    }
+
+    private static bool HasCompatibleVisualCppRuntime(out string? version)
+    {
+        version = null;
+        try
+        {
+            using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32);
+            using var runtime = machine.OpenSubKey(@"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64");
+            var installed = Convert.ToInt32(runtime?.GetValue("Installed") ?? 0);
+            var major = Convert.ToInt32(runtime?.GetValue("Major") ?? 0);
+            var minor = Convert.ToInt32(runtime?.GetValue("Minor") ?? 0);
+            var build = Convert.ToInt32(runtime?.GetValue("Bld") ?? 0);
+            var revision = Convert.ToInt32(runtime?.GetValue("Rbld") ?? 0);
+            version = $"{major}.{minor}.{build}.{revision}";
+            return installed == 1 &&
+                (major > MinimumVisualCppRuntimeMajor ||
+                 (major == MinimumVisualCppRuntimeMajor && minor >= MinimumVisualCppRuntimeMinor));
+        }
+        catch (Exception exception) when (exception is IOException or SecurityException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string VisualCppRuntimeRequirement()
+    {
+        return "The Microsoft Visual C++ 2015-2022 Redistributable (x64) 14.43 or newer is required by " +
+            "the Cairn Codex live adapter. Re-run the Cairn Codex installer, or run the bundled " +
+            "resources\\prerequisites\\vc_redist.x64.exe before connecting.";
     }
 
     private static string LiveDataDirectory()

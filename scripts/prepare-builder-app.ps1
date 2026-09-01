@@ -14,11 +14,13 @@ if (Test-Path -LiteralPath $resolvedStage) {
 New-Item -ItemType Directory -Path $resolvedStage -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'out') -Destination $resolvedStage -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'dist\helper-win-x64') -Destination (Join-Path $resolvedStage 'helper') -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'dist\prerequisites') -Destination (Join-Path $resolvedStage 'prerequisites') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $resolvedStage 'LICENSE.CAIRN-CODEX.txt') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $resolvedStage -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $resolvedStage -Force
 New-Item -ItemType Directory -Path (Join-Path $resolvedStage 'build') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'build\icon.svg') -Destination (Join-Path $resolvedStage 'build\icon.svg') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'installer-prerequisites.nsh') -Destination (Join-Path $resolvedStage 'build\installer-prerequisites.nsh') -Force
 
 $source = Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
 $stagePackage = [ordered]@{
@@ -36,7 +38,10 @@ $stagePackage = [ordered]@{
     asar = $true
     directories = [ordered]@{ output = '../builder' }
     files = @('out/**/*', 'package.json')
-    extraResources = @([ordered]@{ from = 'helper'; to = 'helper' })
+    extraResources = @(
+      [ordered]@{ from = 'helper'; to = 'helper' },
+      [ordered]@{ from = 'prerequisites'; to = 'prerequisites' }
+    )
     extraFiles = @('LICENSE.CAIRN-CODEX.txt', 'THIRD_PARTY_NOTICES.md', 'README.md')
     win = [ordered]@{
       target = 'nsis'
@@ -51,6 +56,7 @@ $stagePackage = [ordered]@{
       createStartMenuShortcut = $true
       shortcutName = 'Cairn Codex'
       deleteAppDataOnUninstall = $false
+      include = 'build/installer-prerequisites.nsh'
     }
   }
 }

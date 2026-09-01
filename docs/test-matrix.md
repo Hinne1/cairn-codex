@@ -17,6 +17,7 @@ a supported game installation and records the manual live-transfer results here.
 | Offline live-queue recovery state machine | helper live-queue self-test with disposable queue root | Passed: pending, deposited, rejected, multi-item, stale semantic hash, and path escape guard |
 | Unsupported live build negative control | helper fingerprint self-test | Passed: unknown `Game.dll` hash and known crashing hook fingerprint remain outside the verified allowlist |
 | Bundled hook/injector fingerprints | helper and package audits | Passed |
+| Native VC++ prerequisite packaging | PE import allowlist, Microsoft signature/version gate, NSIS build, installed-payload hash audit, and isolated installer lifecycle | **Passed 2026-09-01:** hook imports `MSVCP140.dll`, `VCRUNTIME140.dll`, and `VCRUNTIME140_1.dll`; injector imports `VCRUNTIME140.dll`; release payload embedded Microsoft-signed x64 runtime `14.51.36247.0` with SHA-256 `843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c`; installer skip-path, synthetic first launch, uninstall, and retained profile passed. Runtime-absent Windows VM execution remains pending in #66. |
 | Duplicate vault selection | desktop smoke | Rejected |
 | Rejected retrieval state rollback | desktop smoke | Passed |
 | Generated personal/special delivery journal | desktop smoke | Committed and rejected outcomes retained; queue identity persisted before acknowledgement |

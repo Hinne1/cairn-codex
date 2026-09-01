@@ -42,6 +42,46 @@ Collection and Sets do not need identical information architecture to specialist
 need the same type scale, surface hierarchy, focus treatment, control geometry, responsive
 breakpoints, and status vocabulary.
 
+## Measured acceptance baseline
+
+Issue #58 turned the qualitative audit above into an isolated, repeatable baseline on
+2026-09-01. `Pass` means the observed behavior satisfies the current contract. `Follow-up`
+means the behavior is usable but does not satisfy the coherent end state. `Deferred` means the
+specialist owner has not completed that part of the review; every deferred cell names that
+owner rather than hiding work in prose.
+
+All searchable workspaces passed a filter-produced empty state. Normal and scale evidence used
+the generated 24,553-copy/5,525-item profile; no contributor profile, game process, save, or
+stash was opened. Captures ran at 1,440×1,000 and 520×1,000. The harness now fails when a
+requested workspace is hidden or was not opened, can opt experimental tools into its isolated
+profile, and reports active workspace, document overflow, and mounted result counts.
+
+| Workspace | Hierarchy and controls | Normal/large result evidence | 520px | Keyboard and tooltip | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| Collection | Purpose-built dashboard; shared explorer | 5,525 results; 48 cards mounted; empty passed | Pass; no document overflow | Global item tooltip; complete keyboard audit deferred to #16 | Keep the dashboard exception; migrate its manual card cap in #68. |
+| Sets | Shared explorer; rarity/readiness semantics remain explicit | **202 of 202 cards mounted**; empty passed | Pass; controls stack without document overflow | Global item tooltip; card audit deferred to #16 | Page cards in #64 after the active set-semantic work in #46. |
+| Components & Consumables | Shared explorer | 167 results; 48 cards mounted; empty passed | Pass; no document overflow | Global item tooltip; complete audit deferred to #16 | Replace the manual card cap in #68. |
+| Skill Explorer | Shared `ToolHeader`, explorer, and bounded table | 61 current matches/50 mounted; 120/50 deterministic fixture; empty passed | Follow-up: 1,220px local table scroller | Focus tooltip and bounded Arrow/Home/End/paging passed | Give the table a deliberate narrow representation in #63. |
+| Stash Oracle | Shared header/explorer with experimental gating | 3,148 archetypes/12 cards mounted at explicit Lv1–100; empty passed | Pass; no document overflow | Global item tooltip; complete audit deferred to #16 | Replace the manual 12-card cap in #68. |
+| Leveling Planner | Shared header/explorer; setup controls remain specialist | 44/44 current results; 120/50 table and card fixtures; empty passed | Follow-up: 1,250px local table scroller | Focus tooltip, bounded keyboard, actions, and history passed | Resolve narrow table behavior in #63; extraction remains #17. |
+| MI Workshop | Shared header/explorer and bounded table | 1,774 combinations/50 mounted; empty passed | **Fail: document expands to 657px** | Focus tooltip and bounded keyboard/paging passed | Fix toolbar/document overflow in #63. |
+| Supplies | Shared header/explorer and explicit batch/live state | 22 current cards mounted; empty passed; local cap is 60 | Pass; no document overflow | Global item tooltip; batch keyboard audit deferred to #16 | Move keyed selection to the shared surface in #68. |
+| Collection Farming | Shared header/explorer | **214 of 214 route cards mounted**; empty passed; no-match search took 497.4ms including debounce | Pass; no document overflow | Global item tooltip; complete audit deferred to #16 | Page route cards and retain rank semantics in #65. |
+| Dismantling Lab | Shared header/explorer; read-only status is explicit | 24,509 candidates/120 mounted by local cap; empty passed | Pass; no document overflow | Selection/preview audit remains with experimental owner #25 and keyboard owner #16 | Do not fork the active #25 prototype; its eventual result migration must use the shared contract. |
+| Transfers | Focused system workspace; three explicit sections | 24,609 history operations/50 mounted; empty passed | Pass; no document overflow | Shared paging/navigation passed; final audit remains #16 | Preserve the focused shell and server-paged contract. |
+| Settings | Focused system workspace; no explorer by design | Form state; result paging not applicable | **Fail: document expands to 785px** | Form/dialog audit deferred to #16 | Fix grid/header/action overflow in #63. |
+
+The largest cross-workspace hierarchy problem is separate from individual tool styling: every
+Collection child currently repeats the full Collection hero, progress tracker, and tool launcher
+before its own `ToolHeader`. At 520px this pushes specialist content below approximately one full
+viewport. #62 keeps the rich dashboard on Collection while defining compact child-workspace
+navigation. #17 remains the code-ownership migration; #62 owns the visible behavior.
+
+The remaining result migrations are intentionally split by collision domain: #64 owns Sets,
+#65 owns Farming, #68 owns the mature manually capped card tools, and #25 retains Dismantling.
+#63 owns responsive geometry and narrow data presentation. #16 remains the single final owner
+for focus, keyboard, reduced-motion, and assistive-technology acceptance across all workspaces.
+
 ## Migration order
 
 1. Move shared `ToolHeader`, `ExplorerToolbar`, advanced search, semantic badges, import status,

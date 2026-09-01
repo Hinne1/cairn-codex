@@ -5203,22 +5203,45 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_ENABLE_ALL_TOOLS === '1') {
+          const enabledAllTools = await window.webContents.executeJavaScript(`
+            (async () => {
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const button = (selector, label) => [...document.querySelectorAll(selector)]
+                .find((candidate) => candidate.textContent?.trim() === label)
+              button('.system-nav button', 'Settings')?.click()
+              await frames()
+              const experimental = document.querySelector('.experimental-tools-toggle input')
+              if (experimental instanceof HTMLInputElement && !experimental.checked) experimental.click()
+              await frames()
+              button('.workspace-tool-presets button', 'Show all')?.click()
+              await frames()
+              const collection = button('.system-nav button', 'Collection')
+              collection?.click()
+              await frames()
+              return Boolean(collection)
+            })()
+          `)
+          if (!enabledAllTools) throw new Error('Could not enable all tools in the isolated screenshot profile.')
+        }
         const category = process.env.CAIRN_CODEX_SCREENSHOT_CATEGORY
         if (category) {
-          interactionTimings.categoryMs = await window.webContents.executeJavaScript(`
+          const categoryResult = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
               await new Promise((resolve) => setTimeout(resolve, 100))
               document.querySelector('.onboarding-skip')?.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              ;[...document.querySelectorAll('.workspace-tabs button, .category-tabs button, .system-nav button')]
+              const destination = [...document.querySelectorAll('.workspace-tabs button, .category-tabs button, .system-nav button')]
                 .find((button) =>
                   (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
-                ?.click()
+              destination?.click()
               await new Promise((resolve) => setTimeout(resolve, 100))
-              return performance.now() - started
+              return { elapsedMs: performance.now() - started, opened: Boolean(destination) }
             })()
           `)
+          if (!categoryResult.opened) throw new Error(`Screenshot category was not available: ${category}.`)
+          interactionTimings.categoryMs = categoryResult.elapsedMs
         }
         const plannerDisplay = process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY
         if (plannerDisplay) {
@@ -5435,6 +5458,24 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
           if (!openedPlannerSetup) throw new Error('New plan dialog was not available for screenshot capture.')
+        }
+        const oracleMinimumLevel = process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MIN_LEVEL
+        const oracleMaximumLevel = process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MAX_LEVEL
+        if (oracleMinimumLevel || oracleMaximumLevel) {
+          await window.webContents.executeJavaScript(`
+            (async () => {
+              const setLevel = (label, value) => {
+                const input = document.querySelector('.oracle-explorer-toolbar input[aria-label="' + label + '"]')
+                if (!(input instanceof HTMLInputElement) || !value) return
+                input.value = value
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                input.dispatchEvent(new Event('change', { bubbles: true }))
+              }
+              setLevel('Minimum item level', ${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MIN_LEVEL ?? '')})
+              setLevel('Maximum item level', ${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MAX_LEVEL ?? '')})
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            })()
+          `)
         }
         const skillScope = process.env.CAIRN_CODEX_SCREENSHOT_SKILL_SCOPE
         if (skillScope) {
@@ -5742,6 +5783,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           plannerCards: document.querySelectorAll('.planner-card-results .planner-card').length,
           boundedRows: document.querySelectorAll('.bounded-tooltip-results .bounded-results-item').length,
           skillRows: document.querySelectorAll('.skill-table-results .skill-table-row').length,
+          dismantlingRows: document.querySelectorAll('.dismantling-row').length,
+          farmingRows: document.querySelectorAll('.farm-list > article').length,
+          oracleCards: document.querySelectorAll('.oracle-card').length,
+          supplyCards: document.querySelectorAll('.supply-card').length,
+          materialCards: document.querySelectorAll('.materials-grid .item-card').length,
+          toolHeaders: document.querySelectorAll('.tool-header').length,
+          explorerToolbars: document.querySelectorAll('.explorer-toolbar').length,
+          boundedSurfaces: document.querySelectorAll('.bounded-results').length,
           miRows: [...document.querySelectorAll('.mi-table-results .mi-table-row')].map((row) => ({
             text: row.textContent?.replace(/\s+/g, ' ').trim(),
             prefixClass: row.children[2]?.className,
@@ -5768,6 +5817,26 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           scrollX: window.scrollX,
           scrollY: window.scrollY,
           scrollTargetFound: Boolean(document.querySelector(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET ?? 'body')})),
+          activeWorkspace: document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
+            document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim(),
+          documentWidth: document.documentElement.scrollWidth,
+          horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+          overflowingElements: [...document.querySelectorAll('body *')]
+            .filter((element) => {
+              const rect = element.getBoundingClientRect()
+              return rect.right > window.innerWidth + 1 || rect.left < -1
+            })
+            .slice(0, 12)
+            .map((element) => {
+              const rect = element.getBoundingClientRect()
+              return {
+                tag: element.tagName.toLocaleLowerCase(),
+                className: typeof element.className === 'string' ? element.className : '',
+                left: Math.round(rect.left),
+                right: Math.round(rect.right),
+                width: Math.round(rect.width)
+              }
+            }),
           titleX: document.querySelector('.topbar > div')?.getBoundingClientRect().x,
           mainX: document.querySelector('main')?.getBoundingClientRect().x,
           viewport: { width: window.innerWidth, height: window.innerHeight }

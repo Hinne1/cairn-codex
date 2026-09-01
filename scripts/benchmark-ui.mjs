@@ -18,6 +18,8 @@ const query = argument('--query') ?? 'wendigo'
 const category = argument('--category')
 const skillQuery = argument('--skill-query')
 const skillSelectFirst = process.argv.includes('--skill-select-first')
+const oracleMinimumLevel = argument('--oracle-min-level')
+const oracleMaximumLevel = argument('--oracle-max-level')
 const plannerDisplay = argument('--planner-display')
 const miAffixFilter = argument('--mi-affix-filter')
 const expectedMiRows = argument('--expected-mi-rows')
@@ -31,6 +33,7 @@ const waitForBackgroundJobs = process.argv.includes('--wait-for-background-jobs'
 const hydrateAllModes = process.argv.includes('--hydrate-all-modes')
 const openSearchHelp = process.argv.includes('--open-search-help')
 const collapseTrackers = process.argv.includes('--collapse-trackers')
+const enableAllTools = process.argv.includes('--enable-all-tools')
 const screenshotWidth = argument('--width')
 const screenshotHeight = argument('--height')
 const scrollTarget = argument('--scroll-target')
@@ -115,6 +118,7 @@ const env = {
   CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture ?? '',
   ...(openSearchHelp ? { CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP: '1' } : {}),
   ...(collapseTrackers ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
+  ...(enableAllTools ? { CAIRN_CODEX_SCREENSHOT_ENABLE_ALL_TOOLS: '1' } : {}),
   ...(screenshotWidth ? { CAIRN_CODEX_SCREENSHOT_WIDTH: screenshotWidth } : {}),
   ...(screenshotHeight ? { CAIRN_CODEX_SCREENSHOT_HEIGHT: screenshotHeight } : {}),
   ...(scrollTarget ? { CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET: scrollTarget } : {}),
@@ -123,6 +127,8 @@ const env = {
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(skillQuery ? { CAIRN_CODEX_SCREENSHOT_SKILL_QUERY: skillQuery } : {}),
   ...(skillSelectFirst ? { CAIRN_CODEX_SCREENSHOT_SKILL_SELECT_FIRST: '1' } : {}),
+  ...(oracleMinimumLevel ? { CAIRN_CODEX_SCREENSHOT_ORACLE_MIN_LEVEL: oracleMinimumLevel } : {}),
+  ...(oracleMaximumLevel ? { CAIRN_CODEX_SCREENSHOT_ORACLE_MAX_LEVEL: oracleMaximumLevel } : {}),
   ...(plannerDisplay ? { CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY: plannerDisplay } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
@@ -267,12 +273,15 @@ console.log(JSON.stringify({
   category: category ?? 'Collection',
   skillQuery,
   skillSelectFirst,
+  oracleMinimumLevel,
+  oracleMaximumLevel,
   plannerDisplay,
   miAffixFilter: miAffixFilter ?? null,
   miNativeRestore,
   waitForBackgroundJobs,
   hydrateAllModes,
   openSearchHelp,
+  enableAllTools,
   verifyNavigation,
   openPlannerSetup,
   verifyPlannerNavigation,
@@ -291,6 +300,15 @@ console.log(JSON.stringify({
   renderedPlannerRows: report.renderedState?.plannerRows,
   renderedPlannerCards: report.renderedState?.plannerCards,
   renderedBoundedRows: report.renderedState?.boundedRows,
+  renderedSetCards: report.renderedState?.sets,
+  renderedDismantlingRows: report.renderedState?.dismantlingRows,
+  renderedFarmingRows: report.renderedState?.farmingRows,
+  renderedOracleCards: report.renderedState?.oracleCards,
+  renderedSupplyCards: report.renderedState?.supplyCards,
+  activeWorkspace: report.renderedState?.activeWorkspace,
+  documentWidth: report.renderedState?.documentWidth,
+  horizontalOverflow: report.renderedState?.horizontalOverflow,
+  overflowingElements: report.renderedState?.overflowingElements,
   screenshotPath,
   reportPath
 }, null, 2))

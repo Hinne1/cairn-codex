@@ -80,6 +80,9 @@ including its rank, conversion, special-modifier, and level sorts. Leveling Plan
 bounded result window for both its table and card modes; favorites and ignored-base controls stop
 row activation and remain keyed to item records. Grid navigation derives its column count from
 the rendered row so ArrowUp and ArrowDown remain correct as the responsive card grid reflows.
+The measured cross-workspace baseline and remaining focused migration owners live in
+`design-foundation.md`; do not reopen #21 as a broad catch-all when one workspace-sized issue is
+sufficient.
 
 ## Search and filter semantics
 

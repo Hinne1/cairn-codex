@@ -5150,7 +5150,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         }
         await window.webContents.executeJavaScript(`
           (async () => {
-            document.querySelector('.onboarding-skip')?.click()
+            if (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP === undefined)}) {
+              document.querySelector('.onboarding-skip')?.click()
+            }
             await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
           })()
         `)

@@ -104,7 +104,7 @@ const env = {
   ...(screenshotWidth ? { CAIRN_CODEX_SCREENSHOT_WIDTH: screenshotWidth } : {}),
   ...(screenshotHeight ? { CAIRN_CODEX_SCREENSHOT_HEIGHT: screenshotHeight } : {}),
   ...(scrollTarget ? { CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET: scrollTarget } : {}),
-  ...(onboardingStep ? { CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP: onboardingStep } : {}),
+  ...(onboardingStep !== null ? { CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP: onboardingStep } : {}),
   ...(dismissOnboarding ? { CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING: '1' } : {}),
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),

@@ -5841,6 +5841,65 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_ORACLE_WORKSPACE === '1') {
+          interactionTimings.oracleWorkspaceMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const root = document.querySelector('.oracle-results')
+              const rows = () => [...document.querySelectorAll('.oracle-results .bounded-results-item')]
+              const firstIdentity = () => rows()[0]?.textContent?.replace(/\s+/g, ' ').trim()
+              const setQuery = async (value) => {
+                const input = document.querySelector('.oracle-explorer-toolbar .explorer-search input')
+                if (!(input instanceof HTMLInputElement)) throw new Error('Oracle search control was not rendered.')
+                input.value = value
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                await wait(175)
+                await frames()
+              }
+              const minimum = document.querySelector('.oracle-explorer-toolbar input[aria-label="Minimum item level"]')
+              const maximum = document.querySelector('.oracle-explorer-toolbar input[aria-label="Maximum item level"]')
+              if (!root || rows().length !== 12) throw new Error('Oracle did not mount its bounded 12-card page.')
+              if (!(minimum instanceof HTMLInputElement) || minimum.value !== '1' ||
+                  !(maximum instanceof HTMLInputElement) || maximum.value !== '100') {
+                throw new Error('Oracle level controls did not retain the requested 1–100 range.')
+              }
+              const firstPageIdentity = firstIdentity()
+              const first = rows()[0]
+              const second = rows()[1]
+              first.focus()
+              if (document.activeElement !== first) throw new Error('The first Oracle card was not keyboard focusable.')
+              first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              await wait(20)
+              if (document.activeElement !== second) throw new Error('ArrowDown did not move to the next Oracle card.')
+              const evidence = first.querySelector('.oracle-evidence button')
+              if (!(evidence instanceof HTMLButtonElement)) throw new Error('Oracle evidence did not expose an item action.')
+              const evidenceRect = evidence.getBoundingClientRect()
+              evidence.dispatchEvent(new MouseEvent('mouseenter', {
+                clientX: evidenceRect.left + Math.min(12, evidenceRect.width / 2),
+                clientY: evidenceRect.top + Math.min(12, evidenceRect.height / 2)
+              }))
+              for (let attempt = 0; attempt < 40 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
+              if (!document.querySelector('.game-tooltip')) throw new Error('Oracle evidence did not use the global item tooltip.')
+              evidence.dispatchEvent(new MouseEvent('mouseleave'))
+              const next = root.querySelector('.bounded-results-footer nav button:last-of-type')
+              if (!(next instanceof HTMLButtonElement) || next.disabled) throw new Error('Oracle next-page control was unavailable.')
+              next.click()
+              await frames()
+              if (rows().length !== 12 || firstIdentity() === firstPageIdentity) throw new Error('Oracle paging did not replace the mounted cards.')
+              await setQuery('zz-no-oracle-result-zz')
+              if (rows().length !== 0 || !root.querySelector('.bounded-results-state.is-empty')) {
+                throw new Error('Oracle did not render the shared empty state after an impossible search.')
+              }
+              await setQuery(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_QUERY ?? '')})
+              if (rows().length !== 12 || firstIdentity() !== firstPageIdentity) {
+                throw new Error('Oracle search reset did not restore page one and its original first result.')
+              }
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP === '1') {
           const openedSearchHelp = await window.webContents.executeJavaScript(`
             (() => {

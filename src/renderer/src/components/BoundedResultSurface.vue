@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<{
   emptyDetail?: string
   selectionMode?: BoundedSelectionMode
   selectedKeys?: readonly BoundedResultKey[]
+  selectionDisabled?: boolean
   keyboardColumns?: number
 }>(), {
   page: 1,
@@ -37,6 +38,7 @@ const props = withDefaults(defineProps<{
   emptyDetail: 'Try changing the search or filters.',
   selectionMode: 'none',
   selectedKeys: () => [],
+  selectionDisabled: false,
   keyboardColumns: 1
 })
 
@@ -84,7 +86,7 @@ function rememberElement(key: BoundedResultKey, element: Element | null): void {
 
 function select(key: BoundedResultKey): void {
   activeKey.value = key
-  if (selectable.value) {
+  if (selectable.value && !props.selectionDisabled) {
     emit('update:selectedKeys', updateBoundedSelection(props.selectedKeys, key, props.selectionMode))
   }
 }
@@ -115,6 +117,7 @@ function handleKeydown(event: KeyboardEvent, key: BoundedResultKey): void {
   }
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
+    if (props.selectionDisabled) return
     select(key)
     emit('activate', key)
   }
@@ -165,6 +168,7 @@ function changePage(page: number): void {
         :class="{ 'is-selected': selectable && selectedKeys.includes(entry.key) }"
         :role="itemRole"
         :aria-selected="selectable ? selectedKeys.includes(entry.key) : undefined"
+        :aria-disabled="selectable && selectionDisabled ? true : undefined"
         :tabindex="selectable ? (activeKey === entry.key ? 0 : -1) : undefined"
         @focus="activeKey = entry.key"
         @click="select(entry.key)"

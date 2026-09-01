@@ -22,6 +22,8 @@ export const DEFAULT_WORKSPACE_TOOLS: WorkspaceToolPreference[] = [
 export interface StoredPlannerProfile {
   id: string
   name: string
+  className?: string
+  masteries?: string[]
   skills: string[]
   excludedSkills: string[]
   minimumLevel: number
@@ -181,9 +183,12 @@ function validPlannerProfile(value: unknown, fallbackTime: string): StoredPlanne
   if (typeof profile.id !== 'string' || !profile.id || typeof profile.name !== 'string' ||
       !Array.isArray(profile.skills) || !profile.skills.every((skill) => typeof skill === 'string') ||
       typeof profile.levelCap !== 'number') return null
+  const masteries = stringArray(profile.masteries, 2, 40)
   return {
     id: profile.id,
     name: profile.name.slice(0, 60),
+    ...(typeof profile.className === 'string' ? { className: profile.className.slice(0, 80) } : {}),
+    ...(masteries ? { masteries } : {}),
     skills: profile.skills.slice(0, 128),
     excludedSkills: stringArray(profile.excludedSkills, 128, 200) ?? [],
     minimumLevel: clampNumber(profile.minimumLevel, 1, 1, 100),

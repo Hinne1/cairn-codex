@@ -4,6 +4,7 @@ import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import FailureProbe from './components/FailureProbe.vue'
 import ItemAssistantImport from './components/ItemAssistantImport.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
+import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import { createNotificationService, type AppNotification } from './notification-service'
@@ -17,6 +18,12 @@ import {
   type StoredTodoItem as TodoItem
 } from './preference-repository'
 import { searchGuidance } from './search-guidance'
+import {
+  createCharacterPlannerProfile,
+  createManualPlannerProfile,
+  createPlannerClassOptions,
+  type PlannerSetupSubmission
+} from './planner-setup'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import {
   setCompletionCount,
@@ -145,6 +152,7 @@ interface AppHistoryState {
   plannerSortMode: PlannerSortMode
   plannerSortDirection: SortDirection
   plannerDisplay: PlannerDisplay
+  plannerProfileId?: string
   atlasRegionQuery: string
   plannerMapScope: PlannerMapScope
   plannerMapSortMode: PlannerMapSortMode
@@ -358,11 +366,12 @@ const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id
   ?? plannerProfiles.value[0]
 const plannerSkills = ref<string[]>([...(initialPlannerProfile?.skills ?? ['Wendigo Totem'])])
 const plannerSkillDraft = ref('')
-const plannerProfileDraft = ref('')
+const plannerSetupOpen = ref(false)
 const plannerMinimumLevel = ref(initialPlannerProfile?.minimumLevel ?? 1)
 const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? 70)
 const plannerMinimumLevelDraft = ref(plannerMinimumLevel.value)
 const plannerLevelCapDraft = ref(plannerLevelCap.value)
+let applyingPlannerProfile = false
 const plannerDisplay = ref<PlannerDisplay>(initialPreferences.appearance.plannerDisplay)
 const plannerMapScope = ref<PlannerMapScope>('selected')
 const plannerMapSortMode = ref<PlannerMapSortMode>('items')
@@ -384,7 +393,6 @@ const oracleSortMode = ref<OracleSortMode>('score')
 const oracleSortDirection = ref<SortDirection>('desc')
 const oracleVisibleCount = ref(12)
 const discoveredCharacters = ref<CharacterSaveProfile[]>([])
-const characterImportOpen = ref(false)
 const characterImportLoading = ref(false)
 const characterImportError = ref<string | null>(null)
 const atlasRegionQuery = ref('')
@@ -1256,6 +1264,7 @@ const plannerCatalogItems = computed(() => [
 const selectedPlannerProfile = computed(() =>
   plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value) ?? null
 )
+const plannerClassOptions = computed(() => createPlannerClassOptions(snapshot.value?.skillClassNames))
 const plannerIgnoredRecordSet = computed(() => new Set(
   plannerIgnoredRecords.value.map((record) => record.toLocaleLowerCase())
 ))
@@ -1362,7 +1371,7 @@ const selectedStoredCopies = computed(() => {
 })
 
 const skillNames = computed(() => {
-  const names = new Set<string>()
+  const names = new Set<string>(Object.keys(snapshot.value?.skillMasteries ?? {}))
   for (const item of plannerCatalogItems.value) {
     for (const section of item.presentation?.sections ?? []) {
       if (section.kind === 'skill-modifier' && section.heading) names.add(section.heading)
@@ -2023,10 +2032,12 @@ function restorePlannerSkill(skill: string): void {
 function selectPlannerProfile(profileId: string): void {
   const profile = plannerProfiles.value.find((candidate) => candidate.id === profileId)
   if (!profile) return
+  applyingPlannerProfile = true
   selectedPlannerProfileId.value = profile.id
   plannerSkills.value = [...profile.skills]
   plannerMinimumLevel.value = profile.minimumLevel
   plannerLevelCap.value = profile.levelCap
+  void nextTick(() => { applyingPlannerProfile = false })
 }
 
 function commitPlannerMinimumLevel(): void {
@@ -2041,26 +2052,12 @@ function commitPlannerLevelCap(): void {
   plannerLevelCap.value = next
 }
 
-function createPlannerProfile(): void {
-  const name = plannerProfileDraft.value.trim()
-  if (!name) return
-  const profile: PlannerProfile = {
-    id: crypto.randomUUID(),
-    name,
-    skills: [...plannerSkills.value],
-    excludedSkills: [],
-    minimumLevel: plannerMinimumLevel.value,
-    levelCap: plannerLevelCap.value,
-    source: 'manual',
-    modifiedAt: new Date().toISOString()
-  }
-  plannerProfiles.value = [...plannerProfiles.value, profile]
-  plannerProfileDraft.value = ''
-  selectPlannerProfile(profile.id)
+function openPlannerSetup(): void {
+  plannerSetupOpen.value = true
 }
 
 async function loadCharacterProfiles(): Promise<void> {
-  characterImportOpen.value = true
+  if (characterImportLoading.value) return
   characterImportLoading.value = true
   characterImportError.value = null
   try {
@@ -2072,34 +2069,55 @@ async function loadCharacterProfiles(): Promise<void> {
   }
 }
 
-function importCharacterProfile(character: CharacterSaveProfile): void {
+function importCharacterProfile(character: CharacterSaveProfile, setup?: PlannerSetupSubmission): void {
   if (character.error) return
-  const validNames = new Map(skillNames.value.map((name) => [name.toLocaleLowerCase(), name]))
-  const parsedSkills = [...new Set(character.skills
-    .map((skill) => validNames.get(skill.name.toLocaleLowerCase()))
-    .filter((skill): skill is string => Boolean(skill)))]
   const existing = plannerProfiles.value.find((profile) =>
     profile.source === 'character' && profile.characterPath?.toLocaleLowerCase() === character.path.toLocaleLowerCase()
   )
-  const excluded = existing?.excludedSkills.filter((skill) => parsedSkills.includes(skill)) ?? []
-  const profile: PlannerProfile = {
-    id: existing?.id ?? crypto.randomUUID(),
-    name: character.name,
-    skills: parsedSkills.filter((skill) => !excluded.includes(skill)),
-    excludedSkills: excluded,
-    minimumLevel: existing?.characterLevel === undefined ? character.level : existing.minimumLevel,
-    levelCap: existing?.levelCap ?? Math.max(70, character.level),
-    source: 'character',
-    characterPath: character.path,
-    characterLevel: character.level,
-    isHardcore: character.isHardcore,
+  const profile = createCharacterPlannerProfile({
+    character,
+    skillNames: skillNames.value,
+    classOptions: plannerClassOptions.value,
+    ...(existing ? { existing } : {}),
+    ...(setup ? { setup } : {}),
+    id: crypto.randomUUID(),
     modifiedAt: new Date().toISOString()
-  }
+  })
   plannerProfiles.value = existing
     ? plannerProfiles.value.map((candidate) => candidate.id === existing.id ? profile : candidate)
     : [...plannerProfiles.value, profile]
   selectPlannerProfile(profile.id)
-  characterImportOpen.value = false
+}
+
+function completePlannerSetup(submission: PlannerSetupSubmission): void {
+  if (submission.source === 'character') {
+    const character = discoveredCharacters.value.find((candidate) => candidate.path === submission.characterPath)
+    if (!character) {
+      characterImportError.value = 'That character save is no longer available. Reopen New plan and refresh the save list.'
+      return
+    }
+    importCharacterProfile(character, submission)
+  } else {
+    const profile = createManualPlannerProfile(submission, crypto.randomUUID(), new Date().toISOString())
+    plannerProfiles.value = [...plannerProfiles.value, profile]
+    selectPlannerProfile(profile.id)
+  }
+  plannerSetupOpen.value = false
+}
+
+async function refreshSelectedCharacterProfile(): Promise<void> {
+  const profile = selectedPlannerProfile.value
+  if (profile?.source !== 'character' || !profile.characterPath) return
+  await loadCharacterProfiles()
+  const character = discoveredCharacters.value.find((candidate) =>
+    candidate.path.localeCompare(profile.characterPath!, undefined, { sensitivity: 'base' }) === 0
+  )
+  if (!character) {
+    reportTransferProblem('The source character save could not be found. The existing plan was not changed.')
+    return
+  }
+  importCharacterProfile(character)
+  reportSuccess(`Refreshed ${profile.name} from its character save.`)
 }
 
 function deletePlannerProfile(): void {
@@ -2216,6 +2234,7 @@ function currentAppHistoryState(index = appHistoryIndex): AppHistoryState {
     plannerSortMode: plannerSortMode.value,
     plannerSortDirection: plannerSortDirection.value,
     plannerDisplay: plannerDisplay.value,
+    plannerProfileId: selectedPlannerProfileId.value,
     atlasRegionQuery: atlasRegionQuery.value,
     plannerMapScope: plannerMapScope.value,
     plannerMapSortMode: plannerMapSortMode.value,
@@ -2285,6 +2304,7 @@ function handleAppHistory(event: PopStateEvent): void {
   plannerSortMode.value = state.plannerSortMode ?? 'level'
   plannerSortDirection.value = state.plannerSortDirection ?? 'asc'
   plannerDisplay.value = state.plannerDisplay ?? 'list'
+  if (state.plannerProfileId) selectPlannerProfile(state.plannerProfileId)
   atlasRegionQuery.value = state.atlasRegionQuery ?? ''
   plannerMapScope.value = state.plannerMapScope ?? 'selected'
   plannerMapSortMode.value = state.plannerMapSortMode ?? 'items'
@@ -2357,7 +2377,7 @@ watch([oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaxi
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
 })
-watch([activeView, selectedRecord, transferSection], () => {
+watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId], () => {
   if (!appHistoryReady || restoringAppHistory) return
   appHistoryIndex += 1
   appHistoryMaximum = appHistoryIndex
@@ -2382,6 +2402,7 @@ watch(plannerLevelCap, (level) => {
 })
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
+  if (applyingPlannerProfile) return
   plannerProfiles.value = plannerProfiles.value.map((profile) =>
     profile.id === selectedPlannerProfileId.value
       ? {
@@ -6400,26 +6421,30 @@ function formatPercentile(value: number | null | undefined): string {
 
         <div class="planner-controls">
           <div class="planner-profile-control">
-            <label for="planner-profile-select">Saved character / build</label>
-            <span>
+            <label for="planner-profile-select">Active plan</label>
+            <div class="planner-control-row">
               <select
                 id="planner-profile-select"
                 :value="selectedPlannerProfileId"
                 @change="selectPlannerProfile(($event.target as HTMLSelectElement).value)"
               >
                 <option v-for="profile in plannerProfiles" :key="profile.id" :value="profile.id">
-                  {{ profile.name }}{{ profile.source === 'character' ? ' · imported' : '' }}
+                  {{ profile.name }}{{ profile.className ? ` · ${profile.className}` : '' }}{{ profile.source === 'character' ? ' · character' : '' }}
                 </option>
               </select>
-              <button type="button" :disabled="plannerProfiles.length <= 1" title="Delete this build" @click="deletePlannerProfile">Delete</button>
-            </span>
-            <span class="planner-profile-create">
-              <input v-model="plannerProfileDraft" type="text" maxlength="60" placeholder="Save current skills as…" @keydown.enter.prevent="createPlannerProfile" />
-              <button type="button" :disabled="!plannerProfileDraft.trim()" @click="createPlannerProfile">Save as</button>
-            </span>
-            <button type="button" class="planner-character-import-button" @click="loadCharacterProfiles">
-              Import / refresh character saves
-            </button>
+              <button type="button" class="planner-new-plan" @click="openPlannerSetup">New plan</button>
+              <button
+                v-if="selectedPlannerProfile?.source === 'character'"
+                type="button"
+                :disabled="characterImportLoading"
+                @click="refreshSelectedCharacterProfile"
+              >{{ characterImportLoading ? 'Refreshing…' : 'Refresh save' }}</button>
+              <button type="button" :disabled="plannerProfiles.length <= 1" title="Delete this plan" @click="deletePlannerProfile">Delete</button>
+            </div>
+            <small>
+              {{ selectedPlannerProfile?.className || 'Class not set' }}
+              <template v-if="selectedPlannerProfile?.masteries?.length"> · {{ selectedPlannerProfile.masteries.join(' + ') }}</template>
+            </small>
           </div>
           <div class="planner-skill-control">
             <label for="planner-skill-input">Add a skill</label>
@@ -6442,12 +6467,10 @@ function formatPercentile(value: number | null | undefined): string {
           <div class="planner-level-range" aria-label="Item level range">
             <label class="planner-level-control">
               <span>Minimum item level</span>
-              <input v-model.number="plannerMinimumLevelDraft" type="range" min="1" :max="plannerLevelCapDraft" step="1" @change="commitPlannerMinimumLevel" />
               <input v-model.number="plannerMinimumLevelDraft" type="number" min="1" :max="plannerLevelCapDraft" @change="commitPlannerMinimumLevel" @keydown.enter.prevent="commitPlannerMinimumLevel" />
             </label>
             <label class="planner-level-control">
               <span>Level cap</span>
-              <input v-model.number="plannerLevelCapDraft" type="range" :min="plannerMinimumLevelDraft" max="100" step="1" @change="commitPlannerLevelCap" />
               <input v-model.number="plannerLevelCapDraft" type="number" :min="plannerMinimumLevelDraft" max="100" @change="commitPlannerLevelCap" @keydown.enter.prevent="commitPlannerLevelCap" />
             </label>
           </div>
@@ -6469,30 +6492,21 @@ function formatPercentile(value: number | null | undefined): string {
               + {{ skill }}
             </button>
           </div>
-          <section v-if="characterImportOpen" class="planner-character-import">
-            <header>
-              <span><strong>Character saves</strong><small>Read-only import. Existing profiles refresh without losing excluded skills.</small></span>
-              <button type="button" aria-label="Close character importer" @click="characterImportOpen = false">×</button>
-            </header>
-            <p v-if="characterImportLoading">Reading and validating local and Steam Cloud saves…</p>
-            <p v-else-if="characterImportError" class="planner-character-error">{{ characterImportError }}</p>
-            <div v-else class="planner-character-list">
-              <button
-                v-for="character in discoveredCharacters"
-                :key="character.path"
-                type="button"
-                :disabled="Boolean(character.error)"
-                :title="character.error ?? character.path"
-                @click="importCharacterProfile(character)"
-              >
-                <span><strong>{{ character.name }}</strong><small>{{ character.isHardcore ? 'HC' : 'SC' }} · Lv{{ character.level }} · {{ character.skills.length }} allocated skill records</small></span>
-                <b v-if="character.error">Unreadable</b><b v-else>Import</b>
-              </button>
-              <p v-if="discoveredCharacters.length === 0">No character saves were found.</p>
-            </div>
-          </section>
         </div>
 
+        <PlannerSetupDialog
+          v-if="plannerSetupOpen"
+          :profiles="plannerProfiles"
+          :characters="discoveredCharacters"
+          :characters-loading="characterImportLoading"
+          :characters-error="characterImportError"
+          :class-options="plannerClassOptions"
+          :skill-names="skillNames"
+          :skill-masteries="snapshot?.skillMasteries"
+          @cancel="plannerSetupOpen = false"
+          @request-characters="loadCharacterProfiles"
+          @submit="completePlannerSetup"
+        />
         <template v-if="plannerDisplay !== 'map'">
           <ExplorerToolbar
             v-model="plannerQuery"

@@ -67,7 +67,7 @@ assert.ok(farmingStart >= 0 && farmingEnd > farmingStart, 'Collection Farming te
 const farmingTemplate = app.slice(farmingStart, farmingEnd)
 
 assert.match(app, /const farmingPage = ref\(1\)/)
-assert.match(app, /watch\(\[farmingQuery, farmingRarity\], \(\) => \{\s*farmingPage\.value = 1\s*\}\)/)
+assert.match(app, /watch\(\[farmingQuery, farmingRarity\], \(\) => \{\s*if \(restoringAppHistory\) return\s*farmingPage\.value = 1\s*\}\)/)
 assert.match(farmingTemplate, /v-model:page="farmingPage"[\s\S]*?:items="farmTargets"[\s\S]*?:get-key="target => target\.key"[\s\S]*?:page-size="50"/)
 assert.match(farmingTemplate, /#item="\{ item: target, index \}"[\s\S]*?farm-rank">\{\{ index \+ 1 \}\}/)
 assert.match(farmingTemplate, /<article :data-route-key="target\.key">/)

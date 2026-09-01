@@ -21,6 +21,42 @@ import {
 } from './preference-repository'
 import { searchGuidance } from './search-guidance'
 import {
+  appRouteHref,
+  createAppHistoryEntry,
+  parseAppHistoryEntry,
+  parseAppRouteHash,
+  type ActiveView,
+  type AppHistoryEntry,
+  type AppRoute,
+  type DismantlingModeFilter,
+  type DismantlingRarityFilter,
+  type MaterialCategory,
+  type MiAffixFilter,
+  type MiMetricKey,
+  type MiSortMode,
+  type OracleSortMode,
+  type OwnershipFilter,
+  type PlannerDisplay,
+  type PlannerMapScope,
+  type PlannerMapSortMode,
+  type PlannerSortMode,
+  type RarityFilter,
+  type SetFeatureFilter,
+  type SetProgressFilter,
+  type SetSortMode,
+  type SkillRarityFilter,
+  type SkillScope,
+  type SkillSort,
+  type SortDirection,
+  type SortMode,
+  type SupplyCategory,
+  type SupplySlotFilter,
+  type TransferMode,
+  type TransferSection,
+  type VaultRarityFilter,
+  type VaultSortMode
+} from './app-route'
+import {
   createCharacterPlannerProfile,
   createManualPlannerProfile,
   createPlannerClassOptions,
@@ -94,86 +130,8 @@ import type {
 } from '@shared/contracts'
 import type { AnyBackgroundJobSnapshot } from '@shared/background-jobs'
 
-type OwnershipFilter = 'all' | 'owned' | 'missing'
-type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'double-rare' | 'rare' | 'recipe'
-type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
-type SortDirection = 'asc' | 'desc'
 type MiCountingMode = 'base' | 'tier'
-type MiAffixFilter = 'all' | 'double-rare'
-type ActiveView = 'collection' | 'sets' | 'materials' | 'skills' | 'planner' | 'oracle' | 'mi-workshop' | 'supplies' | 'farming' | 'dismantling' | 'vault' | 'settings'
-type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
-type SetFeatureFilter = 'all' | 'visual'
-type SetSortMode = 'completion' | 'level' | 'name'
-type SkillScope = 'archive' | 'all'
-type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 'level'
-type SkillRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
-type MiSortMode = 'metric' | 'level' | 'name' | 'copies'
-type OracleSortMode = 'score' | 'name' | 'class' | 'readiness'
-type PlannerSortMode = 'level' | 'name' | 'rarity'
-type PlannerMapSortMode = 'items' | 'name' | 'level'
-type VaultRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
-type VaultSortMode = 'recent' | 'name' | 'level' | 'roll'
-type TransferMode = 'live' | 'offline'
-type TransferSection = 'ingest-history' | 'dispense-history' | 'quarantine'
-type PlannerDisplay = 'list' | 'grid' | 'map'
-type PlannerMapScope = 'selected' | 'all'
-type SupplyCategory = 'writs' | 'augments'
-type SupplySlotFilter = 'all' | 'weapon' | 'armor' | 'jewelry'
-type MaterialCategory = 'all' | 'component' | 'material' | 'potion-formula'
-type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `item:${string}` | `pet:${string}`
 type WorkspaceToolId = 'sets' | 'materials' | 'skills' | 'oracle' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'dismantling' | 'trivia' | 'todo'
-type DismantlingModeFilter = 'all' | 'softcore' | 'hardcore'
-type DismantlingRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
-
-interface AppHistoryState {
-  cairnCodex: true
-  index: number
-  view: ActiveView
-  selectedRecord: string | null
-  activeCategory: string
-  query: string
-  ownership: OwnershipFilter
-  rarityFilter: RarityFilter
-  miWorkshopQuery: string
-  miAffixFilter: MiAffixFilter
-  miComparisonMetric: MiMetricKey
-  miComparisonDirection: SortDirection
-  miSortMode: MiSortMode
-  skillItemQuery: string
-  skillScope: SkillScope
-  skillRarityFilter: SkillRarityFilter
-  skillSlotFilter: string
-  skillSort: SkillSort
-  skillSortDirection: SortDirection
-  oracleQuery: string
-  oracleClass: string
-  oracleStyle: OracleStyle
-  oracleReadiness: 'all' | OracleReadiness
-  oracleMinimumLevel: number
-  oracleMaximumLevel: number
-  oracleSortMode: OracleSortMode
-  oracleSortDirection: SortDirection
-  plannerQuery: string
-  plannerOwnership: OwnershipFilter
-  plannerShowIgnored: boolean
-  plannerSortMode: PlannerSortMode
-  plannerSortDirection: SortDirection
-  plannerDisplay: PlannerDisplay
-  plannerProfileId?: string
-  atlasRegionQuery: string
-  plannerMapScope: PlannerMapScope
-  plannerMapSortMode: PlannerMapSortMode
-  plannerMapSortDirection: SortDirection
-  vaultQuery: string
-  vaultRarityFilter: VaultRarityFilter
-  vaultSortMode: VaultSortMode
-  vaultSortDirection: SortDirection
-  transferMode: TransferMode
-  transferSection: TransferSection
-  transferHistoryQuery: string
-  transferHistoryOutcome: OperationHistoryOutcome
-  transferHistoryPage: number
-}
 
 interface TooltipAffix {
   record: string
@@ -2223,56 +2181,70 @@ function handleSkillPickerFocusOut(event: FocusEvent): void {
   skillPickerOpen.value = false
 }
 
-function currentAppHistoryState(index = appHistoryIndex): AppHistoryState {
-  return {
-    cairnCodex: true,
-    index,
-    view: activeView.value,
-    selectedRecord: selectedRecord.value,
-    activeCategory: activeCategory.value,
-    query: query.value,
-    ownership: ownership.value,
-    rarityFilter: rarityFilter.value,
-    miWorkshopQuery: miWorkshopQuery.value,
-    miAffixFilter: miAffixFilter.value,
-    miComparisonMetric: miComparisonMetric.value,
-    miComparisonDirection: miComparisonDirection.value,
-    miSortMode: miSortMode.value,
-    skillItemQuery: skillItemQuery.value,
-    skillScope: skillScope.value,
-    skillRarityFilter: skillRarityFilter.value,
-    skillSlotFilter: skillSlotFilter.value,
-    skillSort: skillSort.value,
-    skillSortDirection: skillSortDirection.value,
-    oracleQuery: oracleQuery.value,
-    oracleClass: oracleClass.value,
-    oracleStyle: oracleStyle.value,
-    oracleReadiness: oracleReadiness.value,
-    oracleMinimumLevel: oracleMinimumLevel.value,
-    oracleMaximumLevel: oracleMaximumLevel.value,
-    oracleSortMode: oracleSortMode.value,
-    oracleSortDirection: oracleSortDirection.value,
-    plannerQuery: plannerQuery.value,
-    plannerOwnership: plannerOwnership.value,
-    plannerShowIgnored: plannerShowIgnored.value,
-    plannerSortMode: plannerSortMode.value,
-    plannerSortDirection: plannerSortDirection.value,
-    plannerDisplay: plannerDisplay.value,
-    plannerProfileId: selectedPlannerProfileId.value,
-    atlasRegionQuery: atlasRegionQuery.value,
-    plannerMapScope: plannerMapScope.value,
-    plannerMapSortMode: plannerMapSortMode.value,
-    plannerMapSortDirection: plannerMapSortDirection.value,
-    vaultQuery: vaultQuery.value,
-    vaultRarityFilter: vaultRarityFilter.value,
-    vaultSortMode: vaultSortMode.value,
-    vaultSortDirection: vaultSortDirection.value,
-    transferMode: transferMode.value,
-    transferSection: transferSection.value,
-    transferHistoryQuery: transferHistoryQuery.value,
-    transferHistoryOutcome: transferHistoryOutcome.value,
-    transferHistoryPage: transferHistoryPage.value
+function currentAppRoute(): AppRoute {
+  const itemRecord = selectedRecord.value
+  switch (activeView.value) {
+    case 'collection': return { version: 1, workspace: 'collection', itemRecord, controls: {
+      category: activeCategory.value, query: query.value, ownership: ownership.value, rarity: rarityFilter.value,
+      sort: sortMode.value, direction: sortDirection.value, page: currentPage.value
+    } }
+    case 'sets': return { version: 1, workspace: 'sets', itemRecord, controls: {
+      query: query.value, progress: setProgressFilter.value, feature: setFeatureFilter.value,
+      sort: setSortMode.value, direction: setSortDirection.value, page: currentPage.value
+    } }
+    case 'materials': return { version: 1, workspace: 'materials', itemRecord, controls: {
+      category: materialCategory.value, query: query.value, ownership: ownership.value, rarity: rarityFilter.value,
+      sort: sortMode.value, direction: sortDirection.value, page: currentPage.value
+    } }
+    case 'skills': return { version: 1, workspace: 'skills', itemRecord, controls: {
+      skill: selectedSkill.value, query: skillItemQuery.value, scope: skillScope.value, rarity: skillRarityFilter.value,
+      slot: skillSlotFilter.value, sort: skillSort.value, direction: skillSortDirection.value, page: skillItemPage.value
+    } }
+    case 'planner': return { version: 1, workspace: 'planner', itemRecord, controls: {
+      profileId: selectedPlannerProfileId.value, skills: [...plannerSkills.value], minimumLevel: plannerMinimumLevel.value,
+      maximumLevel: plannerLevelCap.value, query: plannerQuery.value, ownership: plannerOwnership.value,
+      showIgnored: plannerShowIgnored.value, sort: plannerSortMode.value, direction: plannerSortDirection.value,
+      display: plannerDisplay.value, page: plannerPage.value, atlasQuery: atlasRegionQuery.value,
+      atlasRegion: selectedAtlasRegion.value, mapScope: plannerMapScope.value, mapSort: plannerMapSortMode.value,
+      mapDirection: plannerMapSortDirection.value
+    } }
+    case 'oracle': return { version: 1, workspace: 'oracle', itemRecord, controls: {
+      query: oracleQuery.value, characterClass: oracleClass.value, style: oracleStyle.value,
+      readiness: oracleReadiness.value, minimumLevel: oracleMinimumLevel.value, maximumLevel: oracleMaximumLevel.value,
+      sort: oracleSortMode.value, direction: oracleSortDirection.value
+    } }
+    case 'mi-workshop': return { version: 1, workspace: 'mi-workshop', itemRecord, controls: {
+      query: miWorkshopQuery.value, affix: miAffixFilter.value, metric: miComparisonMetric.value,
+      metricDirection: miComparisonDirection.value, sort: miSortMode.value, page: miWorkshopPage.value
+    } }
+    case 'supplies': return { version: 1, workspace: 'supplies', itemRecord, controls: {
+      category: supplyCategory.value, slot: supplySlotFilter.value, query: reusableSupplyQuery.value
+    } }
+    case 'farming': return { version: 1, workspace: 'farming', itemRecord, controls: {
+      query: farmingQuery.value, rarity: farmingRarity.value, page: farmingPage.value
+    } }
+    case 'dismantling': return { version: 1, workspace: 'dismantling', itemRecord, controls: {
+      query: dismantlingQuery.value, mode: dismantlingMode.value, rarity: dismantlingRarity.value
+    } }
+    case 'vault': return { version: 1, workspace: 'vault', itemRecord, controls: {
+      mode: transferMode.value, section: transferSection.value, historyQuery: transferHistoryQuery.value,
+      historyOutcome: transferHistoryOutcome.value, historyPage: transferHistoryPage.value,
+      vaultQuery: vaultQuery.value, vaultRarity: vaultRarityFilter.value, vaultSort: vaultSortMode.value,
+      vaultDirection: vaultSortDirection.value, vaultPage: vaultPage.value, quarantinePage: vaultQuarantinePage.value
+    } }
+    case 'settings': return { version: 1, workspace: 'settings', itemRecord, controls: {} }
   }
+}
+
+function currentAppHistoryState(index = appHistoryIndex): AppHistoryEntry {
+  return createAppHistoryEntry(index, currentAppRoute())
+}
+
+function writeAppHistory(mode: 'push' | 'replace', index = appHistoryIndex): void {
+  const state = currentAppHistoryState(index)
+  const href = appRouteHref(state.route, window.location.href)
+  if (mode === 'push') window.history.pushState(state, '', href)
+  else window.history.replaceState(state, '', href)
 }
 
 function updateHistoryButtons(): void {
@@ -2288,70 +2260,140 @@ function syncMiWorkshopControlElements(): void {
   if (miSortModeSelect.value) miSortModeSelect.value.value = miSortMode.value
 }
 
+function restoreAppRoute(route: AppRoute): void {
+  restoringAppHistory = true
+  activeView.value = route.workspace
+  selectedRecord.value = route.itemRecord
+  switch (route.workspace) {
+    case 'collection':
+      activeCategory.value = route.controls.category
+      query.value = route.controls.query
+      ownership.value = route.controls.ownership
+      rarityFilter.value = route.controls.rarity
+      sortMode.value = route.controls.sort
+      sortDirection.value = route.controls.direction
+      currentPage.value = route.controls.page
+      break
+    case 'sets':
+      query.value = route.controls.query
+      setProgressFilter.value = route.controls.progress
+      setFeatureFilter.value = route.controls.feature
+      setSortMode.value = route.controls.sort
+      setSortDirection.value = route.controls.direction
+      currentPage.value = route.controls.page
+      break
+    case 'materials':
+      materialCategory.value = route.controls.category
+      query.value = route.controls.query
+      ownership.value = route.controls.ownership
+      rarityFilter.value = route.controls.rarity
+      sortMode.value = route.controls.sort
+      sortDirection.value = route.controls.direction
+      currentPage.value = route.controls.page
+      break
+    case 'skills':
+      selectedSkill.value = route.controls.skill
+      skillItemQuery.value = route.controls.query
+      skillScope.value = route.controls.scope
+      skillRarityFilter.value = route.controls.rarity
+      skillSlotFilter.value = route.controls.slot
+      skillSort.value = route.controls.sort
+      skillSortDirection.value = route.controls.direction
+      skillItemPage.value = route.controls.page
+      break
+    case 'planner':
+      applyingPlannerProfile = true
+      if (route.controls.profileId) selectPlannerProfile(route.controls.profileId)
+      if (route.controls.skills.length > 0) plannerSkills.value = [...route.controls.skills]
+      plannerMinimumLevel.value = route.controls.minimumLevel
+      plannerLevelCap.value = Math.max(route.controls.minimumLevel, route.controls.maximumLevel)
+      plannerQuery.value = route.controls.query
+      plannerOwnership.value = route.controls.ownership
+      plannerShowIgnored.value = route.controls.showIgnored
+      plannerSortMode.value = route.controls.sort
+      plannerSortDirection.value = route.controls.direction
+      plannerDisplay.value = route.controls.display
+      plannerPage.value = route.controls.page
+      atlasRegionQuery.value = route.controls.atlasQuery
+      selectedAtlasRegion.value = route.controls.atlasRegion
+      plannerMapScope.value = route.controls.mapScope
+      plannerMapSortMode.value = route.controls.mapSort
+      plannerMapSortDirection.value = route.controls.mapDirection
+      break
+    case 'oracle':
+      oracleQuery.value = route.controls.query
+      oracleClass.value = route.controls.characterClass
+      oracleStyle.value = route.controls.style
+      oracleReadiness.value = route.controls.readiness
+      oracleMinimumLevel.value = route.controls.minimumLevel
+      oracleMaximumLevel.value = Math.max(route.controls.minimumLevel, route.controls.maximumLevel)
+      oracleSortMode.value = route.controls.sort
+      oracleSortDirection.value = route.controls.direction
+      break
+    case 'mi-workshop':
+      miWorkshopQuery.value = route.controls.query
+      miAffixFilter.value = route.controls.affix
+      miComparisonMetric.value = route.controls.metric
+      miComparisonDirection.value = route.controls.metricDirection
+      miSortMode.value = route.controls.sort
+      miWorkshopPage.value = route.controls.page
+      break
+    case 'supplies':
+      supplyCategory.value = route.controls.category
+      supplySlotFilter.value = route.controls.slot
+      reusableSupplyQuery.value = route.controls.query
+      break
+    case 'farming':
+      farmingQuery.value = route.controls.query
+      farmingRarity.value = route.controls.rarity
+      farmingPage.value = route.controls.page
+      break
+    case 'dismantling':
+      dismantlingQuery.value = route.controls.query
+      dismantlingMode.value = route.controls.mode
+      dismantlingRarity.value = route.controls.rarity
+      break
+    case 'vault':
+      transferMode.value = route.controls.mode
+      transferSection.value = route.controls.section
+      transferHistoryQuery.value = route.controls.historyQuery
+      transferHistoryOutcome.value = route.controls.historyOutcome
+      transferHistoryPage.value = route.controls.historyPage
+      vaultQuery.value = route.controls.vaultQuery
+      vaultRarityFilter.value = route.controls.vaultRarity
+      vaultSortMode.value = route.controls.vaultSort
+      vaultSortDirection.value = route.controls.vaultDirection
+      vaultPage.value = route.controls.vaultPage
+      vaultQuarantinePage.value = route.controls.quarantinePage
+      break
+    case 'settings': break
+  }
+  void nextTick(() => {
+    syncMiWorkshopControlElements()
+    if (route.workspace === 'vault') {
+      scheduleOperationHistoryRefresh()
+      scheduleVaultPageRefresh()
+    }
+    applyingPlannerProfile = false
+    restoringAppHistory = false
+  })
+}
+
 function handlePageShow(): void {
-  void nextTick(syncMiWorkshopControlElements)
+  const entry = parseAppHistoryEntry(window.history.state)
+  const route = entry?.route ?? parseAppRouteHash(window.location.hash)
+  if (route) restoreAppRoute(route)
+  else void nextTick(syncMiWorkshopControlElements)
 }
 
 function handleAppHistory(event: PopStateEvent): void {
-  const state = event.state as AppHistoryState | null
-  if (!state?.cairnCodex) return
-  restoringAppHistory = true
-  appHistoryIndex = state.index
-  activeView.value = state.view
-  selectedRecord.value = state.selectedRecord
-  activeCategory.value = state.activeCategory
-  query.value = state.query
-  ownership.value = state.ownership
-  rarityFilter.value = state.rarityFilter
-  miWorkshopQuery.value = state.miWorkshopQuery ?? ''
-  miAffixFilter.value = state.miAffixFilter ?? 'all'
-  miComparisonMetric.value = state.miComparisonMetric ?? 'overall'
-  miComparisonDirection.value = state.miComparisonDirection ?? 'desc'
-  miSortMode.value = state.miSortMode ?? 'metric'
-  skillItemQuery.value = state.skillItemQuery ?? ''
-  skillScope.value = state.skillScope ?? 'all'
-  skillRarityFilter.value = state.skillRarityFilter ?? 'all'
-  skillSlotFilter.value = state.skillSlotFilter ?? 'all'
-  skillSort.value = state.skillSort ?? 'amount'
-  skillSortDirection.value = state.skillSortDirection ?? 'desc'
-  oracleQuery.value = state.oracleQuery ?? ''
-  oracleClass.value = state.oracleClass ?? 'all'
-  oracleStyle.value = state.oracleStyle ?? 'all'
-  oracleReadiness.value = state.oracleReadiness ?? 'all'
-  oracleMinimumLevel.value = state.oracleMinimumLevel ?? 65
-  oracleMaximumLevel.value = state.oracleMaximumLevel ?? 100
-  oracleSortMode.value = state.oracleSortMode ?? 'score'
-  oracleSortDirection.value = state.oracleSortDirection ?? 'desc'
-  plannerQuery.value = state.plannerQuery ?? ''
-  plannerOwnership.value = state.plannerOwnership ?? 'all'
-  plannerShowIgnored.value = state.plannerShowIgnored ?? false
-  plannerSortMode.value = state.plannerSortMode ?? 'level'
-  plannerSortDirection.value = state.plannerSortDirection ?? 'asc'
-  plannerDisplay.value = state.plannerDisplay ?? 'list'
-  if (state.plannerProfileId) selectPlannerProfile(state.plannerProfileId)
-  atlasRegionQuery.value = state.atlasRegionQuery ?? ''
-  plannerMapScope.value = state.plannerMapScope ?? 'selected'
-  plannerMapSortMode.value = state.plannerMapSortMode ?? 'items'
-  plannerMapSortDirection.value = state.plannerMapSortDirection ?? 'desc'
-  vaultQuery.value = state.vaultQuery ?? ''
-  vaultRarityFilter.value = state.vaultRarityFilter ?? 'all'
-  vaultSortMode.value = state.vaultSortMode ?? 'recent'
-  vaultSortDirection.value = state.vaultSortDirection ?? 'desc'
-  transferMode.value = state.transferMode ?? 'live'
-  const restoredTransferSection = String(state.transferSection ?? '')
-  transferSection.value = restoredTransferSection === 'dispense-history' || restoredTransferSection === 'retrieval-history'
-    ? 'dispense-history'
-    : restoredTransferSection === 'quarantine'
-      ? 'quarantine'
-      : 'ingest-history'
-  transferHistoryQuery.value = state.transferHistoryQuery ?? ''
-  transferHistoryOutcome.value = state.transferHistoryOutcome ?? 'all'
-  transferHistoryPage.value = state.transferHistoryPage ?? 1
+  const entry = parseAppHistoryEntry(event.state)
+  const route = entry?.route ?? parseAppRouteHash(window.location.hash)
+  if (!route) return
+  appHistoryIndex = entry?.index ?? 0
+  appHistoryMaximum = Math.max(appHistoryMaximum, appHistoryIndex)
+  restoreAppRoute(route)
   updateHistoryButtons()
-  void nextTick(() => {
-    syncMiWorkshopControlElements()
-    restoringAppHistory = false
-  })
 }
 
 function navigateAppHistory(direction: 'back' | 'forward'): void {
@@ -2367,6 +2409,7 @@ function returnToCollection(): void {
 watch(
   [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, setFeatureFilter, setSortMode, setSortDirection, materialCategory],
   () => {
+    if (restoringAppHistory) return
     currentPage.value = 1
   }
 )
@@ -2405,16 +2448,31 @@ watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId], (
   if (!appHistoryReady || restoringAppHistory) return
   appHistoryIndex += 1
   appHistoryMaximum = appHistoryIndex
-  window.history.pushState(currentAppHistoryState(), '')
+  writeAppHistory('push')
   updateHistoryButtons()
 }, { flush: 'post' })
 watch(
-  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection, plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerDisplay, atlasRegionQuery, plannerMapScope, plannerMapSortMode, plannerMapSortDirection, vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, transferMode, transferHistoryQuery, transferHistoryOutcome, transferHistoryPage],
+  [
+    activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, currentPage,
+    setProgressFilter, setFeatureFilter, setSortMode, setSortDirection,
+    materialCategory,
+    selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, skillItemPage,
+    oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection,
+    miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, miWorkshopPage,
+    plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
+    plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
+    plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
+    reusableSupplyQuery, supplyCategory, supplySlotFilter,
+    farmingQuery, farmingRarity, farmingPage,
+    dismantlingQuery, dismantlingMode, dismantlingRarity,
+    transferMode, transferHistoryQuery, transferHistoryOutcome, transferHistoryPage,
+    vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, vaultPage, vaultQuarantinePage
+  ],
   () => {
     if (!appHistoryReady || restoringAppHistory) return
-    window.history.replaceState(currentAppHistoryState(), '')
+    writeAppHistory('replace')
   },
-  { flush: 'post' }
+  { flush: 'post', deep: true }
 )
 watch(plannerMinimumLevel, (level) => {
   plannerMinimumLevelDraft.value = level
@@ -2426,15 +2484,19 @@ watch(plannerLevelCap, (level) => {
 })
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch([miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode], () => {
+  if (restoringAppHistory) return
   miWorkshopPage.value = 1
 })
 watch([selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection], () => {
+  if (restoringAppHistory) return
   skillItemPage.value = 1
 })
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
+  if (restoringAppHistory) return
   plannerPage.value = 1
 })
 watch([farmingQuery, farmingRarity], () => {
+  if (restoringAppHistory) return
   farmingPage.value = 1
 })
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
@@ -2478,6 +2540,7 @@ watch(visibleAtlasRegions, (regions) => {
   }
 }, { immediate: true })
 watch(transferMode, () => {
+  if (restoringAppHistory) return
   selectedVaultIds.value = []
   vaultPage.value = 1
   vaultQuarantinePage.value = 1
@@ -2489,11 +2552,13 @@ watch(transferSection, (section) => {
   if (section === 'ingest-history' || section === 'dispense-history') scheduleOperationHistoryRefresh()
 })
 watch([transferHistoryQuery, transferHistoryOutcome], () => {
+  if (restoringAppHistory) return
   transferHistoryPage.value = 1
   scheduleOperationHistoryRefresh()
 })
 watch(transferHistoryPage, scheduleOperationHistoryRefresh)
 watch([vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, activeTransferHardcore], () => {
+  if (restoringAppHistory) return
   vaultPage.value = 1
   selectedVaultIds.value = []
   scheduleVaultPageRefresh()
@@ -2510,6 +2575,7 @@ watch(vaultPageCount, (count) => {
   if (vaultPage.value > count) vaultPage.value = count
 })
 watch(supplyCategory, () => {
+  if (restoringAppHistory) return
   supplySlotFilter.value = 'all'
   selectedSupplyIds.value = []
 })
@@ -2591,9 +2657,12 @@ async function cancelActiveBackgroundJob(): Promise<void> {
 onMounted(async () => {
   if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual'
   window.scrollTo(0, 0)
-  appHistoryIndex = 0
-  appHistoryMaximum = 0
-  window.history.replaceState(currentAppHistoryState(0), '')
+  const existingHistoryEntry = parseAppHistoryEntry(window.history.state)
+  const initialRoute = existingHistoryEntry?.route ?? parseAppRouteHash(window.location.hash)
+  appHistoryIndex = existingHistoryEntry?.index ?? 0
+  appHistoryMaximum = appHistoryIndex
+  if (initialRoute) restoreAppRoute(initialRoute)
+  writeAppHistory('replace', appHistoryIndex)
   appHistoryReady = true
   updateHistoryButtons()
   window.addEventListener('popstate', handleAppHistory)
@@ -4484,8 +4553,8 @@ function showItemVersion(item: CollectionItem): void {
 
 function openSelectedMiInWorkshop(): void {
   if (!selectedItem.value || selectedItem.value.rarity !== 'mi') return
-  miWorkshopQuery.value = selectedItem.value.name
   activeView.value = 'mi-workshop'
+  miWorkshopQuery.value = selectedItem.value.name
   selectedRecord.value = null
 }
 

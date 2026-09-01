@@ -50,7 +50,7 @@ const fieldCatalog = {
   seed: ['Seed', 'number'],
   set: ['Set', 'text'],
   skill: ['Skill', 'text'],
-  slot: ['Slot', 'choice', ['head', 'chest', 'shoulders', 'hands', 'legs', 'feet', 'belt', 'amulet', 'ring', 'medal', 'relic', 'weapon', 'off-hand']],
+  slot: ['Slot', 'choice'],
   source: ['Source', 'text'],
   state: ['State', 'choice', ['committed', 'failed', 'needs_recovery', 'pending']],
   stat: ['Stat', 'text'],
@@ -69,30 +69,46 @@ function fields(...names: readonly FieldName[]): readonly SearchFieldDefinition[
   })
 }
 
+function withChoiceValues(
+  definitions: readonly SearchFieldDefinition[],
+  values: Readonly<Record<string, readonly string[]>>
+): readonly SearchFieldDefinition[] {
+  return definitions.map((definition) => values[definition.name]
+    ? { ...definition, values: values[definition.name] }
+    : definition)
+}
+
+const itemSlotValues = [
+  'head', 'chest', 'shoulders', 'hands', 'legs', 'feet', 'waist',
+  'ring', 'amulet', 'medal', 'weapon', 'offhand', 'shield', 'relic'
+] as const
+const materialSlotValues = ['component', 'material', 'potion-formula'] as const
+const supplySlotValues = ['weapon', 'armor', 'jewelry'] as const
+
 export const searchSchemas = {
   collection: {
     key: 'collection',
     description: 'Search collection item data with Boolean logic, phrases, comparisons, and exclusions.',
-    fields: fields('name', 'set', 'skill', 'damage', 'slot', 'type', 'rarity', 'pack', 'level', 'owned'),
+    fields: withChoiceValues(fields('name', 'set', 'skill', 'damage', 'slot', 'type', 'rarity', 'pack', 'level', 'owned'), { slot: itemSlotValues }),
     aliases: { class: 'type' },
     examples: ['skill:wendigo AND "vitality damage"', 'rarity:legendary level:>=75', '(slot:amulet OR slot:medal) -damage:aether']
   },
   sets: {
     key: 'sets',
     description: 'Search set and piece data. Owned means discovered; qualified sources remain separate.',
-    fields: fields('name', 'set', 'skill', 'damage', 'slot', 'rarity', 'pack', 'level', 'owned', 'complete', 'craftable', 'awakening', 'fx'),
+    fields: withChoiceValues(fields('name', 'set', 'skill', 'damage', 'slot', 'rarity', 'pack', 'level', 'owned', 'complete', 'craftable', 'awakening', 'fx'), { slot: itemSlotValues }),
     examples: ['set:ultos AND damage:lightning', 'craftable:true OR awakening:true', 'rarity:legendary complete:false fx:true']
   },
   materials: {
     key: 'materials',
     description: 'Search component and consumable effects and metadata.',
-    fields: fields('name', 'skill', 'damage', 'slot', 'type', 'rarity', 'pack', 'level', 'owned'),
+    fields: withChoiceValues(fields('name', 'skill', 'damage', 'slot', 'type', 'rarity', 'pack', 'level', 'owned'), { slot: materialSlotValues }),
     examples: ['"fire resistance" AND slot:component', 'skill:wendigo', 'pack:gdx1 -damage:cold']
   },
   skillItems: {
     key: 'skill-items',
     description: 'Search matching items, modifiers, and conversions.',
-    fields: fields('name', 'skill', 'damage', 'stat', 'slot', 'rarity', 'level', 'conversion', 'owned'),
+    fields: withChoiceValues(fields('name', 'skill', 'damage', 'stat', 'slot', 'rarity', 'level', 'conversion', 'owned'), { slot: itemSlotValues }),
     examples: ['slot:amulet AND damage:cold', 'conversion:vitality OR stat:recharge', 'level:>=75 -rarity:rare']
   },
   oracle: {
@@ -104,7 +120,7 @@ export const searchSchemas = {
   planner: {
     key: 'planner',
     description: 'Search shopping-list items and acquisition sources.',
-    fields: fields('name', 'type', 'slot', 'rarity', 'skill', 'damage', 'source', 'area', 'level', 'owned'),
+    fields: withChoiceValues(fields('name', 'type', 'slot', 'rarity', 'skill', 'damage', 'source', 'area', 'level', 'owned'), { slot: itemSlotValues }),
     aliases: { location: 'area' },
     examples: ['skill:wendigo AND "vitality damage"', 'area:ugdenbog OR source:zaria', 'level:<=50 -owned:true']
   },
@@ -117,13 +133,13 @@ export const searchSchemas = {
   miWorkshop: {
     key: 'mi-workshop',
     description: 'Search retained Monster Infrequent combinations and affixes.',
-    fields: fields('name', 'slot', 'level', 'prefix', 'suffix', 'affix', 'skill', 'damage', 'stat', 'copies'),
+    fields: withChoiceValues(fields('name', 'slot', 'level', 'prefix', 'suffix', 'affix', 'skill', 'damage', 'stat', 'copies'), { slot: itemSlotValues }),
     examples: ['name:"bloodsworn codex" AND damage:vitality', 'prefix:devouring OR suffix:"of the wild"', 'copies:>=2 -damage:aether']
   },
   supplies: {
     key: 'supplies',
     description: 'Search reusable supply effects and access requirements.',
-    fields: fields('name', 'category', 'effect', 'faction', 'slot', 'source', 'mode', 'eligible'),
+    fields: withChoiceValues(fields('name', 'category', 'effect', 'faction', 'slot', 'source', 'mode', 'eligible'), { slot: supplySlotValues }),
     examples: ['effect:"aether resistance" AND slot:armor', 'faction:homestead eligible:true', 'category:rune OR category:merit']
   },
   dismantling: {
@@ -141,7 +157,7 @@ export const searchSchemas = {
   vault: {
     key: 'vault',
     description: 'Search stored item copies and their exact metadata.',
-    fields: fields('name', 'base', 'prefix', 'suffix', 'affix', 'slot', 'rarity', 'level', 'seed', 'mode', 'pack'),
+    fields: withChoiceValues(fields('name', 'base', 'prefix', 'suffix', 'affix', 'slot', 'rarity', 'level', 'seed', 'mode', 'pack'), { slot: itemSlotValues }),
     examples: ['rarity:legendary AND level:>=94', 'affix:devouring -mode:hardcore', 'seed:3100000000 OR slot:amulet']
   },
   history: {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId } from 'vue'
+import { computed, nextTick, ref, useId, watch } from 'vue'
 import {
   buildAdvancedSearchQuery,
   newAdvancedSearchRule,
@@ -27,10 +27,17 @@ const firstControl = ref<HTMLSelectElement | null>(null)
 const draft = ref<AdvancedSearchDraft>({ combinator: 'all', rules: [newAdvancedSearchRule()], preservedQuery: '' })
 const notice = ref<string | null>(null)
 const error = ref<string | null>(null)
+const errorRuleId = ref<number | null>(null)
 const dialogId = `advanced-search-${useId()}`
+const errorId = `${dialogId}-error`
 
 const preview = computed(() => buildAdvancedSearchQuery(draft.value, props.schema))
 const searchSubject = computed(() => props.searchLabel.replace(/^Search\s+/iu, '').trim().toLocaleLowerCase())
+
+watch(draft, () => {
+  error.value = null
+  errorRuleId.value = null
+}, { deep: true })
 
 const operatorLabels: Record<AdvancedSearchOperator, string> = {
   contains: 'contains',
@@ -63,6 +70,7 @@ function openDialog(): void {
   draft.value = parsed.draft
   notice.value = parsed.notice
   error.value = null
+  errorRuleId.value = null
   dialog.value?.showModal()
   void nextTick(() => firstControl.value?.focus())
 }
@@ -76,6 +84,7 @@ function resetDraft(): void {
   draft.value = { combinator: 'all', rules: [newAdvancedSearchRule()], preservedQuery: '' }
   notice.value = null
   error.value = null
+  errorRuleId.value = null
   void nextTick(() => firstControl.value?.focus())
 }
 
@@ -95,10 +104,15 @@ function updateField(rule: AdvancedSearchRule): void {
   error.value = null
 }
 
+function updateOperator(rule: AdvancedSearchRule): void {
+  if (rule.operator === 'is-not') rule.negated = false
+}
+
 function apply(): void {
   const built = buildAdvancedSearchQuery(draft.value, props.schema)
   if (built.error) {
     error.value = built.error
+    errorRuleId.value = built.errorRuleId
     return
   }
   emit('update:modelValue', built.query)
@@ -173,6 +187,8 @@ function trapFocus(event: KeyboardEvent): void {
                 :ref="(element) => { if (index === 0) firstControl = element as HTMLSelectElement }"
                 v-model="rule.field"
                 :aria-label="`Rule ${index + 1} field`"
+                :aria-invalid="errorRuleId === rule.id"
+                :aria-describedby="errorRuleId === rule.id ? errorId : undefined"
                 @change="updateField(rule)"
               >
                 <option value="">Any text</option>
@@ -181,7 +197,13 @@ function trapFocus(event: KeyboardEvent): void {
             </label>
             <label>
               <span>Operator</span>
-              <select v-model="rule.operator" :aria-label="`Rule ${index + 1} operator`">
+              <select
+                v-model="rule.operator"
+                :aria-label="`Rule ${index + 1} operator`"
+                :aria-invalid="errorRuleId === rule.id"
+                :aria-describedby="errorRuleId === rule.id ? errorId : undefined"
+                @change="updateOperator(rule)"
+              >
                 <option v-for="operator in ruleOperators(rule)" :key="operator" :value="operator">{{ operatorLabels[operator] }}</option>
               </select>
             </label>
@@ -191,6 +213,8 @@ function trapFocus(event: KeyboardEvent): void {
                 v-if="fieldDefinition(rule)?.kind === 'boolean'"
                 v-model="rule.value"
                 :aria-label="`Rule ${index + 1} value`"
+                :aria-invalid="errorRuleId === rule.id"
+                :aria-describedby="errorRuleId === rule.id ? errorId : undefined"
               >
                 <option value="" disabled>Choose…</option>
                 <option value="true">Yes</option>
@@ -201,12 +225,19 @@ function trapFocus(event: KeyboardEvent): void {
                 v-model="rule.value"
                 :list="fieldDefinition(rule)?.values ? `${dialogId}-values-${rule.id}` : undefined"
                 :type="fieldDefinition(rule)?.kind === 'number' ? 'number' : 'text'"
+                :step="fieldDefinition(rule)?.kind === 'number' ? 'any' : undefined"
                 :placeholder="valuePlaceholder(rule)"
                 :aria-label="`Rule ${index + 1} value`"
+                :aria-invalid="errorRuleId === rule.id"
+                :aria-describedby="errorRuleId === rule.id ? errorId : undefined"
               />
               <datalist v-if="fieldDefinition(rule)?.values" :id="`${dialogId}-values-${rule.id}`">
                 <option v-for="value in fieldDefinition(rule)?.values" :key="value" :value="value" />
               </datalist>
+            </label>
+            <label class="advanced-search-negate">
+              <input v-model="rule.negated" type="checkbox" :disabled="rule.operator === 'is-not'" />
+              <span>Exclude this rule from the results</span>
             </label>
             <button type="button" class="advanced-search-remove" :aria-label="`Remove rule ${index + 1}`" @click="removeRule(index)">Remove</button>
           </div>
@@ -218,7 +249,7 @@ function trapFocus(event: KeyboardEvent): void {
           <span>Query preview</span>
           <code>{{ preview.error ? 'Complete every rule to preview the query.' : preview.query || 'All results' }}</code>
         </section>
-        <p v-if="error" class="advanced-search-error" role="alert">{{ error }}</p>
+        <p v-if="error" :id="errorId" class="advanced-search-error" role="alert">{{ error }}</p>
 
         <footer>
           <button type="button" @click="resetDraft">Reset</button>
@@ -288,6 +319,9 @@ function trapFocus(event: KeyboardEvent): void {
 .advanced-search-add,
 .advanced-search-dialog footer button { min-height: 36px; padding: 0 11px; border: 1px solid #514837; border-radius: 5px; color: #cdbb98; background: #28241d; cursor: pointer; font: 10px inherit; }
 .advanced-search-remove { color: #b99689; background: transparent; }
+.advanced-search-negate { grid-column: 2 / 5; display: flex !important; align-items: center; gap: 7px !important; color: #a79c89; font-size: 10px; }
+.advanced-search-negate input { width: 15px; height: 15px; margin: 0; accent-color: #b58c42; }
+.advanced-search-negate input:disabled + span { opacity: .55; }
 .advanced-search-add { justify-self: start; }
 .advanced-search-preview { display: grid; min-height: 58px; gap: 7px; padding: 11px; border: 1px solid #3f3a31; border-radius: 6px; background: #10100e; }
 .advanced-search-error { margin: -8px 0 0; color: #d18c7b; font-size: 10px; }
@@ -301,6 +335,7 @@ function trapFocus(event: KeyboardEvent): void {
   .advanced-search-rule-number { grid-row: 1 / span 4; }
   .advanced-search-rule label,
   .advanced-search-remove { grid-column: 2; }
+  .advanced-search-negate { grid-column: 2; }
   .advanced-search-combinator { align-items: start; flex-direction: column; gap: 9px; }
   .advanced-search-combinator legend { float: none; margin: 0 0 4px; }
   .advanced-search-dialog footer { grid-template-columns: 1fr 1fr; }

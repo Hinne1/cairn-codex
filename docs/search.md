@@ -13,8 +13,9 @@ and provides recipes you can adapt.
 Choose **Advanced search** beside **Search tips** to add repeatable rules without memorizing
 field names or operators. The available fields and suggested values change with the active
 workspace. Select **All of these rules** for `AND`, or **Any of these rules** for `OR`; use
-**is not** to add an explicit exclusion. Numeric fields offer **is**, **at least**, and **at
-most**.
+**is not** or **Exclude this rule from the results** for an explicit exclusion. Exclusions apply
+after the positive all/any group, so a negated numeric comparison keeps its original operator.
+Numeric fields offer **is**, **at least**, **at most**, **more than**, and **less than**.
 
 The **Query preview** shows the exact text that will be placed in the normal search box. Apply
 runs it immediately, after which the text remains editable, copyable, and shareable. **Cancel**

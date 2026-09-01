@@ -17,6 +17,7 @@ export interface AdvancedSearchRule {
   field: string
   operator: AdvancedSearchOperator
   value: string
+  negated: boolean
 }
 
 export interface AdvancedSearchDraft {
@@ -34,12 +35,13 @@ export interface AdvancedSearchParseResult {
 export interface AdvancedSearchBuildResult {
   query: string
   error: string | null
+  errorRuleId: number | null
 }
 
 let nextRuleId = 1
 
 export function newAdvancedSearchRule(field = ''): AdvancedSearchRule {
-  return { id: nextRuleId++, field, operator: 'contains', value: '' }
+  return { id: nextRuleId++, field, operator: 'contains', value: '', negated: false }
 }
 
 export function operatorsForField(field: SearchFieldDefinition | null): readonly AdvancedSearchOperator[] {
@@ -97,8 +99,9 @@ function ruleFromExpression(
     const raw = query.slice(term.start, term.end)
     if (raw.includes('"')) operator = 'exact'
   }
-  if (excluded) operator = 'is-not'
-  return { id: nextRuleId++, field, operator, value }
+  const negated = excluded && definition?.kind === 'number' && operator !== 'is'
+  if (excluded && !negated) operator = 'is-not'
+  return { id: nextRuleId++, field, operator, value, negated }
 }
 
 export function parseAdvancedSearchDraft(query: string, schema: SearchWorkspaceSchema): AdvancedSearchParseResult {
@@ -120,6 +123,9 @@ export function parseAdvancedSearchDraft(query: string, schema: SearchWorkspaceS
   if (compiled.expression.kind === 'or') {
     combinator = 'any'
     expressions = flatten(compiled.expression, 'or')
+    if (expressions.some((expression) => expression.kind === 'not')) {
+      return unrepresentable(trimmed, 'This query combines exclusions with OR in a way the form cannot edit safely. It is preserved as a locked clause.')
+    }
   } else if (compiled.expression.kind === 'and') {
     const andParts = flatten(compiled.expression, 'and')
     const positiveParts = andParts.filter((part) => part.kind !== 'not')
@@ -183,9 +189,10 @@ export function buildAdvancedSearchQuery(draft: AdvancedSearchDraft, schema: Sea
   const positive: string[] = []
   const excluded: string[] = []
   for (const rule of activeRules) {
+    const index = draft.rules.indexOf(rule)
     const built = ruleTerm(rule, schema)
-    if (built.error) return { query: '', error: built.error }
-    if (rule.operator === 'is-not') excluded.push(`NOT ${built.term}`)
+    if (built.error) return { query: '', error: `Rule ${index + 1}: ${built.error}`, errorRuleId: rule.id }
+    if (rule.negated || rule.operator === 'is-not') excluded.push(`NOT ${built.term}`)
     else positive.push(built.term)
   }
 
@@ -198,6 +205,6 @@ export function buildAdvancedSearchQuery(draft: AdvancedSearchDraft, schema: Sea
   const preserved = draft.preservedQuery.trim()
   const query = preserved && generated ? `(${preserved}) AND (${generated})` : preserved || generated
   const compiled = compileSearchQuery(query, searchQueryOptions(schema))
-  if (compiled.error) return { query: '', error: compiled.error.message }
-  return { query, error: null }
+  if (compiled.error) return { query: '', error: compiled.error.message, errorRuleId: null }
+  return { query, error: null, errorRuleId: null }
 }

@@ -7296,7 +7296,7 @@ function formatPercentile(value: number | null | undefined): string {
           layout="list"
         >
           <template #item="{ item: target, index }">
-            <article>
+            <article :data-route-key="target.key">
               <span class="farm-rank">{{ index + 1 }}</span>
               <div>
                 <h3>{{ target.name }} <small>{{ contentPackShortLabel(target.contentPack) }}</small></h3>

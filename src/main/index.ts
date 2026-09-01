@@ -5497,9 +5497,22 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const root = document.querySelector('.farming-route-results')
               const mountedRows = () => [...document.querySelectorAll('.farming-route-results .bounded-results-item')]
               const firstRank = () => document.querySelector('.farming-route-results .farm-rank')?.textContent?.trim()
+              const firstRouteKey = () => document.querySelector('.farming-route-results article')?.getAttribute('data-route-key')
+              const setSearch = async (value) => {
+                const input = document.querySelector('.farming-workspace .explorer-search input')
+                if (!(input instanceof HTMLInputElement)) {
+                  throw new Error('Collection Farming search control was not available.')
+                }
+                input.value = value
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                await new Promise((resolve) => setTimeout(resolve, 175))
+                await frames()
+              }
               if (!root || mountedRows().length !== 50 || firstRank() !== '1') {
                 throw new Error('The first Collection Farming page did not mount ranks 1–50.')
               }
+              const firstPageRouteKey = firstRouteKey()
+              if (!firstPageRouteKey) throw new Error('Collection Farming did not expose stable route identity.')
               const next = root.querySelector('.bounded-results-footer nav button:last-of-type')
               if (!(next instanceof HTMLButtonElement) || next.disabled) {
                 throw new Error('Collection Farming did not expose an enabled next-page control.')
@@ -5510,9 +5523,25 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               next.click()
               await frames()
-              if (mountedRows().length !== 50 || firstRank() !== '51') {
+              const secondPageRouteKey = firstRouteKey()
+              if (mountedRows().length !== 50 || firstRank() !== '51' || !secondPageRouteKey || secondPageRouteKey === firstPageRouteKey) {
                 throw new Error('Collection Farming did not replace page one with global ranks 51–100.')
               }
+              await setSearch('route 001')
+              if (mountedRows().length !== 1 || firstRank() !== '1' || !firstRouteKey()?.includes(':synthetic route 001:')) {
+                throw new Error('Collection Farming search did not reset to the matching stable route on page one.')
+              }
+              await setSearch('no-such-farming-route')
+              if (mountedRows().length !== 0 || !root.querySelector('.bounded-results-state.is-empty')) {
+                throw new Error('Collection Farming search did not render the shared zero-result state.')
+              }
+              await setSearch('')
+              if (mountedRows().length !== 50 || firstRank() !== '1' || firstRouteKey() !== firstPageRouteKey) {
+                throw new Error('Clearing Collection Farming search did not restore the original first page and route identity.')
+              }
+              root.querySelector('.bounded-results-footer nav button:last-of-type')?.click()
+              await frames()
+              if (firstRank() !== '51') throw new Error('Collection Farming could not return to page two before filter reset.')
               const rarity = document.querySelector('.farming-workspace .explorer-toolbar-filters select')
               if (!(rarity instanceof HTMLSelectElement)) {
                 throw new Error('Collection Farming rarity control was not available.')
@@ -5542,6 +5571,15 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!document.querySelector('.game-tooltip')) {
                 throw new Error('Collection Farming item snippets did not retain the global tooltip.')
               }
+              const expectedItemName = item.textContent?.trim()
+              item.click()
+              await frames()
+              const drawerItemName = document.querySelector('.item-drawer h2')?.textContent?.trim()
+              if (!expectedItemName || drawerItemName !== expectedItemName) {
+                throw new Error('Collection Farming item activation did not open the matching item drawer.')
+              }
+              document.querySelector('.drawer-close')?.click()
+              await frames()
               item.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
               return performance.now() - started
             })()

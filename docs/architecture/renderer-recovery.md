@@ -66,6 +66,11 @@ must never be added to that allowlist.
 
 ## Verification
 
+Interface recovery delegates to the versioned preference repository described in
+[`preferences.md`](preferences.md). Its reset replaces only appearance, workspace, and search
+preferences; planner profiles, to-dos, source selection, onboarding progress, and all
+non-renderer data remain intact.
+
 `npm run test:safe-mode` covers bounded failure counting, stale-window reset, healthy reset,
 safe-mode suggestion rules, diagnostic correlation IDs, and the preference preservation list.
 The isolated screenshot harness supports `--simulate-workspace-error`, `--safe-mode`, and

@@ -10,6 +10,11 @@ import {
   resetUiPreferences,
   type RendererFailureReport
 } from './renderer-recovery'
+import {
+  createPreferenceRepository,
+  type StoredPlannerProfile as PlannerProfile,
+  type StoredTodoItem as TodoItem
+} from './preference-repository'
 import { searchGuidance } from './search-guidance'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import {
@@ -22,8 +27,6 @@ import {
 } from './set-semantics'
 import {
   ONBOARDING_STEP_COUNT,
-  readOnboardingPreference,
-  writeOnboardingPreference,
   type OnboardingStatus
 } from './onboarding'
 import ToolHeader from './components/ToolHeader.vue'
@@ -163,20 +166,6 @@ interface TooltipAffix {
   presentation?: ItemPresentation
 }
 
-interface PlannerProfile {
-  id: string
-  name: string
-  skills: string[]
-  excludedSkills: string[]
-  minimumLevel: number
-  levelCap: number
-  source: 'manual' | 'character'
-  characterPath?: string
-  characterLevel?: number
-  isHardcore?: boolean
-  modifiedAt: string
-}
-
 interface SkillMatch {
   skill: string
   amount: number
@@ -201,13 +190,6 @@ interface ComparisonStatRow extends PresentedRollStat {
   deltaTone: 'positive' | 'negative' | 'same' | 'unique' | 'missing' | 'reference'
   percentileDeltaLabel: string | null
   missingFromCopy: boolean
-}
-
-interface TodoItem {
-  id: string
-  text: string
-  done: boolean
-  createdAt: string
 }
 
 interface CollectionSet {
@@ -288,7 +270,6 @@ const workspaceToolDefinitions: WorkspaceToolDefinition[] = [
 ]
 const defaultWorkspaceToolIds = workspaceToolDefinitions.map((tool) => tool.id)
 const essentialWorkspaceToolIds: WorkspaceToolId[] = ['sets', 'skills', 'planner', 'mi-workshop', 'supplies']
-const workspaceToolPreferenceVersion = 2
 const startupRecoveryParameters = new URLSearchParams(window.location.search)
 const safeModeActive = ref(startupRecoveryParameters.get('safeMode') === '1')
 const safeModeSuggested = ref(startupRecoveryParameters.get('safeModeSuggested') === '1')
@@ -297,16 +278,22 @@ const safeModeOfferOpen = ref(safeModeSuggested.value && !safeModeActive.value)
 const safeModeBusy = ref(false)
 const safeModeDialog = ref<HTMLElement | null>(null)
 const simulateWorkspaceFailure = startupRecoveryParameters.get('simulateWorkspaceError') === '1'
-const initialOnboardingPreference = readOnboardingPreference(localStorage)
+const preferenceRepository = createPreferenceRepository(localStorage)
+const initialPreferences = preferenceRepository.value
+document.documentElement.dataset.theme = initialPreferences.appearance.theme
+const initialOnboardingPreference = {
+  ...initialPreferences.onboarding,
+  shouldOpen: initialPreferences.onboarding.status === 'in-progress'
+}
 
 const discovery = ref<GrimDawnDiscovery | null>(null)
 // Collection snapshots are immutable and replaced wholesale. Keeping thousands of
 // catalog records shallow avoids proxying every tooltip line, set tier, and drop
 // location while preserving reactive updates when a new snapshot arrives.
 const snapshot = shallowRef<CollectionSnapshot | null>(null)
-const indexStashPaths = ref<string[]>(readStoredSourcePaths('stashes'))
-const archiveStashPaths = ref<string[]>(readStoredSourcePaths('archive'))
-const collectionBasis = ref<CollectionBasis>(readStoredCollectionBasis())
+const indexStashPaths = ref<string[]>([...initialPreferences.sources.indexPaths])
+const archiveStashPaths = ref<string[]>([...initialPreferences.sources.archivePaths])
+const collectionBasis = ref<CollectionBasis>(initialPreferences.sources.collectionBasis)
 const enabledStashPaths = computed<string[]>({
   get: () =>
     collectionBasis.value === 'archive' ? archiveStashPaths.value : indexStashPaths.value,
@@ -335,7 +322,7 @@ const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
         ? 'roll-analysis'
         : 'idle'
 )
-const zoomFactor = ref(readStoredZoomFactor())
+const zoomFactor = ref(initialPreferences.appearance.zoomFactor)
 const activeCategory = ref('All')
 const activeView = ref<ActiveView>('collection')
 const query = ref('')
@@ -344,17 +331,15 @@ const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
 const sortMode = ref<SortMode>('recent')
 const sortDirection = ref<SortDirection>('desc')
-const trackerCollapsed = ref(readStoredTrackerCollapsed())
-const miCountingMode = ref<MiCountingMode>(readStoredMiCountingMode())
-const showLegacyScanner = ref(readStoredBoolean('cairn-codex-show-legacy-scanner', false))
+const trackerCollapsed = ref(initialPreferences.appearance.trackerCollapsed)
+const miCountingMode = ref<MiCountingMode>(initialPreferences.workspace.miCountingMode)
+const showLegacyScanner = ref(initialPreferences.workspace.showLegacyScanner)
 const setProgressFilter = ref<SetProgressFilter>('all')
 const setFeatureFilter = ref<SetFeatureFilter>('all')
 const setSortMode = ref<SetSortMode>('completion')
 const setSortDirection = ref<SortDirection>('desc')
-const selectedSkill = ref(localStorage.getItem('cairn-codex-skill') ?? 'Wendigo Totem')
-const skillScope = ref<SkillScope>(
-  localStorage.getItem('cairn-codex-skill-scope') === 'archive' ? 'archive' : 'all'
-)
+const selectedSkill = ref(initialPreferences.search.selectedSkill)
+const skillScope = ref<SkillScope>(initialPreferences.search.skillScope)
 const skillSort = ref<SkillSort>('amount')
 const skillSortDirection = ref<SortDirection>('desc')
 const skillItemQuery = ref('')
@@ -362,18 +347,18 @@ const skillRarityFilter = ref<SkillRarityFilter>('all')
 const skillSlotFilter = ref('all')
 const skillPickerOpen = ref(false)
 const skillPickerIndex = ref(0)
-const plannerProfiles = ref<PlannerProfile[]>(readStoredPlannerProfiles())
-const selectedPlannerProfileId = ref(readStoredPlannerProfileId(plannerProfiles.value))
+const plannerProfiles = ref<PlannerProfile[]>(structuredClone(initialPreferences.planner.profiles))
+const selectedPlannerProfileId = ref(initialPreferences.planner.selectedProfileId)
 const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)
   ?? plannerProfiles.value[0]
 const plannerSkills = ref<string[]>([...(initialPlannerProfile?.skills ?? ['Wendigo Totem'])])
 const plannerSkillDraft = ref('')
 const plannerProfileDraft = ref('')
 const plannerMinimumLevel = ref(initialPlannerProfile?.minimumLevel ?? 1)
-const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? readStoredPlannerLevelCap())
+const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? 70)
 const plannerMinimumLevelDraft = ref(plannerMinimumLevel.value)
 const plannerLevelCapDraft = ref(plannerLevelCap.value)
-const plannerDisplay = ref<PlannerDisplay>(readStoredPlannerDisplay())
+const plannerDisplay = ref<PlannerDisplay>(initialPreferences.appearance.plannerDisplay)
 const plannerMapScope = ref<PlannerMapScope>('selected')
 const plannerMapSortMode = ref<PlannerMapSortMode>('items')
 const plannerMapSortDirection = ref<SortDirection>('desc')
@@ -381,14 +366,14 @@ const plannerQuery = ref('')
 const plannerOwnership = ref<OwnershipFilter>('all')
 const plannerSortMode = ref<PlannerSortMode>('level')
 const plannerSortDirection = ref<SortDirection>('asc')
-const plannerIgnoredRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-ignored-records'))
-const plannerFavoriteRecords = ref<string[]>(readStoredStringArray('cairn-codex-planner-favorite-records'))
+const plannerIgnoredRecords = ref<string[]>([...initialPreferences.planner.ignoredRecords])
+const plannerFavoriteRecords = ref<string[]>([...initialPreferences.planner.favoriteRecords])
 const plannerShowIgnored = ref(false)
-const oracleClass = ref(localStorage.getItem('cairn-codex-oracle-class') ?? 'all')
-const oracleStyle = ref<OracleStyle>(readStoredOracleStyle())
+const oracleClass = ref(initialPreferences.search.oracleClass)
+const oracleStyle = ref<OracleStyle>(initialPreferences.search.oracleStyle)
 const oracleReadiness = ref<'all' | OracleReadiness>('all')
-const oracleMinimumLevel = ref(readStoredNumber('cairn-codex-oracle-minimum-level', 65, 1, 100))
-const oracleMaximumLevel = ref(readStoredNumber('cairn-codex-oracle-maximum-level', 100, 1, 100))
+const oracleMinimumLevel = ref(initialPreferences.search.oracleMinimumLevel)
+const oracleMaximumLevel = ref(initialPreferences.search.oracleMaximumLevel)
 const oracleQuery = ref('')
 const oracleSortMode = ref<OracleSortMode>('score')
 const oracleSortDirection = ref<SortDirection>('desc')
@@ -420,7 +405,7 @@ const quarantineVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0,
 const vaultPageLoading = ref(false)
 const staging = ref<StagingTabInspection | null>(null)
 const writeSafety = ref<WriteSafetyStatus | null>(null)
-const selectedStashPath = ref(localStorage.getItem('cairn-codex-retrieval-stash') ?? '')
+const selectedStashPath = ref(initialPreferences.sources.retrievalStash)
 const selectedVaultIds = ref<string[]>([])
 const vaultQuery = ref('')
 const vaultRarityFilter = ref<VaultRarityFilter>('all')
@@ -440,8 +425,8 @@ const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
 const supplySlotFilter = ref<SupplySlotFilter>('all')
 const supplyVisibleCount = ref(60)
-const experimentalToolsEnabled = ref(safeModeActive.value ? false : readStoredExperimentalToolsEnabled())
-const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>(readStoredWorkspaceToolIds())
+const experimentalToolsEnabled = ref(safeModeActive.value ? false : initialPreferences.workspace.experimentalToolsEnabled)
+const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>([...initialPreferences.workspace.visibleTools])
 const toolSettingsOpen = ref(false)
 const materialCategory = ref<MaterialCategory>('all')
 const farmingQuery = ref('')
@@ -457,6 +442,7 @@ const dismantlingError = ref<string | null>(null)
 const infiniteSupplies = ref(true)
 const infiniteSuppliesBusy = ref(false)
 const diagnosticsBusy = ref(false)
+const preferenceExportBusy = ref(false)
 const debugLoggingBusy = ref(false)
 const debugLoggingStatus = ref<DebugLoggingStatus>({
   enabled: false,
@@ -485,7 +471,7 @@ const todoOpen = ref(false)
 const triviaOpen = ref(false)
 const todoDraft = ref('')
 const todoInput = ref<HTMLInputElement | null>(null)
-const todos = ref<TodoItem[]>(readStoredTodos())
+const todos = ref<TodoItem[]>(structuredClone(initialPreferences.notes.todos))
 const manualDisconnectProcessId = ref<number | null>(null)
 const liveDisconnectPending = ref(false)
 const showMiReserves = ref(false)
@@ -500,7 +486,7 @@ const miComparisonDirectionSelect = ref<HTMLSelectElement | null>(null)
 const miSortModeSelect = ref<HTMLSelectElement | null>(null)
 const canNavigateBack = ref(false)
 const canNavigateForward = ref(false)
-const autoLiveConnect = ref(safeModeActive.value ? false : readStoredBoolean('cairn-codex-auto-live-connect', true))
+const autoLiveConnect = ref(safeModeActive.value ? false : initialPreferences.sources.autoLiveConnect)
 const tooltipRecord = ref<string | null>(null)
 const tooltipCopyAffixes = ref<{ prefixRecord: string; suffixRecord: string } | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
@@ -2353,13 +2339,13 @@ watch(setSortMode, (mode) => {
   setSortDirection.value = mode === 'completion' ? 'desc' : 'asc'
 })
 
-watch(selectedSkill, (skill) => localStorage.setItem('cairn-codex-skill', skill))
-watch(skillScope, (scope) => localStorage.setItem('cairn-codex-skill-scope', scope))
-watch(miCountingMode, (mode) => localStorage.setItem('cairn-codex-mi-counting-mode', mode))
-watch(oracleClass, (className) => localStorage.setItem('cairn-codex-oracle-class', className))
-watch(oracleStyle, (style) => localStorage.setItem('cairn-codex-oracle-style', style))
-watch(oracleMinimumLevel, (level) => localStorage.setItem('cairn-codex-oracle-minimum-level', String(level)))
-watch(oracleMaximumLevel, (level) => localStorage.setItem('cairn-codex-oracle-maximum-level', String(level)))
+watch(selectedSkill, (selectedSkill) => preferenceRepository.update('search', { selectedSkill }))
+watch(skillScope, (skillScope) => preferenceRepository.update('search', { skillScope }))
+watch(miCountingMode, (miCountingMode) => preferenceRepository.update('workspace', { miCountingMode }))
+watch(oracleClass, (oracleClass) => preferenceRepository.update('search', { oracleClass }))
+watch(oracleStyle, (oracleStyle) => preferenceRepository.update('search', { oracleStyle }))
+watch(oracleMinimumLevel, (oracleMinimumLevel) => preferenceRepository.update('search', { oracleMinimumLevel }))
+watch(oracleMaximumLevel, (oracleMaximumLevel) => preferenceRepository.update('search', { oracleMaximumLevel }))
 watch([oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleQuery], () => {
   oracleVisibleCount.value = 12
 })
@@ -2381,10 +2367,6 @@ watch(
   },
   { flush: 'post' }
 )
-watch(plannerSkills, (skills) => {
-  localStorage.setItem('cairn-codex-planner-skills', JSON.stringify(skills))
-}, { deep: true })
-watch(plannerLevelCap, (level) => localStorage.setItem('cairn-codex-planner-level-cap', String(level)))
 watch(plannerMinimumLevel, (level) => {
   plannerMinimumLevelDraft.value = level
   if (level > plannerLevelCap.value) plannerLevelCap.value = level
@@ -2393,7 +2375,7 @@ watch(plannerLevelCap, (level) => {
   plannerLevelCapDraft.value = level
   if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
 })
-watch(plannerDisplay, (display) => localStorage.setItem('cairn-codex-planner-display', display))
+watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   plannerProfiles.value = plannerProfiles.value.map((profile) =>
     profile.id === selectedPlannerProfileId.value
@@ -2408,16 +2390,22 @@ watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   )
 }, { deep: true })
 watch(plannerProfiles, (profiles) => {
-  localStorage.setItem('cairn-codex-planner-profiles', JSON.stringify(profiles))
+  preferenceRepository.update('planner', {
+    profiles: profiles.map((profile) => ({
+      ...profile,
+      skills: [...profile.skills],
+      excludedSkills: [...profile.excludedSkills]
+    }))
+  })
 }, { deep: true, immediate: true })
 watch(selectedPlannerProfileId, (profileId) => {
-  localStorage.setItem('cairn-codex-planner-profile', profileId)
+  preferenceRepository.update('planner', { selectedProfileId: profileId })
 })
 watch(plannerIgnoredRecords, (records) => {
-  localStorage.setItem('cairn-codex-planner-ignored-records', JSON.stringify(records))
+  preferenceRepository.update('planner', { ignoredRecords: [...records] })
 }, { deep: true })
 watch(plannerFavoriteRecords, (records) => {
-  localStorage.setItem('cairn-codex-planner-favorite-records', JSON.stringify(records))
+  preferenceRepository.update('planner', { favoriteRecords: [...records] })
 }, { deep: true })
 watch([plannerMapScope, plannerMinimumLevel, plannerLevelCap, plannerSkills], () => {
   selectedAtlasRegion.value = null
@@ -2480,13 +2468,12 @@ watch(selectedDismantlingIds, () => {
   dismantlingError.value = null
 }, { deep: true })
 watch(visibleWorkspaceToolIds, (toolIds) => {
-  localStorage.setItem('cairn-codex-visible-workspace-tools', JSON.stringify(toolIds))
-  localStorage.setItem('cairn-codex-workspace-tools-version', String(workspaceToolPreferenceVersion))
+  preferenceRepository.update('workspace', { visibleTools: [...toolIds] })
 }, { deep: true })
 
 watch(selectedStashPath, async (path) => {
   if (path) {
-    localStorage.setItem('cairn-codex-retrieval-stash', path)
+    preferenceRepository.update('sources', { retrievalStash: path })
     await refreshStaging()
   }
 })
@@ -2542,6 +2529,9 @@ onMounted(async () => {
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
+  void window.cairnCodex.reportPreferenceLoad(preferenceRepository.diagnostics).catch((error) => {
+    console.warn('Preference migration diagnostics could not be recorded.', error)
+  })
   try {
     try {
       const appStatus: AppStatus = await window.cairnCodex.getAppStatus()
@@ -2748,8 +2738,8 @@ function resetInterfacePreferences(): void {
     'Reset display and workspace preferences? Your Codex Archive, planner profiles, to-do list, saves, stashes, and backups will not be changed.'
   )
   if (!confirmed) return
-  const removed = resetUiPreferences(localStorage)
-  reportSuccess(`Reset ${removed} interface preferences. Reloading Cairn…`)
+  resetUiPreferences(localStorage)
+  reportSuccess('Reset interface preferences. Planner profiles, to-dos, sources, and archive data were preserved. Reloading Cairn…')
   window.setTimeout(() => window.location.reload(), 250)
 }
 
@@ -2864,7 +2854,7 @@ async function handleGdiaImportCompleted(result: GdiaImportResult): Promise<void
   try {
     if (collectionBasis.value !== 'archive') {
       collectionBasis.value = 'archive'
-      localStorage.setItem('cairn-codex-collection-basis', 'archive')
+      preferenceRepository.update('sources', { collectionBasis: 'archive' })
     }
     await loadSelectedSources()
     reportSuccess(result.importedItems > 0
@@ -2882,9 +2872,10 @@ function formatOperationSource(source: 'item-assistant' | 'live' | 'offline'): s
 }
 
 function persistOnboarding(status: OnboardingStatus, step = onboardingStep.value): void {
-  const preference = writeOnboardingPreference(localStorage, status, step)
-  onboardingStatus.value = preference.status
-  onboardingStep.value = preference.step
+  const boundedStep = Math.max(0, Math.min(ONBOARDING_STEP_COUNT - 1, Math.trunc(step)))
+  preferenceRepository.update('onboarding', { status, step: boundedStep })
+  onboardingStatus.value = status
+  onboardingStep.value = boundedStep
 }
 
 function setOnboardingStep(step: number): void {
@@ -2922,7 +2913,7 @@ async function handleOnboardingImportCompleted(result: GdiaImportResult): Promis
 function chooseEmptyArchive(): void {
   if (collectionBasis.value !== 'archive') {
     collectionBasis.value = 'archive'
-    localStorage.setItem('cairn-codex-collection-basis', 'archive')
+    preferenceRepository.update('sources', { collectionBasis: 'archive' })
   }
   setOnboardingStep(2)
 }
@@ -3039,43 +3030,8 @@ function vaultItemAsObserved(item: VaultListItem, itemIndex: number): ObservedSt
   }
 }
 
-function readStoredSourcePaths(basis: CollectionBasis): string[] {
-  try {
-    const key = basis === 'archive' ? 'cairn-codex-archive-sources' : 'cairn-codex-index-sources'
-    const stored = localStorage.getItem(key) ?? localStorage.getItem('cairn-codex-sources') ?? '[]'
-    const parsed = JSON.parse(stored) as unknown
-    return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string') ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function readStoredStringArray(key: string): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) ?? '[]') as unknown
-    return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string') ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function readStoredTodos(): TodoItem[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem('cairn-codex-todos') ?? '[]') as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((value): value is TodoItem => {
-      if (!value || typeof value !== 'object') return false
-      const todo = value as Partial<TodoItem>
-      return typeof todo.id === 'string' && typeof todo.text === 'string' &&
-        typeof todo.done === 'boolean' && typeof todo.createdAt === 'string'
-    })
-  } catch {
-    return []
-  }
-}
-
 function storeTodos(): void {
-  localStorage.setItem('cairn-codex-todos', JSON.stringify(todos.value))
+  preferenceRepository.update('notes', { todos: todos.value.map((todo) => ({ ...todo })) })
 }
 
 async function openTodos(): Promise<void> {
@@ -3144,85 +3100,10 @@ function clearCompletedTodos(): void {
   storeTodos()
 }
 
-function readStoredPlannerProfiles(): PlannerProfile[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem('cairn-codex-planner-profiles') ?? '[]') as unknown
-    if (Array.isArray(parsed)) {
-      const profiles = parsed.filter((value): value is PlannerProfile => {
-        if (!value || typeof value !== 'object') return false
-        const profile = value as Partial<PlannerProfile>
-        return typeof profile.id === 'string' && typeof profile.name === 'string' &&
-          Array.isArray(profile.skills) && profile.skills.every((skill) => typeof skill === 'string') &&
-          typeof profile.levelCap === 'number'
-      }).map((profile) => ({
-        ...profile,
-        excludedSkills: Array.isArray(profile.excludedSkills) ? profile.excludedSkills : [],
-        minimumLevel: typeof profile.minimumLevel === 'number'
-          ? Math.min(100, Math.max(1, profile.minimumLevel))
-          : 1,
-        source: profile.source === 'character' ? 'character' as const : 'manual' as const,
-        modifiedAt: profile.modifiedAt || new Date().toISOString()
-      }))
-      if (profiles.length > 0) return profiles
-    }
-  } catch {
-    // Fall through to the legacy planner migration below.
-  }
-  const legacySkills = localStorage.getItem('cairn-codex-planner-skills') === null
-    ? ['Wendigo Totem']
-    : readStoredStringArray('cairn-codex-planner-skills')
-  return [{
-    id: crypto.randomUUID(),
-    name: 'Current build',
-    skills: legacySkills,
-    excludedSkills: [],
-    minimumLevel: 1,
-    levelCap: readStoredPlannerLevelCap(),
-    source: 'manual',
-    modifiedAt: new Date().toISOString()
-  }]
-}
-
-function readStoredPlannerProfileId(profiles: PlannerProfile[]): string {
-  const stored = localStorage.getItem('cairn-codex-planner-profile')
-  return profiles.some((profile) => profile.id === stored) ? stored! : profiles[0]?.id ?? ''
-}
-
-function readStoredPlannerDisplay(): PlannerDisplay {
-  const stored = localStorage.getItem('cairn-codex-planner-display')
-  return stored === 'grid' || stored === 'map' ? stored : 'list'
-}
-
-function readStoredOracleStyle(): OracleStyle {
-  const stored = localStorage.getItem('cairn-codex-oracle-style')
-  return stored === 'pets' || stored === 'retaliation' || stored === 'weapon' || stored === 'caster'
-    ? stored
-    : 'all'
-}
-
-function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number): number {
-  const stored = localStorage.getItem(key)
-  if (stored === null) return fallback
-  const value = Number(stored)
-  return Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback
-}
-
-function readStoredPlannerLevelCap(): number {
-  const versionKey = 'cairn-codex-planner-level-cap-version'
-  if (localStorage.getItem(versionKey) !== '1') {
-    localStorage.setItem(versionKey, '1')
-    localStorage.setItem('cairn-codex-planner-level-cap', '70')
-    return 70
-  }
-  return readStoredNumber('cairn-codex-planner-level-cap', 70, 1, 100)
-}
-
 function storeSourcePaths(): void {
-  const key =
-    collectionBasis.value === 'archive'
-      ? 'cairn-codex-archive-sources'
-      : 'cairn-codex-index-sources'
-  localStorage.setItem(key, JSON.stringify(enabledStashPaths.value))
+  preferenceRepository.update('sources', collectionBasis.value === 'archive'
+    ? { archivePaths: [...enabledStashPaths.value] }
+    : { indexPaths: [...enabledStashPaths.value] })
 }
 
 async function toggleSourceForBasis(basis: CollectionBasis, path: string): Promise<void> {
@@ -3230,10 +3111,9 @@ async function toggleSourceForBasis(basis: CollectionBasis, path: string): Promi
   target.value = target.value.includes(path)
     ? target.value.filter((candidate) => candidate !== path)
     : [...target.value, path]
-  localStorage.setItem(
-    basis === 'archive' ? 'cairn-codex-archive-sources' : 'cairn-codex-index-sources',
-    JSON.stringify(target.value)
-  )
+  preferenceRepository.update('sources', basis === 'archive'
+    ? { archivePaths: [...target.value] }
+    : { indexPaths: [...target.value] })
   if (collectionBasis.value === basis) await loadSelectedSources()
 }
 
@@ -3243,10 +3123,9 @@ async function selectSourceModeForBasis(basis: CollectionBasis, isHardcore: bool
     .map((stash) => stash.path)
   const target = basis === 'archive' ? archiveStashPaths : indexStashPaths
   target.value = paths
-  localStorage.setItem(
-    basis === 'archive' ? 'cairn-codex-archive-sources' : 'cairn-codex-index-sources',
-    JSON.stringify(paths)
-  )
+  preferenceRepository.update('sources', basis === 'archive'
+    ? { archivePaths: [...paths] }
+    : { indexPaths: [...paths] })
   if (collectionBasis.value === basis) await loadSelectedSources()
 }
 
@@ -3264,67 +3143,15 @@ async function setArchiveModeEnabled(isHardcore: boolean, enabled: boolean): Pro
   const modePathSet = new Set(modePaths)
   archiveStashPaths.value = archiveStashPaths.value.filter((path) => !modePathSet.has(path))
   if (enabled) archiveStashPaths.value.push(...modePaths)
-  localStorage.setItem('cairn-codex-archive-sources', JSON.stringify(archiveStashPaths.value))
+  preferenceRepository.update('sources', { archivePaths: [...archiveStashPaths.value] })
   if (collectionBasis.value === 'archive') await loadSelectedSources()
-}
-
-function readStoredCollectionBasis(): CollectionBasis {
-  const defaultVersionKey = 'cairn-codex-collection-basis-default-version'
-  if (localStorage.getItem(defaultVersionKey) !== '2') {
-    localStorage.setItem(defaultVersionKey, '2')
-    localStorage.setItem('cairn-codex-collection-basis', 'archive')
-    return 'archive'
-  }
-  return localStorage.getItem('cairn-codex-collection-basis') === 'stashes'
-    ? 'stashes'
-    : 'archive'
 }
 
 async function setCollectionBasis(basis: CollectionBasis): Promise<void> {
   if (collectionBasis.value === basis) return
   collectionBasis.value = basis
-  localStorage.setItem('cairn-codex-collection-basis', basis)
+  preferenceRepository.update('sources', { collectionBasis: basis })
   await loadSelectedSources()
-}
-
-function readStoredZoomFactor(): number {
-  const stored = Number(localStorage.getItem('cairn-codex-zoom'))
-  return Number.isFinite(stored) && stored >= 0.7 && stored <= 1.8 ? stored : 1
-}
-
-function readStoredBoolean(key: string, fallback: boolean): boolean {
-  const stored = localStorage.getItem(key)
-  return stored === null ? fallback : stored === 'true'
-}
-
-function readStoredExperimentalToolsEnabled(): boolean {
-  const key = 'cairn-codex-experimental-tools'
-  const stored = localStorage.getItem(key)
-  if (stored !== null) return stored === 'true'
-  // Preserve tools that existing installs already exposed, while keeping them
-  // opt-in for genuinely new profiles.
-  const enabled = localStorage.getItem('cairn-codex-workspace-tools-version') !== null
-  localStorage.setItem(key, String(enabled))
-  return enabled
-}
-
-function readStoredWorkspaceToolIds(): WorkspaceToolId[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem('cairn-codex-visible-workspace-tools') ?? 'null') as unknown
-    if (!Array.isArray(parsed)) return [...defaultWorkspaceToolIds]
-    const allowed = new Set(defaultWorkspaceToolIds)
-    const stored = parsed.filter((value): value is WorkspaceToolId =>
-      typeof value === 'string' && allowed.has(value as WorkspaceToolId)
-    )
-    const preferenceVersion = Number(localStorage.getItem('cairn-codex-workspace-tools-version') ?? 0)
-    const migrated = preferenceVersion < workspaceToolPreferenceVersion
-      ? [...stored, 'dismantling' as const]
-      : stored
-    localStorage.setItem('cairn-codex-workspace-tools-version', String(workspaceToolPreferenceVersion))
-    return [...new Set(migrated)]
-  } catch {
-    return [...defaultWorkspaceToolIds]
-  }
 }
 
 function workspaceToolVisible(id: WorkspaceToolId): boolean {
@@ -3340,7 +3167,7 @@ function workspaceToolSelected(id: WorkspaceToolId): boolean {
 function setExperimentalToolsEnabled(enabled: boolean): void {
   if (safeModeActive.value && enabled) return
   experimentalToolsEnabled.value = enabled
-  localStorage.setItem('cairn-codex-experimental-tools', String(enabled))
+  preferenceRepository.update('workspace', { experimentalToolsEnabled: enabled })
   if (!enabled && (activeView.value === 'oracle' || activeView.value === 'dismantling')) {
     activeView.value = 'collection'
   }
@@ -3360,24 +3187,10 @@ function showAllWorkspaceTools(): void {
   visibleWorkspaceToolIds.value = [...defaultWorkspaceToolIds]
 }
 
-function readStoredMiCountingMode(): MiCountingMode {
-  return localStorage.getItem('cairn-codex-mi-counting-mode') === 'tier' ? 'tier' : 'base'
-}
-
-function readStoredTrackerCollapsed(): boolean {
-  const versionKey = 'cairn-codex-tracker-layout-version'
-  if (localStorage.getItem(versionKey) !== '2') {
-    localStorage.setItem(versionKey, '2')
-    localStorage.setItem('cairn-codex-tracker-collapsed', 'false')
-    return false
-  }
-  return readStoredBoolean('cairn-codex-tracker-collapsed', false)
-}
-
 function setAutoLiveConnect(enabled: boolean): void {
   if (safeModeActive.value && enabled) return
   autoLiveConnect.value = enabled
-  localStorage.setItem('cairn-codex-auto-live-connect', String(enabled))
+  preferenceRepository.update('sources', { autoLiveConnect: enabled })
   if (enabled) {
     manualDisconnectProcessId.value = null
     void pollLiveLifecycle()
@@ -3386,13 +3199,13 @@ function setAutoLiveConnect(enabled: boolean): void {
 
 function setLegacyScannerVisible(enabled: boolean): void {
   showLegacyScanner.value = enabled
-  localStorage.setItem('cairn-codex-show-legacy-scanner', String(enabled))
+  preferenceRepository.update('workspace', { showLegacyScanner: enabled })
   if (!enabled && collectionBasis.value !== 'archive') void setCollectionBasis('archive')
 }
 
 function toggleTracker(): void {
   trackerCollapsed.value = !trackerCollapsed.value
-  localStorage.setItem('cairn-codex-tracker-collapsed', String(trackerCollapsed.value))
+  preferenceRepository.update('appearance', { trackerCollapsed: trackerCollapsed.value })
 }
 
 async function refreshHeaderCharacters(): Promise<void> {
@@ -3486,7 +3299,20 @@ async function approveCurrentGameBuild(): Promise<void> {
 
 async function setZoom(factor: number): Promise<void> {
   zoomFactor.value = await window.cairnCodex.setZoomFactor(factor)
-  localStorage.setItem('cairn-codex-zoom', String(zoomFactor.value))
+  preferenceRepository.update('appearance', { zoomFactor: zoomFactor.value })
+}
+
+async function exportPreferences(): Promise<void> {
+  if (preferenceExportBusy.value) return
+  preferenceExportBusy.value = true
+  try {
+    const result = await window.cairnCodex.exportPreferences(preferenceRepository.exportJson())
+    if (!result.canceled && result.path) reportSuccess(`Preferences exported to ${result.path}.`)
+  } catch (error) {
+    reportTransferProblem(readableError(error))
+  } finally {
+    preferenceExportBusy.value = false
+  }
 }
 
 function handleZoomWheel(event: WheelEvent): void {
@@ -7688,6 +7514,10 @@ function formatPercentile(value: number | null | undefined): string {
             <button class="settings-action" type="button" :disabled="diagnosticsBusy" @click="exportDiagnostics">
               {{ diagnosticsBusy ? 'Collecting diagnostics…' : 'Export redacted support bundle' }}
             </button>
+            <button class="settings-action" type="button" :disabled="preferenceExportBusy" @click="exportPreferences">
+              {{ preferenceExportBusy ? 'Exporting preferences…' : 'Export preferences' }}
+            </button>
+            <small>Preference exports contain your planner profiles, to-dos, and configured local source paths. Keep them private; use the redacted support bundle for public bug reports.</small>
             <button class="settings-action" type="button" @click="openDataDirectory">Open data and backups folder</button>
             <div class="interface-recovery-actions">
               <button class="settings-action" type="button" @click="resetInterfacePreferences">Reset interface preferences</button>

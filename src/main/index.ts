@@ -12,6 +12,7 @@ import {
   type CollectionBasis,
   type CollectionSnapshot,
   type DismantlingPreview,
+  type DebugLoggingStatus,
   type GrimDawnDiscovery,
   type GdiaImportResult,
   type IngestResult,
@@ -43,6 +44,11 @@ import {
 } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
 import { ArchiveBackupService } from './archive-backup'
+import {
+  DiagnosticLogger,
+  diagnosticPrivacyViolations,
+  redactDiagnosticValue
+} from './diagnostics'
 
 // Packaged GUI launches do not always have a durable console attached. Electron's
 // child processes can outlive a terminal or diagnostic launcher and inherit its
@@ -243,18 +249,10 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-function createHelperClient(): GrimDawnHelperClient {
-  if (app.isPackaged) {
-    return new GrimDawnHelperClient({
-      command: join(process.resourcesPath, 'helper', 'CairnCodex.GrimDawn.exe'),
-      args: []
-    })
-  }
-
-  return new GrimDawnHelperClient({
-    command: 'dotnet',
-    args: [
-      join(
+function helperArtifactPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'helper', 'CairnCodex.GrimDawn.exe')
+    : join(
         app.getAppPath(),
         'src',
         'helper',
@@ -264,14 +262,43 @@ function createHelperClient(): GrimDawnHelperClient {
         'net10.0-windows',
         'CairnCodex.GrimDawn.dll'
       )
-    ]
+}
+
+function createHelperClient(diagnostics?: DiagnosticLogger): GrimDawnHelperClient {
+  const onDiagnostic: NonNullable<ConstructorParameters<typeof GrimDawnHelperClient>[0]['onDiagnostic']> =
+    (event) => {
+      if (event.outcome === 'failed') {
+        diagnostics?.error('helper', 'request.failed', event.error, {
+          method: event.method,
+          durationMs: event.durationMs
+        })
+      } else {
+        diagnostics?.debugEvent('helper', 'request.completed', {
+          method: event.method,
+          durationMs: event.durationMs
+        })
+      }
+    }
+  if (app.isPackaged) {
+    return new GrimDawnHelperClient({
+      command: helperArtifactPath(),
+      args: [],
+      onDiagnostic
+    })
+  }
+
+  return new GrimDawnHelperClient({
+    command: 'dotnet',
+    args: [helperArtifactPath()],
+    onDiagnostic
   })
 }
 
 function registerIpcHandlers(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase,
-  archiveBackups: ArchiveBackupService
+  archiveBackups: ArchiveBackupService,
+  diagnostics: DiagnosticLogger
 ): () => Promise<void> {
   let writeQueue: Promise<void> = Promise.resolve()
   let latestCollection: CollectionSnapshot | null = null
@@ -298,6 +325,24 @@ function registerIpcHandlers(
       }
       return operation()
     })
+  const runDiagnosticOperation = async <T>(
+    scope: string,
+    event: string,
+    operation: () => Promise<T>,
+    startData?: Record<string, unknown>,
+    completedData?: (result: T) => Record<string, unknown>
+  ): Promise<T> => {
+    const correlationId = randomUUID()
+    const startedAt = diagnostics.operationStarted(scope, event, correlationId, startData)
+    try {
+      const result = await operation()
+      diagnostics.operationCompleted(scope, event, correlationId, startedAt, completedData?.(result))
+      return result
+    } catch (error) {
+      diagnostics.operationFailed(scope, event, correlationId, startedAt, error)
+      throw error
+    }
+  }
   const queueArchiveBackup = (reason: string): void => {
     void runExclusive(() => archiveBackups.createBackup(reason)).catch((error) => {
       console.error(`[archive-backup] ${reason} failed`, error)
@@ -312,6 +357,41 @@ function registerIpcHandlers(
       return { appVersion: app.getVersion(), helper: 'unavailable', mode: 'read-only' }
     }
   })
+  ipcMain.handle(IPC_CHANNELS.getDebugLogging, (): DebugLoggingStatus => {
+    const policy = diagnostics.getRetentionPolicy()
+    return {
+      enabled: diagnostics.getDebugMode(),
+      maxFiles: policy.maxFiles,
+      maxFileBytes: policy.maxFileBytes,
+      maxAgeDays: policy.maxAgeDays
+    }
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.setDebugLogging,
+    (_event, input: { enabled: boolean }): DebugLoggingStatus => {
+      if (typeof input?.enabled !== 'boolean') throw new Error('Debug logging must be enabled or disabled explicitly.')
+      database.setDebugLogging(input.enabled)
+      diagnostics.setDebugMode(input.enabled)
+      const policy = diagnostics.getRetentionPolicy()
+      return {
+        enabled: diagnostics.getDebugMode(),
+        maxFiles: policy.maxFiles,
+        maxFileBytes: policy.maxFileBytes,
+        maxAgeDays: policy.maxAgeDays
+      }
+    }
+  )
+  ipcMain.handle(
+    IPC_CHANNELS.recordNavigation,
+    (_event, input: { view: string }): void => {
+      const views = new Set([
+        'collection', 'sets', 'materials', 'skills', 'planner', 'oracle', 'mi-workshop',
+        'supplies', 'farming', 'dismantling', 'vault', 'settings'
+      ])
+      if (!views.has(input?.view)) throw new Error('Unknown workspace navigation event.')
+      diagnostics.info('navigation', 'workspace.opened', { view: input.view })
+    }
+  )
   ipcMain.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
     return shell.openPath(app.getPath('userData'))
   })
@@ -432,12 +512,23 @@ function registerIpcHandlers(
         backupPath: null
       }
     }
-    const result = await runExclusive(() => migrateGdiaDatabase(
-      database,
-      sourcePath,
-      join(app.getPath('userData'), 'migrations', 'gdia'),
-      { requireAllCatalogued: false }
-    ))
+    const result = await runDiagnosticOperation(
+      'import',
+      'item-assistant',
+      () => runExclusive(() => migrateGdiaDatabase(
+        database,
+        sourcePath,
+        join(app.getPath('userData'), 'migrations', 'gdia'),
+        { requireAllCatalogued: false }
+      )),
+      undefined,
+      (completed) => ({
+        sourceItems: completed.sourceItems,
+        importedItems: completed.importedIds.length,
+        duplicateItems: completed.duplicateIds.length,
+        unsupportedItems: completed.unsupportedIds.length
+      })
+    )
     if (result.importedIds.length > 0) queueArchiveBackup('Item Assistant migration')
     return {
       canceled: false,
@@ -470,8 +561,8 @@ function registerIpcHandlers(
     const generatedAtUtc = new Date().toISOString()
     const fileStamp = generatedAtUtc.replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
     const selection = await dialog.showSaveDialog({
-      title: 'Save Cairn Codex diagnostics',
-      defaultPath: join(app.getPath('downloads'), `cairn-codex-diagnostics-${fileStamp}.json`),
+      title: 'Save Cairn Codex support bundle',
+      defaultPath: join(app.getPath('downloads'), `cairn-codex-support-${fileStamp}.json`),
       filters: [{ name: 'JSON', extensions: ['json'] }]
     })
     if (selection.canceled || !selection.filePath) return { canceled: true, path: null }
@@ -489,6 +580,7 @@ function registerIpcHandlers(
       directoryCounts[name] = await countFiles(join(userData, name))
     }
     const live = await safely(() => helper.request<LiveGameStatus>('inspect-live-game'))
+    if (!('error' in live)) diagnostics.registerSecret(live.activeCharacterName)
     const safeLive = 'error' in live ? live : {
       state: live.state,
       grimDawnProcessCount: live.grimDawnProcessIds.length,
@@ -507,34 +599,89 @@ function registerIpcHandlers(
       recommendation: live.recommendation,
       hookMessageCount: live.messages.length
     }
-    const report = {
+    const helperHealth = await safely(() => helper.request<Record<string, unknown>>('health'))
+    const appSha256 = app.isPackaged
+      ? await readFile(app.getAppPath())
+          .then((contents) => createHash('sha256').update(contents).digest('hex'))
+          .catch(() => null)
+      : null
+    const helperSha256 = await readFile(helperArtifactPath())
+      .then((contents) => createHash('sha256').update(contents).digest('hex'))
+      .catch(() => null)
+    const logs = await diagnostics.readEntries()
+    const report = redactDiagnosticValue({
       generatedAtUtc,
-      privacy: 'No item payloads, save contents, database contents, character names, raw hook messages, or extracted game assets are included.',
+      formatVersion: 1,
+      privacy: 'No item payloads, save contents, database contents, character names, personal paths, raw hook messages, credentials, queues, receipts, archives, or extracted game assets are included.',
       app: {
         version: app.getVersion(),
         packaged: app.isPackaged,
         electron: process.versions.electron,
         node: process.versions.node,
-        chrome: process.versions.chrome
+        chrome: process.versions.chrome,
+        sha256: appSha256
       },
       system: { platform: platform(), release: release(), architecture: arch() },
+      helper: { health: helperHealth, sha256: helperSha256 },
       database: database.getDiagnosticSummary(),
-      archiveBackups: await safely(() => archiveBackups.getStatus()),
+      archiveBackups: await safely(async () => {
+        const status = await archiveBackups.getStatus()
+        return {
+          retained: status.backups.length,
+          verified: status.backups.filter((backup) => backup.verified).length,
+          pendingRestore: status.pendingRestore,
+          latest: status.latest ? {
+            createdAtUtc: status.latest.createdAtUtc,
+            reason: status.latest.reason,
+            sizeBytes: status.latest.sizeBytes,
+            schemaVersion: status.latest.schemaVersion,
+            vaultItemCount: status.latest.vaultItemCount,
+            verified: status.latest.verified
+          } : null
+        }
+      }),
       files: directoryCounts,
       collection: latestCollection ? {
         scannedAtUtc: latestCollection.scannedAtUtc,
         basis: latestCollection.basis,
         warningCount: latestCollection.warnings.length,
-        warningMessages: latestCollection.warnings.map((warning) => warning.message),
         contentPacks: latestCollection.contentPacks.map((pack) => pack.id),
         sourceCount: latestCollection.scannedStashes.length,
         catalogItems: latestCollection.items.length,
         observedItems: latestCollection.observedItems.length
       } : null,
       writeSafety: await safely(() => helper.request<WriteSafetyStatus>('inspect-write-safety')),
-      live: safeLive
+      live: safeLive,
+      logging: diagnostics.getRetentionPolicy(),
+      jobTimings: logs
+        .filter((entry) => entry.durationMs !== undefined)
+        .slice(-100)
+        .map(({ timestampUtc, scope, event, correlationId, durationMs }) => ({
+          timestampUtc, scope, event, correlationId, durationMs
+        })),
+      lastSafeActions: logs
+        .filter((entry) => entry.event.endsWith('.completed'))
+        .slice(-25)
+        .map(({ timestampUtc, scope, event, correlationId, durationMs }) => ({
+          timestampUtc, scope, event, correlationId, durationMs
+        })),
+      logs
+    })
+    const serializedReport = `${JSON.stringify(report, null, 2)}\n`
+    const privacyViolations = diagnosticPrivacyViolations(
+      serializedReport,
+      'error' in live || !live.activeCharacterName ? [] : [live.activeCharacterName]
+    )
+    if (privacyViolations.length > 0) {
+      diagnostics.error(
+        'diagnostics',
+        'support-bundle.rejected',
+        new Error(`Privacy validation failed: ${privacyViolations.join(', ')}`)
+      )
+      throw new Error('The support bundle failed its privacy check and was not written.')
     }
-    await writeFile(selection.filePath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+    await writeFile(selection.filePath, serializedReport, 'utf8')
+    diagnostics.info('diagnostics', 'support-bundle.exported', { formatVersion: 1 })
     return { canceled: false, path: selection.filePath }
   })
   ipcMain.handle(
@@ -579,65 +726,71 @@ function registerIpcHandlers(
     IPC_CHANNELS.hydrateArchiveRolls,
     async (_event, input: { sourcePaths: string[] }): Promise<ArchiveRollHydrationResult | null> => {
       if (archiveRollHydrationBatch) return archiveRollHydrationBatch
-      const batch = (async (): Promise<ArchiveRollHydrationResult | null> => {
-        latestCollection ??= await readCollectionCache(collectionCachePath)
-        if (!latestCollection) return null
-        const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-        const mode = lifetimeMode(projected)
-        const installation = projected.discovery.installations[0]
-        if (!installation) {
-          return {
-            processed: 0,
-            pending: 0,
-            snapshot: await presentCollection(helper, database, projected, 'archive')
-          }
-        }
-        const candidates = database.listArchiveRollAnalysisCandidates(
-          ROLL_ANALYSIS_VERSION,
-          256,
-          mode
-        )
-        if (candidates.length === 0) {
-          return {
-            processed: 0,
-            pending: 0,
-            snapshot: await presentCollection(helper, database, projected, 'archive')
-          }
-        }
-        const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
-          installationPath: installation.path,
-          items: candidates.map(({ payload }) => {
-            const item = payload as LiveVaultPayload
+      const batch = runDiagnosticOperation(
+        'background-job',
+        'archive-roll-hydration',
+        async (): Promise<ArchiveRollHydrationResult | null> => {
+          latestCollection ??= await readCollectionCache(collectionCachePath)
+          if (!latestCollection) return null
+          const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+          const mode = lifetimeMode(projected)
+          const installation = projected.discovery.installations[0]
+          if (!installation) {
             return {
-              baseRecord: item.baseRecord,
-              prefixRecord: item.prefixRecord,
-              suffixRecord: item.suffixRecord,
-              seed: item.seed
+              processed: 0,
+              pending: 0,
+              snapshot: await presentCollection(helper, database, projected, 'archive')
             }
+          }
+          const candidates = database.listArchiveRollAnalysisCandidates(
+            ROLL_ANALYSIS_VERSION,
+            256,
+            mode
+          )
+          if (candidates.length === 0) {
+            return {
+              processed: 0,
+              pending: 0,
+              snapshot: await presentCollection(helper, database, projected, 'archive')
+            }
+          }
+          const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
+            installationPath: installation.path,
+            items: candidates.map(({ payload }) => {
+              const item = payload as LiveVaultPayload
+              return {
+                baseRecord: item.baseRecord,
+                prefixRecord: item.prefixRecord,
+                suffixRecord: item.suffixRecord,
+                seed: item.seed
+              }
+            })
           })
-        })
-        if (analyzed.items.length !== candidates.length) {
-          throw new Error(
-            `Roll analysis returned ${analyzed.items.length} results for ${candidates.length} archived copies.`
-          )
-        }
-        await runExclusive(async () => {
-          database.setVaultRollAnalyses(
-            candidates.map((candidate, index) => ({
-              id: candidate.id,
-              rollAnalysis: analyzed.items[index]!
-            }))
-          )
-        })
-        const pending = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
-        return {
-          processed: candidates.length,
-          pending,
-          snapshot: pending === 0
-            ? await presentCollection(helper, database, projected, 'archive')
-            : null
-        }
-      })()
+          if (analyzed.items.length !== candidates.length) {
+            throw new Error(
+              `Roll analysis returned ${analyzed.items.length} results for ${candidates.length} archived copies.`
+            )
+          }
+          await runExclusive(async () => {
+            database.setVaultRollAnalyses(
+              candidates.map((candidate, index) => ({
+                id: candidate.id,
+                rollAnalysis: analyzed.items[index]!
+              }))
+            )
+          })
+          const pending = database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
+          return {
+            processed: candidates.length,
+            pending,
+            snapshot: pending === 0
+              ? await presentCollection(helper, database, projected, 'archive')
+              : null
+          }
+        },
+        { batchLimit: 256 },
+        (result) => ({ processed: result?.processed ?? 0, pending: result?.pending ?? 0 })
+      )
       archiveRollHydrationBatch = batch
       try {
         return await batch
@@ -649,7 +802,7 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.scanCollection,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
-      collectionScan ??= (async () => {
+      collectionScan ??= runDiagnosticOperation('background-job', 'collection-scan', async () => {
         const startedAt = Date.now()
         const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
         const withIcons = await attachItemIcons(helper, snapshot)
@@ -675,7 +828,11 @@ function registerIpcHandlers(
         await writeCollectionCache(collectionCachePath, persisted)
         console.log(`[collection-scan] completed in ${Date.now() - startedAt}ms`)
         return persisted
-      })().finally(() => {
+      }, undefined, (result) => ({
+        catalogItems: result.items.length,
+        observedItems: result.observedItems.length,
+        warningCount: result.warnings.length
+      })).finally(() => {
         collectionScan = null
       })
       const snapshot = await collectionScan
@@ -690,23 +847,29 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.rebuildGameDataIndex,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
-      const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
-      const withIcons = await attachItemIcons(helper, snapshot)
-      const installationPath = withIcons.discovery.installations[0]?.path
-      if (!installationPath) throw new Error('No Grim Dawn installation is available.')
-      const locationIndex = await loadMapLocationIndex(
-        helper,
-        mapLocationCachePath,
-        installationPath,
-        true
-      )
-      latestCollection = {
-        ...database.persistSnapshot(attachMapLocations(withIcons, locationIndex)),
-        catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
-      }
-      await writeCollectionCache(collectionCachePath, latestCollection)
-      const projected = projectCollectionSources(latestCollection, input.sourcePaths)
-      return presentCollection(helper, database, projected, input.basis)
+      return runDiagnosticOperation('background-job', 'game-data-rebuild', async () => {
+        const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
+        const withIcons = await attachItemIcons(helper, snapshot)
+        const installationPath = withIcons.discovery.installations[0]?.path
+        if (!installationPath) throw new Error('No Grim Dawn installation is available.')
+        const locationIndex = await loadMapLocationIndex(
+          helper,
+          mapLocationCachePath,
+          installationPath,
+          true
+        )
+        latestCollection = {
+          ...database.persistSnapshot(attachMapLocations(withIcons, locationIndex)),
+          catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
+        }
+        await writeCollectionCache(collectionCachePath, latestCollection)
+        const projected = projectCollectionSources(latestCollection, input.sourcePaths)
+        return presentCollection(helper, database, projected, input.basis)
+      }, undefined, (result) => ({
+        catalogItems: result.items.length,
+        observedItems: result.observedItems.length,
+        warningCount: result.warnings.length
+      }))
     }
   )
   ipcMain.handle(
@@ -806,7 +969,13 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.ingestStagingTab,
     async (_event, input: { path: string }): Promise<IngestResult> => {
-      const result = await runTransferExclusive(() => executeStagingTabIngest(helper, database, input.path))
+      const result = await runDiagnosticOperation(
+        'transfer',
+        'offline-ingest',
+        () => runTransferExclusive(() => executeStagingTabIngest(helper, database, input.path)),
+        undefined,
+        (completed) => ({ ingestedItems: completed.ingested.length })
+      )
       if (result.ingested.length > 0) queueArchiveBackup('offline ingest')
       return result
     }
@@ -814,7 +983,13 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.retrieveVaultItems,
     async (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> => {
-      const result = await runTransferExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds))
+      const result = await runDiagnosticOperation(
+        'transfer',
+        'offline-retrieval',
+        () => runTransferExclusive(() => executeLastTabRetrieval(helper, database, input.path, input.vaultItemIds)),
+        { requestedItems: input.vaultItemIds.length },
+        (completed) => ({ retrievedItems: completed.retrieved.length })
+      )
       if (result.retrieved.length > 0) queueArchiveBackup('offline retrieval')
       return result
     }
@@ -860,14 +1035,23 @@ function registerIpcHandlers(
         database,
         latestCollection?.discovery.installations[0]?.path
       ))
-      if (result.ingested.length > 0) queueArchiveBackup('live ingest')
+      if (result.ingested.length > 0) {
+        diagnostics.info('transfer', 'live-ingest.completed', { ingestedItems: result.ingested.length })
+        queueArchiveBackup('live ingest')
+      }
       return result
     }
   )
   ipcMain.handle(
     IPC_CHANNELS.retrieveLiveVaultItems,
     async (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> => {
-      const result = await runTransferExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds))
+      const result = await runDiagnosticOperation(
+        'transfer',
+        'live-retrieval',
+        () => runTransferExclusive(() => executeLiveRetrieval(helper, database, input.vaultItemIds)),
+        { requestedItems: input.vaultItemIds.length },
+        (completed) => ({ retrievedItems: completed.retrieved.length })
+      )
       if (result.retrieved.length > 0) queueArchiveBackup('live retrieval')
       return result
     }
@@ -875,7 +1059,7 @@ function registerIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.dispenseLiveAugments,
     (_event, input: { records: string[]; expectedCharacterName?: string }): Promise<LiveSupplyDispenseResult> =>
-      runTransferExclusive(async () => {
+      runDiagnosticOperation('transfer', 'supply-dispense', () => runTransferExclusive(async () => {
         latestCollection ??= await readCollectionCache(collectionCachePath)
         if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
         const result = await executeLiveAugmentDispense(
@@ -887,12 +1071,12 @@ function registerIpcHandlers(
         )
         queueArchiveBackup('supply delivery')
         return result
-      })
+      }), { requestedItems: input.records.length }, (completed) => ({ deliveredItems: completed.dispensed.length }))
   )
   ipcMain.handle(
     IPC_CHANNELS.recoverSahdinasMemento,
     (_event, input: { destination: SpecialRecoveryDestination; expectedCharacterName?: string }): Promise<SpecialItemRecoveryResult> =>
-      runTransferExclusive(async () => {
+      runDiagnosticOperation('transfer', 'special-item-recovery', () => runTransferExclusive(async () => {
         latestCollection ??= await readCollectionCache(collectionCachePath)
         if (!latestCollection) throw new Error('Build the game-data index before recovering Sahdina\'s Memento.')
         const result = await executeSahdinasMementoRecovery(
@@ -904,11 +1088,13 @@ function registerIpcHandlers(
         )
         queueArchiveBackup('special item recovery')
         return result
-      })
+      }), { destination: input.destination }, () => ({ deliveredItems: 1 }))
   )
   return async () => {
     await writeQueue
     await archiveBackups.flush()
+    diagnostics.info('startup', 'application.shutdown')
+    await diagnostics.flush()
   }
 }
 
@@ -2825,6 +3011,15 @@ async function runSmokeTest(
     if (!database.getInfiniteSupplies() || database.setInfiniteSupplies(false) !== false) {
       throw new Error('Infinite-supplies setting did not persist its disabled state.')
     }
+    if (
+      database.getDebugLogging() ||
+      database.setDebugLogging(true) !== true ||
+      !database.getDebugLogging() ||
+      database.setDebugLogging(false) !== false ||
+      database.getDebugLogging()
+    ) {
+      throw new Error('Debug-logging setting did not round-trip safely.')
+    }
     const finiteRetrievalOperationId = randomUUID()
     database.prepareRetrievalOperation({
       operationId: finiteRetrievalOperationId,
@@ -3031,6 +3226,7 @@ async function runSmokeTest(
         databaseIntegrity: 'verified',
         archiveBackupRestore: 'verified',
         archiveRollCache: 'verified',
+        debugLoggingSetting: 'verified',
         serializerRoundTrips: roundTrips.length,
         ingestPlans: ingestPlans.length,
         retrievalRoundTrips: retrievalRoundTrips.length,
@@ -3890,11 +4086,40 @@ if (!hasSingleInstanceLock) {
 
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
+  const diagnosticsDirectory = process.env.CAIRN_CODEX_SMOKE_TEST === '1'
+    ? join(app.getPath('temp'), `cairn-codex-smoke-logs-${process.pid}`)
+    : join(app.getPath('userData'), 'logs')
+  // Start with the larger bounded policy so a persisted debug session is not
+  // truncated before the database setting becomes available below.
+  const diagnostics = new DiagnosticLogger(diagnosticsDirectory, true)
+  await diagnostics.initialize()
+  process.on('uncaughtExceptionMonitor', (error) => {
+    diagnostics.error('failure', 'main-process.uncaught-exception', error)
+  })
+  app.on('render-process-gone', (_event, _webContents, details) => {
+    diagnostics.warn('failure', 'renderer-process.gone', {
+      reason: details.reason,
+      exitCode: details.exitCode
+    })
+  })
+  app.on('child-process-gone', (_event, details) => {
+    diagnostics.warn('failure', 'child-process.gone', {
+      type: details.type,
+      reason: details.reason,
+      exitCode: details.exitCode
+    })
+  })
+  diagnostics.info('startup', 'electron.ready', {
+    appVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    electronVersion: process.versions.electron
+  })
   console.log('[startup] Electron ready; opening Cairn Codex services.')
   Menu.setApplicationMenu(null)
   registerItemIconProtocol()
+  diagnostics.info('startup', 'icon-protocol.registered')
   console.log('[startup] Item icon protocol registered.')
-  const helper = createHelperClient()
+  const helper = createHelperClient(diagnostics)
   const databaseOverride = process.env.CAIRN_CODEX_DATABASE_PATH
   const databasePath = process.env.CAIRN_CODEX_SMOKE_TEST === '1'
     ? ':memory:'
@@ -3907,7 +4132,10 @@ app.whenReady().then(async () => {
         databasePath,
         archiveBackupDirectory
       )
-      if (restored) console.log('[startup] Staged archive restore applied and verified.')
+      if (restored) {
+        diagnostics.info('startup', 'archive-restore.applied')
+        console.log('[startup] Staged archive restore applied and verified.')
+      }
     } catch (error) {
       const quarantined = await ArchiveBackupService.quarantinePendingRestore(
         archiveBackupDirectory
@@ -3917,9 +4145,16 @@ app.whenReady().then(async () => {
         (quarantined ? ` Request quarantined at ${quarantined}.` : ''),
         error
       )
+      diagnostics.error('startup', 'archive-restore.rejected', error, {
+        requestQuarantined: Boolean(quarantined)
+      })
     }
   }
   const database = new CollectionDatabase(databasePath)
+  diagnostics.setDebugMode(database.getDebugLogging())
+  diagnostics.info('startup', 'database.ready', {
+    schemaVersion: database.getDiagnosticSummary().schemaVersion
+  })
   console.log('[startup] Collection database ready.')
 
   const ingestCommand = process.env.CAIRN_CODEX_INGEST_REQUEST
@@ -3982,7 +4217,8 @@ app.whenReady().then(async () => {
     databasePath,
     archiveBackupDirectory
   )
-  const flushIpcWrites = registerIpcHandlers(helper, database, archiveBackups)
+  const flushIpcWrites = registerIpcHandlers(helper, database, archiveBackups, diagnostics)
+  diagnostics.info('startup', 'ipc.registered')
   console.log('[startup] IPC handlers registered; creating the main window.')
   void createWindow()
   void archiveBackups.ensureStartupBackup()

@@ -19,6 +19,9 @@ export const IPC_CHANNELS = {
   setPinnedBest: 'collection:set-pinned-best',
   getInfiniteSupplies: 'settings:get-infinite-supplies',
   setInfiniteSupplies: 'settings:set-infinite-supplies',
+  getDebugLogging: 'settings:get-debug-logging',
+  setDebugLogging: 'settings:set-debug-logging',
+  recordNavigation: 'diagnostics:record-navigation',
   inspectWriteSafety: 'vault:inspect-write-safety',
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
@@ -48,6 +51,13 @@ export interface AppStatus {
 export interface DiagnosticExportResult {
   canceled: boolean
   path: string | null
+}
+
+export interface DebugLoggingStatus {
+  enabled: boolean
+  maxFiles: number
+  maxFileBytes: number
+  maxAgeDays: number
 }
 
 export interface ArchiveBackupEntry {
@@ -122,6 +132,9 @@ export interface CairnCodexApi {
   setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>
   getInfiniteSupplies: () => Promise<boolean>
   setInfiniteSupplies: (enabled: boolean) => Promise<boolean>
+  getDebugLogging: () => Promise<DebugLoggingStatus>
+  setDebugLogging: (enabled: boolean) => Promise<DebugLoggingStatus>
+  recordNavigation: (view: string) => Promise<void>
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>

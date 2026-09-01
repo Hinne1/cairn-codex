@@ -20,6 +20,7 @@ import type {
   CollectionRaritySummary,
   CollectionSnapshot,
   DismantlingPreview,
+  DebugLoggingStatus,
   GdiaImportResult,
   GrimDawnDiscovery,
   ItemGrantedSkillPresentation,
@@ -389,6 +390,13 @@ const dismantlingError = ref<string | null>(null)
 const infiniteSupplies = ref(true)
 const infiniteSuppliesBusy = ref(false)
 const diagnosticsBusy = ref(false)
+const debugLoggingBusy = ref(false)
+const debugLoggingStatus = ref<DebugLoggingStatus>({
+  enabled: false,
+  maxFiles: 3,
+  maxFileBytes: 256 * 1024,
+  maxAgeDays: 7
+})
 const archiveBackupBusy = ref<'backup' | 'export' | 'restore' | null>(null)
 const archiveBackupStatus = ref<ArchiveBackupStatus | null>(null)
 const gdiaImportBusy = ref(false)
@@ -2315,6 +2323,7 @@ watch(selectedStashPath, async (path) => {
 })
 
 watch(activeView, async (view) => {
+  void window.cairnCodex.recordNavigation(view).catch(() => undefined)
   await nextTick()
   syncMiWorkshopControlElements()
   window.scrollTo({ top: 0, behavior: 'auto' })
@@ -2358,6 +2367,11 @@ onMounted(async () => {
       infiniteSupplies.value = await window.cairnCodex.getInfiniteSupplies()
     } catch (error) {
       console.warn('Stored-supply setting could not be loaded; preserving the safe default.', error)
+    }
+    try {
+      debugLoggingStatus.value = await window.cairnCodex.getDebugLogging()
+    } catch (error) {
+      console.warn('Diagnostic logging setting could not be loaded; preserving bounded standard logging.', error)
     }
     await refreshRecoveryStatus()
     await refreshArchiveBackupStatus()
@@ -2469,11 +2483,27 @@ async function exportDiagnostics(): Promise<void> {
   vaultError.value = null
   try {
     const result = await window.cairnCodex.exportDiagnostics()
-    if (!result.canceled) vaultMessage.value = `Diagnostic report saved to ${result.path}.`
+    if (!result.canceled) vaultMessage.value = `Redacted support bundle saved to ${result.path}.`
   } catch (error) {
     vaultError.value = readableError(error)
   } finally {
     diagnosticsBusy.value = false
+  }
+}
+
+async function setDebugLogging(enabled: boolean): Promise<void> {
+  if (debugLoggingBusy.value) return
+  debugLoggingBusy.value = true
+  vaultError.value = null
+  try {
+    debugLoggingStatus.value = await window.cairnCodex.setDebugLogging(enabled)
+    vaultMessage.value = enabled
+      ? `Debug logging enabled for up to ${debugLoggingStatus.value.maxAgeDays} days.`
+      : 'Debug logging disabled; standard bounded diagnostics remain active.'
+  } catch (error) {
+    vaultError.value = readableError(error)
+  } finally {
+    debugLoggingBusy.value = false
   }
 }
 
@@ -7018,12 +7048,24 @@ function formatPercentile(value: number | null | undefined): string {
                 {{ operation.operation }} · {{ operation.state }} · {{ operation.id }}
               </code>
             </div>
-            <p>Export a small JSON report with versions, adapter fingerprints, database integrity, and unfinished-operation state. Item payloads and save contents are excluded.</p>
+            <label class="settings-toggle">
+              <input
+                type="checkbox"
+                :checked="debugLoggingStatus.enabled"
+                :disabled="debugLoggingBusy"
+                @change="setDebugLogging(($event.target as HTMLInputElement).checked)"
+              />
+              <span>
+                <strong>Debug logging</strong>
+                <small>Capture additional helper timings for up to {{ debugLoggingStatus.maxAgeDays }} days. Logs rotate after {{ debugLoggingStatus.maxFiles }} bounded files and never include item payloads or character names.</small>
+              </span>
+            </label>
+            <p>Export one redacted JSON support bundle with rotating logs, job timings, versions and fingerprints, database integrity, and unfinished-operation state. Personal paths, character names, item payloads, saves, archives, queues, receipts, and credentials are excluded.</p>
             <button class="settings-action" type="button" :disabled="diagnosticsBusy" @click="exportDiagnostics">
-              {{ diagnosticsBusy ? 'Collecting diagnostics…' : 'Export diagnostic report' }}
+              {{ diagnosticsBusy ? 'Collecting diagnostics…' : 'Export redacted support bundle' }}
             </button>
             <button class="settings-action" type="button" @click="openDataDirectory">Open data and backups folder</button>
-            <small>Preserve this folder after any uncertain transfer. Do not post saves or the archive database publicly.</small>
+            <small>Standard diagnostics retain at most 3 × 256 KB for 7 days. Debug mode retains at most 6 × 1 MB for 14 days. Preserve the data folder after an uncertain transfer, but never post saves or the archive database publicly.</small>
           </article>
         </div>
       </section>

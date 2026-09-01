@@ -20,6 +20,12 @@ export interface GrimDawnHelperOptions {
   command: string
   args: string[]
   requestTimeoutMs?: number
+  onDiagnostic?: (event: {
+    method: string
+    outcome: 'completed' | 'failed'
+    durationMs: number
+    error?: Error
+  }) => void
 }
 
 export class GrimDawnHelperClient {
@@ -33,25 +39,36 @@ export class GrimDawnHelperClient {
   async request<T>(method: string, params: object = {}): Promise<T> {
     const process = this.ensureStarted()
     const id = String(this.nextId++)
+    const startedAt = Date.now()
 
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
+        const pending = this.pending.get(id)
         this.pending.delete(id)
-        reject(new Error(`Grim Dawn helper timed out while handling ${method}.`))
+        pending?.reject(new Error(`Grim Dawn helper timed out while handling ${method}.`))
       }, this.options.requestTimeoutMs ?? 60_000)
 
       this.pending.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
+        resolve: (value) => {
+          this.options.onDiagnostic?.({ method, outcome: 'completed', durationMs: Date.now() - startedAt })
+          resolve(value as T)
+        },
+        reject: (error) => {
+          this.options.onDiagnostic?.({ method, outcome: 'failed', durationMs: Date.now() - startedAt, error })
+          reject(error)
+        },
         timeout
       })
 
       process.stdin.write(`${JSON.stringify({ id, method, params })}\n`, (error) => {
         if (!error) return
 
-        clearTimeout(timeout)
+        const pending = this.pending.get(id)
         this.pending.delete(id)
-        reject(error)
+        if (pending) {
+          clearTimeout(pending.timeout)
+          pending.reject(error)
+        }
       })
     })
   }

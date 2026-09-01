@@ -10,6 +10,7 @@ import {
   type CollectionSnapshot,
   type DiagnosticExportResult,
   type DismantlingPreview,
+  type DebugLoggingStatus,
   type GdiaImportResult,
   type GrimDawnDiscovery,
   type IngestResult,
@@ -68,6 +69,12 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.getInfiniteSupplies) as Promise<boolean>,
   setInfiniteSupplies: (enabled) =>
     ipcRenderer.invoke(IPC_CHANNELS.setInfiniteSupplies, { enabled }) as Promise<boolean>,
+  getDebugLogging: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getDebugLogging) as Promise<DebugLoggingStatus>,
+  setDebugLogging: (enabled) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setDebugLogging, { enabled }) as Promise<DebugLoggingStatus>,
+  recordNavigation: (view) =>
+    ipcRenderer.invoke(IPC_CHANNELS.recordNavigation, { view }) as Promise<void>,
   inspectWriteSafety: () =>
     ipcRenderer.invoke(IPC_CHANNELS.inspectWriteSafety) as Promise<WriteSafetyStatus>,
   inspectStagingTab: (path) =>

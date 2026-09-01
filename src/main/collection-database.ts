@@ -1253,6 +1253,23 @@ export class CollectionDatabase {
     return enabled
   }
 
+  getDebugLogging(): boolean {
+    const row = this.database
+      .prepare("SELECT value FROM app_setting WHERE key = 'debug_logging'")
+      .get() as { value: string } | undefined
+    return row?.value === 'true'
+  }
+
+  setDebugLogging(enabled: boolean): boolean {
+    this.database
+      .prepare(`
+        INSERT INTO app_setting (key, value) VALUES ('debug_logging', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `)
+      .run(enabled ? 'true' : 'false')
+    return enabled
+  }
+
   close(): void {
     this.database.close()
   }

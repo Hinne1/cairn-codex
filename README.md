@@ -248,7 +248,10 @@ Useful design references:
 
 Cairn stores its archive, settings, caches, operation journal, receipts,
 quarantine, and backups under `%APPDATA%\cairn-codex`. Settings can open that
-directory and export a diagnostic report that omits item payloads and save data.
+directory and export a redacted support bundle with bounded structured logs,
+versions, timings, and integrity results. It excludes personal paths, character
+names, item payloads, saves, archives, queues, receipts, and credentials; see
+[Diagnostics and support bundles](docs/support-bundles.md).
 Verified archive snapshots live under `archive-backups`; ordinary rotation keeps
 up to twelve snapshots, with up to three additional emergency pre-restore copies.
 

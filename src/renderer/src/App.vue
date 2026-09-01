@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
+import FailureProbe from './components/FailureProbe.vue'
 import ItemAssistantImport from './components/ItemAssistantImport.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
+import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import { createNotificationService, type AppNotification } from './notification-service'
+import {
+  resetUiPreferences,
+  type RendererFailureReport
+} from './renderer-recovery'
 import { searchGuidance } from './search-guidance'
 import {
   setCompletionCount,
@@ -38,6 +44,7 @@ import {
 } from '@shared/search-query'
 import type {
   ArchiveBackupStatus,
+  AppStatus,
   CharacterSaveProfile,
   CollectionBasis,
   CollectionItem,
@@ -294,6 +301,14 @@ const workspaceToolDefinitions: WorkspaceToolDefinition[] = [
 const defaultWorkspaceToolIds = workspaceToolDefinitions.map((tool) => tool.id)
 const essentialWorkspaceToolIds: WorkspaceToolId[] = ['sets', 'skills', 'planner', 'mi-workshop', 'supplies']
 const workspaceToolPreferenceVersion = 2
+const startupRecoveryParameters = new URLSearchParams(window.location.search)
+const safeModeActive = ref(startupRecoveryParameters.get('safeMode') === '1')
+const safeModeSuggested = ref(startupRecoveryParameters.get('safeModeSuggested') === '1')
+const failedStartupCount = ref(Math.max(0, Number(startupRecoveryParameters.get('failedStarts') ?? 0) || 0))
+const safeModeOfferOpen = ref(safeModeSuggested.value && !safeModeActive.value)
+const safeModeBusy = ref(false)
+const safeModeDialog = ref<HTMLElement | null>(null)
+const simulateWorkspaceFailure = startupRecoveryParameters.get('simulateWorkspaceError') === '1'
 const initialOnboardingPreference = readOnboardingPreference(localStorage)
 
 const discovery = ref<GrimDawnDiscovery | null>(null)
@@ -437,7 +452,7 @@ const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
 const supplySlotFilter = ref<SupplySlotFilter>('all')
 const supplyVisibleCount = ref(60)
-const experimentalToolsEnabled = ref(readStoredExperimentalToolsEnabled())
+const experimentalToolsEnabled = ref(safeModeActive.value ? false : readStoredExperimentalToolsEnabled())
 const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>(readStoredWorkspaceToolIds())
 const toolSettingsOpen = ref(false)
 const materialCategory = ref<MaterialCategory>('all')
@@ -463,7 +478,9 @@ const debugLoggingStatus = ref<DebugLoggingStatus>({
 })
 const archiveBackupBusy = ref<'backup' | 'export' | 'restore' | null>(null)
 const archiveBackupStatus = ref<ArchiveBackupStatus | null>(null)
-const onboardingOpen = ref(initialOnboardingPreference.shouldOpen)
+const onboardingOpen = ref(
+  !safeModeActive.value && !safeModeOfferOpen.value && initialOnboardingPreference.shouldOpen
+)
 const onboardingStep = ref(initialOnboardingPreference.step)
 const onboardingStatus = ref<OnboardingStatus>(initialOnboardingPreference.status)
 const onboardingDialog = ref<HTMLElement | null>(null)
@@ -495,7 +512,7 @@ const miComparisonDirectionSelect = ref<HTMLSelectElement | null>(null)
 const miSortModeSelect = ref<HTMLSelectElement | null>(null)
 const canNavigateBack = ref(false)
 const canNavigateForward = ref(false)
-const autoLiveConnect = ref(readStoredBoolean('cairn-codex-auto-live-connect', true))
+const autoLiveConnect = ref(safeModeActive.value ? false : readStoredBoolean('cairn-codex-auto-live-connect', true))
 const tooltipRecord = ref<string | null>(null)
 const tooltipCopyAffixes = ref<{ prefixRecord: string; suffixRecord: string } | null>(null)
 const tooltipPosition = ref({ left: 0, top: 0 })
@@ -2516,6 +2533,13 @@ watch([onboardingOpen, appInitializing], async ([open, initializing]) => {
   onboardingDialog.value?.focus()
 })
 
+watch(safeModeOfferOpen, async (open) => {
+  document.body.classList.toggle('safe-mode-offer-active', open)
+  if (!open) return
+  await nextTick()
+  safeModeDialog.value?.focus()
+})
+
 async function reportStartupPhase(phase: StartupPhaseEvent): Promise<void> {
   try {
     startupPhaseStatus.value = await window.cairnCodex.reportStartupPhase(phase)
@@ -2543,6 +2567,23 @@ onMounted(async () => {
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   try {
+    try {
+      const appStatus: AppStatus = await window.cairnCodex.getAppStatus()
+      safeModeActive.value = appStatus.safeMode.active
+      safeModeSuggested.value = appStatus.safeMode.suggested || startupRecoveryParameters.get('safeModeSuggested') === '1'
+      failedStartupCount.value = Math.max(appStatus.safeMode.failedStarts, failedStartupCount.value)
+      safeModeOfferOpen.value = safeModeSuggested.value && !appStatus.safeMode.active
+      if (appStatus.safeMode.active) {
+        experimentalToolsEnabled.value = false
+        autoLiveConnect.value = false
+        onboardingOpen.value = false
+        if (activeView.value === 'oracle' || activeView.value === 'dismantling') {
+          activeView.value = 'collection'
+        }
+      }
+    } catch (error) {
+      console.warn('Startup recovery status could not be loaded.', error)
+    }
     zoomFactor.value = await window.cairnCodex.setZoomFactor(zoomFactor.value)
     try {
       infiniteSupplies.value = await window.cairnCodex.getInfiniteSupplies()
@@ -2688,6 +2729,67 @@ async function exportDiagnostics(): Promise<void> {
     reportTransferProblem(readableError(error))
   } finally {
     diagnosticsBusy.value = false
+  }
+}
+
+async function reportRendererFailure(failure: RendererFailureReport): Promise<void> {
+  await window.cairnCodex.reportRendererError(failure)
+}
+
+function returnToCollectionAfterFailure(): void {
+  selectedRecord.value = null
+  activeView.value = 'collection'
+}
+
+async function restartInSafeMode(): Promise<void> {
+  if (safeModeBusy.value) return
+  safeModeBusy.value = true
+  try {
+    await window.cairnCodex.restartInSafeMode()
+  } catch (error) {
+    reportTransferProblem(`Cairn could not restart in safe mode: ${readableError(error)}`)
+    safeModeBusy.value = false
+  }
+}
+
+async function restartNormally(): Promise<void> {
+  if (safeModeBusy.value) return
+  safeModeBusy.value = true
+  try {
+    await window.cairnCodex.restartNormally()
+  } catch (error) {
+    reportTransferProblem(`Cairn could not restart normally: ${readableError(error)}`)
+    safeModeBusy.value = false
+  }
+}
+
+function dismissSafeModeOffer(): void {
+  safeModeOfferOpen.value = false
+}
+
+function resetInterfacePreferences(): void {
+  const confirmed = window.confirm(
+    'Reset display and workspace preferences? Your Codex Archive, planner profiles, to-do list, saves, stashes, and backups will not be changed.'
+  )
+  if (!confirmed) return
+  const removed = resetUiPreferences(localStorage)
+  reportSuccess(`Reset ${removed} interface preferences. Reloading Cairn…`)
+  window.setTimeout(() => window.location.reload(), 250)
+}
+
+function trapSafeModeFocus(event: KeyboardEvent): void {
+  const dialog = safeModeDialog.value
+  if (!dialog) return
+  const candidates = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled])')]
+  if (!candidates.length) return
+  const first = candidates[0]!
+  const last = candidates[candidates.length - 1]!
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
   }
 }
 
@@ -3251,7 +3353,8 @@ function readStoredWorkspaceToolIds(): WorkspaceToolId[] {
 
 function workspaceToolVisible(id: WorkspaceToolId): boolean {
   const definition = workspaceToolDefinitions.find((tool) => tool.id === id)
-  return workspaceToolIdSet.value.has(id) && (!definition?.experimental || experimentalToolsEnabled.value)
+  return workspaceToolIdSet.value.has(id) &&
+    (!definition?.experimental || (experimentalToolsEnabled.value && !safeModeActive.value))
 }
 
 function workspaceToolSelected(id: WorkspaceToolId): boolean {
@@ -3259,6 +3362,7 @@ function workspaceToolSelected(id: WorkspaceToolId): boolean {
 }
 
 function setExperimentalToolsEnabled(enabled: boolean): void {
+  if (safeModeActive.value && enabled) return
   experimentalToolsEnabled.value = enabled
   localStorage.setItem('cairn-codex-experimental-tools', String(enabled))
   if (!enabled && (activeView.value === 'oracle' || activeView.value === 'dismantling')) {
@@ -3295,6 +3399,7 @@ function readStoredTrackerCollapsed(): boolean {
 }
 
 function setAutoLiveConnect(enabled: boolean): void {
+  if (safeModeActive.value && enabled) return
   autoLiveConnect.value = enabled
   localStorage.setItem('cairn-codex-auto-live-connect', String(enabled))
   if (enabled) {
@@ -4933,6 +5038,10 @@ function handleEscape(event: KeyboardEvent): void {
     return
   }
   if (event.key !== 'Escape') return
+  if (safeModeOfferOpen.value) {
+    dismissSafeModeOffer()
+    return
+  }
   if (onboardingOpen.value) {
     persistOnboarding('in-progress')
     onboardingOpen.value = false
@@ -5587,6 +5696,50 @@ function formatPercentile(value: number | null | undefined): string {
       </article>
     </aside>
 
+    <section v-if="safeModeActive" class="safe-mode-banner" role="status">
+      <div>
+        <p class="section-label">Safe mode</p>
+        <strong>Recovery startup is active.</strong>
+        <span>Experimental tools are hidden and automatic game connection is paused. Your Codex Archive has not been reset.</span>
+      </div>
+      <div class="safe-mode-actions">
+        <button type="button" @click="resetInterfacePreferences">Reset interface preferences</button>
+        <button type="button" :disabled="safeModeBusy" @click="restartNormally">
+          {{ safeModeBusy ? 'Restarting…' : 'Restart normally' }}
+        </button>
+      </div>
+    </section>
+
+    <div v-if="safeModeOfferOpen" class="safe-mode-offer-backdrop" @click.self="dismissSafeModeOffer">
+      <section
+        ref="safeModeDialog"
+        class="safe-mode-offer"
+        role="dialog"
+        tabindex="-1"
+        aria-modal="true"
+        aria-labelledby="safe-mode-offer-title"
+        aria-describedby="safe-mode-offer-description"
+        @keydown.tab="trapSafeModeFocus"
+      >
+        <p class="section-label">Startup recovery</p>
+        <h2 id="safe-mode-offer-title">Cairn has had trouble starting.</h2>
+        <p id="safe-mode-offer-description">
+          Cairn did not reach a healthy startup {{ failedStartupCount }} times in a row. Safe mode
+          keeps the archive intact while hiding experimental tools and pausing automatic game connection.
+        </p>
+        <div class="safe-mode-offer-note">
+          <strong>No collection data is deleted.</strong>
+          <span>You can also reset display preferences later without touching planner profiles, to-dos, saves, stashes, or backups.</span>
+        </div>
+        <div class="safe-mode-actions">
+          <button type="button" :disabled="safeModeBusy" @click="restartInSafeMode">
+            {{ safeModeBusy ? 'Restarting…' : 'Restart in safe mode' }}
+          </button>
+          <button type="button" class="secondary" :disabled="safeModeBusy" @click="dismissSafeModeOffer">Continue normally</button>
+        </div>
+      </section>
+    </div>
+
     <div v-if="onboardingOpen && !appInitializing" class="onboarding-backdrop">
       <section
         ref="onboardingDialog"
@@ -5799,6 +5952,15 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
     </div>
 
+    <WorkspaceErrorBoundary
+      :key="activeView"
+      :workspace="activeView"
+      :report="reportRendererFailure"
+      @return-home="returnToCollectionAfterFailure"
+      @restart-safe="restartInSafeMode"
+      @export-diagnostics="exportDiagnostics"
+    >
+    <FailureProbe v-if="simulateWorkspaceFailure" />
     <main>
       <section v-if="appInitializing || scanning || archiveRollHydrating" class="background-scan" aria-live="polite">
         <span class="scan-spinner" aria-hidden="true" />
@@ -7307,9 +7469,10 @@ function formatPercentile(value: number | null | undefined): string {
               <input
                 type="checkbox"
                 :checked="autoLiveConnect"
+                :disabled="safeModeActive"
                 @change="setAutoLiveConnect(($event.target as HTMLInputElement).checked)"
               />
-              <span><strong>Auto-connect</strong><small>Connect when Grim Dawn starts and disconnect when it exits.</small></span>
+              <span><strong>Auto-connect</strong><small>{{ safeModeActive ? 'Paused while recovery safe mode is active.' : 'Connect when Grim Dawn starts and disconnect when it exits.' }}</small></span>
             </label>
             <div class="settings-status">
               <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
@@ -7343,10 +7506,11 @@ function formatPercentile(value: number | null | undefined): string {
             <label class="settings-toggle experimental-tools-toggle">
               <input
                 type="checkbox"
-                :checked="experimentalToolsEnabled"
+                :checked="experimentalToolsEnabled && !safeModeActive"
+                :disabled="safeModeActive"
                 @change="setExperimentalToolsEnabled(($event.target as HTMLInputElement).checked)"
               />
-              <span><strong>Enable experimental tools</strong><small>Shows Stash Oracle and the read-only Dismantling Lab. Their recommendations and simulations are explicitly provisional.</small></span>
+              <span><strong>Enable experimental tools</strong><small>{{ safeModeActive ? 'Unavailable while recovery safe mode is active.' : 'Shows Stash Oracle and the read-only Dismantling Lab. Their recommendations and simulations are explicitly provisional.' }}</small></span>
             </label>
             <div class="workspace-tool-options">
               <label v-for="tool in workspaceToolDefinitions" :key="tool.id" class="settings-toggle compact">
@@ -7549,6 +7713,12 @@ function formatPercentile(value: number | null | undefined): string {
               {{ diagnosticsBusy ? 'Collecting diagnostics…' : 'Export redacted support bundle' }}
             </button>
             <button class="settings-action" type="button" @click="openDataDirectory">Open data and backups folder</button>
+            <div class="interface-recovery-actions">
+              <button class="settings-action" type="button" @click="resetInterfacePreferences">Reset interface preferences</button>
+              <button v-if="safeModeActive" class="settings-action" type="button" :disabled="safeModeBusy" @click="restartNormally">Restart normally</button>
+              <button v-else class="settings-action" type="button" :disabled="safeModeBusy" @click="restartInSafeMode">Restart in safe mode</button>
+            </div>
+            <small>Interface reset preserves the Codex Archive, planner profiles, to-do list, source selection, saves, stashes, and backups.</small>
             <small>Standard diagnostics retain at most 3 × 256 KB for 7 days. Debug mode retains at most 6 × 1 MB for 14 days. Preserve the data folder after an uncertain transfer, but never post saves or the archive database publicly.</small>
           </article>
         </div>
@@ -8188,6 +8358,7 @@ function formatPercentile(value: number | null | undefined): string {
         </nav>
       </template>
     </main>
+    </WorkspaceErrorBoundary>
 
     <Teleport to="body">
       <aside

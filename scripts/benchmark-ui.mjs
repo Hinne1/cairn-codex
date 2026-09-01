@@ -32,6 +32,10 @@ const onboardingStep = argument('--onboarding-step')
 const dismissOnboarding = process.argv.includes('--dismiss-onboarding')
 const transferSection = argument('--transfer-section')
 const verifyNavigation = process.argv.includes('--verify-navigation')
+const simulateWorkspaceError = process.argv.includes('--simulate-workspace-error')
+const safeMode = process.argv.includes('--safe-mode')
+const safeModeSuggested = process.argv.includes('--safe-mode-suggested')
+const disableGpu = process.argv.includes('--disable-gpu')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -105,6 +109,12 @@ const env = {
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
+  ...(simulateWorkspaceError ? { CAIRN_CODEX_SCREENSHOT_RENDER_ERROR: '1' } : {}),
+  ...(safeMode ? { CAIRN_CODEX_SCREENSHOT_SAFE_MODE: '1' } : {}),
+  ...(safeModeSuggested ? {
+    CAIRN_CODEX_SCREENSHOT_SAFE_MODE_SUGGESTED: '1',
+    CAIRN_CODEX_SCREENSHOT_FAILED_STARTS: '3'
+  } : {}),
   ...(miAffixFilter ? { CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER: miAffixFilter } : {}),
   ...(miNativeRestore ? { CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE: '1' } : {}),
   ...(hydrateAllModes ? { CAIRN_CODEX_SCREENSHOT_HYDRATE_ALL_MODES: '1' } : {}),
@@ -112,6 +122,7 @@ const env = {
   CAIRN_CODEX_PERF_REPORT_PATH: reportPath
 }
 const child = spawn(appPath, [
+  ...(disableGpu ? ['--disable-gpu', '--disable-gpu-sandbox', '--in-process-gpu'] : []),
   ...(electronSource ? ['.'] : []),
   `--user-data-dir=${profileRoot}`
 ], {

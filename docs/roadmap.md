@@ -68,7 +68,7 @@ queries, jobs, and persistence remain in those monoliths.
 | ARCH-04 | P1 | planned | Introduce a background-job contract. | Scan, roll hydration, import, backup, icon extraction, and map indexing report typed progress, support cancellation where safe, avoid duplicate jobs, and survive navigation. |
 | ARCH-05 | P1 | planned | Add a shared data-grid/list primitive. | Paging/virtualization, selection, empty/loading/error states, keyboard navigation, and stable record keys are tested once and reused by Transfers, MI Workshop, Planner, Skills, and histories. |
 | ARCH-06 | P2 | planned | Replace ad-hoc history state with typed routes. | Deep links and Back/Forward restore a workspace and serializable controls without storing large transient data or manually syncing native form restoration. |
-| ARCH-07 | P1 | planned | Add renderer error boundaries and safe mode. | A failed tool cannot blank the app; users can reopen with experimental tools disabled and reset UI preferences without touching the archive. |
+| ARCH-07 | P1 | done | Add renderer error boundaries and safe mode. | A failed tool cannot blank the app; users can reopen with experimental tools disabled and reset UI preferences without touching the archive. |
 | ARCH-08 | P2 | planned | Define the theme API. | Components consume semantic tokens only; no new tool adds literal palette values outside the theme layer. |
 
 ## Performance and reliability budgets

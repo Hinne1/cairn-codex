@@ -24,6 +24,7 @@ import {
   type SpecialItemRecoveryResult,
   type RetrievalResult,
   type RecoveryStatus,
+  type RendererErrorReport,
   type StagingTabInspection,
   type StartupPhaseEvent,
   type StartupStatus,
@@ -89,10 +90,16 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.setDebugLogging, { enabled }) as Promise<DebugLoggingStatus>,
   recordNavigation: (view) =>
     ipcRenderer.invoke(IPC_CHANNELS.recordNavigation, { view }) as Promise<void>,
+  reportRendererError: (report: RendererErrorReport) =>
+    ipcRenderer.invoke(IPC_CHANNELS.reportRendererError, report) as Promise<void>,
   getStartupStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getStartupStatus) as Promise<StartupStatus>,
   reportStartupPhase: (phase: StartupPhaseEvent) =>
     ipcRenderer.invoke(IPC_CHANNELS.reportStartupPhase, { phase }) as Promise<StartupStatus>,
+  restartInSafeMode: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.restartInSafeMode) as Promise<void>,
+  restartNormally: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.restartNormally) as Promise<void>,
   inspectWriteSafety: () =>
     ipcRenderer.invoke(IPC_CHANNELS.inspectWriteSafety) as Promise<WriteSafetyStatus>,
   inspectStagingTab: (path) =>

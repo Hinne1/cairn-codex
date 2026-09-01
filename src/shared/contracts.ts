@@ -25,8 +25,11 @@ export const IPC_CHANNELS = {
   getDebugLogging: 'settings:get-debug-logging',
   setDebugLogging: 'settings:set-debug-logging',
   recordNavigation: 'diagnostics:record-navigation',
+  reportRendererError: 'diagnostics:report-renderer-error',
   getStartupStatus: 'diagnostics:get-startup-status',
   reportStartupPhase: 'diagnostics:report-startup-phase',
+  restartInSafeMode: 'recovery:restart-in-safe-mode',
+  restartNormally: 'recovery:restart-normally',
   inspectWriteSafety: 'vault:inspect-write-safety',
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
@@ -52,6 +55,21 @@ export interface AppStatus {
   appVersion: string
   helper: 'not-configured' | 'available' | 'unavailable'
   mode: 'read-only'
+  safeMode: SafeModeStatus
+}
+
+export interface SafeModeStatus {
+  active: boolean
+  suggested: boolean
+  failedStarts: number
+  threshold: number
+}
+
+export interface RendererErrorReport {
+  correlationId: string
+  workspace: string
+  message: string
+  stack: string | null
 }
 
 export interface DiagnosticExportResult {
@@ -213,8 +231,11 @@ export interface CairnCodexApi {
   getDebugLogging: () => Promise<DebugLoggingStatus>
   setDebugLogging: (enabled: boolean) => Promise<DebugLoggingStatus>
   recordNavigation: (view: string) => Promise<void>
+  reportRendererError: (report: RendererErrorReport) => Promise<void>
   getStartupStatus: () => Promise<StartupStatus>
   reportStartupPhase: (phase: StartupPhaseEvent) => Promise<StartupStatus>
+  restartInSafeMode: () => Promise<void>
+  restartNormally: () => Promise<void>
   inspectWriteSafety: () => Promise<WriteSafetyStatus>
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>

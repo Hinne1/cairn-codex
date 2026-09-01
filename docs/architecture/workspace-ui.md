@@ -8,6 +8,9 @@ Presentation roles and the workspace migration audit are defined in `design-foun
 Shared UI consumes `semantic-tokens.css`; literal workspace palettes and workspace-specific
 control geometry are not part of this contract.
 
+Alternate palettes use the versioned resolver documented in `theme-extension.md`. Components
+must not branch on `data-theme`; they continue to consume the same semantic roles.
+
 ## Workspace shell
 
 Collection is the rich home dashboard. Its archive summary, refresh action, completion trackers,

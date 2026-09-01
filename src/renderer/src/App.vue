@@ -249,7 +249,6 @@ const safeModeDialog = ref<HTMLElement | null>(null)
 const simulateWorkspaceFailure = startupRecoveryParameters.get('simulateWorkspaceError') === '1'
 const preferenceRepository = createPreferenceRepository(localStorage)
 const initialPreferences = preferenceRepository.value
-document.documentElement.dataset.theme = initialPreferences.appearance.theme
 const initialOnboardingPreference = {
   ...initialPreferences.onboarding,
   shouldOpen: initialPreferences.onboarding.status === 'in-progress'

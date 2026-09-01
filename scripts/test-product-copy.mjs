@@ -24,6 +24,7 @@ const allowedLoreLines = new Set([
 const allowedProductNameLines = new Set([
   'src/renderer/index.html::<title>Cairn Codex</title>',
   'src/renderer/src/components/OnboardingDialog.vue::<h2 id="onboarding-title">Welcome to Cairn Codex</h2>',
+  "src/renderer/src/semantic-tokens.ts::name: 'Cairn Codex',",
   'src/main/collection-database.ts::`Archive schema ${version.user_version} is newer than this Cairn Codex build supports.`',
   "src/main/collection-database.ts::throw new Error('The selected file is not a Cairn Codex archive database.')",
   "src/main/index.ts::title: 'Export Cairn Codex preferences',",

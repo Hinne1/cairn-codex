@@ -27,7 +27,7 @@
     "test:safe-mode": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-safe-mode.mjs",
     "test:search": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-search-query.mjs",
     "test:set-semantics": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-set-semantics.mjs",
-    "test:theme-contract": "node ./scripts/test-theme-contract.mjs",
+    "test:theme-contract": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-theme-contract.mjs",
     "generate:app-icon": "node ./scripts/generate-app-icon.mjs",
     "test:app-icon": "node ./scripts/generate-app-icon.mjs --check",
     "test:bounded-results": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-bounded-results.mjs",

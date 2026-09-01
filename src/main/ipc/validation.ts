@@ -27,7 +27,7 @@ export function booleanField<TField extends string>(field: TField, message: stri
 
 export function validateBackgroundJobId(input: unknown): { id: string } {
   const value = objectInput(input, 'A valid background job ID is required.')
-  if (typeof value.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.id)) {
+  if (typeof value.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.id)) {
     throw new Error('A valid background job ID is required.')
   }
   return { id: value.id }
@@ -100,7 +100,7 @@ export function validateCollectionRequest(input: unknown): { sourcePaths: string
   const value = objectInput(input, 'Collection scan input is outside its safe bounds.')
   if (
     !Array.isArray(value.sourcePaths) || value.sourcePaths.length > 256 ||
-    !value.sourcePaths.every((path) => typeof path === 'string' && path.length > 0 && path.length <= 1024) ||
+    !value.sourcePaths.every((path) => typeof path === 'string' && path.length > 0 && path.length <= 32_767 && !path.includes('\0')) ||
     !['stashes', 'archive'].includes(value.basis as string)
   ) throw new Error('Collection scan input is outside its safe bounds.')
   return { sourcePaths: value.sourcePaths as string[], basis: value.basis as CollectionBasis }
@@ -109,7 +109,7 @@ export function validateCollectionRequest(input: unknown): { sourcePaths: string
 export function validateSourcePaths(input: unknown): { sourcePaths: string[] } {
   const value = objectInput(input, 'Collection source paths are outside their safe bounds.')
   if (!Array.isArray(value.sourcePaths) || value.sourcePaths.length > 256 ||
-      !value.sourcePaths.every((path) => typeof path === 'string' && path.length > 0 && path.length <= 1024)) {
+      !value.sourcePaths.every((path) => typeof path === 'string' && path.length > 0 && path.length <= 32_767 && !path.includes('\0'))) {
     throw new Error('Collection source paths are outside their safe bounds.')
   }
   return { sourcePaths: value.sourcePaths as string[] }
@@ -144,6 +144,12 @@ export function validateVaultPage(input: unknown): VaultPageRequest {
   if (value.rarity !== undefined && !['epic', 'legendary', 'mi', 'rare', 'faction', 'supply'].includes(value.rarity as string)) {
     throw new Error('The requested vault rarity is not supported.')
   }
+  if ((value.isHardcore !== undefined && typeof value.isHardcore !== 'boolean') ||
+      (value.catalogued !== undefined && typeof value.catalogued !== 'boolean') ||
+      (value.excludeSupplies !== undefined && typeof value.excludeSupplies !== 'boolean') ||
+      (value.query !== undefined && typeof value.query !== 'string')) {
+    throw new Error('Vault filters are outside their safe bounds.')
+  }
   if (!Number.isInteger(value.offset) || (value.offset as number) < 0 || (value.offset as number) > 10_000_000 ||
       !Number.isInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > 250 ||
       (typeof value.query === 'string' ? value.query.length : 0) > 200) {
@@ -156,6 +162,7 @@ export function validateOperationHistory(input: unknown): OperationHistoryReques
   const value = objectInput(input, 'Operation-history paging parameters are outside their safe bounds.')
   if (!['ingest', 'retrieve'].includes(value.operation as string)) throw new Error('A valid operation-history kind is required.')
   if (!['all', 'committed', 'failed', 'pending'].includes(value.outcome as string)) throw new Error('A valid operation-history outcome is required.')
+  if (value.query !== undefined && typeof value.query !== 'string') throw new Error('Operation-history query is outside its safe bounds.')
   if (!Number.isInteger(value.offset) || (value.offset as number) < 0 || (value.offset as number) > 10_000_000 ||
       !Number.isInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > 250 ||
       (typeof value.query === 'string' ? value.query.length : 0) > 200) {
@@ -166,7 +173,9 @@ export function validateOperationHistory(input: unknown): OperationHistoryReques
 
 export function validatePath(input: unknown): { path: string } {
   const value = objectInput(input, 'A valid stash path is required.')
-  if (typeof value.path !== 'string' || value.path.length < 1 || value.path.length > 1024) throw new Error('A valid stash path is required.')
+  if (typeof value.path !== 'string' || value.path.length < 1 || value.path.length > 32_767 || value.path.includes('\0')) {
+    throw new Error('A valid stash path is required.')
+  }
   return { path: value.path }
 }
 

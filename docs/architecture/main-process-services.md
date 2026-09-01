@@ -13,7 +13,8 @@ Each request belongs to exactly one main-process domain service.
 - `backups` owns archive backup inspection, creation, export, restore staging, and directory access.
 - `imports` owns Item Assistant progress, receipt lookup, and migration.
 - `collection` owns discovery, cached/scanned catalog presentation, roll hydration, pins, and supplies.
-- `transfers` owns archive queries, offline/live transfer, write safety, history, and recovery delivery.
+- `archive` owns vault queries, history, dismantling previews, and offline ingest/retrieval.
+- `liveTransfers` owns write-safety inspection, live adapter lifecycle, sync, retrieval, supplies, and recovery delivery.
 - `windowLifecycle` owns safe-mode restart, startup reporting, zoom, and application data access.
 
 Channel ownership is exclusive. A domain rejects registration of a channel that is not in its

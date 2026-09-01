@@ -1660,23 +1660,23 @@ function registerIpcHandlers(
     },
     booleanField('enabled', 'Infinite supplies must be enabled or disabled explicitly.')
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.inspectWriteSafety,
     (): Promise<WriteSafetyStatus> => helper.request<WriteSafetyStatus>('inspect-write-safety')
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.inspectStagingTab,
     (_event, input: { path: string }): Promise<StagingTabInspection> =>
       inspectStagingTab(helper, database, input.path),
     validatePath
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.listVaultItems,
     (_event, input?: { isHardcore?: boolean }): VaultListItem[] =>
       database.listVaultItems(input?.isHardcore),
     validateOptionalMode
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.queryVaultItems,
     (_event, input: VaultPageRequest): VaultItemPage => {
       if (!input || !['ingested', 'retrieval_pending', 'retrieved'].includes(input.state)) {
@@ -1705,7 +1705,7 @@ function registerIpcHandlers(
     },
     validateVaultPage
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.queryOperationHistory,
     (_event, input: OperationHistoryRequest): OperationHistoryPage => {
       if (!input || !['ingest', 'retrieve'].includes(input.operation)) {
@@ -1725,7 +1725,7 @@ function registerIpcHandlers(
     },
     validateOperationHistory
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.getVaultSummary,
     (): VaultSummary => {
       const summary = database.getVaultSummary()
@@ -1738,7 +1738,7 @@ function registerIpcHandlers(
       return summary
     }
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.previewDismantling,
     async (_event, input: { vaultItemIds: string[] }): Promise<DismantlingPreview> => {
       const requestedIds = input.vaultItemIds ?? []
@@ -1768,7 +1768,7 @@ function registerIpcHandlers(
     },
     validateVaultIds
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.ingestStagingTab,
     async (_event, input: { path: string }): Promise<IngestResult> => {
       const result = await runDiagnosticOperation(
@@ -1783,7 +1783,7 @@ function registerIpcHandlers(
     },
     validatePath
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.archive.handle(
     IPC_CHANNELS.retrieveVaultItems,
     async (_event, input: { path: string; vaultItemIds: string[] }): Promise<RetrievalResult> => {
       const result = await runDiagnosticOperation(
@@ -1798,7 +1798,7 @@ function registerIpcHandlers(
     },
     validatePathAndVaultIds
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.inspectLiveGame,
     async (): Promise<LiveGameStatus> => {
       const status = await helper.request<LiveGameStatus>('inspect-live-game')
@@ -1813,11 +1813,11 @@ function registerIpcHandlers(
       }
     }
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.approveLiveGameBuild,
     (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('approve-live-game-build')
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.startLiveGame,
     (): Promise<LiveGameStatus> => {
       if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) {
@@ -1826,11 +1826,11 @@ function registerIpcHandlers(
       return helper.request<LiveGameStatus>('start-live-game')
     }
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.stopLiveGame,
     (): Promise<LiveGameStatus> => helper.request<LiveGameStatus>('stop-live-game')
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.syncLiveGame,
     async (): Promise<LiveGameSyncResult> => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
@@ -1846,7 +1846,7 @@ function registerIpcHandlers(
       return result
     }
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.retrieveLiveVaultItems,
     async (_event, input: { vaultItemIds: string[] }): Promise<LiveRetrievalResult> => {
       const result = await runDiagnosticOperation(
@@ -1861,7 +1861,7 @@ function registerIpcHandlers(
     },
     validateVaultIds
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.dispenseLiveAugments,
     (_event, input: { records: string[]; expectedCharacterName?: string }): Promise<LiveSupplyDispenseResult> =>
       runDiagnosticOperation('transfer', 'supply-dispense', () => runTransferExclusive(async () => {
@@ -1879,7 +1879,7 @@ function registerIpcHandlers(
       }), { requestedItems: input.records.length }, (completed) => ({ deliveredItems: completed.dispensed.length })),
     validateSupplyDispense
   )
-  ipcDomains.transfers.handle(
+  ipcDomains.liveTransfers.handle(
     IPC_CHANNELS.recoverSahdinasMemento,
     (_event, input: { destination: SpecialRecoveryDestination; expectedCharacterName?: string }): Promise<SpecialItemRecoveryResult> =>
       runDiagnosticOperation('transfer', 'special-item-recovery', () => runTransferExclusive(async () => {

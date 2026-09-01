@@ -26,12 +26,15 @@ export const MAIN_IPC_CHANNELS = {
     IPC_CHANNELS.setPinnedBest, IPC_CHANNELS.getInfiniteSupplies,
     IPC_CHANNELS.setInfiniteSupplies
   ],
-  transfers: [
-    IPC_CHANNELS.inspectWriteSafety, IPC_CHANNELS.inspectStagingTab,
+  archive: [
+    IPC_CHANNELS.inspectStagingTab,
     IPC_CHANNELS.listVaultItems, IPC_CHANNELS.queryVaultItems,
     IPC_CHANNELS.queryOperationHistory, IPC_CHANNELS.getVaultSummary,
     IPC_CHANNELS.previewDismantling, IPC_CHANNELS.ingestStagingTab,
-    IPC_CHANNELS.retrieveVaultItems, IPC_CHANNELS.inspectLiveGame,
+    IPC_CHANNELS.retrieveVaultItems
+  ],
+  liveTransfers: [
+    IPC_CHANNELS.inspectWriteSafety, IPC_CHANNELS.inspectLiveGame,
     IPC_CHANNELS.approveLiveGameBuild, IPC_CHANNELS.startLiveGame,
     IPC_CHANNELS.stopLiveGame, IPC_CHANNELS.syncLiveGame,
     IPC_CHANNELS.retrieveLiveVaultItems, IPC_CHANNELS.dispenseLiveAugments,
@@ -52,7 +55,8 @@ export interface MainIpcDomains {
   backups: IpcDomainService
   imports: IpcDomainService
   collection: IpcDomainService
-  transfers: IpcDomainService
+  archive: IpcDomainService
+  liveTransfers: IpcDomainService
   windowLifecycle: IpcDomainService
 }
 
@@ -79,7 +83,8 @@ export function createMainIpcDomains(registrar: IpcRegistrar): MainIpcDomains {
     backups: new IpcDomainService('backups', scopedRegistrar(registrar, 'backups')),
     imports: new IpcDomainService('imports', scopedRegistrar(registrar, 'imports')),
     collection: new IpcDomainService('collection', scopedRegistrar(registrar, 'collection')),
-    transfers: new IpcDomainService('transfers', scopedRegistrar(registrar, 'transfers')),
+    archive: new IpcDomainService('archive', scopedRegistrar(registrar, 'archive')),
+    liveTransfers: new IpcDomainService('live-transfers', scopedRegistrar(registrar, 'liveTransfers')),
     windowLifecycle: new IpcDomainService('window-lifecycle', scopedRegistrar(registrar, 'windowLifecycle'))
   }
 }

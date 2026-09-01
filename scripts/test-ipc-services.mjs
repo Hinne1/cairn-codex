@@ -36,6 +36,9 @@ const registrar = {
 const domains = createMainIpcDomains(registrar)
 const ownedChannels = Object.values(MAIN_IPC_CHANNELS).flat()
 assert.equal(new Set(ownedChannels).size, ownedChannels.length, 'domain channel ownership must be unique')
+const eventOnlyChannels = new Set([IPC_CHANNELS.backgroundJobChanged, IPC_CHANNELS.gdiaImportProgress])
+const requestChannels = Object.values(IPC_CHANNELS).filter((channel) => !eventOnlyChannels.has(channel))
+assert.deepEqual([...ownedChannels].sort(), [...requestChannels].sort(), 'every request contract needs one domain owner')
 
 let serviceCalls = 0
 domains.diagnostics.handle(
@@ -86,6 +89,10 @@ await assert.rejects(
 assert.throws(
   () => validateVaultPage({ state: 'ingested', sort: 'recent', direction: 'desc', offset: 0, limit: 251 }),
   /outside their safe bounds/
+)
+assert.throws(
+  () => validateVaultPage({ state: 'ingested', sort: 'recent', direction: 'desc', offset: 0, limit: 50, query: 42 }),
+  /filters are outside their safe bounds/
 )
 
 const queue = new SerializedServiceQueue()

@@ -98,6 +98,11 @@ semantics are verified. It must not become a guessed loot generator.
 
 ### Data questions to resolve
 
+The installed-data findings and remaining executable/live gates are recorded in
+[`dismantling-research.md`](dismantling-research.md). The probability preview is
+now table-accurate for the inspected data, but exact outcomes and mutation are
+not reproducible from archive item data alone.
+
 - Locate the Inventor dismantling tables, eligibility rules, material pools, quantities, weights,
   level scaling, and expansion overrides in the installed ARZ/database records.
 - Determine whether the game rolls results from item level, rarity, affixes, seed, or a global

@@ -50,6 +50,18 @@ try {
   const write = await request('self-test-write-transaction')
   if (!write.passed) throw new Error('Verified write transaction self-test failed.')
 
+  const dismantling = await request('self-test-dismantling')
+  if (
+    !dismantling.passed ||
+    dismantling.assertions < 11 ||
+    !dismantling.levelLimitsPassed ||
+    !dismantling.bellSlopePassed ||
+    !dismantling.noDropPassed ||
+    !dismantling.failClosedPassed
+  ) {
+    throw new Error('Dismantling probability-model self-test failed.')
+  }
+
   const live = await request('self-test-live-queue')
   if (
     !live.passed ||
@@ -66,7 +78,7 @@ try {
     throw new Error('Native adapter fingerprints were not reported correctly.')
   }
 
-  console.log(JSON.stringify({ health, write, live }, null, 2))
+  console.log(JSON.stringify({ health, write, dismantling, live }, null, 2))
 } finally {
   child.stdin.end()
   lines.close()

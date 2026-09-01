@@ -4,6 +4,10 @@ Thank you for helping improve Cairn Codex. This project handles real Grim Dawn
 items and save-adjacent files, so correctness and recoverability matter more than
 speed of delivery.
 
+Coding agents and contributors using agentic tools must also read `AGENTS.md`
+before editing. GitHub issues are the canonical work queue; claim an issue before
+starting so parallel work does not overlap.
+
 ## Before opening an issue
 
 - Search existing issues and the in-app to-do list.

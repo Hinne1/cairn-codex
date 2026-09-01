@@ -1,12 +1,13 @@
 # Cairn Codex product and architecture roadmap
 
-This is the canonical backlog for work that crosses individual bug fixes. It separates
-external-tester gates from later product polish so that attractive redesigns cannot obscure
-data-safety or scale risks.
+This document explains the product direction and architecture themes that cross individual
+fixes. The live, assignable backlog is maintained in
+[GitHub issues](https://github.com/Hinne1/cairn-codex/issues); issue labels and milestones are
+the source of truth for status, ownership, and dependencies.
 
-Status values are **done**, **in progress**, **planned**, and **research**. Priority **P0** is
-required before handing a build to a new external tester; **P1** is beta-quality work; **P2**
-is longer-term architecture or product expansion.
+The IDs below remain stable planning references while the corresponding GitHub issues carry
+their current state. Priority **P0** is required before handing a build to a new external
+tester; **P1** is beta-quality work; **P2** is longer-term architecture or product expansion.
 
 ## External tester gates
 

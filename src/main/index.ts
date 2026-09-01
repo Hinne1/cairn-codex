@@ -5232,7 +5232,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               await new Promise((resolve) => setTimeout(resolve, 100))
               document.querySelector('.onboarding-skip')?.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              const destination = [...document.querySelectorAll('.workspace-tabs button, .category-tabs button, .system-nav button')]
+              const destination = [...document.querySelectorAll('.workspace-tabs button, .workspace-switcher button, .category-tabs button, .system-nav button')]
                 .find((button) =>
                   (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
               destination?.click()
@@ -5244,6 +5244,62 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           interactionTimings.categoryMs = categoryResult.elapsedMs
         }
         const plannerDisplay = process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SWITCHER === '1') {
+          interactionTimings.workspaceSwitcherMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const switcher = document.querySelector('.workspace-switcher')
+              const rail = switcher?.querySelector('.workspace-tool-rail')
+              const home = switcher?.querySelector('.workspace-home')
+              const active = rail?.querySelector('[aria-current="page"]')
+              const customize = switcher?.querySelector('.workspace-customize')
+              if (!switcher || !rail || !home || !active || !customize) {
+                throw new Error('The focused workspace switcher did not render all required controls.')
+              }
+              const switcherRect = switcher.getBoundingClientRect()
+              const railRect = rail.getBoundingClientRect()
+              const activeRect = active.getBoundingClientRect()
+              for (const control of [home, active, customize]) {
+                control.focus()
+                if (document.activeElement !== control) throw new Error('A workspace switcher control could not receive keyboard focus.')
+              }
+              if (
+                switcherRect.left < 0 || switcherRect.right > window.innerWidth ||
+                railRect.left < switcherRect.left || railRect.right > switcherRect.right ||
+                activeRect.left < railRect.left - 1 || activeRect.right > railRect.right + 1 ||
+                document.documentElement.scrollWidth > window.innerWidth + 1
+              ) {
+                throw new Error('The focused workspace switcher is clipped or causing page-level overflow.')
+              }
+              const activeLabel = active.textContent?.trim()
+              customize.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const activeSetting = [...document.querySelectorAll('.tool-settings-options label')]
+                .find((label) => label.querySelector('strong')?.textContent?.trim().startsWith(activeLabel))
+                ?.querySelector('input')
+              if (!(activeSetting instanceof HTMLInputElement) || !activeSetting.checked) {
+                throw new Error('The active specialist was not represented in tool customization.')
+              }
+              activeSetting.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              if (!document.querySelector('.hero') || document.querySelector('.workspace-switcher')) {
+                throw new Error('Hiding the active specialist did not return to the Collection dashboard.')
+              }
+              activeSetting.click()
+              document.querySelector('.tool-settings-done')?.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const restoredDestination = [...document.querySelectorAll('.workspace-tabs button')]
+                .find((button) => button.querySelector('span')?.textContent?.trim() === activeLabel)
+              restoredDestination?.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              if (document.querySelector('.workspace-tool-rail [aria-current="page"]')?.textContent?.trim() !== activeLabel) {
+                throw new Error('The restored specialist did not reopen in the focused shell.')
+              }
+              return performance.now() - started
+            })()
+          `)
+        }
         if (plannerDisplay) {
           const plannerDisplayLabel = ({ table: 'Table', cards: 'Cards', map: 'MI sources' } as Record<string, string>)[plannerDisplay] ?? ''
           await window.webContents.executeJavaScript(`
@@ -5636,10 +5692,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const started = performance.now()
               const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
                 .find((button) => button.textContent?.trim() === label)
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button')]
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
                 .find((button) => button.querySelector('span')?.textContent?.trim() === label)
               const currentSystemView = () => document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim()
-              const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim()
+              const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
+                document.querySelector('.workspace-tool-rail button[aria-current="page"]')?.textContent?.trim()
               const assertSettings = () => {
                 if (currentSystemView() !== 'Settings' || !document.querySelector('.settings-workspace')) {
                   throw new Error('Settings destination and content were not restored together.')
@@ -5818,6 +5875,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           scrollY: window.scrollY,
           scrollTargetFound: Boolean(document.querySelector(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET ?? 'body')})),
           activeWorkspace: document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
+            document.querySelector('.workspace-tool-rail button[aria-current="page"]')?.textContent?.trim() ??
             document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim(),
           documentWidth: document.documentElement.scrollWidth,
           horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,

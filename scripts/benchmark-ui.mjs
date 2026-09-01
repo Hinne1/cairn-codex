@@ -42,6 +42,7 @@ const onboardingStep = argument('--onboarding-step')
 const dismissOnboarding = process.argv.includes('--dismiss-onboarding')
 const transferSection = argument('--transfer-section')
 const verifyNavigation = process.argv.includes('--verify-navigation')
+const verifyWorkspaceSwitcher = process.argv.includes('--verify-workspace-switcher')
 const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
 const verifyPlannerActions = process.argv.includes('--verify-planner-actions')
@@ -132,6 +133,7 @@ const env = {
   ...(plannerDisplay ? { CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY: plannerDisplay } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
+  ...(verifyWorkspaceSwitcher ? { CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SWITCHER: '1' } : {}),
   ...(openPlannerSetup ? { CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP: '1' } : {}),
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
   ...(verifyPlannerActions ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS: '1' } : {}),
@@ -283,6 +285,7 @@ console.log(JSON.stringify({
   openSearchHelp,
   enableAllTools,
   verifyNavigation,
+  verifyWorkspaceSwitcher,
   openPlannerSetup,
   verifyPlannerNavigation,
   verifyPlannerActions,

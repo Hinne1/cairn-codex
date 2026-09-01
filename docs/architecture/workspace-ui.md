@@ -8,6 +8,20 @@ Presentation roles and the workspace migration audit are defined in `design-foun
 Shared UI consumes `semantic-tokens.css`; literal workspace palettes and workspace-specific
 control geometry are not part of this contract.
 
+## Workspace shell
+
+Collection is the rich home dashboard. Its archive summary, refresh action, completion trackers,
+collection-basis controls, and full customizable tool launcher render only on Collection itself.
+They must not be repeated above a specialist tool.
+
+Specialist tools use `src/renderer/src/components/WorkspaceSwitcher.vue` immediately below the
+persistent system navigation. The switcher keeps Collection and tool customization fixed while
+the visible tool destinations occupy one bounded horizontal rail. The active destination uses
+`aria-current="page"` and scrolls into view when the route changes. Hiding the currently open
+tool returns to Collection; hidden and disabled experimental tools do not remain reachable from
+the rail. Transfers and Settings remain focused system workspaces and do not render either
+Collection launcher.
+
 ## Semantic foundation
 
 - Use application-layer tokens for canvas, surfaces, overlays, borders, text, focus, controls,
@@ -135,12 +149,13 @@ piece being discovered. Surfaces must name those qualifications explicitly.
 
 ## Adding a workspace
 
-1. Use `ToolHeader` for the workspace heading.
-2. Use `ExplorerToolbar` if the result set is searchable or filterable.
-3. Keep query, filters, sorting, and result count reactive from the same source of truth.
-4. Route item hover/focus through the global tooltip pipeline.
-5. Use `BoundedResultSurface` for a result set that can exceed one bounded page.
-6. Add an isolated screenshot interaction for any new control shape.
-7. Verify keyboard focus, narrow layouts, empty results, and restored history state.
-8. Declare the workspace once in `src/shared/search-schema.ts`; parser options, Search tips, and
+1. Register the route in the shared Collection launcher and focused workspace switcher.
+2. Use `ToolHeader` for the workspace heading.
+3. Use `ExplorerToolbar` if the result set is searchable or filterable.
+4. Keep query, filters, sorting, and result count reactive from the same source of truth.
+5. Route item hover/focus through the global tooltip pipeline.
+6. Use `BoundedResultSurface` for a result set that can exceed one bounded page.
+7. Add an isolated screenshot interaction for any new control shape.
+8. Verify keyboard focus, narrow layouts, empty results, and restored history state.
+9. Declare the workspace once in `src/shared/search-schema.ts`; parser options, Search tips, and
    Advanced search controls must consume that same definition.

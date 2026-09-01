@@ -7,6 +7,7 @@ import ItemAssistantImport from './components/ItemAssistantImport.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
 import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
+import WorkspaceSwitcher from './components/WorkspaceSwitcher.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import { createNotificationService, type AppNotification } from './notification-service'
 import {
@@ -348,6 +349,9 @@ const activeCategory = ref('All')
 const activeView = ref<ActiveView>('collection')
 const collectionSystemDestinationActive = computed(() =>
   activeView.value !== 'vault' && activeView.value !== 'settings'
+)
+const specialistWorkspaceActive = computed(() =>
+  activeView.value !== 'collection' && activeView.value !== 'vault' && activeView.value !== 'settings'
 )
 const query = ref('')
 const searchQuery = ref('')
@@ -808,6 +812,11 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
 })
 const visibleSupplyVaultItems = computed(() => supplyVaultItems.value.slice(0, supplyVisibleCount.value))
 const workspaceToolIdSet = computed(() => new Set(visibleWorkspaceToolIds.value))
+const visibleWorkspaceTools = computed(() =>
+  workspaceToolDefinitions
+    .filter((tool) => workspaceToolVisible(tool.id))
+    .map(({ id, label }) => ({ id, label }))
+)
 const quarantinedVaultItems = computed(() => quarantineVaultPage.value.items)
 const visibleQuarantinedVaultItems = computed(() => quarantinedVaultItems.value)
 const activeHistoryKind = computed(() =>
@@ -3251,6 +3260,19 @@ function setWorkspaceToolVisible(id: WorkspaceToolId, visible: boolean): void {
   visibleWorkspaceToolIds.value = visible
     ? [...new Set([...visibleWorkspaceToolIds.value, id])]
     : visibleWorkspaceToolIds.value.filter((candidate) => candidate !== id)
+  if (!visible && activeView.value === id) returnToCollection()
+}
+
+function openWorkspaceTool(id: string): void {
+  if (!workspaceToolDefinitions.some((tool) => tool.id === id && workspaceToolVisible(tool.id))) return
+  if (id === 'materials') openMaterials()
+  else if (id === 'oracle') openStashOracle()
+  else if (id === 'supplies') void openSupplies()
+  else if (id === 'trivia') openTrivia()
+  else if (id === 'todo') openTodos()
+  else if (id === 'sets' || id === 'skills' || id === 'planner' || id === 'mi-workshop' || id === 'farming' || id === 'dismantling') {
+    activeView.value = id
+  }
 }
 
 function showEssentialWorkspaceTools(): void {
@@ -5793,7 +5815,7 @@ function formatPercentile(value: number | null | undefined): string {
           @click="cancelActiveBackgroundJob"
         >Cancel safely</button>
       </section>
-      <section v-if="activeView !== 'vault' && activeView !== 'settings'" class="hero">
+      <section v-if="activeView === 'collection'" class="hero">
         <div>
           <p class="section-label">{{ collectionBasisLabel }}</p>
           <h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>
@@ -5815,7 +5837,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
       </section>
 
-      <section v-if="snapshot && activeView !== 'vault' && activeView !== 'settings'" class="completion-tracker" aria-label="Collection completion">
+      <section v-if="snapshot && activeView === 'collection'" class="completion-tracker" aria-label="Collection completion">
         <header>
           <div><p class="section-label">Collection progress</p><strong>{{ allItemSummary.collected }} / {{ allItemSummary.total }} tracked entries</strong></div>
           <button type="button" :aria-expanded="!trackerCollapsed" @click="toggleTracker">{{ trackerCollapsed ? 'Show trackers' : 'Hide trackers' }}</button>
@@ -5823,7 +5845,7 @@ function formatPercentile(value: number | null | undefined): string {
         <div v-if="!trackerCollapsed" class="metrics">
         <button
           type="button"
-          :aria-pressed="activeView === 'collection' && rarityFilter === 'all'"
+          :aria-pressed="rarityFilter === 'all'"
           @click="filterToAllRarities"
         >
           <div class="metric-heading">
@@ -5838,7 +5860,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'collection' && rarityFilter === 'legendary'"
+          :aria-pressed="rarityFilter === 'legendary'"
           @click="filterToRarity('legendary')"
         >
           <div class="metric-heading">
@@ -5854,7 +5876,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'collection' && rarityFilter === 'epic'"
+          :aria-pressed="rarityFilter === 'epic'"
           @click="filterToRarity('epic')"
         >
           <div class="metric-heading">
@@ -5869,7 +5891,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'collection' && rarityFilter === 'mi'"
+          :aria-pressed="rarityFilter === 'mi'"
           @click="filterToRarity('mi')"
         >
           <div class="metric-heading">
@@ -5884,7 +5906,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'mi-workshop'"
+          aria-pressed="false"
           @click="openAffixWorkshop"
         >
           <div class="metric-heading">
@@ -5899,7 +5921,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'sets'"
+          aria-pressed="false"
           @click="openSets"
         >
           <div class="metric-heading">
@@ -5920,7 +5942,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'materials' && materialCategory === 'component'"
+          aria-pressed="false"
           @click="openMaterials('component')"
         >
           <div class="metric-heading">
@@ -5932,7 +5954,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'materials' && materialCategory !== 'component'"
+          aria-pressed="false"
           @click="openMaterials('all')"
         >
           <div class="metric-heading">
@@ -5956,7 +5978,7 @@ function formatPercentile(value: number | null | undefined): string {
         </button>
         <button
           type="button"
-          :aria-pressed="activeView === 'collection' && rarityFilter === 'recipe'"
+          :aria-pressed="rarityFilter === 'recipe'"
           @click="filterToRecipes"
         >
           <div class="metric-heading">
@@ -5969,7 +5991,7 @@ function formatPercentile(value: number | null | undefined): string {
         </div>
       </section>
 
-      <section v-if="showLegacyScanner && activeView !== 'vault' && activeView !== 'settings'" class="collection-basis" aria-label="Collection persistence">
+      <section v-if="showLegacyScanner && activeView === 'collection'" class="collection-basis" aria-label="Collection persistence">
         <button
           type="button"
           :class="{ active: collectionBasis === 'archive' }"
@@ -5989,39 +6011,39 @@ function formatPercentile(value: number | null | undefined): string {
           <small>A live inventory of physical copies currently present in the selected Grim Dawn stash files.</small>
         </button>
       </section>
-      <header v-if="snapshot && activeView !== 'vault' && activeView !== 'settings'" class="workspace-launcher-heading">
+      <header v-if="snapshot && activeView === 'collection'" class="workspace-launcher-heading">
         <div><p class="section-label">Tools</p><small>Keep this workspace as focused—or as gloriously cluttered—as you like.</small></div>
         <button type="button" @click="toolSettingsOpen = true">Customize tools</button>
       </header>
-      <nav v-if="snapshot && activeView !== 'vault' && activeView !== 'settings'" class="workspace-tabs" aria-label="Cairn Codex workspace">
-        <button type="button" :class="{ active: activeView === 'collection' }" @click="activeView = 'collection'">
+      <nav v-if="snapshot && activeView === 'collection'" class="workspace-tabs" aria-label="Cairn Codex workspace">
+        <button type="button" class="active" aria-current="page" @click="activeView = 'collection'">
           <span>Collection</span><small>Items and copies</small>
         </button>
-        <button v-if="workspaceToolVisible('sets')" type="button" :class="{ active: activeView === 'sets' }" @click="activeView = 'sets'">
+        <button v-if="workspaceToolVisible('sets')" type="button" @click="activeView = 'sets'">
           <span>Sets</span><small>{{ setSummary.collected }} / {{ setSummary.total }} complete</small>
         </button>
-        <button v-if="workspaceToolVisible('materials')" type="button" :class="{ active: activeView === 'materials' }" @click="openMaterials()">
+        <button v-if="workspaceToolVisible('materials')" type="button" @click="openMaterials()">
           <span>Components & Consumables</span><small>{{ componentSummary.collected + consumableSummary.collected }} discovered</small>
         </button>
-        <button v-if="workspaceToolVisible('skills')" type="button" :class="{ active: activeView === 'skills' }" @click="activeView = 'skills'">
+        <button v-if="workspaceToolVisible('skills')" type="button" @click="activeView = 'skills'">
           <span>Skill Explorer</span><small>Browse item skill modifiers</small>
         </button>
-        <button v-if="workspaceToolVisible('oracle')" type="button" :class="{ active: activeView === 'oracle' }" @click="openStashOracle">
+        <button v-if="workspaceToolVisible('oracle')" type="button" @click="openStashOracle">
           <span>Stash Oracle</span><small>Build ideas from your archive</small>
         </button>
-        <button v-if="workspaceToolVisible('planner')" type="button" :class="{ active: activeView === 'planner' }" @click="activeView = 'planner'">
+        <button v-if="workspaceToolVisible('planner')" type="button" @click="activeView = 'planner'">
           <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · Lv{{ plannerMinimumLevel }}–{{ plannerLevelCap }}</small>
         </button>
-        <button v-if="workspaceToolVisible('mi-workshop')" type="button" :class="{ active: activeView === 'mi-workshop' }" @click="activeView = 'mi-workshop'">
+        <button v-if="workspaceToolVisible('mi-workshop')" type="button" @click="activeView = 'mi-workshop'">
           <span>MI Workshop</span><small>Compare bases, affixes, and rolls</small>
         </button>
-        <button v-if="workspaceToolVisible('supplies')" type="button" :class="{ active: activeView === 'supplies' }" @click="openSupplies">
+        <button v-if="workspaceToolVisible('supplies')" type="button" @click="openSupplies">
           <span>Supplies</span><small>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</small>
         </button>
-        <button v-if="workspaceToolVisible('farming')" type="button" :class="{ active: activeView === 'farming' }" @click="activeView = 'farming'">
+        <button v-if="workspaceToolVisible('farming')" type="button" @click="activeView = 'farming'">
           <span>Collection Farming</span><small>Ranked drop-source routes</small>
         </button>
-        <button v-if="workspaceToolVisible('dismantling')" type="button" :class="{ active: activeView === 'dismantling' }" @click="activeView = 'dismantling'">
+        <button v-if="workspaceToolVisible('dismantling')" type="button" @click="activeView = 'dismantling'">
           <span>Dismantling Lab</span><small>Read-only Inventor simulator</small>
         </button>
         <button v-if="workspaceToolVisible('trivia')" type="button" :aria-expanded="triviaOpen" @click="openTrivia">
@@ -6031,6 +6053,15 @@ function formatPercentile(value: number | null | undefined): string {
           <span>To-do</span><small>{{ remainingTodoCount }} remaining</small>
         </button>
       </nav>
+
+      <WorkspaceSwitcher
+        v-if="snapshot && specialistWorkspaceActive"
+        :active-id="activeView"
+        :tools="visibleWorkspaceTools"
+        @home="returnToCollection"
+        @select="openWorkspaceTool"
+        @customize="toolSettingsOpen = true"
+      />
 
       <nav v-if="snapshot && activeView === 'collection'" class="category-tabs" aria-label="Item categories">
         <button

@@ -172,6 +172,13 @@ search-document, icon, content-pack label, tooltip, and item-drawer adapters. Re
 replaces the complete control snapshot, while user query or rarity edits reset paging inside the
 workspace. This is the reference seam for later incremental route extraction while #17 remains open.
 
+Stash Oracle follows the same seam. `StashOracleWorkspace.vue` owns archetype generation, search,
+class/style/readiness/level filters, sorting, paging, and result cards; `stash-oracle.ts` owns the
+pure filtered-and-sorted view projection plus immutable control mutations. `App.vue` retains only
+the typed route-control snapshot, preference persistence, planner navigation, and adapters for the
+global tooltip and item drawer. A restored route preserves its requested page, while user edits to
+search or filters reset the workspace to page one.
+
 ## Semantic badges and Grim Dawn rarity
 
 Compact state labels use `src/renderer/src/components/SemanticBadge.vue` and the variables in

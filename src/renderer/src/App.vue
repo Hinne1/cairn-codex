@@ -11,6 +11,8 @@ import WorkspaceSwitcher from './components/WorkspaceSwitcher.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
 import type { CollectionFarmingControls } from './workspaces/collection-farming'
+import StashOracleWorkspace from './workspaces/StashOracleWorkspace.vue'
+import type { StashOracleControls } from './workspaces/stash-oracle'
 import { createNotificationService, type AppNotification } from './notification-service'
 import {
   resetUiPreferences,
@@ -36,7 +38,6 @@ import {
   type MiAffixFilter,
   type MiMetricKey,
   type MiSortMode,
-  type OracleSortMode,
   type OwnershipFilter,
   type PlannerDisplay,
   type PlannerMapScope,
@@ -83,11 +84,7 @@ import {
   type OnboardingStatus
 } from './onboarding'
 import ToolHeader from './components/ToolHeader.vue'
-import {
-  buildStashOracle,
-  type OracleReadiness,
-  type OracleStyle
-} from './stash-oracle'
+import type { OracleCandidate } from './stash-oracle'
 import {
   isAvailableViaAwakening,
   isCollectionOwned,
@@ -351,15 +348,17 @@ const plannerSortDirection = ref<SortDirection>('asc')
 const plannerIgnoredRecords = ref<string[]>([...initialPreferences.planner.ignoredRecords])
 const plannerFavoriteRecords = ref<string[]>([...initialPreferences.planner.favoriteRecords])
 const plannerShowIgnored = ref(false)
-const oracleClass = ref(initialPreferences.search.oracleClass)
-const oracleStyle = ref<OracleStyle>(initialPreferences.search.oracleStyle)
-const oracleReadiness = ref<'all' | OracleReadiness>('all')
-const oracleMinimumLevel = ref(initialPreferences.search.oracleMinimumLevel)
-const oracleMaximumLevel = ref(initialPreferences.search.oracleMaximumLevel)
-const oracleQuery = ref('')
-const oracleSortMode = ref<OracleSortMode>('score')
-const oracleSortDirection = ref<SortDirection>('desc')
-const oraclePage = ref(1)
+const oracleControls = ref<StashOracleControls>({
+  query: '',
+  characterClass: initialPreferences.search.oracleClass,
+  style: initialPreferences.search.oracleStyle,
+  readiness: 'all',
+  minimumLevel: initialPreferences.search.oracleMinimumLevel,
+  maximumLevel: initialPreferences.search.oracleMaximumLevel,
+  sort: 'score',
+  direction: 'desc',
+  page: 1
+})
 const discoveredCharacters = ref<CharacterSaveProfile[]>([])
 const characterImportLoading = ref(false)
 const characterImportError = ref<string | null>(null)
@@ -502,7 +501,6 @@ const collectionSearchQuery = computed(() => compileSearchQuery(
 ))
 const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, searchQueryOptions(searchSchemas.sets)))
 const skillItemsSearchQuery = computed(() => compileSearchQuery(skillItemQuery.value, searchQueryOptions(searchSchemas.skillItems)))
-const oracleStructuredQuery = computed(() => compileSearchQuery(oracleQuery.value, searchQueryOptions(searchSchemas.oracle)))
 const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
 const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
 const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, searchQueryOptions(searchSchemas.miWorkshop)))
@@ -1347,73 +1345,6 @@ const skillNames = computed(() => {
   return [...names].sort((left, right) => left.localeCompare(right))
 })
 
-const allOracleCandidates = computed(() => buildStashOracle(
-  plannerCatalogItems.value,
-  isArchivedItem,
-  {
-    minimumLevel: Math.min(oracleMinimumLevel.value, oracleMaximumLevel.value),
-    maximumLevel: Math.max(oracleMinimumLevel.value, oracleMaximumLevel.value),
-    mastery: 'all',
-    style: oracleStyle.value,
-    skillMasteries: snapshot.value?.skillMasteries,
-    skillClassNames: snapshot.value?.skillClassNames
-  }
-))
-const oracleClassOptions = computed(() => [...new Set(allOracleCandidates.value.map((candidate) => candidate.className))]
-  .sort((left, right) => left.localeCompare(right)))
-const oracleCandidates = computed(() => oracleClass.value === 'all'
-  ? allOracleCandidates.value
-  : allOracleCandidates.value.filter((candidate) => normalizeLoose(candidate.className) === normalizeLoose(oracleClass.value)))
-const filteredOracleCandidates = computed(() => {
-  const structuredQuery = oracleStructuredQuery.value
-  const direction = oracleSortDirection.value === 'asc' ? 1 : -1
-  const readinessRank: Record<OracleReadiness, number> = { ready: 3, near: 2, wildcard: 1 }
-  return oracleCandidates.value
-    .filter((candidate) => {
-      if (oracleReadiness.value !== 'all' && candidate.readiness !== oracleReadiness.value) return false
-      const text = [
-        candidate.title,
-        candidate.skill,
-        candidate.damageType,
-        candidate.style,
-        candidate.className,
-        ...candidate.masteries,
-        ...candidate.relatedSkills,
-        ...candidate.sets.map((set) => set.name),
-        ...candidate.evidence.flatMap((evidence) => [evidence.item.name, ...evidence.reasons])
-      ].join(' ')
-      return structuredQuery.matches({
-        text,
-        fields: {
-          name: candidate.title,
-          class: candidate.className,
-          mastery: candidate.masteries,
-          skill: [candidate.skill, ...candidate.relatedSkills],
-          damage: candidate.damageType,
-          style: candidate.style,
-          set: candidate.sets.map((set) => set.name),
-          item: candidate.evidence.map((evidence) => evidence.item.name),
-          readiness: candidate.readiness,
-          score: candidate.score
-        }
-      })
-    })
-    .sort((left, right) => {
-      let comparison = 0
-      if (oracleSortMode.value === 'name') comparison = left.title.localeCompare(right.title)
-      else if (oracleSortMode.value === 'class') comparison = left.className.localeCompare(right.className)
-      else if (oracleSortMode.value === 'readiness') comparison = readinessRank[left.readiness] - readinessRank[right.readiness]
-      else comparison = left.score - right.score
-      if (comparison === 0) comparison = left.title.localeCompare(right.title)
-      return comparison * direction
-    })
-})
-const oracleReadinessCounts = computed(() => ({
-  ready: oracleCandidates.value.filter((candidate) => candidate.readiness === 'ready').length,
-  near: oracleCandidates.value.filter((candidate) => candidate.readiness === 'near').length,
-  wildcard: oracleCandidates.value.filter((candidate) => candidate.readiness === 'wildcard').length
-}))
-
 const skillSuggestions = computed(() => {
   const query = selectedSkill.value.trim().toLocaleLowerCase()
   const matches = skillNames.value.filter((skill) =>
@@ -2155,9 +2086,7 @@ function currentAppRoute(): AppRoute {
       mapDirection: plannerMapSortDirection.value
     } }
     case 'oracle': return { version: 1, workspace: 'oracle', itemRecord, controls: {
-      query: oracleQuery.value, characterClass: oracleClass.value, style: oracleStyle.value,
-      readiness: oracleReadiness.value, minimumLevel: oracleMinimumLevel.value, maximumLevel: oracleMaximumLevel.value,
-      sort: oracleSortMode.value, direction: oracleSortDirection.value, page: oraclePage.value
+      ...oracleControls.value
     } }
     case 'mi-workshop': return { version: 1, workspace: 'mi-workshop', itemRecord, controls: {
       query: miWorkshopQuery.value, affix: miAffixFilter.value, metric: miComparisonMetric.value,
@@ -2268,15 +2197,10 @@ function restoreAppRoute(route: AppRoute): void {
       plannerMapSortDirection.value = route.controls.mapDirection
       break
     case 'oracle':
-      oracleQuery.value = route.controls.query
-      oracleClass.value = route.controls.characterClass
-      oracleStyle.value = route.controls.style
-      oracleReadiness.value = route.controls.readiness
-      oracleMinimumLevel.value = route.controls.minimumLevel
-      oracleMaximumLevel.value = Math.max(route.controls.minimumLevel, route.controls.maximumLevel)
-      oracleSortMode.value = route.controls.sort
-      oracleSortDirection.value = route.controls.direction
-      oraclePage.value = route.controls.page
+      oracleControls.value = {
+        ...route.controls,
+        maximumLevel: Math.max(route.controls.minimumLevel, route.controls.maximumLevel)
+      }
       break
     case 'mi-workshop':
       miWorkshopQuery.value = route.controls.query
@@ -2384,14 +2308,20 @@ watch(setSortMode, (mode) => {
 watch(selectedSkill, (selectedSkill) => preferenceRepository.update('search', { selectedSkill }))
 watch(skillScope, (skillScope) => preferenceRepository.update('search', { skillScope }))
 watch(miCountingMode, (miCountingMode) => preferenceRepository.update('workspace', { miCountingMode }))
-watch(oracleClass, (oracleClass) => preferenceRepository.update('search', { oracleClass }))
-watch(oracleStyle, (oracleStyle) => preferenceRepository.update('search', { oracleStyle }))
-watch(oracleMinimumLevel, (oracleMinimumLevel) => preferenceRepository.update('search', { oracleMinimumLevel }))
-watch(oracleMaximumLevel, (oracleMaximumLevel) => preferenceRepository.update('search', { oracleMaximumLevel }))
-watch([oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleQuery], () => {
-  if (restoringAppHistory) return
-  oraclePage.value = 1
-})
+watch(
+  () => [
+    oracleControls.value.characterClass,
+    oracleControls.value.style,
+    oracleControls.value.minimumLevel,
+    oracleControls.value.maximumLevel
+  ] as const,
+  ([oracleClass, oracleStyle, oracleMinimumLevel, oracleMaximumLevel]) => preferenceRepository.update('search', {
+    oracleClass,
+    oracleStyle,
+    oracleMinimumLevel,
+    oracleMaximumLevel
+  })
+)
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
 })
@@ -2408,7 +2338,7 @@ watch(
     setProgressFilter, setFeatureFilter, setSortMode, setSortDirection,
     materialCategory,
     selectedSkill, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, skillItemPage,
-    oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection, oraclePage,
+    oracleControls,
     miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, miWorkshopPage,
     plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
     plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
@@ -3601,21 +3531,13 @@ function openMaterials(category: MaterialCategory = 'all'): void {
 
 function openStashOracle(): void {
   activeView.value = 'oracle'
-  oraclePage.value = 1
+  oracleControls.value = { ...oracleControls.value, page: 1 }
 }
 
-function surpriseMeWithOracle(): void {
-  oracleClass.value = 'all'
-  oracleStyle.value = 'all'
-  oracleReadiness.value = 'all'
-  oracleQuery.value = ''
-  oraclePage.value = 1
-}
-
-function sendOracleCandidateToPlanner(candidate: (typeof oracleCandidates.value)[number]): void {
+function sendOracleCandidateToPlanner(candidate: OracleCandidate): void {
   plannerSkills.value = [...new Set([candidate.skill, ...candidate.relatedSkills])]
-  plannerMinimumLevelDraft.value = Math.min(plannerMinimumLevel.value, oracleMinimumLevel.value)
-  plannerLevelCapDraft.value = Math.max(plannerLevelCap.value, oracleMaximumLevel.value)
+  plannerMinimumLevelDraft.value = Math.min(plannerMinimumLevel.value, oracleControls.value.minimumLevel)
+  plannerLevelCapDraft.value = Math.max(plannerLevelCap.value, oracleControls.value.maximumLevel)
   plannerMinimumLevel.value = plannerMinimumLevelDraft.value
   plannerLevelCap.value = plannerLevelCapDraft.value
   plannerQuery.value = ''
@@ -3623,17 +3545,9 @@ function sendOracleCandidateToPlanner(candidate: (typeof oracleCandidates.value)
   activeView.value = 'planner'
 }
 
-function oracleReadinessLabel(readiness: OracleReadiness): string {
-  if (readiness === 'ready') return 'Ready now'
-  if (readiness === 'near') return 'Nearly there'
-  return 'Wild card'
-}
-
-function oracleStyleLabel(style: Exclude<OracleStyle, 'all'>): string {
-  if (style === 'pets') return 'Pet build'
-  if (style === 'retaliation') return 'Retaliation'
-  if (style === 'weapon') return 'Weapon build'
-  return 'Caster build'
+function inspectOracleSkill(skill: string): void {
+  selectedSkill.value = skill
+  activeView.value = 'skills'
 }
 
 async function openSupplies(): Promise<void> {
@@ -6357,170 +6271,23 @@ function formatPercentile(value: number | null | undefined): string {
         </BoundedResultSurface>
       </section>
 
-      <section v-else-if="activeView === 'oracle'" class="stash-oracle" aria-label="Stash Oracle build recommendations">
-        <ToolHeader
-          eyebrow="Archetype assembler"
-          title="What build is your stash trying to make you play?"
-          description="CC follows the mechanical evidence: archived skill modifiers, conversions, set progress, high-level MIs, and the slots those items need. Every recommendation shows its work."
-          tone="ember"
-        />
-
-        <ExplorerToolbar
-          v-model="oracleQuery"
-          v-bind="searchGuidance.oracle"
-          class="oracle-explorer-toolbar"
-          search-label="Search archetypes"
-          placeholder="Skill, damage type, set, item…"
-          :result-count="filteredOracleCandidates.length"
-          result-label="build archetypes"
-          :search-error="searchErrorMessage(oracleStructuredQuery)"
-        >
-          <template #filters>
-            <label>
-              <span>Class</span>
-              <select v-model="oracleClass" autocomplete="off">
-                <option value="all">Any class</option>
-                <option v-for="className in oracleClassOptions" :key="className" :value="className">{{ className }}</option>
-              </select>
-            </label>
-            <label>
-              <span>Build style</span>
-              <select v-model="oracleStyle" autocomplete="off">
-                <option value="all">Any style</option>
-                <option value="pets">Pets</option>
-                <option value="caster">Caster</option>
-                <option value="weapon">Weapon</option>
-                <option value="retaliation">Retaliation</option>
-              </select>
-            </label>
-            <label>
-              <span>Readiness</span>
-              <select v-model="oracleReadiness" autocomplete="off">
-                <option value="all">All ({{ oracleCandidates.length }})</option>
-                <option value="ready">Ready now ({{ oracleReadinessCounts.ready }})</option>
-                <option value="near">Nearly there ({{ oracleReadinessCounts.near }})</option>
-                <option value="wildcard">Wild cards ({{ oracleReadinessCounts.wildcard }})</option>
-              </select>
-            </label>
-            <label class="explorer-range-control">
-              <span>Item level</span>
-              <span>
-                <input v-model.number="oracleMinimumLevel" type="number" min="1" :max="oracleMaximumLevel" aria-label="Minimum item level" />
-                <b>to</b>
-                <input v-model.number="oracleMaximumLevel" type="number" :min="oracleMinimumLevel" max="100" aria-label="Maximum item level" />
-              </span>
-            </label>
-          </template>
-          <template #sort>
-            <label>
-              <span>Sort by</span>
-              <select v-model="oracleSortMode" autocomplete="off">
-                <option value="score">Stash fit</option>
-                <option value="readiness">Readiness</option>
-                <option value="name">Build name</option>
-                <option value="class">Class</option>
-              </select>
-            </label>
-            <label>
-              <span>Order</span>
-              <select v-model="oracleSortDirection" autocomplete="off">
-                <option value="desc">Highest first</option>
-                <option value="asc">Lowest first</option>
-              </select>
-            </label>
-          </template>
-          <template #actions>
-            <button type="button" @click="surpriseMeWithOracle">Surprise me</button>
-          </template>
-        </ExplorerToolbar>
-        <p class="explorer-context-note">Scores measure archived mechanical support and equipability—not whether a build is fashionable.</p>
-
-        <BoundedResultSurface
-          v-model:page="oraclePage"
-          class="oracle-results"
-          :items="filteredOracleCandidates"
-          :get-key="candidate => candidate.key"
-          :page-size="12"
-          label="Stash Oracle build recommendations"
-          layout="grid"
-          navigable
-        >
-          <template #item="{ item: candidate }">
-          <article
-            class="oracle-card"
-            :class="`readiness-${candidate.readiness}`"
-          >
-            <header>
-              <div>
-                <span class="oracle-readiness">{{ oracleReadinessLabel(candidate.readiness) }}</span>
-                <h3>{{ candidate.title }}</h3>
-                <p>
-                  <span>{{ oracleStyleLabel(candidate.style) }}</span>
-                  <span :title="candidate.masteries.join(' + ')">{{ candidate.className }}</span>
-                </p>
-              </div>
-              <div class="oracle-score" :title="candidate.summary"><strong>{{ candidate.score }}</strong><small>stash fit</small></div>
-            </header>
-            <p class="oracle-summary">{{ candidate.summary }}</p>
-
-            <div v-if="candidate.sets.length" class="oracle-set-progress">
-              <button
-                v-for="set in candidate.sets"
-                :key="set.name"
-                type="button"
-                :class="{ complete: set.owned === set.total }"
-                :title="`Open ${set.name} and inspect every set bonus`"
-                @click="openOracleSet(set.name)"
-              >
-                <strong>{{ set.name }}</strong>
-                <small>{{ set.owned }}/{{ set.total }}<template v-if="!set.capstoneUnlocked"> · capstone {{ set.capstonePieces }}</template></small>
-              </button>
-            </div>
-
-            <div class="oracle-evidence">
-              <p><span>Strongest evidence</span><small>{{ candidate.ownedCore }}/{{ candidate.coreSize }} core signals archived</small></p>
-              <div>
-                <button
-                  v-for="evidence in candidate.evidence.slice(0, 7)"
-                  :key="evidence.item.record"
-                  type="button"
-                  :class="{ owned: evidence.owned, missing: !evidence.owned }"
-                  :title="evidence.reasons.join(' · ')"
-                  @mouseenter="queueTooltip(evidence.item, $event)"
-                  @mousemove="moveTooltip"
-                  @mouseleave="scheduleTooltipHide"
-                  @focus="queueTooltip(evidence.item, $event)"
-                  @blur="scheduleTooltipHide"
-                  @click="openItem(evidence.item)"
-                >
-                  <img v-if="itemIconUrl(evidence.item)" :src="itemIconUrl(evidence.item)!" alt="" />
-                    <span><strong>{{ evidence.item.name }}</strong><small>{{ evidence.owned ? (plannerOwnershipLabel(evidence.item) ?? 'Archived') : 'Missing' }} · {{ evidence.reasons.slice(0, 2).join(' · ') }}</small></span>
-                </button>
-              </div>
-            </div>
-
-            <div v-if="candidate.conflicts.length" class="oracle-conflicts">
-              <strong>Choices required</strong>
-              <span v-for="conflict in candidate.conflicts" :key="conflict">{{ conflict }}</span>
-            </div>
-            <div v-if="candidate.relatedSkills.length" class="oracle-related">
-              <small>Also supported</small><span v-for="skill in candidate.relatedSkills" :key="skill">{{ skill }}</span>
-            </div>
-            <footer>
-              <button type="button" @click="sendOracleCandidateToPlanner(candidate)">Build a shopping list</button>
-              <button type="button" @click="selectedSkill = candidate.skill; activeView = 'skills'">Inspect {{ candidate.skill }}</button>
-            </footer>
-          </article>
-          </template>
-          <template #empty>
-            <div class="oracle-empty">
-              <strong>The Oracle found no coherent signal with these filters.</strong>
-              <p>Try a lower item-level floor, another mastery, or “Surprise me.” One archived supporting item is enough to seed a wild card.</p>
-              <button type="button" @click="surpriseMeWithOracle">Clear filters</button>
-            </div>
-          </template>
-        </BoundedResultSurface>
-      </section>
+      <StashOracleWorkspace
+        v-else-if="activeView === 'oracle'"
+        v-model:controls="oracleControls"
+        :items="plannerCatalogItems"
+        :skill-masteries="snapshot?.skillMasteries"
+        :skill-class-names="snapshot?.skillClassNames"
+        :is-archived-item="isArchivedItem"
+        :icon-url-for-item="itemIconUrl"
+        :ownership-label-for-item="plannerOwnershipLabel"
+        @open-set="openOracleSet"
+        @queue-tooltip="queueTooltip"
+        @move-tooltip="moveTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+        @build-plan="sendOracleCandidateToPlanner"
+        @inspect-skill="inspectOracleSkill"
+      />
 
       <section v-else-if="activeView === 'planner'" class="leveling-planner" aria-label="Character leveling shopping list">
         <ToolHeader

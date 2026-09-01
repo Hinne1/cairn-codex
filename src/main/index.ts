@@ -1130,7 +1130,9 @@ function registerIpcHandlers(
         const mapIndex = await readMapLocationIndex(mapLocationCachePath)
         return Boolean(mapIndex && await mapLocationIndexIsFresh(mapIndex))
       },
-      areSourcesFresh: collectionStashesAreFresh
+      areSourcesFresh: process.env.CAIRN_CODEX_SCREENSHOT_PATH
+        ? async () => true
+        : collectionStashesAreFresh
     },
     scanner: { scanInstalledData: () => helper.request<CollectionSnapshot>('scan-collection') },
     icons: { attachIcons: (snapshot) => attachItemIcons(helper, jobs, snapshot) },
@@ -1801,6 +1803,14 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
   }
   if (name === 'mi-workshop') {
     const fixture = createScreenshotCollectionFixture('search-help')
+    const syntheticStash = {
+      path: 'C:\\Synthetic QA\\route-fixtures\\transfer.gst',
+      isHardcore: false,
+      modLabel: 'Main campaign',
+      itemCount: 72,
+      lastWriteUtc: '2026-09-01T12:00:00.000Z',
+      sha256: '0'.repeat(64)
+    }
     const template = fixture.items[0]!
     const bases = Array.from({ length: 6 }, (_, index): CollectionItem => ({
       ...template,
@@ -1842,7 +1852,7 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
       const suffix = suffixes[(index * 5) % 12]!
       const percentile = 20 + (index * 17) % 79
       return {
-        sourcePath: `fixture://mi-workshop/${index}`,
+        sourcePath: syntheticStash.path,
         tabIndex: Math.floor(index / 24),
         itemIndex: index % 24,
         baseRecord: base.record,
@@ -1892,6 +1902,8 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
     })
     return {
       ...fixture,
+      scannedStashes: [syntheticStash],
+      availableStashes: [syntheticStash],
       observedItems,
       items: bases,
       rarities: [{ rarity: 'mi', total: bases.length, collected: bases.length, availableCopies: observedItems.length }],
@@ -5112,12 +5124,17 @@ async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void
     failedStarts: process.env.CAIRN_CODEX_SCREENSHOT_FAILED_STARTS ?? String(recoveryStatus.failedStarts),
     simulateWorkspaceError: process.env.CAIRN_CODEX_SCREENSHOT_RENDER_ERROR === '1' ? '1' : '0'
   }
+  const screenshotRouteHash = process.env.CAIRN_CODEX_SCREENSHOT_ROUTE_HASH?.replace(/^#/, '')
   if (process.env.ELECTRON_RENDERER_URL) {
     const rendererUrl = new URL(process.env.ELECTRON_RENDERER_URL)
     for (const [key, value] of Object.entries(recoveryQuery)) rendererUrl.searchParams.set(key, value)
+    if (screenshotRouteHash) rendererUrl.hash = screenshotRouteHash
     void window.loadURL(rendererUrl.toString())
   } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'), { query: recoveryQuery })
+    void window.loadFile(join(__dirname, '../renderer/index.html'), {
+      query: recoveryQuery,
+      ...(screenshotRouteHash ? { hash: screenshotRouteHash } : {})
+    })
   }
   window.webContents.on('did-fail-load', (_event, code, description) => {
     console.error('[window] renderer load failed', { code, description })
@@ -5163,7 +5180,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       if (scanError) throw new Error('Renderer collection scan failed: ' + scanError)
       const ready = await window.webContents.executeJavaScript(
         `(Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
-         Boolean(document.querySelector('.catalog-grid, .catalog-results, .set-grid'))) &&
+          Boolean(document.querySelector('.catalog-grid, .catalog-results, .set-grid, .workspace-switcher, .settings-workspace, .vault-workspace'))) &&
          (!document.querySelector('.primary-action')?.disabled ||
           Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
           Boolean(document.querySelector('.background-scan'))) &&
@@ -5946,6 +5963,152 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 clientX: rect.right - 20,
                 clientY: rect.top + 30
               }))
+            })()
+          `)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_TYPED_ROUTES === '1') {
+          interactionTimings.typedRoutesMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const waitForPopState = () => new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('Typed route navigation did not emit popstate.')), 1500)
+                window.addEventListener('popstate', () => {
+                  clearTimeout(timer)
+                  requestAnimationFrame(() => requestAnimationFrame(resolve))
+                }, { once: true })
+              })
+              const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
+                .find((button) => button.textContent?.trim() === label)
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
+                .find((button) => button.querySelector('span')?.textContent?.trim() === label)
+              const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
+                document.querySelector('.workspace-tool-rail button[aria-current="page"]')?.textContent?.trim()
+              const assertTypedEntry = (workspace, itemExpected) => {
+                const state = window.history.state
+                if (
+                  state?.cairnCodex !== true || state?.routeVersion !== 1 ||
+                  state?.route?.version !== 1 || state?.route?.workspace !== workspace ||
+                  typeof state?.index !== 'number' || 'view' in state || 'selectedRecord' in state
+                ) {
+                  throw new Error('History entry is not the versioned typed route for ' + workspace + ': ' + JSON.stringify(state))
+                }
+                if (itemExpected && !state.route.itemRecord) throw new Error('Item route omitted its stable record identity.')
+                if (!itemExpected && state.route.itemRecord !== null) throw new Error('Workspace route retained a transient item selection.')
+                const serialized = JSON.stringify(state.route)
+                for (const forbidden of ['snapshot', 'results', 'observedItems', 'payload']) {
+                  if (serialized.includes('"' + forbidden + '"')) {
+                    throw new Error('Typed route serialized forbidden transient data: ' + forbidden + '.')
+                  }
+                }
+                const hash = new URL(window.location.href).hash
+                const params = new URLSearchParams(hash.slice(1))
+                if (params.get('cc-route') !== '1' || params.get('view') !== workspace) {
+                  throw new Error('URL deep link and typed history state disagree: ' + hash)
+                }
+                return state
+              }
+
+              document.querySelector('.onboarding-skip')?.click()
+              await frames()
+              if (window.history.state?.route?.workspace === 'sets') {
+                assertTypedEntry('sets', false)
+                if (activeWorkspace() !== 'Sets') throw new Error('Direct Sets deep link did not restore its workspace.')
+                const setItem = document.querySelector('.set-card li button')
+                if (!(setItem instanceof HTMLButtonElement)) throw new Error('Deep-linked Sets route did not render an item link.')
+                setItem.click()
+                await frames()
+                const setItemState = assertTypedEntry('sets', true)
+                if (!document.querySelector('.item-drawer')) throw new Error('Set item link did not open its typed item route.')
+                const backToSet = waitForPopState()
+                window.history.back()
+                await backToSet
+                assertTypedEntry('sets', false)
+                if (document.querySelector('.item-drawer')) throw new Error('Back did not close the set item route.')
+                const forwardToSetItem = waitForPopState()
+                window.history.forward()
+                await forwardToSetItem
+                if (
+                  !document.querySelector('.item-drawer') ||
+                  window.history.state.route.itemRecord !== setItemState.route.itemRecord
+                ) {
+                  throw new Error('Forward did not restore the set item route.')
+                }
+                return performance.now() - started
+              }
+              const initial = assertTypedEntry('collection', false)
+              if (activeWorkspace() !== 'Collection' || typeof initial.route.controls.query !== 'string') {
+                throw new Error('Direct Collection deep link did not restore its workspace and query.')
+              }
+              const card = document.querySelector('.catalog-results .bounded-results-item[tabindex]')
+              if (!(card instanceof HTMLElement)) throw new Error('Deep-linked Collection route did not render an activatable MI item.')
+              card.click()
+              await frames()
+              const itemState = assertTypedEntry('collection', true)
+              const drawer = document.querySelector('.item-drawer')
+              const openWorkshop = document.querySelector('.drawer-mi-tools button')
+              if (!(drawer instanceof HTMLElement) || !(openWorkshop instanceof HTMLButtonElement)) {
+                throw new Error('Collection item route did not open the MI comparison drawer and return action.')
+              }
+              const itemName = drawer.querySelector('h2')?.textContent?.trim()
+              if (!itemName || !itemState.route.itemRecord) throw new Error('MI item route lacked stable identity.')
+              openWorkshop.click()
+              await frames()
+              const workshopState = assertTypedEntry('mi-workshop', false)
+              if (workshopState.route.controls.query !== itemName || document.querySelector('.item-drawer')) {
+                throw new Error('Open in MI Workshop did not create a serializable return destination.')
+              }
+              const backToItem = waitForPopState()
+              window.history.back()
+              await backToItem
+              if (!document.querySelector('.item-drawer') || window.history.state.route.itemRecord !== itemState.route.itemRecord) {
+                throw new Error('Back did not restore the MI item drawer route: ' + JSON.stringify({
+                  state: window.history.state,
+                  expectedRecord: itemState.route.itemRecord,
+                  drawer: document.querySelector('.item-drawer h2')?.textContent?.trim() ?? null,
+                  workspace: activeWorkspace()
+                }))
+              }
+              const forwardToWorkshop = waitForPopState()
+              window.history.forward()
+              await forwardToWorkshop
+              if (document.querySelector('.item-drawer') || window.history.state.route.controls.query !== itemName) {
+                throw new Error('Forward did not restore the MI Workshop return route.')
+              }
+
+              const search = document.querySelector('.mi-explorer-toolbar .explorer-search input')
+              const affix = document.querySelector('.mi-explorer-toolbar .explorer-toolbar-filters select')
+              if (!(search instanceof HTMLInputElement) || !(affix instanceof HTMLSelectElement)) {
+                throw new Error('MI route controls were not rendered for native restoration verification.')
+              }
+              const restoredWorkshopState = assertTypedEntry('mi-workshop', false)
+              search.value = 'native-restoration-disagreement'
+              affix.value = 'double-rare'
+              window.dispatchEvent(new PageTransitionEvent('pageshow'))
+              await frames()
+              await new Promise((resolve) => setTimeout(resolve, 20))
+              if (
+                search.value !== restoredWorkshopState.route.controls.query ||
+                affix.value !== restoredWorkshopState.route.controls.affix
+              ) {
+                throw new Error('Native form restoration disagreed with application route state.')
+              }
+
+              const collection = systemButton('Collection')
+              if (!(collection instanceof HTMLButtonElement)) throw new Error('Collection route was unavailable.')
+              collection.click()
+              await frames()
+              assertTypedEntry('collection', false)
+              const workshop = workspaceButton('MI Workshop')
+              if (!(workshop instanceof HTMLButtonElement)) throw new Error('MI Workshop child route was unavailable from Collection.')
+              workshop.click()
+              await frames()
+              assertTypedEntry('mi-workshop', false)
+              const backToCollection = waitForPopState()
+              window.history.back()
+              await backToCollection
+              assertTypedEntry('collection', false)
+              return performance.now() - started
             })()
           `)
         }

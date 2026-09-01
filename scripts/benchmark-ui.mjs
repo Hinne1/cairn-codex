@@ -43,7 +43,9 @@ const gdiaResultFixture = process.argv.includes('--gdia-result-fixture')
 const onboardingStep = argument('--onboarding-step')
 const dismissOnboarding = process.argv.includes('--dismiss-onboarding')
 const transferSection = argument('--transfer-section')
+const routeHash = argument('--route-hash')
 const verifyNavigation = process.argv.includes('--verify-navigation')
+const verifyTypedRoutes = process.argv.includes('--verify-typed-routes')
 const verifyWorkspaceSwitcher = process.argv.includes('--verify-workspace-switcher')
 const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
@@ -79,6 +81,9 @@ if (plannerDisplay !== null && !['table', 'cards', 'map'].includes(plannerDispla
 }
 if (supplyCategory !== null && !['writs', 'augments'].includes(supplyCategory)) {
   throw new Error(`--supply-category must be writs or augments; received ${supplyCategory}.`)
+}
+if (routeHash !== null && !routeHash.startsWith('#cc-route=1&')) {
+  throw new Error('--route-hash must be a version 1 Cairn Codex route hash.')
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
@@ -143,7 +148,9 @@ const env = {
   ...(supplyCategory ? { CAIRN_CODEX_SCREENSHOT_SUPPLY_CATEGORY: supplyCategory } : {}),
   ...(plannerDisplay ? { CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY: plannerDisplay } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
+  ...(routeHash ? { CAIRN_CODEX_SCREENSHOT_ROUTE_HASH: routeHash } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
+  ...(verifyTypedRoutes ? { CAIRN_CODEX_SCREENSHOT_VERIFY_TYPED_ROUTES: '1' } : {}),
   ...(verifyWorkspaceSwitcher ? { CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SWITCHER: '1' } : {}),
   ...(openPlannerSetup ? { CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP: '1' } : {}),
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
@@ -307,6 +314,7 @@ console.log(JSON.stringify({
   openSearchHelp,
   enableAllTools,
   verifyNavigation,
+  verifyTypedRoutes,
   verifyWorkspaceSwitcher,
   openPlannerSetup,
   verifyPlannerNavigation,

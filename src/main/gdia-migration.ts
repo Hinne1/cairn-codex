@@ -4,12 +4,12 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { dirname, join, resolve, sep } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { GdiaImportPreflight, GdiaImportStage } from '@shared/contracts'
-import type { CollectionDatabase, VaultImportResult } from './collection-database'
+import type { CollectionDatabase, VaultImportResult } from './collection-database.ts'
 import {
   assertNoGdiaSqliteSidecars,
   inspectGdiaBackup,
   prepareGdiaBackup
-} from './gdia-backup'
+} from './gdia-backup.ts'
 
 const ARCHIVE_GROWTH_RESERVE_PER_ITEM = 4096
 const IMPORT_METADATA_RESERVE_BYTES = 128 * 1024

@@ -1,17 +1,14 @@
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { CollectionDatabase } from '../src/main/collection-database.ts'
+import { analyzeGdiaDatabase, migrateGdiaDatabase } from '../src/main/gdia-migration.ts'
 
 const rawArguments = process.argv.slice(2)
-const electronSource = rawArguments.includes('--electron-source')
-const options = parseOptions(rawArguments.filter((argument) => argument !== '--electron-source'))
+const options = parseOptions(rawArguments)
 const requestedItems = positiveInteger(options.items ?? '4', '--items')
 const projectRoot = resolve(import.meta.dirname, '..')
-const appPath = resolve(options.app ?? process.env.CAIRN_CODEX_ELECTRON_PATH ?? (
-  electronSource ? 'node_modules/electron/dist/electron.exe' : resolveRequired(options.app, '--app')
-))
 const baseDatabasePath = options['base-db'] ? resolve(options['base-db']) : null
 const testRoot = join(projectRoot, 'local-cache', 'gdia-migration')
 const profileRoot = join(testRoot, 'profile')
@@ -102,7 +99,7 @@ const queueHash = createHash('sha256').update(queueBytes).digest('hex')
 const sourceHash = await sha256(sourceDatabasePath)
 
 const firstStarted = performance.now()
-const firstRun = runImport('first')
+const firstRun = await runImport()
 const firstDurationMs = Math.round(performance.now() - firstStarted)
 const first = inspectTarget()
 if (first.vault - baselineVault !== requestedItems) {
@@ -126,7 +123,7 @@ await mkdir(orphanBatchPath, { recursive: true })
 await writeFile(join(orphanBatchPath, 'orphan.csv'), 'uncommitted receipt')
 
 const repeatStarted = performance.now()
-const repeatRun = runImport('repeat')
+const repeatRun = await runImport()
 const repeatDurationMs = Math.round(performance.now() - repeatStarted)
 const repeated = inspectTarget()
 if (repeated.vault !== first.vault || repeated.journal !== first.journal) {
@@ -152,7 +149,7 @@ if (backupManifest.sourceSha256 !== sourceHash || await sha256(backupPath) !== s
 await writeFile(`${sourceDatabasePath}-wal`, 'active WAL state')
 let sqliteSidecarRejected = false
 try {
-  runImport('wal-sidecar')
+  await runImport()
 } catch (error) {
   sqliteSidecarRejected = String(error).includes('Close Item Assistant completely')
 } finally {
@@ -183,34 +180,22 @@ console.log(JSON.stringify({
   repeatDurationMs
 }, null, 2))
 
-function runImport(label) {
-  const result = spawnSync(appPath, [
-    ...(electronSource ? ['.'] : []),
-    `--user-data-dir=${profileRoot}`
-  ], {
-    env: {
-      ...process.env,
-      CAIRN_CODEX_DATABASE_PATH: targetDatabasePath,
-      CAIRN_CODEX_IMPORT_GDIA: sourceDatabasePath,
-      CAIRN_CODEX_MIGRATION_BACKUP_DIR: backupDirectory,
-      CAIRN_CODEX_SCREENSHOT_PATH: join(testRoot, `unused-${label}.png`)
-    },
-    encoding: 'utf8',
-    timeout: 120_000,
-    windowsHide: true
-  })
-  if (result.status !== 0) {
-    throw new Error(`${label} packaged migration failed (${result.status}): ${result.stderr || result.stdout}`)
+async function runImport() {
+  const database = new CollectionDatabase(targetDatabasePath)
+  const stages = []
+  try {
+    const analysis = await analyzeGdiaDatabase(database, sourceDatabasePath, backupDirectory)
+    const result = await migrateGdiaDatabase(database, sourceDatabasePath, backupDirectory, {
+      requireAllCatalogued: false,
+      expectedSourceSha256: analysis.preflight.sourceSha256,
+      expectedQueueFingerprint: analysis.queueFingerprint,
+      expectedRequiredFreeBytes: analysis.preflight.requiredFreeBytes,
+      onStage: (stage) => stages.push(stage)
+    })
+    return { migration: 'gdia', preflight: analysis.preflight, stages, ...result }
+  } finally {
+    database.close()
   }
-  for (const line of result.stdout.trim().split(/\r?\n/).reverse()) {
-    try {
-      const parsed = JSON.parse(line)
-      if (parsed.migration === 'gdia') return parsed
-    } catch {
-      // Startup diagnostics are plain text; only the final migration record is JSON.
-    }
-  }
-  throw new Error(`${label} packaged migration did not report its preflight and stage result: ${result.stdout}`)
 }
 
 function assertPreflight(run, reused) {
@@ -300,25 +285,8 @@ async function assertQueueReceipt(path) {
 }
 
 function initializeTargetDatabase() {
-  const initialized = spawnSync(appPath, [
-    ...(electronSource ? ['.'] : []),
-    `--user-data-dir=${profileRoot}`
-  ], {
-    env: {
-      ...process.env,
-      CAIRN_CODEX_DATABASE_PATH: targetDatabasePath,
-      CAIRN_CODEX_INITIALIZE_DATABASE: '1'
-    },
-    encoding: 'utf8',
-    timeout: 120_000,
-    windowsHide: true
-  })
-  if (initialized.status !== 0) {
-    throw new Error(
-      `Could not initialize the generated Cairn archive (${initialized.status}): ` +
-      `${initialized.error?.message || initialized.stderr || initialized.stdout || 'no process output'}`
-    )
-  }
+  const initialized = new CollectionDatabase(targetDatabasePath)
+  initialized.close()
 }
 
 function seedCatalog(database) {
@@ -360,11 +328,6 @@ function parseOptions(args) {
   const result = {}
   for (let index = 0; index < args.length; index += 2) result[args[index].replace(/^--/, '')] = args[index + 1]
   return result
-}
-
-function resolveRequired(value, name) {
-  if (!value) throw new Error(`${name} is required.`)
-  return resolve(value)
 }
 
 function positiveInteger(value, name) {

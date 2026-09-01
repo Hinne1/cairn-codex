@@ -4902,8 +4902,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
 // Automated diagnostics run in disposable processes and must not be mistaken
 // for user-launched second instances while the ordinary app is open.
 const hasSingleInstanceLock = process.env.CAIRN_CODEX_SCREENSHOT_PATH ||
-  process.env.CAIRN_CODEX_SMOKE_TEST === '1' ||
-  process.env.CAIRN_CODEX_INITIALIZE_DATABASE === '1'
+  process.env.CAIRN_CODEX_SMOKE_TEST === '1'
   ? true
   : app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
@@ -4990,13 +4989,6 @@ app.whenReady().then(async () => {
     schemaVersion: database.getDiagnosticSummary().schemaVersion
   })
   console.log('[startup] Collection database ready.')
-
-  if (process.env.CAIRN_CODEX_INITIALIZE_DATABASE === '1') {
-    helper.dispose()
-    database.close()
-    app.exit(0)
-    return
-  }
 
   const ingestCommand = process.env.CAIRN_CODEX_INGEST_REQUEST
   if (ingestCommand) {

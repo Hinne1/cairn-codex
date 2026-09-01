@@ -19,7 +19,7 @@
     "test:onboarding": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-onboarding.mjs",
     "test:notifications": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-notifications.mjs",
     "test:gdia-backup": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-gdia-backup.mjs",
-    "test:gdia-migration": "node ./scripts/test-gdia-migration.mjs --electron-source --items 20000",
+    "test:gdia-migration": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-gdia-migration.mjs --items 20000",
     "audit:repo": "node ./scripts/audit-repository.mjs",
     "package:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1",
     "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-release.ps1",

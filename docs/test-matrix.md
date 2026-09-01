@@ -82,7 +82,7 @@ They are never inferred from a successful injection handshake.
 | Cairn exits/restarts mid-operation | Journal and receipt reconcile without duplication | Automated on-disk close/reopen passed 2026-09-01; live timing confirmation pending |
 | Stale or mismatched receipt | Semantic mismatch never commits or releases an archive copy | Automated fail-closed helper and desktop cases passed 2026-09-01 |
 | Unsupported game rebuild | Live injection remains blocked; read-only tools still work | Automated fingerprint negative control passed; live confirmation on the next game update pending |
-| Item Assistant migration | Verified backup; SC/HC multiplicity and queue receipts preserved; repeat creates no copies | Automated 20,000-copy packaged-app gate runs in `npm run verify`; WAL sidecars fail closed, the queue batch/manifest is hash-checked, an orphan batch is reconciled, and unchanged repeat creates no copies; user-path confirmation remains optional |
+| Item Assistant migration | Verified backup; SC/HC multiplicity and queue receipts preserved; repeat creates no copies | Automated 20,000-copy core migration gate runs in `npm run verify`; WAL sidecars fail closed, the queue batch/manifest is hash-checked, an orphan batch is reconciled, and unchanged repeat creates no copies; user-path confirmation remains optional |
 
 Record the exact app version, game version/build, `Game.dll`, hook, and injector
 hashes with the completed manual run. A different hash starts a new matrix.

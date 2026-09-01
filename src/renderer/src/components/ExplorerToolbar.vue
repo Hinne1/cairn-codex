@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, useId, type CSSProperties } from 'vue'
 import type { SearchWorkspaceSchema } from '@shared/search-schema'
 import AdvancedSearchDialog from './AdvancedSearchDialog.vue'
 
@@ -31,6 +31,10 @@ const emit = defineEmits<{
 
 const searchInput = ref<HTMLInputElement | null>(null)
 const searchHelpDetails = ref<HTMLDetailsElement | null>(null)
+const searchHelpSummary = ref<HTMLElement | null>(null)
+const searchHelpPanel = ref<HTMLElement | null>(null)
+const searchHelpPanelStyle = ref<CSSProperties>({})
+const searchHelpOpen = ref(false)
 const searchInputId = `explorer-search-${useId()}`
 const searchHelpId = `${searchInputId}-help`
 const searchErrorId = `${searchInputId}-error`
@@ -44,14 +48,70 @@ function syncSearchInput(): void {
 function applySearchExample(example: string): void {
   emit('update:modelValue', example)
   if (searchHelpDetails.value) searchHelpDetails.value.open = false
+  searchHelpOpen.value = false
   void nextTick(() => {
     searchInput.value?.focus()
     searchInput.value?.select()
   })
 }
 
-onMounted(() => window.addEventListener('pageshow', syncSearchInput))
-onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
+async function positionSearchHelpPanel(): Promise<void> {
+  if (!searchHelpDetails.value?.open || !searchHelpSummary.value || !searchHelpPanel.value) return
+  const gap = 16
+  const trigger = searchHelpSummary.value.getBoundingClientRect()
+  const width = Math.min(370, Math.max(0, window.innerWidth - gap * 2))
+  const maximumHeight = Math.max(120, window.innerHeight - gap * 2)
+  const panelHeight = Math.min(searchHelpPanel.value.scrollHeight, maximumHeight)
+  const left = Math.min(
+    Math.max(gap, trigger.right - width),
+    Math.max(gap, window.innerWidth - width - gap)
+  )
+  const below = trigger.bottom + 7
+  const top = below + panelHeight <= window.innerHeight - gap
+    ? below
+    : Math.max(gap, trigger.top - panelHeight - 7)
+  searchHelpPanelStyle.value = {
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+    width: `${Math.round(width)}px`,
+    maxHeight: `${Math.round(maximumHeight)}px`
+  }
+  await nextTick()
+  if (!searchHelpPanel.value) return
+  const rendered = searchHelpPanel.value.getBoundingClientRect()
+  const leftCorrection = left - rendered.left
+  const topCorrection = top - rendered.top
+  if (Math.abs(leftCorrection) > 0.5 || Math.abs(topCorrection) > 0.5) {
+    searchHelpPanelStyle.value = {
+      ...searchHelpPanelStyle.value,
+      left: `${Math.round(left + leftCorrection)}px`,
+      top: `${Math.round(top + topCorrection)}px`
+    }
+  }
+}
+
+function handleSearchHelpToggle(): void {
+  searchHelpOpen.value = Boolean(searchHelpDetails.value?.open)
+  if (searchHelpOpen.value) void nextTick(positionSearchHelpPanel)
+}
+
+function closeSearchHelp(): void {
+  if (!searchHelpDetails.value?.open) return
+  searchHelpDetails.value.open = false
+  searchHelpOpen.value = false
+  void nextTick(() => searchHelpSummary.value?.focus())
+}
+
+onMounted(() => {
+  window.addEventListener('pageshow', syncSearchInput)
+  window.addEventListener('resize', positionSearchHelpPanel)
+  window.addEventListener('scroll', positionSearchHelpPanel, true)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pageshow', syncSearchInput)
+  window.removeEventListener('resize', positionSearchHelpPanel)
+  window.removeEventListener('scroll', positionSearchHelpPanel, true)
+})
 </script>
 
 <template>
@@ -70,9 +130,11 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
             :schema="searchSchema"
             @update:model-value="emit('update:modelValue', $event)"
           />
-          <details ref="searchHelpDetails" class="explorer-search-help">
-            <summary :aria-label="`${searchLabel} help and examples`">Search tips</summary>
-            <div :id="searchHelpId" class="explorer-search-help-panel">
+          <details ref="searchHelpDetails" class="explorer-search-help" @toggle="handleSearchHelpToggle">
+            <summary ref="searchHelpSummary" :aria-label="`${searchLabel} help and examples`" @keydown.esc.prevent="closeSearchHelp">Search tips</summary>
+          </details>
+          <Teleport to="body">
+            <div v-if="searchHelpOpen" ref="searchHelpPanel" :id="searchHelpId" class="explorer-search-help-panel" :style="searchHelpPanelStyle" @keydown.esc.prevent="closeSearchHelp">
               <p>{{ searchHelp }}</p>
               <span>Try an example</span>
               <div class="explorer-search-examples">
@@ -84,7 +146,7 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
                 >{{ example }}</button>
               </div>
             </div>
-          </details>
+          </Teleport>
         </span>
       </div>
       <span class="explorer-search-input">
@@ -206,11 +268,9 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
 }
 .explorer-search-help[open] summary { color: var(--cc-tone-accent-soft); }
 .explorer-search-help-panel {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 7px);
-  right: 0;
-  width: min(370px, calc(100vw - 48px));
+  position: fixed;
+  z-index: 70;
+  overflow-y: auto;
   padding: var(--cc-space-5);
   border: 1px solid var(--explorer-border);
   border-radius: var(--cc-radius-sm);
@@ -332,14 +392,22 @@ onBeforeUnmount(() => window.removeEventListener('pageshow', syncSearchInput))
 @keyframes explorer-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1180px) {
-  .explorer-search { flex-basis: 100%; }
+  .explorer-toolbar { align-items: stretch; flex-direction: column; }
+  .explorer-search { width: 100%; min-width: 0; flex-basis: auto; }
+  .explorer-toolbar-group {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  }
+  .explorer-toolbar-group :deep(label),
+  .explorer-toolbar-sort :deep(label:first-child) { width: 100%; min-width: 0; }
+  .explorer-toolbar-actions { width: 100%; flex-wrap: wrap; }
+  .explorer-toolbar-actions :deep(button) { min-width: min(210px, 100%); flex: 1 1 auto; white-space: normal; }
+  .explorer-result-count { margin-left: 0; align-items: flex-start; text-align: left; }
 }
 
 @media (max-width: 760px) {
-  .explorer-toolbar { display: flex; align-items: stretch; flex-direction: column; }
-  .explorer-toolbar-group,
+  .explorer-toolbar { padding: var(--cc-space-4); }
   .explorer-toolbar-actions { align-items: stretch; flex-direction: column; }
-  .explorer-toolbar-group :deep(label) { min-width: 0; }
-  .explorer-result-count { align-items: flex-start; text-align: left; }
 }
 </style>

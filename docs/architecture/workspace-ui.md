@@ -53,6 +53,12 @@ Tool-specific selectors and unusual controls belong in the toolbar slots. They s
 reimplement its outer layout, input styling, focus treatment, clear button, result count, or
 responsive breakpoints.
 
+At compact widths the toolbar becomes one vertical control flow: search, filters, sorting,
+actions, then the result count. Controls may wrap or stack, but their labels and meanings must
+not disappear. `Search tips` is a viewport-layer overlay rather than content that widens its
+workspace; it clamps to the visible viewport, closes on Escape, and restores focus to its
+summary. `Advanced search` follows the same containment and focus-restoration contract.
+
 Collection, Sets, Components & Consumables, Skill Explorer, Stash Oracle, both Leveling
 Planner result modes, MI Workshop, Supplies, Collection Farming, Dismantling Lab, and the
 Transfers archive browser currently use this contract. Settings and configuration forms do not
@@ -82,6 +88,11 @@ pure paging and keyboard model in `src/renderer/src/bounded-results.ts`.
 - `list`, `grid`, and CSS-table layouts share the same result model. Selectable and interactive
   surfaces use roving focus with Arrow keys, Home, End, Enter, and Space. Grid surfaces derive
   the visible column count from rendered rows unless a fixed keyboard column count is required.
+- A dense comparison table may retain its useful desktop columns at compact widths only inside
+  a labeled local horizontal scroller. That region must receive keyboard focus, expose a visible
+  scrolling hint, retain the identity column while scrolling where practical, and must never
+  widen the document itself. Do not squeeze field names into ambiguous abbreviations merely to
+  avoid a local scrollbar.
 - Selection is keyed by domain identity and may survive sorting or paging when the owning tool
   permits it. A workspace must clear selection explicitly when its safety rules require that.
 
@@ -156,6 +167,8 @@ piece being discovered. Surfaces must name those qualifications explicitly.
 5. Route item hover/focus through the global tooltip pipeline.
 6. Use `BoundedResultSurface` for a result set that can exceed one bounded page.
 7. Add an isolated screenshot interaction for any new control shape.
-8. Verify keyboard focus, narrow layouts, empty results, and restored history state.
+8. Verify keyboard focus, narrow layouts, empty results, restored history state, and absence of
+   document-level horizontal overflow. For deliberately wide tables, also verify the labeled
+   local scroller and its focus treatment.
 9. Declare the workspace once in `src/shared/search-schema.ts`; parser options, Search tips, and
    Advanced search controls must consume that same definition.

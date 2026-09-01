@@ -860,6 +860,37 @@ body.onboarding-active { overflow: hidden; }
 .transfer-mode-tabs em.state-ready, .transfer-mode-tabs em.ready { color: #c6d887; background: #28321d; }
 .transfer-mode-tabs button.active { border-color: #806435; background: #30281d; box-shadow: inset 3px 0 #c19745; }
 .transfer-mode-tabs button.active strong { color: #efd49a; }
+.transfer-section-tabs { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; margin: 14px 0 18px; padding-bottom: 14px; border-bottom: 1px solid #332f28; }
+.transfer-section-tabs button { display: grid; gap: 3px; padding: 12px 14px; border: 1px solid #38342c; border-radius: 7px; color: #8e8575; background: #171613; cursor: pointer; text-align: left; }
+.transfer-section-tabs button:hover { border-color: #5a4b34; }
+.transfer-section-tabs button.active { border-color: #806435; background: #30281d; box-shadow: inset 3px 0 #c19745; }
+.transfer-section-tabs strong { color: #cbbfa5; font: 500 15px Georgia, serif; }
+.transfer-section-tabs button.active strong { color: #efd49a; }
+.transfer-section-tabs small { color: #70695e; font-size: 9px; }
+.operation-history { display: grid; gap: 8px; }
+.operation-history-row { display: grid; grid-template-columns: 125px minmax(0,1fr) minmax(260px,.65fr); gap: 18px; padding: 17px; border: 1px solid #39352d; border-radius: 7px; background: rgba(24,23,20,.82); }
+.operation-state { display: grid; align-content: start; gap: 4px; }
+.operation-state strong { color: #d5c8ac; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+.operation-state small { color: #7e7567; font-size: 9px; }
+.operation-state.state-committed strong { color: #b8cf7d; }
+.operation-state.state-failed strong { color: #d89584; }
+.operation-state:not(.state-committed):not(.state-failed) strong { color: #ddbb6d; }
+.operation-summary h3 { margin: 0 0 8px; color: #d9ceb7; font: 500 17px Georgia, serif; }
+.operation-summary > p { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.operation-summary > p > span, .operation-summary > p > em { display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid #3d382e; border-radius: 999px; color: #b8ad96; background: #1b1a17; font-size: 9px; font-style: normal; }
+.operation-summary > p > span small { color: #746c5f; }
+.operation-summary .operation-empty { color: #756e62; font-size: 10px; }
+.operation-summary .operation-error { display: block; margin-top: 8px; color: #cf8e7e; font-size: 10px; line-height: 1.45; }
+.operation-meta { display: grid; align-content: start; gap: 6px; margin: 0; }
+.operation-meta div { display: grid; grid-template-columns: 84px minmax(0,1fr); gap: 8px; }
+.operation-meta dt { color: #6f685d; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.operation-meta dd { min-width: 0; margin: 0; color: #9f9583; font-size: 9px; }
+.operation-meta code { display: block; overflow: hidden; color: #bba673; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.quarantine-workspace { display: grid; gap: 12px; }
+.quarantine-actions { display: flex; gap: 8px; }
+.quarantine-actions button { padding: 10px 14px; border: 1px solid #754936; border-radius: 5px; color: #ddb08f; background: #332019; cursor: pointer; }
+.quarantine-actions button:disabled { opacity: .42; cursor: default; }
+.quarantine-workspace > small { color: #8b786a; font-size: 9px; line-height: 1.5; }
 .live-mode-card { margin-top: 16px; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border: 1px solid #474033; border-radius: 8px; background: rgba(24, 23, 20, 0.9); }
 .live-mode-card.state-ready { border-color: #68713f; background: linear-gradient(120deg, rgba(40, 53, 29, 0.72), rgba(24, 25, 20, 0.94)); box-shadow: inset 3px 0 #a8bd5b; }
 .quest-recovery-panel { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 16px; padding: 18px 20px; border: 1px solid #4b4030; border-radius: 8px; background: linear-gradient(120deg, rgba(50, 38, 25, .82), rgba(23, 22, 19, .96)); }
@@ -1221,6 +1252,9 @@ body.onboarding-active { overflow: hidden; }
   .game-status-pill small { display: none; }
   .dismantling-layout { grid-template-columns: 1fr; }
   .dismantling-preview { position: static; }
+  .transfer-section-tabs { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .operation-history-row { grid-template-columns: 110px minmax(0,1fr); }
+  .operation-meta { grid-column: 2; }
 }
 
 @media (max-width: 900px) {
@@ -1272,4 +1306,8 @@ body.onboarding-active { overflow: hidden; }
   .stat-list { grid-template-columns: 1fr; }
   .vault-history { grid-template-columns: 1fr; }
   .status-pill { display: none; }
+  .transfer-section-tabs { grid-template-columns: 1fr; }
+  .operation-history-row { grid-template-columns: 1fr; }
+  .operation-meta { grid-column: auto; }
+  .quarantine-actions { flex-direction: column; }
 }

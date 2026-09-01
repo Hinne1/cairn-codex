@@ -19,6 +19,8 @@ import {
   type LiveGameSyncResult,
   type LiveRetrievalResult,
   type LiveSupplyDispenseResult,
+  type OperationHistoryPage,
+  type OperationHistoryRequest,
   type SpecialItemRecoveryResult,
   type RetrievalResult,
   type RecoveryStatus,
@@ -99,6 +101,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.listVaultItems) as Promise<VaultListItem[]>,
   queryVaultItems: (request: VaultPageRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.queryVaultItems, request) as Promise<VaultItemPage>,
+  queryOperationHistory: (request: OperationHistoryRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.queryOperationHistory, request) as Promise<OperationHistoryPage>,
   getVaultSummary: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getVaultSummary) as Promise<VaultSummary>,
   previewDismantling: (vaultItemIds) =>

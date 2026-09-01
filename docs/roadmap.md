@@ -15,7 +15,7 @@ tester; **P1** is beta-quality work; **P2** is longer-term architecture or produ
 | --- | --- | --- | --- | --- |
 | SCALE-01 | P0 | done | Exercise a 20,000-copy Item Assistant import in an isolated profile. | Mixed SC/HC import, verified source backup, repeat-import deduplication, unsupported records, and source immutability all pass. |
 | SCALE-02 | P0 | done | Replace 24-at-a-time roll hydration that rebuilds and retransmits the full archive after every batch. | Roll analysis is a bounded background job with lightweight progress; a 20k archive never performs O(n²) snapshot work and remains responsive. |
-| SCALE-03 | P0 | in progress | Page or virtualize copy-heavy views and query them without mounting the entire archive. | Transfers, retrieval history, ingestion history, quarantine, and any copy list keep a bounded DOM and meet the performance budgets below with 20k+ copies. |
+| SCALE-03 | P0 | done | Page or virtualize copy-heavy views and query them without mounting the entire archive. | Transfers, retrieval history, ingestion history, quarantine, and any copy list keep a bounded DOM and meet the performance budgets below with 20k+ copies. |
 | SCALE-04 | P0 | planned | Separate startup instrumentation into cached first paint, interactive, scan settled, and roll-analysis settled. | Diagnostics and performance tests report each phase so a usable cached screen is not confused with a completed background refresh. |
 | DIAG-01 | P0 | planned | Add structured rotating application logs and a one-click support bundle. | A tester can export redacted logs, app/game/helper versions, hashes, job timings, last navigation/action, database integrity, and operation correlation IDs without exposing item payloads or character names. |
 | IMPORT-01 | P0 | planned | Add an Item Assistant preflight and progress flow. | Before import, show source path, copy count, SC/HC split, unsupported estimate, backup size, required free space, and destination mode; during import, show named progress stages and a durable result. |
@@ -30,8 +30,9 @@ tester; **P1** is beta-quality work; **P2** is longer-term architecture or produ
 - A packaged isolated 24,514-copy profile reached the benchmark-ready Collection in
   **41.5 seconds**, versus roughly 34 seconds for the existing capture profile; ordinary
   Collection search remained about **153 ms including the 150 ms wait**.
-- Opening unfiltered Transfers mounted **14,509 rows** and took about **1.8 seconds** just to
-  switch workspaces. This is functional but not an acceptable bounded UI.
+- The original unfiltered Transfers view mounted **14,509 rows** and took about **1.8 seconds**
+  to switch workspaces. The replacement pages archive and quarantine results at 100 rows and
+  operation histories at 50 rows.
 - Background roll hydration scored only 96 of 20,002 newly unscored copies during the captured
   run. The current 24-copy loop reloads, projects, serializes, and sends the entire archive for
   every batch. This is the most important pre-tester performance defect.
@@ -44,7 +45,7 @@ tester; **P1** is beta-quality work; **P2** is longer-term architecture or produ
 | FEATURE-01 | P1 | done | Centralize feature maturity and experimental-tool visibility. | Stash Oracle and Dismantling Lab are off for new profiles, preserved for existing users, clearly labelled experimental, and enabled from Settings. |
 | COUNT-01 | P1 | done | Surface archive scale. | The home view shows total currently archived copies alongside catalog-entry counts. |
 | NOTICE-01 | P1 | done | Replace independent snackbar refs/timers with one notification service. | Notifications are queued or coalesced, never overlap, use stable severity/action semantics, remain accessible, and preserve important transfer/recovery messages until dismissed. |
-| TRANSFER-01 | P1 | planned | Redesign Transfers around operations rather than one long page. | Tabs are **Retrieve**, **Ingestion history**, **Retrieval history**, and **Quarantine**. History comes from the operation journal, supports search/paging, and keeps SC/HC, seed, time, outcome, and correlation ID. |
+| TRANSFER-01 | P1 | done | Redesign Transfers around operations rather than one long page. | Tabs are **Retrieve**, **Ingestion history**, **Retrieval history**, and **Quarantine**. History comes from the operation journal, supports search/paging, and keeps SC/HC, seed, time, outcome, and correlation ID. |
 | SEARCH-01 | P1 | planned | Build one shared query parser and search-document contract. | Every ExplorerToolbar supports implicit AND, explicit `AND`/`OR`, quoted phrases, negation, and documented fields such as `skill:`, `damage:`, `slot:`, `rarity:`, `level:`, `owned:`, and `affix:` where meaningful. |
 | SEARCH-02 | P1 | planned | Add an inline search guide and examples. | Help is reachable from every search bar, explains scope for the current tool, and can insert example queries such as `skill:wendigo AND "vitality damage"`. |
 | SETS-01 | P1 | planned | Bring Sets onto the shared visual hierarchy. | Epic versus Legendary is obvious at card and list level; level, completion, craftability, awakening, and FX changes use shared badges/tokens; sorting and keyboard behavior match other tools. |

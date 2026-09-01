@@ -42,8 +42,8 @@ until every P0 gate in `docs/roadmap.md` is complete.
   work is active; note any jump, blank region, delayed input, or Windows “Not responding” state.
 - Switch repeatedly between Collection, Settings, and Transfers. Settings/Transfers should be
   full-screen system workspaces and Back/Forward should restore the previous tool.
-- In Transfers, page through Retrieve, Ingestion history, Retrieval history, and Quarantine once
-  `TRANSFER-01` is complete. No view should mount all archived copies.
+- In Transfers, page through Retrieve, Ingestion history, Retrieval history, and Quarantine.
+  No view should mount all archived copies.
 - Trigger several quick informational messages and one error. The unified notification queue must
   keep them readable without overlap once `NOTICE-01` is complete.
 

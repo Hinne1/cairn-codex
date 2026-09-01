@@ -5,6 +5,9 @@ import type {
   CollectionSnapshot,
   ItemRollAnalysis,
   ObservedStashItem,
+  OperationHistoryEntry,
+  OperationHistoryPage,
+  OperationHistoryRequest,
   VaultItemPage,
   VaultListItem,
   VaultPageRequest,
@@ -12,7 +15,7 @@ import type {
 } from '@shared/contracts'
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 11
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 12
 
 export interface ValidatedCollectionDatabase {
   schemaVersion: number
@@ -956,6 +959,194 @@ export class CollectionDatabase {
     }
   }
 
+  queryOperationHistory(request: OperationHistoryRequest): OperationHistoryPage {
+    const clauses = ['operation_journal.operation = ?']
+    const parameters: Array<string | number> = [request.operation]
+    if (request.outcome === 'pending') {
+      clauses.push("operation_journal.state NOT IN ('committed', 'failed')")
+    } else if (request.outcome !== 'all') {
+      clauses.push('operation_journal.state = ?')
+      parameters.push(request.outcome)
+    }
+    const query = request.query?.trim().toLocaleLowerCase() ?? ''
+    const searchJoins = query ? `
+      LEFT JOIN vault_item direct_history_item
+        ON direct_history_item.id = operation_journal.vault_item_id
+      LEFT JOIN catalog_item direct_history_catalog
+        ON direct_history_catalog.record = direct_history_item.base_record
+    ` : ''
+    if (query) {
+      clauses.push(`(
+        LOWER(
+          operation_journal.id || ' ' || operation_journal.state || ' ' ||
+          operation_journal.started_at_utc || ' ' || COALESCE(operation_journal.completed_at_utc, '') || ' ' ||
+          operation_journal.detail_json
+        ) LIKE ? ESCAPE char(92)
+        OR LOWER(
+          COALESCE(direct_history_catalog.name, '') || ' ' ||
+          COALESCE(direct_history_item.base_record, '') || ' ' ||
+          COALESCE(CAST(direct_history_item.serialized_item AS TEXT), '')
+        ) LIKE ? ESCAPE char(92)
+        OR (operation_journal.vault_item_id IS NULL AND EXISTS (
+          SELECT 1
+          FROM json_each(
+            CASE WHEN json_valid(operation_journal.detail_json) THEN operation_journal.detail_json ELSE '{}' END,
+            '$.vaultItemIds'
+          ) history_id
+          JOIN vault_item history_item ON history_item.id = history_id.value
+          JOIN catalog_item history_catalog ON history_catalog.record = history_item.base_record
+          WHERE LOWER(
+            history_catalog.name || ' ' || history_item.base_record || ' ' ||
+            CAST(history_item.serialized_item AS TEXT)
+          ) LIKE ? ESCAPE char(92)
+        ))
+        OR (operation_journal.vault_item_id IS NULL AND EXISTS (
+          SELECT 1
+          FROM vault_item history_item
+          JOIN catalog_item history_catalog ON history_catalog.record = history_item.base_record
+          WHERE (
+            (operation_journal.operation = 'ingest' AND history_item.ingested_at_utc = operation_journal.completed_at_utc) OR
+            (operation_journal.operation = 'retrieve' AND history_item.retrieved_at_utc = operation_journal.completed_at_utc)
+          ) AND LOWER(
+            history_catalog.name || ' ' || history_item.base_record || ' ' ||
+            CAST(history_item.serialized_item AS TEXT)
+          ) LIKE ? ESCAPE char(92)
+        ))
+      )`)
+      const escaped = `%${query.replace(/[\\%_]/g, '\\$&')}%`
+      parameters.push(escaped, escaped, escaped, escaped)
+    }
+    const where = clauses.join(' AND ')
+    const totalRow = this.database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM operation_journal
+      ${searchJoins}
+      WHERE ${where}
+    `).get(...parameters) as { count: number }
+    const limit = Math.max(1, Math.min(250, Math.trunc(request.limit)))
+    const offset = Math.max(0, Math.trunc(request.offset))
+    const rows = this.database.prepare(`
+      SELECT operation_journal.id, operation_journal.operation, operation_journal.state,
+             operation_journal.vault_item_id, operation_journal.stash_path,
+             CASE
+               WHEN operation_journal.id LIKE 'gdia-import-%' THEN 'item-assistant'
+               WHEN LOWER(operation_journal.stash_path) LIKE 'live:%' THEN 'live'
+               ELSE 'offline'
+             END AS source_kind,
+             operation_journal.started_at_utc, operation_journal.completed_at_utc,
+             operation_journal.detail_json
+      FROM operation_journal
+      ${searchJoins}
+      WHERE ${where}
+      ORDER BY operation_journal.started_at_utc DESC, operation_journal.id
+      LIMIT ? OFFSET ?
+    `).all(...parameters, limit, offset) as Array<{
+      id: string
+      operation: 'ingest' | 'retrieve'
+      state: string
+      vault_item_id: string | null
+      stash_path: string
+      source_kind: 'item-assistant' | 'live' | 'offline'
+      started_at_utc: string
+      completed_at_utc: string | null
+      detail_json: string
+    }>
+
+    const parsed = rows.map((row) => {
+      let detail: Record<string, unknown> = {}
+      try {
+        const value = JSON.parse(row.detail_json) as unknown
+        if (value && typeof value === 'object' && !Array.isArray(value)) detail = value as Record<string, unknown>
+      } catch {
+        // Invalid historical detail is still presented without derived metadata.
+      }
+      const detailIds = Array.isArray(detail.vaultItemIds)
+        ? detail.vaultItemIds.filter((value): value is string => typeof value === 'string')
+        : []
+      const vaultItemIds = [...new Set([...(row.vault_item_id ? [row.vault_item_id] : []), ...detailIds])]
+      const records = Array.isArray(detail.records)
+        ? detail.records.filter((value): value is string => typeof value === 'string')
+        : typeof detail.record === 'string' ? [detail.record] : []
+      return { row, detail, vaultItemIds, records }
+    })
+    const completedTimes = [...new Set(parsed.flatMap((entry) => entry.row.completed_at_utc ? [entry.row.completed_at_utc] : []))]
+    if (completedTimes.length > 0) {
+      const placeholders = completedTimes.map(() => '?').join(', ')
+      const timestampRows = this.database.prepare(`
+        SELECT id, ingested_at_utc, retrieved_at_utc FROM vault_item
+        WHERE ingested_at_utc IN (${placeholders}) OR retrieved_at_utc IN (${placeholders})
+      `).all(...completedTimes, ...completedTimes) as Array<{
+        id: string
+        ingested_at_utc: string
+        retrieved_at_utc: string | null
+      }>
+      for (const entry of parsed) {
+        const completed = entry.row.completed_at_utc
+        if (!completed || entry.vaultItemIds.length > 0) continue
+        entry.vaultItemIds = timestampRows
+          .filter((item) => entry.row.operation === 'ingest'
+            ? item.ingested_at_utc === completed
+            : item.retrieved_at_utc === completed)
+          .map((item) => item.id)
+      }
+    }
+    const allVaultIds = [...new Set(parsed.flatMap((entry) => entry.vaultItemIds))]
+    const vaultRows = allVaultIds.length === 0 ? [] : this.database.prepare(`
+      SELECT vault_item.id, vault_item.base_record, vault_item.serialized_item,
+             vault_item.is_hardcore, catalog_item.name
+      FROM vault_item
+      JOIN catalog_item ON catalog_item.record = vault_item.base_record
+      WHERE vault_item.id IN (${allVaultIds.map(() => '?').join(', ')})
+    `).all(...allVaultIds) as Array<{
+      id: string
+      base_record: string
+      serialized_item: Uint8Array
+      is_hardcore: number
+      name: string
+    }>
+    const vaultById = new Map(vaultRows.map((row) => [row.id, row]))
+    const generatedRecords = [...new Set(parsed.flatMap((entry) => entry.records))]
+    const generatedNames = this.getCatalogNames(generatedRecords)
+
+    const items: OperationHistoryEntry[] = parsed.map(({ row, detail, vaultItemIds, records }) => {
+      const associated = vaultItemIds.flatMap((id) => {
+        const item = vaultById.get(id)
+        if (!item) return []
+        let seed: number | null = null
+        try {
+          const payload = JSON.parse(Buffer.from(item.serialized_item).toString('utf8')) as { seed?: unknown }
+          if (typeof payload.seed === 'number' && Number.isFinite(payload.seed)) seed = payload.seed
+        } catch {
+          // The journal remains useful even if one retained payload cannot be summarized.
+        }
+        return [{ name: item.name, record: item.base_record, seed, isHardcore: item.is_hardcore === 1 }]
+      })
+      const generated = records.map((record) => ({
+        name: generatedNames.get(record.toLowerCase()) ?? record.split(/[\\/]/).at(-1)?.replace(/\.dbr$/i, '') ?? record,
+        record,
+        seed: null,
+        isHardcore: typeof detail.isHardcore === 'boolean' ? detail.isHardcore : null
+      })).filter((generatedItem) => !associated.some((item) => item.record === generatedItem.record))
+      const summaries = [...associated, ...generated]
+      const modes = [...new Set(summaries.map((item) => item.isHardcore).filter((value): value is boolean => value !== null))]
+      const error = typeof detail.error === 'string' ? detail.error : null
+      return {
+        id: row.id,
+        operation: row.operation,
+        state: row.state,
+        startedAtUtc: row.started_at_utc,
+        completedAtUtc: row.completed_at_utc,
+        isHardcore: modes.length === 1 ? modes[0]! : null,
+        itemCount: summaries.length,
+        items: summaries.slice(0, 3).map(({ name, record, seed }) => ({ name, record, seed })),
+        additionalItemCount: Math.max(0, summaries.length - 3),
+        source: row.source_kind,
+        error
+      }
+    })
+    return { items, total: Number(totalRow.count), offset, limit }
+  }
+
   getVaultSummary(): VaultSummary {
     const row = this.database.prepare(`
       SELECT
@@ -1701,6 +1892,20 @@ export class CollectionDatabase {
         COMMIT;
       `)
       version = 11
+    }
+    if (version === 11) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE INDEX operation_journal_history_idx
+          ON operation_journal(operation, state, started_at_utc DESC, id);
+        CREATE INDEX vault_item_ingested_time_idx
+          ON vault_item(ingested_at_utc, id);
+        CREATE INDEX vault_item_retrieved_time_idx
+          ON vault_item(retrieved_at_utc, id);
+        PRAGMA user_version = 12;
+        COMMIT;
+      `)
+      version = 12
     }
   }
 

@@ -10,7 +10,7 @@ Before sending a build to a new tester with a large Item Assistant archive:
 
 - [x] Import and repeat-import 20,000 synthetic mixed-mode copies without duplicates or source mutation.
 - [ ] Replace the current full-archive/24-copy roll-hydration loop with a bounded background job.
-- [ ] Page or virtualize Transfers and operation histories; never mount the full archive.
+- [x] Page Transfers, quarantine, and operation histories; never mount the full archive.
 - [ ] Persist redacted rotating logs and export them in a support bundle with correlation IDs.
 - [x] Provide Item Assistant import preflight, named progress, safe confirmation-only cancellation, and a durable summary. First-run guidance remains ONBOARD-01.
 - [ ] Deduplicate unchanged Item Assistant source backups and preflight free disk space.

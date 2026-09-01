@@ -31,6 +31,7 @@ export const IPC_CHANNELS = {
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
   queryVaultItems: 'vault:query-items',
+  queryOperationHistory: 'vault:query-operation-history',
   getVaultSummary: 'vault:get-summary',
   previewDismantling: 'vault:preview-dismantling',
   ingestStagingTab: 'vault:ingest-staging-tab',
@@ -218,6 +219,7 @@ export interface CairnCodexApi {
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>
   queryVaultItems: (request: VaultPageRequest) => Promise<VaultItemPage>
+  queryOperationHistory: (request: OperationHistoryRequest) => Promise<OperationHistoryPage>
   getVaultSummary: () => Promise<VaultSummary>
   previewDismantling: (vaultItemIds: string[]) => Promise<DismantlingPreview>
   ingestStagingTab: (path: string) => Promise<IngestResult>
@@ -378,6 +380,44 @@ export interface VaultPageRequest {
 
 export interface VaultItemPage {
   items: VaultListItem[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export type OperationHistoryKind = 'ingest' | 'retrieve'
+export type OperationHistoryOutcome = 'all' | 'committed' | 'failed' | 'pending'
+
+export interface OperationHistoryRequest {
+  operation: OperationHistoryKind
+  outcome: OperationHistoryOutcome
+  query?: string
+  offset: number
+  limit: number
+}
+
+export interface OperationHistoryItemSummary {
+  name: string
+  record: string
+  seed: number | null
+}
+
+export interface OperationHistoryEntry {
+  id: string
+  operation: OperationHistoryKind
+  state: string
+  startedAtUtc: string
+  completedAtUtc: string | null
+  isHardcore: boolean | null
+  itemCount: number
+  items: OperationHistoryItemSummary[]
+  additionalItemCount: number
+  source: 'item-assistant' | 'live' | 'offline'
+  error: string | null
+}
+
+export interface OperationHistoryPage {
+  items: OperationHistoryEntry[]
   total: number
   offset: number
   limit: number

@@ -30,6 +30,8 @@ const scrollTarget = argument('--scroll-target')
 const gdiaResultFixture = process.argv.includes('--gdia-result-fixture')
 const onboardingStep = argument('--onboarding-step')
 const dismissOnboarding = process.argv.includes('--dismiss-onboarding')
+const transferSection = argument('--transfer-section')
+const verifyNavigation = process.argv.includes('--verify-navigation')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -101,6 +103,8 @@ const env = {
   ...(onboardingStep ? { CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP: onboardingStep } : {}),
   ...(dismissOnboarding ? { CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING: '1' } : {}),
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
+  ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
+  ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
   ...(miAffixFilter ? { CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER: miAffixFilter } : {}),
   ...(miNativeRestore ? { CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE: '1' } : {}),
   ...(hydrateAllModes ? { CAIRN_CODEX_SCREENSHOT_HYDRATE_ALL_MODES: '1' } : {}),
@@ -196,6 +200,7 @@ console.log(JSON.stringify({
   waitForBackgroundJobs,
   hydrateAllModes,
   openSearchHelp,
+  verifyNavigation,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
   scrollTarget,
@@ -205,6 +210,7 @@ console.log(JSON.stringify({
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,
   renderedVaultRows: report.renderedState?.vaultRows,
+  renderedOperationRows: report.renderedState?.operationRows,
   screenshotPath,
   reportPath
 }, null, 2))

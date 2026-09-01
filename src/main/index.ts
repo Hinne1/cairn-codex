@@ -22,6 +22,8 @@ import {
   type LiveGameSyncResult,
   type LiveRetrievalResult,
   type LiveSupplyDispenseResult,
+  type OperationHistoryPage,
+  type OperationHistoryRequest,
   type SpecialItemRecoveryResult,
   type SpecialRecoveryDestination,
   type MapRegionLocation,
@@ -1380,6 +1382,25 @@ function registerIpcHandlers(
     }
   )
   ipcMain.handle(
+    IPC_CHANNELS.queryOperationHistory,
+    (_event, input: OperationHistoryRequest): OperationHistoryPage => {
+      if (!input || !['ingest', 'retrieve'].includes(input.operation)) {
+        throw new Error('A valid operation-history kind is required.')
+      }
+      if (!['all', 'committed', 'failed', 'pending'].includes(input.outcome)) {
+        throw new Error('A valid operation-history outcome is required.')
+      }
+      if (
+        !Number.isInteger(input.offset) || input.offset < 0 || input.offset > 10_000_000 ||
+        !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 250 ||
+        (input.query?.length ?? 0) > 200
+      ) {
+        throw new Error('Operation-history paging parameters are outside their safe bounds.')
+      }
+      return database.queryOperationHistory(input)
+    }
+  )
+  ipcMain.handle(
     IPC_CHANNELS.getVaultSummary,
     (): VaultSummary => database.getVaultSummary()
   )
@@ -1890,7 +1911,7 @@ async function executeSahdinasMementoRecovery(
     destination: `live://special-recovery/${destination}`,
     payloadSha256,
     startedAtUtc: new Date().toISOString(),
-    detail: { phase: 'prepared', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination }
+    detail: { phase: 'prepared', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination, isHardcore: activeIsHardcore }
   })
   try {
     const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
@@ -1927,7 +1948,7 @@ async function executeSahdinasMementoRecovery(
           operationId,
           receiptPath: result.receiptPath,
           completedAtUtc: new Date().toISOString(),
-          detail: { phase: 'committed', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination }
+          detail: { phase: 'committed', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination, isHardcore: activeIsHardcore }
         })
         return {
           operationId,
@@ -2057,7 +2078,7 @@ async function executeLiveAugmentDispense(
     destination: 'live://personal-inventory/augments',
     payloadSha256,
     startedAtUtc: new Date().toISOString(),
-    detail: { phase: 'prepared', adapter: 'cairn-live-v1', records: selected.map((item) => item.record) }
+    detail: { phase: 'prepared', adapter: 'cairn-live-v1', records: selected.map((item) => item.record), isHardcore: activeCharacter.isHardcore }
   })
   try {
     for (const [index, item] of selected.entries()) {
@@ -2113,6 +2134,7 @@ async function executeLiveAugmentDispense(
         phase: 'committed',
         adapter: 'cairn-live-v1',
         records: dispensed.map((item) => item.record),
+        isHardcore: activeCharacter.isHardcore,
         receiptPaths,
         rejectedCount: issues.length
       }
@@ -3503,6 +3525,22 @@ async function runSmokeTest(
       offset: 0,
       limit: 100
     })
+    const ingestionHistory = database.queryOperationHistory({
+      operation: 'ingest',
+      outcome: 'committed',
+      query: journalPayload.baseRecord,
+      offset: 0,
+      limit: 100
+    })
+    const retrievalHistory = database.queryOperationHistory({
+      operation: 'retrieve',
+      outcome: 'all',
+      query: retrievalOperationId,
+      offset: 0,
+      limit: 100
+    })
+    const journalIngest = ingestionHistory.items.find((entry) => entry.id === ingestOperationId)
+    const journalRetrieval = retrievalHistory.items.find((entry) => entry.id === retrievalOperationId)
     const vaultSummary = database.getVaultSummary()
     if (
       ingestedPage.total < 1 ||
@@ -3511,6 +3549,11 @@ async function runSmokeTest(
       retrievedPage.items.length !== 1 ||
       !searchedPage.items.some((item) => item.id === reusableVaultItemId) ||
       escapedSearchPage.total !== 0 ||
+      journalIngest?.isHardcore !== true ||
+      journalIngest.itemCount !== 1 ||
+      journalIngest.items[0]?.seed !== journalPayload.seed ||
+      journalRetrieval?.state !== 'committed' ||
+      journalRetrieval.itemCount !== 1 ||
       vaultSummary.total < 2 ||
       vaultSummary.ingested < 1 ||
       vaultSummary.retrieved < 1
@@ -4629,12 +4672,26 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           interactionTimings.categoryMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
+              await new Promise((resolve) => setTimeout(resolve, 100))
+              document.querySelector('.onboarding-skip')?.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               ;[...document.querySelectorAll('.workspace-tabs button, .category-tabs button, .system-nav button')]
                 .find((button) =>
                   (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
                 ?.click()
               await new Promise((resolve) => setTimeout(resolve, 100))
               return performance.now() - started
+            })()
+          `)
+        }
+        const transferSection = process.env.CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION
+        if (transferSection) {
+          await window.webContents.executeJavaScript(`
+            (async () => {
+              ;[...document.querySelectorAll('.transfer-section-tabs button')]
+                .find((button) => button.querySelector('strong')?.textContent?.trim() === ${JSON.stringify(transferSection)})
+                ?.click()
+              await new Promise((resolve) => setTimeout(resolve, 250))
             })()
           `)
         }
@@ -4796,6 +4853,42 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION === '1' && transferSection) {
+          interactionTimings.navigationMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const activeSection = () => document.querySelector('.transfer-section-tabs button.active strong')?.textContent?.trim()
+              const waitForPopState = () => new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('Navigation did not emit popstate.')), 1500)
+                window.addEventListener('popstate', () => {
+                  clearTimeout(timer)
+                  requestAnimationFrame(() => requestAnimationFrame(resolve))
+                }, { once: true })
+              })
+              const back = waitForPopState()
+              window.history.back()
+              await back
+              if (activeSection() !== 'Retrieve') throw new Error('Back did not restore Retrieve.')
+              const forward = waitForPopState()
+              window.history.forward()
+              await forward
+              if (activeSection() !== ${JSON.stringify(transferSection)}) {
+                throw new Error('Forward did not restore the requested transfer section.')
+              }
+              const restoredQuery = document.querySelector('.vault-explorer-toolbar input')?.value ?? ''
+              if (restoredQuery !== ${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_QUERY ?? '')}) {
+                throw new Error('Forward did not restore the transfer-history query.')
+              }
+              return performance.now() - started
+            })()
+          `)
+        }
+        await window.webContents.executeJavaScript(`
+          (async () => {
+            document.querySelector('.onboarding-skip')?.click()
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+          })()
+        `)
         window.setOpacity(0)
         window.showInactive()
         window.webContents.invalidate()
@@ -4819,6 +4912,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           sets: document.querySelectorAll('.set-card').length,
           copyCards: document.querySelectorAll('.copy-card').length,
           vaultRows: document.querySelectorAll('.vault-item-list .vault-row').length,
+          operationRows: document.querySelectorAll('.operation-history-row').length,
           miRows: [...document.querySelectorAll('.mi-table tbody tr')].map((row) => ({
             text: row.textContent?.replace(/\s+/g, ' ').trim(),
             prefixClass: row.children[2]?.className,

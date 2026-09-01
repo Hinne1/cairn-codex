@@ -39,6 +39,8 @@ import type {
   LiveGameStatus,
   MapRegionLocation,
   ObservedStashItem,
+  OperationHistoryOutcome,
+  OperationHistoryPage,
   RecoveryStatus,
   RolledStat,
   StagingTabInspection,
@@ -70,6 +72,7 @@ type PlannerMapSortMode = 'items' | 'name' | 'level'
 type VaultRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
 type VaultSortMode = 'recent' | 'name' | 'level' | 'roll'
 type TransferMode = 'live' | 'offline'
+type TransferSection = 'retrieve' | 'ingestion-history' | 'retrieval-history' | 'quarantine'
 type PlannerDisplay = 'list' | 'grid' | 'map'
 type PlannerMapScope = 'selected' | 'all'
 type SupplyCategory = 'writs' | 'augments'
@@ -123,6 +126,10 @@ interface AppHistoryState {
   vaultSortMode: VaultSortMode
   vaultSortDirection: SortDirection
   transferMode: TransferMode
+  transferSection: TransferSection
+  transferHistoryQuery: string
+  transferHistoryOutcome: OperationHistoryOutcome
+  transferHistoryPage: number
 }
 
 interface TooltipAffix {
@@ -362,6 +369,7 @@ const characterImportError = ref<string | null>(null)
 const atlasRegionQuery = ref('')
 const selectedAtlasRegion = ref<string | null>(null)
 const transferMode = ref<TransferMode>('live')
+const transferSection = ref<TransferSection>('retrieve')
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
 const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
@@ -378,7 +386,6 @@ const vaultSummary = ref<VaultSummary>({
 })
 const storedVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0, limit: 100 })
 const quarantineVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0, limit: 100 })
-const retrievedVaultPage = ref<VaultItemPage>({ items: [], total: 0, offset: 0, limit: 100 })
 const vaultPageLoading = ref(false)
 const staging = ref<StagingTabInspection | null>(null)
 const writeSafety = ref<WriteSafetyStatus | null>(null)
@@ -389,9 +396,14 @@ const vaultRarityFilter = ref<VaultRarityFilter>('all')
 const vaultSortMode = ref<VaultSortMode>('recent')
 const vaultSortDirection = ref<SortDirection>('desc')
 const vaultPage = ref(1)
-const vaultHistoryPage = ref(1)
 const vaultQuarantinePage = ref(1)
 const vaultPageSize = 100
+const operationHistory = ref<OperationHistoryPage>({ items: [], total: 0, offset: 0, limit: 50 })
+const operationHistoryLoading = ref(false)
+const transferHistoryQuery = ref('')
+const transferHistoryOutcome = ref<OperationHistoryOutcome>('all')
+const transferHistoryPage = ref(1)
+const operationHistoryPageSize = 50
 const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
@@ -476,7 +488,9 @@ let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 let liveSyncInFlight = false
 let vaultPageTimer: ReturnType<typeof setTimeout> | null = null
+let operationHistoryTimer: ReturnType<typeof setTimeout> | null = null
 let vaultPageRequestId = 0
+let operationHistoryRequestId = 0
 let appHistoryReady = false
 let restoringAppHistory = false
 let appHistoryIndex = 0
@@ -716,14 +730,15 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
 const visibleSupplyVaultItems = computed(() => supplyVaultItems.value.slice(0, supplyVisibleCount.value))
 const workspaceToolIdSet = computed(() => new Set(visibleWorkspaceToolIds.value))
 const quarantinedVaultItems = computed(() => quarantineVaultPage.value.items)
-const retrievedVaultItems = computed(() => retrievedVaultPage.value.items)
 const visibleQuarantinedVaultItems = computed(() => quarantinedVaultItems.value)
 const vaultQuarantinePageCount = computed(() =>
   Math.max(1, Math.ceil(quarantineVaultPage.value.total / vaultPageSize))
 )
-const visibleRetrievedVaultItems = computed(() => retrievedVaultItems.value)
-const vaultHistoryPageCount = computed(() =>
-  Math.max(1, Math.ceil(retrievedVaultPage.value.total / vaultPageSize))
+const operationHistoryPageCount = computed(() =>
+  Math.max(1, Math.ceil(operationHistory.value.total / operationHistoryPageSize))
+)
+const activeHistoryKind = computed(() =>
+  transferSection.value === 'ingestion-history' ? 'ingest' as const : 'retrieve' as const
 )
 const archivedCopyCount = computed(() => vaultSummary.value.ingested)
 const stashChoices = computed(() => snapshot.value?.availableStashes ?? snapshot.value?.scannedStashes ?? [])
@@ -2122,7 +2137,11 @@ function currentAppHistoryState(index = appHistoryIndex): AppHistoryState {
     vaultRarityFilter: vaultRarityFilter.value,
     vaultSortMode: vaultSortMode.value,
     vaultSortDirection: vaultSortDirection.value,
-    transferMode: transferMode.value
+    transferMode: transferMode.value,
+    transferSection: transferSection.value,
+    transferHistoryQuery: transferHistoryQuery.value,
+    transferHistoryOutcome: transferHistoryOutcome.value,
+    transferHistoryPage: transferHistoryPage.value
   }
 }
 
@@ -2188,6 +2207,10 @@ function handleAppHistory(event: PopStateEvent): void {
   vaultSortMode.value = state.vaultSortMode ?? 'recent'
   vaultSortDirection.value = state.vaultSortDirection ?? 'desc'
   transferMode.value = state.transferMode ?? 'live'
+  transferSection.value = state.transferSection ?? 'retrieve'
+  transferHistoryQuery.value = state.transferHistoryQuery ?? ''
+  transferHistoryOutcome.value = state.transferHistoryOutcome ?? 'all'
+  transferHistoryPage.value = state.transferHistoryPage ?? 1
   updateHistoryButtons()
   void nextTick(() => {
     syncMiWorkshopControlElements()
@@ -2237,7 +2260,7 @@ watch([oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaxi
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
 })
-watch([activeView, selectedRecord], () => {
+watch([activeView, selectedRecord, transferSection], () => {
   if (!appHistoryReady || restoringAppHistory) return
   appHistoryIndex += 1
   appHistoryMaximum = appHistoryIndex
@@ -2245,7 +2268,7 @@ watch([activeView, selectedRecord], () => {
   updateHistoryButtons()
 }, { flush: 'post' })
 watch(
-  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection, plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerDisplay, atlasRegionQuery, plannerMapScope, plannerMapSortMode, plannerMapSortDirection, vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, transferMode],
+  [activeCategory, query, ownership, rarityFilter, miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, skillItemQuery, skillScope, skillRarityFilter, skillSlotFilter, skillSort, skillSortDirection, oracleQuery, oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleSortMode, oracleSortDirection, plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerDisplay, atlasRegionQuery, plannerMapScope, plannerMapSortMode, plannerMapSortDirection, vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, transferMode, transferHistoryQuery, transferHistoryOutcome, transferHistoryPage],
   () => {
     if (!appHistoryReady || restoringAppHistory) return
     window.history.replaceState(currentAppHistoryState(), '')
@@ -2304,6 +2327,16 @@ watch(transferMode, () => {
   vaultQuarantinePage.value = 1
   selectedSupplyIds.value = []
 })
+watch(transferSection, (section) => {
+  selectedVaultIds.value = []
+  if (!restoringAppHistory) transferHistoryPage.value = 1
+  if (section === 'ingestion-history' || section === 'retrieval-history') scheduleOperationHistoryRefresh()
+})
+watch([transferHistoryQuery, transferHistoryOutcome], () => {
+  transferHistoryPage.value = 1
+  scheduleOperationHistoryRefresh()
+})
+watch(transferHistoryPage, scheduleOperationHistoryRefresh)
 watch([vaultQuery, vaultRarityFilter, vaultSortMode, vaultSortDirection, activeTransferHardcore], () => {
   vaultPage.value = 1
   selectedVaultIds.value = []
@@ -2317,15 +2350,11 @@ watch(vaultQuarantinePage, () => {
   selectedVaultIds.value = []
   scheduleVaultPageRefresh()
 })
-watch(vaultHistoryPage, scheduleVaultPageRefresh)
 watch(vaultPageCount, (count) => {
   if (vaultPage.value > count) vaultPage.value = count
 })
 watch(vaultQuarantinePageCount, (count) => {
   if (vaultQuarantinePage.value > count) vaultQuarantinePage.value = count
-})
-watch(vaultHistoryPageCount, (count) => {
-  if (vaultHistoryPage.value > count) vaultHistoryPage.value = count
 })
 watch(supplyCategory, () => {
   supplySlotFilter.value = 'all'
@@ -2478,6 +2507,7 @@ onBeforeUnmount(() => {
   notifications.clear()
   if (searchQueryTimer) clearTimeout(searchQueryTimer)
   if (vaultPageTimer) clearTimeout(vaultPageTimer)
+  if (operationHistoryTimer) clearTimeout(operationHistoryTimer)
   cancelSearchDocumentWarmup()
 })
 
@@ -2652,6 +2682,12 @@ async function handleGdiaImportCompleted(result: GdiaImportResult): Promise<void
   } catch (error) {
     reportTransferProblem(readableError(error))
   }
+}
+
+function formatOperationSource(source: 'item-assistant' | 'live' | 'offline'): string {
+  if (source === 'item-assistant') return 'Item Assistant import'
+  if (source === 'live') return 'Live game'
+  return 'Offline shared stash'
 }
 
 function persistOnboarding(status: OnboardingStatus, step = onboardingStep.value): void {
@@ -3562,6 +3598,10 @@ async function refreshVault(): Promise<void> {
     else staging.value = null
     await refreshRecoveryStatus()
     if (activeView.value === 'vault') await refreshVaultPages()
+    if (
+      activeView.value === 'vault' &&
+      (transferSection.value === 'ingestion-history' || transferSection.value === 'retrieval-history')
+    ) await refreshOperationHistory()
     if (activeView.value === 'supplies' || activeView.value === 'dismantling') {
       await refreshFullVaultItems()
     }
@@ -3592,6 +3632,43 @@ function scheduleVaultPageRefresh(): void {
   }, 120)
 }
 
+function scheduleOperationHistoryRefresh(): void {
+  if (
+    activeView.value !== 'vault' ||
+    (transferSection.value !== 'ingestion-history' && transferSection.value !== 'retrieval-history')
+  ) return
+  if (operationHistoryTimer) clearTimeout(operationHistoryTimer)
+  operationHistoryLoading.value = true
+  operationHistoryTimer = setTimeout(() => {
+    operationHistoryTimer = null
+    void refreshOperationHistory()
+  }, 120)
+}
+
+async function refreshOperationHistory(): Promise<void> {
+  if (transferSection.value !== 'ingestion-history' && transferSection.value !== 'retrieval-history') return
+  const requestId = ++operationHistoryRequestId
+  operationHistoryLoading.value = true
+  try {
+    const result = await window.cairnCodex.queryOperationHistory({
+      operation: activeHistoryKind.value,
+      outcome: transferHistoryOutcome.value,
+      query: transferHistoryQuery.value,
+      offset: (transferHistoryPage.value - 1) * operationHistoryPageSize,
+      limit: operationHistoryPageSize
+    })
+    if (requestId !== operationHistoryRequestId) return
+    operationHistory.value = result
+    const pageCount = Math.max(1, Math.ceil(operationHistory.value.total / operationHistoryPageSize))
+    if (transferHistoryPage.value > pageCount) transferHistoryPage.value = pageCount
+  } catch (error) {
+    if (requestId !== operationHistoryRequestId) return
+    reportTransferProblem(readableError(error))
+  } finally {
+    if (requestId === operationHistoryRequestId) operationHistoryLoading.value = false
+  }
+}
+
 async function refreshVaultPages(): Promise<void> {
   const requestId = ++vaultPageRequestId
   const isHardcore = activeTransferHardcore.value
@@ -3602,7 +3679,7 @@ async function refreshVaultPages(): Promise<void> {
   }
   vaultPageLoading.value = true
   try {
-    const [stored, quarantine, retrieved] = await Promise.all([
+    const [stored, quarantine] = await Promise.all([
       window.cairnCodex.queryVaultItems({
         state: 'ingested',
         isHardcore,
@@ -3623,19 +3700,11 @@ async function refreshVaultPages(): Promise<void> {
         direction: 'desc',
         offset: (vaultQuarantinePage.value - 1) * vaultPageSize,
         limit: vaultPageSize
-      }),
-      window.cairnCodex.queryVaultItems({
-        state: 'retrieved',
-        sort: 'recent',
-        direction: 'desc',
-        offset: (vaultHistoryPage.value - 1) * vaultPageSize,
-        limit: vaultPageSize
       })
     ])
     if (requestId !== vaultPageRequestId) return
     storedVaultPage.value = stored
     quarantineVaultPage.value = quarantine
-    retrievedVaultPage.value = retrieved
     const currentIds = new Set([...stored.items, ...quarantine.items].map((item) => item.id))
     selectedVaultIds.value = selectedVaultIds.value.filter((id) => currentIds.has(id))
   } catch (error) {
@@ -4814,7 +4883,6 @@ function vaultItemForId(id: string): VaultListItem | null {
   const visible = [
     ...storedVaultPage.value.items,
     ...quarantineVaultPage.value.items,
-    ...retrievedVaultPage.value.items,
     ...vaultItems.value
   ].find((item) => item.id === id)
   if (visible) return visible
@@ -7350,6 +7418,22 @@ function formatPercentile(value: number | null | undefined): string {
           </template>
         </ToolHeader>
 
+        <nav class="transfer-section-tabs" aria-label="Transfer workspace">
+          <button type="button" :class="{ active: transferSection === 'retrieve' }" @click="transferSection = 'retrieve'">
+            <strong>Retrieve</strong><small>{{ storedVaultPage.total.toLocaleString() }} stored</small>
+          </button>
+          <button type="button" :class="{ active: transferSection === 'ingestion-history' }" @click="transferSection = 'ingestion-history'">
+            <strong>Ingestion history</strong><small>Items entering Cairn</small>
+          </button>
+          <button type="button" :class="{ active: transferSection === 'retrieval-history' }" @click="transferSection = 'retrieval-history'">
+            <strong>Retrieval history</strong><small>Items returned to Grim Dawn</small>
+          </button>
+          <button type="button" :class="{ active: transferSection === 'quarantine' }" @click="transferSection = 'quarantine'">
+            <strong>Quarantine</strong><small>{{ quarantineVaultPage.total.toLocaleString() }} awaiting review</small>
+          </button>
+        </nav>
+
+        <template v-if="transferSection === 'retrieve'">
         <nav class="transfer-mode-tabs" aria-label="Transfer method">
           <button type="button" :class="{ active: transferMode === 'live' }" @click="transferMode = 'live'">
             <span><strong>Live game</strong><small>Watched tabs while Grim Dawn is running</small></span>
@@ -7467,46 +7551,6 @@ function formatPercentile(value: number | null | undefined): string {
             >{{ sahdinaRecoveryBusy === 'shared-stash' ? 'Delivering…' : 'Recover to shared stash' }}</button>
           </div>
         </article>
-
-        <section v-if="quarantineVaultPage.total" class="vault-quarantine">
-          <header>
-            <div>
-              <p class="section-label">Recovery quarantine</p>
-              <h3>{{ quarantineVaultPage.total }} non-catalog item{{ quarantineVaultPage.total === 1 ? '' : 's' }} safely stored</h3>
-            </div>
-          </header>
-          <p>
-            Cairn intercepted these items but they are outside the Epic/Legendary/MI collection.
-            Select them and use live return; their verified receipt remains on disk until the return is acknowledged.
-          </p>
-          <div class="vault-item-list selectable">
-            <label v-for="item in visibleQuarantinedVaultItems" :key="item.id" class="vault-row unsupported">
-              <input
-                type="checkbox"
-                :checked="selectedVaultIds.includes(item.id)"
-                :disabled="vaultBusy"
-                @change="toggleVaultItem(item.id)"
-              />
-              <div>
-                <strong>{{ item.name }}</strong>
-                <small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.baseRecord }} · seed {{ item.seed }}</small>
-              </div>
-            </label>
-          </div>
-          <nav v-if="vaultQuarantinePageCount > 1" class="pagination vault-pagination" aria-label="Quarantine pages">
-            <button type="button" :disabled="vaultQuarantinePage === 1" @click="vaultQuarantinePage -= 1">Previous</button>
-            <span>Page {{ vaultQuarantinePage }} of {{ vaultQuarantinePageCount }}</span>
-            <button type="button" :disabled="vaultQuarantinePage === vaultQuarantinePageCount" @click="vaultQuarantinePage += 1">Next</button>
-          </nav>
-          <button
-            class="vault-action live-action"
-            type="button"
-            :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0 || selectedVaultIds.some((id) => !quarantinedVaultItems.some((item) => item.id === id))"
-            @click="retrieveSelectedLive"
-          >
-            {{ vaultBusy ? 'Waiting for game…' : `Live-return ${selectedVaultIds.length || ''} selected` }}
-          </button>
-        </section>
 
         <article class="vault-panel live-stored-panel">
           <header>
@@ -7684,23 +7728,102 @@ function formatPercentile(value: number | null | undefined): string {
           </article>
         </div>
         </template>
+        </template>
 
-        <section v-if="retrievedVaultPage.total" class="vault-history">
-          <div>
-            <p class="section-label">History</p>
-            <h3>Previously retrieved</h3>
-          </div>
-          <div class="history-chips">
-            <span v-for="item in visibleRetrievedVaultItems" :key="item.id">
-              {{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.name }} · seed {{ item.seed }}
-            </span>
-          </div>
-          <nav v-if="vaultHistoryPageCount > 1" class="pagination vault-pagination" aria-label="Retrieval history pages">
-            <button type="button" :disabled="vaultHistoryPage === 1" @click="vaultHistoryPage -= 1">Previous</button>
-            <span>Page {{ vaultHistoryPage }} of {{ vaultHistoryPageCount }}</span>
-            <button type="button" :disabled="vaultHistoryPage === vaultHistoryPageCount" @click="vaultHistoryPage += 1">Next</button>
-          </nav>
-        </section>
+        <template v-else-if="transferSection === 'ingestion-history' || transferSection === 'retrieval-history'">
+          <ExplorerToolbar
+            v-model="transferHistoryQuery"
+            v-bind="searchGuidance.vault"
+            class="vault-explorer-toolbar"
+            :search-label="transferSection === 'ingestion-history' ? 'Search ingestion history' : 'Search retrieval history'"
+            placeholder="Item, seed, outcome, correlation ID…"
+            :result-count="operationHistory.total"
+            result-label="operations"
+            :loading="operationHistoryLoading"
+          >
+            <template #filters>
+              <label>
+                <span>Outcome</span>
+                <select v-model="transferHistoryOutcome" autocomplete="off">
+                  <option value="all">All outcomes</option>
+                  <option value="committed">Completed</option>
+                  <option value="failed">Failed</option>
+                  <option value="pending">Needs attention</option>
+                </select>
+              </label>
+            </template>
+          </ExplorerToolbar>
+
+          <section class="operation-history" :aria-label="transferSection === 'ingestion-history' ? 'Ingestion history' : 'Retrieval history'">
+            <article v-for="operation in operationHistory.items" :key="operation.id" class="operation-history-row">
+              <div class="operation-state" :class="`state-${operation.state}`">
+                <strong>{{ operation.state === 'committed' ? 'Completed' : operation.state === 'failed' ? 'Failed' : 'Needs attention' }}</strong>
+                <small>{{ operation.isHardcore === null ? 'Mode unknown' : operation.isHardcore ? 'Hardcore' : 'Softcore' }}</small>
+              </div>
+              <div class="operation-summary">
+                <h3>{{ operation.itemCount }} item{{ operation.itemCount === 1 ? '' : 's' }} · {{ formatOperationSource(operation.source) }}</h3>
+                <p v-if="operation.items.length">
+                  <span v-for="item in operation.items" :key="`${operation.id}:${item.record}:${item.seed}`">
+                    {{ item.name }}<small v-if="item.seed !== null">seed {{ item.seed }}</small>
+                  </span>
+                  <em v-if="operation.additionalItemCount">+{{ operation.additionalItemCount }} more</em>
+                </p>
+                <p v-else class="operation-empty">No retained item summary is available for this historical operation.</p>
+                <p v-if="operation.error" class="operation-error">{{ operation.error }}</p>
+              </div>
+              <dl class="operation-meta">
+                <div><dt>Started</dt><dd>{{ formatBackupDate(operation.startedAtUtc) }}</dd></div>
+                <div v-if="operation.completedAtUtc"><dt>Finished</dt><dd>{{ formatBackupDate(operation.completedAtUtc) }}</dd></div>
+                <div><dt>Correlation ID</dt><dd><code>{{ operation.id }}</code></dd></div>
+              </dl>
+            </article>
+            <div v-if="!operationHistoryLoading && operationHistory.items.length === 0" class="vault-empty">No operations match these filters.</div>
+            <nav v-if="operationHistoryPageCount > 1" class="pagination vault-pagination" aria-label="Operation history pages">
+              <button type="button" :disabled="transferHistoryPage === 1" @click="transferHistoryPage -= 1">Previous</button>
+              <span>Page {{ transferHistoryPage }} of {{ operationHistoryPageCount }}</span>
+              <button type="button" :disabled="transferHistoryPage === operationHistoryPageCount" @click="transferHistoryPage += 1">Next</button>
+            </nav>
+          </section>
+        </template>
+
+        <template v-else>
+          <ExplorerToolbar
+            v-model="vaultQuery"
+            v-bind="searchGuidance.vault"
+            class="vault-explorer-toolbar"
+            search-label="Search quarantine"
+            placeholder="Item record, name, seed…"
+            :result-count="quarantineVaultPage.total"
+            result-label="quarantined copies"
+            :loading="vaultPageLoading"
+          />
+          <section class="vault-quarantine quarantine-workspace">
+            <header>
+              <div>
+                <p class="section-label">Recovery quarantine</p>
+                <h3>{{ quarantineVaultPage.total }} non-catalog item{{ quarantineVaultPage.total === 1 ? '' : 's' }} safely stored</h3>
+              </div>
+            </header>
+            <p>Cairn retained these items because they could not safely join the collection catalog. Review the exact record and return only the copies you recognize.</p>
+            <div v-if="visibleQuarantinedVaultItems.length" class="vault-item-list selectable">
+              <label v-for="item in visibleQuarantinedVaultItems" :key="item.id" class="vault-row unsupported">
+                <input type="checkbox" :checked="selectedVaultIds.includes(item.id)" :disabled="vaultBusy" @change="toggleVaultItem(item.id)" />
+                <div><strong>{{ item.name }}</strong><small>{{ item.isHardcore ? 'HC' : 'SC' }} · {{ item.baseRecord }} · seed {{ item.seed }}</small></div>
+              </label>
+            </div>
+            <div v-else class="vault-empty">Nothing is waiting in quarantine.</div>
+            <nav v-if="vaultQuarantinePageCount > 1" class="pagination vault-pagination" aria-label="Quarantine pages">
+              <button type="button" :disabled="vaultQuarantinePage === 1" @click="vaultQuarantinePage -= 1">Previous</button>
+              <span>Page {{ vaultQuarantinePage }} of {{ vaultQuarantinePageCount }}</span>
+              <button type="button" :disabled="vaultQuarantinePage === vaultQuarantinePageCount" @click="vaultQuarantinePage += 1">Next</button>
+            </nav>
+            <div class="quarantine-actions">
+              <button type="button" :disabled="vaultBusy || liveStatus?.state !== 'ready' || selectedVaultIds.length === 0" @click="retrieveSelectedLive">Return selected live</button>
+              <button type="button" :disabled="vaultBusy || !writeSafety?.permitted || staging?.itemCount !== 0 || selectedVaultIds.length === 0" @click="retrieveSelected">Return selected offline</button>
+            </div>
+            <small>Live return uses the configured deposit tab. Offline return requires Grim Dawn and Item Assistant to be closed and the final shared stash tab to be empty.</small>
+          </section>
+        </template>
       </section>
 
       <section v-else-if="!snapshot && (appInitializing || scanning)" class="empty-state">

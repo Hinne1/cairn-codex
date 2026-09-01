@@ -1,4 +1,129 @@
 :root {
+  color-scheme: dark;
+
+  /* Typography */
+  --cc-font-interface: Inter, ui-sans-serif, system-ui, sans-serif;
+  --cc-font-display: Georgia, 'Times New Roman', serif;
+  --cc-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --cc-font-size-2xs: 8px;
+  --cc-font-size-xs: 9px;
+  --cc-font-size-sm: 10px;
+  --cc-font-size-md: 11px;
+  --cc-font-size-lg: 12px;
+  --cc-font-size-xl: 14px;
+  --cc-font-size-2xl: 16px;
+  --cc-font-size-3xl: 20px;
+  --cc-font-size-4xl: 24px;
+  --cc-font-size-5xl: 30px;
+  --cc-line-compact: 1.2;
+  --cc-line-body: 1.5;
+  --cc-letter-label: .09em;
+
+  /* Spacing, geometry, and motion */
+  --cc-space-1: 4px;
+  --cc-space-2: 6px;
+  --cc-space-3: 8px;
+  --cc-space-4: 10px;
+  --cc-space-5: 12px;
+  --cc-space-6: 16px;
+  --cc-space-7: 20px;
+  --cc-space-8: 24px;
+  --cc-space-9: 32px;
+  --cc-control-height-sm: 32px;
+  --cc-control-height: 38px;
+  --cc-radius-xs: 3px;
+  --cc-radius-sm: 5px;
+  --cc-radius-md: 7px;
+  --cc-radius-lg: 9px;
+  --cc-radius-dialog: 10px;
+  --cc-radius-pill: 999px;
+  --cc-transition-fast: 120ms ease-out;
+
+  /* Application layers */
+  --cc-canvas: #10100f;
+  --cc-canvas-deep: #0d0d0c;
+  --cc-mix-light: #fff;
+  --cc-surface-1: #171714;
+  --cc-surface-2: #1d1c18;
+  --cc-surface-3: #24211b;
+  --cc-surface-raised: #2a241b;
+  --cc-surface-input: #11110f;
+  --cc-surface-overlay: rgba(23, 23, 20, .96);
+  --cc-backdrop: rgba(4, 4, 3, .78);
+
+  /* Borders and focus */
+  --cc-border-subtle: #343026;
+  --cc-border-default: #39352c;
+  --cc-border-strong: #454034;
+  --cc-border-emphasis: #554a37;
+  --cc-focus: #8c7040;
+  --cc-focus-ring: rgba(140, 112, 64, .14);
+
+  /* Content */
+  --cc-text-strong: #ece5d3;
+  --cc-text-primary: #ded4bf;
+  --cc-text-secondary: #b5ab98;
+  --cc-text-muted: #8d8575;
+  --cc-text-subtle: #756e61;
+  --cc-text-disabled: #4e4a42;
+  --cc-text-inverse: #19150e;
+
+  /* Brand and interaction */
+  --cc-accent: #d3aa55;
+  --cc-accent-strong: #e7c477;
+  --cc-accent-soft: #d5ba7b;
+  --cc-accent-surface: #2a241b;
+  --cc-accent-surface-hover: #30281a;
+  --cc-accent-border: #55472f;
+
+  /* Feedback */
+  --cc-success: #bdce91;
+  --cc-success-border: #526039;
+  --cc-success-surface: #1b2318;
+  --cc-warning: #e0bd69;
+  --cc-warning-border: #80632e;
+  --cc-warning-surface: #251f16;
+  --cc-danger: #dfa291;
+  --cc-danger-border: #704238;
+  --cc-danger-surface: #38221d;
+  --cc-info: #9bc7d8;
+  --cc-info-border: #3b4c54;
+  --cc-info-surface: #151b1d;
+
+  /* Elevation */
+  --cc-shadow-popover: 0 12px 28px rgba(0, 0, 0, .42);
+  --cc-shadow-dialog: 0 24px 70px rgba(0, 0, 0, .68);
+  --cc-shadow-focus: 0 0 0 2px var(--cc-focus-ring);
+
+  /* Workspace tones configure shared chrome without forking its geometry. */
+  --cc-tone-accent: var(--cc-accent);
+  --cc-tone-accent-soft: var(--cc-accent-soft);
+  --cc-tone-border: var(--cc-border-strong);
+  --cc-tone-surface: var(--cc-surface-overlay);
+  --cc-tone-muted: var(--cc-text-subtle);
+  --cc-tone-heading: var(--cc-text-strong);
+  --cc-tone-focus: var(--cc-focus);
+  --cc-tone-focus-ring: var(--cc-focus-ring);
+
+  --cc-tone-green-accent: #91bd73;
+  --cc-tone-green-accent-soft: #b8d277;
+  --cc-tone-green-border: #46523e;
+  --cc-tone-green-surface: #181a16;
+  --cc-tone-green-muted: #75816d;
+  --cc-tone-green-heading: #dcebd2;
+  --cc-tone-green-focus: #73955f;
+  --cc-tone-green-focus-ring: rgba(105, 145, 83, .15);
+  --cc-tone-blue-accent: #6aa7c8;
+  --cc-tone-blue-border: #3b4c54;
+  --cc-tone-blue-surface: #151b1d;
+  --cc-tone-blue-muted: #82949b;
+  --cc-tone-blue-heading: #d7e6eb;
+  --cc-tone-ember-accent: #df9443;
+  --cc-tone-ember-border: #55462c;
+  --cc-tone-ember-surface: #292319;
+  --cc-tone-ember-glow: rgba(132, 91, 35, .2);
+
+  /* Grim Dawn gameplay semantics remain distinct from application chrome. */
   --gd-rarity-epic: #79c2ff;
   --gd-rarity-legendary: #e099fa;
   --semantic-level: #d0b574;
@@ -10,4 +135,8 @@
   --semantic-awakening: #e0b95d;
   --semantic-fx: #76c8c0;
   --semantic-missing: #c3bcb0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --cc-transition-fast: 0ms; }
 }

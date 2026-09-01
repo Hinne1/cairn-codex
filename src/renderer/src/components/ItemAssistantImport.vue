@@ -134,9 +134,9 @@ function formatDuration(milliseconds: number): string {
   gap: 9px;
   margin-top: 14px;
   padding: 12px;
-  border: 1px solid #464034;
-  border-radius: 7px;
-  background: rgba(17, 17, 15, .72);
+  border: 1px solid var(--cc-border-strong);
+  border-radius: var(--cc-radius-md);
+  background: color-mix(in srgb, var(--cc-surface-input), transparent 28%);
 }
 .migration-compact { display: grid; gap: 9px; }
 .migration-compact .settings-action { width: 100%; }
@@ -147,14 +147,14 @@ function formatDuration(milliseconds: number): string {
   gap: 12px;
 }
 .migration-progress span,
-.migration-summary header > span { color: #bca264; font-size: 10px; }
-.migration-progress progress { width: 100%; accent-color: #b99345; }
+.migration-summary header > span { color: var(--cc-accent-soft); font-size: var(--cc-font-size-sm); }
+.migration-progress progress { width: 100%; accent-color: var(--cc-accent); }
 .migration-progress p,
-.migration-source { margin: 0; color: #a9a08e; font-size: 11px; }
+.migration-source { margin: 0; color: var(--cc-text-secondary); font-size: var(--cc-font-size-md); }
 .migration-summary header div { display: grid; gap: 3px; }
-.migration-summary header small { color: #817968; }
+.migration-summary header small { color: var(--cc-text-subtle); }
 .migration-summary header > span.warning,
-.migration-error { color: #d88b73; }
+.migration-error { color: var(--cc-danger); }
 .migration-source { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .migration-result { margin: 0; }
 @media (max-width: 680px) {

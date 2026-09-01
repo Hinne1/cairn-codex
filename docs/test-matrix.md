@@ -14,11 +14,17 @@ a supported game installation and records the manual live-transfer results here.
 | Stale source hash | helper write self-test | Rejected without changing source |
 | Invalid replacement | helper write self-test | Rejected without changing source |
 | Live CSV serialization and semantic receipt hash | helper live-queue self-test | Passed, 18 fields |
+| Offline live-queue recovery state machine | helper live-queue self-test with disposable queue root | Passed: pending, deposited, rejected, multi-item, stale semantic hash, and path escape guard |
+| Unsupported live build negative control | helper fingerprint self-test | Passed: unknown `Game.dll` hash and known crashing hook fingerprint remain outside the verified allowlist |
 | Bundled hook/injector fingerprints | helper and package audits | Passed |
 | Duplicate vault selection | desktop smoke | Rejected |
 | Rejected retrieval state rollback | desktop smoke | Passed |
 | Generated personal/special delivery journal | desktop smoke | Committed and rejected outcomes retained; queue identity persisted before acknowledgement |
 | Lost helper response after a queued write | desktop smoke | Retained as `needs_recovery`; later writes blocked |
+| Cairn restart after queued retrieval | disposable on-disk archive plus simulated durable deposited receipt | Passed: journal survived close/reopen, exact copy committed once, duplicate submit rejected |
+| Grim Dawn exit during multi-supply delivery | simulated offline deposited/rejected receipts | Passed: one delivered and one rejected receipt reconciled to one committed operation; rejected receipt copied before acknowledgement |
+| Repeated multi-item live ingest | simulated durable incoming receipts | Passed: two exact copies committed on first sync and zero duplicated on repeat sync |
+| Stale or mismatched live receipt | simulated `unknown` semantic receipt state | Passed: operation and copy remain pending for audit; no write is unblocked |
 | Database integrity after uncertain outcome | `PRAGMA quick_check` in desktop smoke | Passed |
 | Archive backup, rotation, and restart restore | disposable on-disk archive in desktop smoke | Verified snapshot hashes and manifests; selected prior state restored; emergency pre-restore copy retained; invalid pending request quarantined without replacing the current archive |
 | Archive roll cache and pinned-best persistence | desktop smoke | Passed |
@@ -67,13 +73,31 @@ They are never inferred from a successful injection handshake.
 | MI with prefix/suffix and pet stats | Exact affixes, rolls, and pet stats survive round trip | Pending |
 | Soulbound augment delivery | Exactly selected augment reaches active character | Pending |
 | Multi-select delivery | Only selected records, one each, serialized acknowledgements | Pending |
-| Full shared destination | Batch stops; unacknowledged archive copies remain stored | Pending |
-| Full character inventory | Personal delivery is rejected/returned without archive release | Pending |
-| Repeated submit | UI/orchestrator produces no duplicate operation or duplicate item | Pending |
-| Game exits mid-operation | Outcome remains pending/recoverable, queue payload retained | Passed 2026-08-30: five exact Hardcore records remained in the durable incoming queue after Grim Dawn exited; the next Cairn run committed each seed once, drained the queue, left no incomplete journal entry, and passed `PRAGMA quick_check` |
-| Cairn exits/restarts mid-operation | Journal and receipt reconcile without duplication | Pending |
-| Unsupported game rebuild | Live injection remains blocked; read-only tools still work | Pending |
+| Full shared destination | Batch stops; unacknowledged archive copies remain stored | Automated rejected-retrieval rollback passed; live confirmation pending |
+| Full character inventory | Personal delivery is rejected/returned without archive release | Automated generated-delivery rejection and partial-batch recovery passed; live confirmation pending |
+| Repeated submit | UI/orchestrator produces no duplicate operation or duplicate item | Automated pending-copy and committed-ingest duplicate guards passed; live confirmation pending |
+| Game exits mid-operation | Outcome remains pending/recoverable, queue payload retained | Passed live 2026-08-30 for five-item ingest; offline deposited/rejected retrieval and supply reconciliation passed 2026-09-01 |
+| Cairn exits/restarts mid-operation | Journal and receipt reconcile without duplication | Automated on-disk close/reopen passed 2026-09-01; live timing confirmation pending |
+| Stale or mismatched receipt | Semantic mismatch never commits or releases an archive copy | Automated fail-closed helper and desktop cases passed 2026-09-01 |
+| Unsupported game rebuild | Live injection remains blocked; read-only tools still work | Automated fingerprint negative control passed; live confirmation on the next game update pending |
 | Item Assistant migration | Verified backup; SC/HC multiplicity and queue receipts preserved; repeat creates no copies | Automated packaged-app gate passed; user-path confirmation remains optional |
 
 Record the exact app version, game version/build, `Game.dll`, hook, and injector
 hashes with the completed manual run. A different hash starts a new matrix.
+
+## Recovery expectations
+
+| Operation | Terminal evidence after interruption | Expected archive state |
+| --- | --- | --- |
+| Live ingestion, one or many | Incoming queue file copied and hash-verified | Each queue identity commits once; a repeated poll only acknowledges the already-committed receipt |
+| Archive retrieval | Every retained queue has a matching deposited receipt | Exact pending copies become retrieved once; reusable supplies remain stored |
+| Archive retrieval | Every retained queue has a matching rejected receipt | Rejection is copied and acknowledged; every pending copy returns to stored |
+| Generated/supply delivery | Deposited and rejected receipts are mixed | Operation commits with exact deposited and rejected counts; no archive copy is released |
+| Any live delivery | Outgoing file still exists | Operation stays pending and later writes remain blocked |
+| Any live delivery | No matching semantic receipt, including stale content | Operation stays `needs_recovery`; no optimistic commit or rollback occurs |
+
+The automated 2026-09-01 run used Cairn Codex `0.1.0-beta.1`, helper protocol 1,
+hook SHA-256 `419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5`,
+and injector SHA-256 `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`.
+The live confirmation row must additionally record the exact supported `Game.dll` hash
+reported by the support bundle; compatibility remains fail-closed when that fingerprint differs.

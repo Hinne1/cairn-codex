@@ -222,6 +222,46 @@ export class CollectionDatabase {
     return Number(row.count)
   }
 
+  listRecoveryOperations(): RecoveryJournalOperation[] {
+    const rows = this.database.prepare(`
+      SELECT id, operation, state, stash_path, source_sha256, backup_path,
+             started_at_utc, detail_json
+      FROM operation_journal
+      WHERE state NOT IN ('committed', 'failed')
+      ORDER BY started_at_utc ASC
+    `).all() as Array<{
+      id: string
+      operation: 'ingest' | 'retrieve'
+      state: string
+      stash_path: string
+      source_sha256: string
+      backup_path: string | null
+      started_at_utc: string
+      detail_json: string
+    }>
+    return rows.map((row) => {
+      let detail: Record<string, unknown> = {}
+      try {
+        const parsed = JSON.parse(row.detail_json) as unknown
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          detail = parsed as Record<string, unknown>
+        }
+      } catch {
+        // Invalid retained detail stays unresolved and therefore fail-closed.
+      }
+      return {
+        id: row.id,
+        operation: row.operation,
+        state: row.state,
+        destination: row.stash_path,
+        sourceSha256: row.source_sha256,
+        backupPath: row.backup_path,
+        startedAtUtc: row.started_at_utc,
+        detail
+      }
+    })
+  }
+
   persistSnapshot(snapshot: CollectionSnapshot): CollectionSnapshot {
     snapshot = this.withInstanceKeys(snapshot)
     this.database.exec('BEGIN IMMEDIATE')
@@ -1026,7 +1066,7 @@ export class CollectionDatabase {
         .prepare(`
           UPDATE operation_journal
           SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
-          WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+          WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
         `)
         .run(
           input.backupPath,
@@ -1048,6 +1088,12 @@ export class CollectionDatabase {
     const detail = error instanceof Error ? error.message : String(error)
     this.database.exec('BEGIN IMMEDIATE')
     try {
+      const journalRow = this.database
+        .prepare('SELECT detail_json FROM operation_journal WHERE id = ?')
+        .get(operationId) as { detail_json: string } | undefined
+      const previous = journalRow
+        ? JSON.parse(journalRow.detail_json) as Record<string, unknown>
+        : {}
       const reset = this.database.prepare(`
         UPDATE vault_item SET state = 'ingested'
         WHERE id = ? AND state = 'retrieval_pending'
@@ -1059,9 +1105,9 @@ export class CollectionDatabase {
         .prepare(`
           UPDATE operation_journal
           SET state = 'failed', completed_at_utc = ?, detail_json = ?
-          WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+          WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
         `)
-        .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
+        .run(new Date().toISOString(), JSON.stringify({ ...previous, error: detail }), operationId)
       this.database.exec('COMMIT')
     } catch (failure) {
       this.database.exec('ROLLBACK')
@@ -1079,7 +1125,7 @@ export class CollectionDatabase {
       .prepare(`
         UPDATE operation_journal
         SET state = 'needs_recovery', detail_json = ?
-        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+        WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
       `)
       .run(
         JSON.stringify({ ...previous, error: detail, phase: 'commit_outcome_unknown' }),
@@ -1106,14 +1152,14 @@ export class CollectionDatabase {
 
   updatePendingOperationDetail(operationId: string, detail: Record<string, unknown>): void {
     const row = this.database
-      .prepare('SELECT detail_json FROM operation_journal WHERE id = ? AND state = \'prepared\'')
+      .prepare("SELECT detail_json FROM operation_journal WHERE id = ? AND state IN ('prepared', 'needs_recovery')")
       .get(operationId) as { detail_json: string } | undefined
     if (!row) throw new Error('Prepared operation journal entry is missing.')
     const previous = JSON.parse(row.detail_json) as Record<string, unknown>
     const result = this.database
       .prepare(`
         UPDATE operation_journal SET detail_json = ?
-        WHERE id = ? AND state = 'prepared'
+        WHERE id = ? AND state IN ('prepared', 'needs_recovery')
       `)
       .run(JSON.stringify({ ...previous, ...detail }), operationId)
     if (Number(result.changes) !== 1) {
@@ -1126,7 +1172,7 @@ export class CollectionDatabase {
       .prepare(`
         UPDATE operation_journal
         SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
-        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+        WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
       `)
       .run(
         input.receiptPath,
@@ -1141,15 +1187,19 @@ export class CollectionDatabase {
 
   failDeliveryOperation(operationId: string, error: unknown): void {
     const detail = error instanceof Error ? error.message : String(error)
+    const row = this.database
+      .prepare('SELECT detail_json FROM operation_journal WHERE id = ?')
+      .get(operationId) as { detail_json: string } | undefined
+    const previous = row ? JSON.parse(row.detail_json) as Record<string, unknown> : {}
     this.database
       .prepare(`
         UPDATE operation_journal
         SET state = 'failed', completed_at_utc = ?, detail_json = ?
-        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+        WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
       `)
       .run(
         new Date().toISOString(),
-        JSON.stringify({ transferKind: 'generated_delivery', error: detail }),
+        JSON.stringify({ ...previous, transferKind: 'generated_delivery', error: detail }),
         operationId
       )
   }
@@ -1164,7 +1214,7 @@ export class CollectionDatabase {
       .prepare(`
         UPDATE operation_journal
         SET state = 'needs_recovery', detail_json = ?
-        WHERE id = ? AND operation = 'retrieve' AND state = 'prepared'
+        WHERE id = ? AND operation = 'retrieve' AND state IN ('prepared', 'needs_recovery')
       `)
       .run(
         JSON.stringify({
@@ -2011,6 +2061,17 @@ export interface CompletedDeliveryOperation {
   operationId: string
   receiptPath: string
   completedAtUtc: string
+  detail: Record<string, unknown>
+}
+
+export interface RecoveryJournalOperation {
+  id: string
+  operation: 'ingest' | 'retrieve'
+  state: string
+  destination: string
+  sourceSha256: string
+  backupPath: string | null
+  startedAtUtc: string
   detail: Record<string, unknown>
 }
 

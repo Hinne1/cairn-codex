@@ -42,6 +42,7 @@ import {
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import {
   CollectionDatabase,
+  type RecoveryJournalOperation,
   type ResolvedArchiveCatalogItem
 } from './collection-database'
 import { migrateGdiaDatabase } from './gdia-migration'
@@ -361,6 +362,228 @@ function createHelperClient(diagnostics?: DiagnosticLogger): GrimDawnHelperClien
   })
 }
 
+interface TerminalRecoveryEntry {
+  operationId: string
+  state: 'deposited' | 'rejected'
+  receiptPath: string
+  semanticSha256: string
+  copiedReceiptPath: string | null
+}
+
+type HelperRequester = Pick<GrimDawnHelperClient, 'request'>
+
+function retainedRecoveryQueues(operation: RecoveryJournalOperation): LiveRetrievalQueue[] {
+  const queues = operation.detail.queues
+  if (!Array.isArray(queues)) return []
+  const parsed = queues.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const queue = candidate as Record<string, unknown>
+    if (
+      typeof queue.operationId !== 'string' ||
+      typeof queue.outgoingPath !== 'string' ||
+      typeof queue.semanticSha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/i.test(queue.semanticSha256) ||
+      typeof queue.isHardcore !== 'boolean' ||
+      !Array.isArray(queue.baselineDeleted) ||
+      !queue.baselineDeleted.every((value) => typeof value === 'string') ||
+      !Array.isArray(queue.baselineIncoming) ||
+      !queue.baselineIncoming.every((value) => typeof value === 'string')
+    ) return []
+    return [{
+      operationId: queue.operationId,
+      outgoingPath: queue.outgoingPath,
+      semanticSha256: queue.semanticSha256,
+      isHardcore: queue.isHardcore,
+      baselineDeleted: queue.baselineDeleted as string[],
+      baselineIncoming: queue.baselineIncoming as string[]
+    }]
+  })
+  return parsed.length === queues.length &&
+    new Set(parsed.map((queue) => queue.operationId)).size === parsed.length
+    ? parsed
+    : []
+}
+
+function retainedTerminalResolution(operation: RecoveryJournalOperation): TerminalRecoveryEntry[] {
+  const resolution = operation.detail.recoveryResolution
+  if (!resolution || typeof resolution !== 'object' || Array.isArray(resolution)) return []
+  const entries = (resolution as Record<string, unknown>).entries
+  if (!Array.isArray(entries)) return []
+  const parsed = entries.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const entry = candidate as Record<string, unknown>
+    if (
+      typeof entry.operationId !== 'string' ||
+      (entry.state !== 'deposited' && entry.state !== 'rejected') ||
+      typeof entry.receiptPath !== 'string' ||
+      typeof entry.semanticSha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/i.test(entry.semanticSha256) ||
+      (entry.copiedReceiptPath !== null && typeof entry.copiedReceiptPath !== 'string')
+    ) return []
+    return [{
+      operationId: entry.operationId,
+      state: entry.state as 'deposited' | 'rejected',
+      receiptPath: entry.receiptPath,
+      semanticSha256: entry.semanticSha256,
+      copiedReceiptPath: entry.copiedReceiptPath as string | null
+    }]
+  })
+  return parsed.length === entries.length &&
+    new Set(parsed.map((entry) => entry.operationId)).size === parsed.length
+    ? parsed
+    : []
+}
+
+async function finalizeLiveRecoveryOperation(
+  helper: HelperRequester,
+  database: CollectionDatabase,
+  operation: RecoveryJournalOperation,
+  queues: LiveRetrievalQueue[],
+  entries: TerminalRecoveryEntry[],
+  diagnostics: DiagnosticLogger
+): Promise<boolean> {
+  if (
+    entries.length !== queues.length ||
+    entries.some((entry, index) =>
+      entry.operationId !== queues[index]?.operationId ||
+      entry.semanticSha256.toLowerCase() !== queues[index]?.semanticSha256.toLowerCase()
+    )
+  ) return false
+  const rejected = entries.filter((entry) => entry.state === 'rejected')
+  const deposited = entries.filter((entry) => entry.state === 'deposited')
+  for (const entry of rejected) {
+    try {
+      await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+        path: entry.receiptPath,
+        expectedSha256: entry.semanticSha256,
+        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'recovered-rejections')
+      })
+    } catch (error) {
+      if (!entry.copiedReceiptPath) throw error
+      diagnostics.info('recovery', 'rejected-receipt.already-moved', {
+        operationId: operation.id,
+        queueOperationId: entry.operationId
+      })
+    }
+  }
+
+  const generated = operation.detail.transferKind === 'generated_delivery'
+  const completedAtUtc = new Date().toISOString()
+  if (generated) {
+    if (deposited.length === 0) {
+      database.failDeliveryOperation(
+        operation.id,
+        new Error('The game rejected every retained delivery; no generated item was delivered.')
+      )
+    } else {
+      database.completeDeliveryOperation({
+        operationId: operation.id,
+        receiptPath: deposited[0]!.receiptPath,
+        completedAtUtc,
+        detail: {
+          ...operation.detail,
+          phase: 'recovered_committed',
+          receiptPaths: deposited.map((entry) => entry.receiptPath),
+          rejectedCount: rejected.length
+        }
+      })
+    }
+  } else {
+    const vaultItemIds = Array.isArray(operation.detail.vaultItemIds)
+      ? operation.detail.vaultItemIds.filter((value): value is string => typeof value === 'string')
+      : []
+    if (vaultItemIds.length === 0 || vaultItemIds.length !== queues.length) return false
+    if (deposited.length === entries.length) {
+      database.completeRetrievalOperation({
+        operationId: operation.id,
+        backupPath: deposited[0]!.receiptPath,
+        completedAtUtc,
+        vaultItemIds,
+        detail: {
+          ...operation.detail,
+          phase: 'recovered_committed',
+          receiptPaths: deposited.map((entry) => entry.receiptPath),
+          vaultItemIds
+        }
+      })
+    } else if (rejected.length === entries.length) {
+      database.failRetrievalOperation(
+        operation.id,
+        vaultItemIds,
+        new Error('The game rejected the retained retrieval; every archive copy remains stored.')
+      )
+    } else {
+      return false
+    }
+  }
+  diagnostics.info('recovery', 'operation.resolved', {
+    operationId: operation.id,
+    outcome: deposited.length > 0 ? 'committed' : 'rejected',
+    depositedItems: deposited.length,
+    rejectedItems: rejected.length
+  })
+  return true
+}
+
+async function reconcileLiveRecoveryOperations(
+  helper: HelperRequester,
+  database: CollectionDatabase,
+  diagnostics: DiagnosticLogger
+): Promise<number> {
+  let resolved = 0
+  for (const operation of database.listRecoveryOperations()) {
+    if (operation.operation !== 'retrieve') continue
+    const queues = retainedRecoveryQueues(operation)
+    if (queues.length === 0) continue
+    try {
+      let entries = retainedTerminalResolution(operation)
+      if (entries.length !== queues.length) {
+        const inspected = await Promise.all(
+          queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }))
+        )
+        if (inspected.some((status) =>
+          (status.state !== 'deposited' && status.state !== 'rejected') || !status.receiptPath
+        )) continue
+        entries = []
+        for (const [index, status] of inspected.entries()) {
+          const queue = queues[index]!
+          let copiedReceiptPath: string | null = null
+          if (status.state === 'rejected') {
+            const copied = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
+              path: status.receiptPath!,
+              expectedSha256: queue.semanticSha256,
+              receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'recovered-rejections')
+            })
+            copiedReceiptPath = copied.receiptPath
+          }
+          entries.push({
+            operationId: queue.operationId,
+            state: status.state as 'deposited' | 'rejected',
+            receiptPath: status.receiptPath!,
+            semanticSha256: queue.semanticSha256,
+            copiedReceiptPath
+          })
+        }
+        database.updatePendingOperationDetail(operation.id, {
+          recoveryResolution: { recordedAtUtc: new Date().toISOString(), entries }
+        })
+        operation.detail = {
+          ...operation.detail,
+          recoveryResolution: { recordedAtUtc: new Date().toISOString(), entries }
+        }
+      }
+      if (await finalizeLiveRecoveryOperation(
+        helper, database, operation, queues, entries, diagnostics
+      )) resolved += 1
+    } catch (error) {
+      diagnostics.error('recovery', 'operation.reconcile-failed', error, {
+        operationId: operation.id
+      })
+    }
+  }
+  return resolved
+}
+
 function registerIpcHandlers(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase,
@@ -383,6 +606,7 @@ function registerIpcHandlers(
   }
   const runTransferExclusive = <T>(operation: () => Promise<T>): Promise<T> =>
     runExclusive(async () => {
+      await reconcileLiveRecoveryOperations(helper, database, diagnostics)
       const unresolved = database.getRecoveryOperationCount()
       if (unresolved > 0) {
         throw new Error(
@@ -626,7 +850,8 @@ function registerIpcHandlers(
       backupReused: result.backupReused
     }
   })
-  ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => {
+  ipcMain.handle(IPC_CHANNELS.getRecoveryStatus, () => runExclusive(async () => {
+    await reconcileLiveRecoveryOperations(helper, database, diagnostics)
     const operations = database.getDiagnosticSummary().recoveryOperations
     return {
       requiresAttention: operations.length > 0,
@@ -638,7 +863,7 @@ function registerIpcHandlers(
         hasBackup: operation.hasBackup
       }))
     }
-  })
+  }))
   ipcMain.handle(IPC_CHANNELS.exportDiagnostics, async () => {
     const generatedAtUtc = new Date().toISOString()
     const fileStamp = generatedAtUtc.replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z')
@@ -1272,7 +1497,7 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
 }
 
 async function syncLiveIncoming(
-  helper: GrimDawnHelperClient,
+  helper: HelperRequester,
   database: CollectionDatabase,
   installationPath?: string
 ): Promise<LiveGameSyncResult> {
@@ -2406,7 +2631,8 @@ function registerItemIconProtocol(): void {
 
 async function runSmokeTest(
   helper: GrimDawnHelperClient,
-  database: CollectionDatabase
+  database: CollectionDatabase,
+  diagnostics: DiagnosticLogger
 ): Promise<void> {
   try {
     const schemaSmokePath = join(
@@ -2506,12 +2732,22 @@ async function runSmokeTest(
       fields: number
       hookSha256: string
       injectorSha256: string
+      offlineRecoveryPassed: boolean
+      staleReceiptRejected: boolean
+      queuePathGuardPassed: boolean
+      multiItemPassed: boolean
+      unsupportedBuildRejected: boolean
     }>('self-test-live-queue')
     if (
       !liveQueue.passed ||
       liveQueue.fields !== 18 ||
       !/^[0-9a-f]{64}$/.test(liveQueue.hookSha256) ||
-      !/^[0-9a-f]{64}$/.test(liveQueue.injectorSha256)
+      !/^[0-9a-f]{64}$/.test(liveQueue.injectorSha256) ||
+      !liveQueue.offlineRecoveryPassed ||
+      !liveQueue.staleReceiptRejected ||
+      !liveQueue.queuePathGuardPassed ||
+      !liveQueue.multiItemPassed ||
+      !liveQueue.unsupportedBuildRejected
     ) {
       throw new Error('Live queue serializer self-test failed.')
     }
@@ -3366,6 +3602,214 @@ async function runSmokeTest(
     if (retainedDiscoveries !== collected) {
       throw new Error('Lifetime discoveries were lost when availability dropped to zero.')
     }
+    const recoverySmokeRoot = join(
+      app.getPath('temp'),
+      `cairn-codex-live-recovery-smoke-${randomUUID()}`
+    )
+    const recoverySmokePath = join(recoverySmokeRoot, 'archive.sqlite3')
+    let recoveryDatabase: CollectionDatabase | null = null
+    try {
+      await mkdir(recoverySmokeRoot, { recursive: true })
+      recoveryDatabase = new CollectionDatabase(recoverySmokePath)
+      recoveryDatabase.persistSnapshot(helperSnapshot)
+      const recoveryImport = recoveryDatabase.importVaultItems({
+        sourcePath: 'smoke-recovery-source',
+        sourceSha256: 'smoke-recovery-source-hash',
+        backupPath: 'smoke-recovery-backup',
+        importedAtUtc: new Date().toISOString(),
+        items: [0, 1, 2].map((externalId) => ({
+          externalId: `recovery-${externalId}`,
+          baseRecord: journalPayload.baseRecord as string,
+          isHardcore: true,
+          createdAtUtc: new Date().toISOString(),
+          payload: journalPayload
+        }))
+      })
+      const queue = (operationId: string, hashCharacter: string): LiveRetrievalQueue => ({
+        operationId,
+        outgoingPath: join(recoverySmokeRoot, 'queue', `${operationId}.csv`),
+        semanticSha256: hashCharacter.repeat(64),
+        isHardcore: true,
+        baselineDeleted: [],
+        baselineIncoming: []
+      })
+      const incomingItems: LiveIncomingItem[] = [0, 1].map((index) => ({
+        path: join(recoverySmokeRoot, 'incoming', `smoke-ingest-${index}.csv`),
+        sha256: String(index + 1).repeat(64),
+        isHardcore: true,
+        item: { ...(journalPayload as unknown as LiveVaultPayload), seed: 1000 + index },
+        createdAtUtc: new Date().toISOString()
+      }))
+      const incomingHelper: HelperRequester = {
+        request: async <T>(method: string, params: object = {}): Promise<T> => {
+          if (method === 'inspect-live-game') {
+            return { state: 'unavailable', detail: 'Offline recovery smoke.' } as T
+          }
+          if (method === 'poll-live-incoming') return incomingItems as T
+          if (method === 'copy-live-incoming' || method === 'ack-live-incoming') {
+            const input = params as { path: string; expectedSha256: string }
+            return {
+              sha256: input.expectedSha256,
+              receiptPath: `${input.path}.${method === 'copy-live-incoming' ? 'copied' : 'acknowledged'}`
+            } as T
+          }
+          throw new Error(`Unexpected live-ingest smoke helper method: ${method}`)
+        }
+      }
+      const firstIngestBatch = await syncLiveIncoming(incomingHelper, recoveryDatabase)
+      const repeatedIngestBatch = await syncLiveIncoming(incomingHelper, recoveryDatabase)
+      if (firstIngestBatch.ingested.length !== 2 || repeatedIngestBatch.ingested.length !== 0) {
+        throw new Error('A repeated multi-item live ingest was not idempotent after durable commit.')
+      }
+      const restartedOperationId = randomUUID()
+      const restartedQueue = queue(`${restartedOperationId}-0`, 'a')
+      recoveryDatabase.prepareRetrievalOperation({
+        operationId: restartedOperationId,
+        stashPath: 'live://gdia/hc',
+        sourceSha256: 'smoke-restarted-retrieval',
+        startedAtUtc: new Date().toISOString(),
+        vaultItemIds: [recoveryImport.importedIds[0]!],
+        detail: {
+          phase: 'queued',
+          smokeTest: true,
+          vaultItemIds: [recoveryImport.importedIds[0]!],
+          queues: [restartedQueue]
+        }
+      })
+      recoveryDatabase.markRetrievalNeedsRecovery(
+        restartedOperationId,
+        new Error('Simulated Cairn exit after queueing.')
+      )
+      let repeatedSubmitRejected = false
+      try {
+        recoveryDatabase.prepareRetrievalOperation({
+          operationId: randomUUID(),
+          stashPath: 'live://gdia/hc',
+          sourceSha256: 'smoke-repeat-submit',
+          startedAtUtc: new Date().toISOString(),
+          vaultItemIds: [recoveryImport.importedIds[0]!],
+          detail: { phase: 'prepared', smokeTest: true }
+        })
+      } catch {
+        repeatedSubmitRejected = true
+      }
+      recoveryDatabase.close()
+      recoveryDatabase = new CollectionDatabase(recoverySmokePath)
+      if (
+        !repeatedSubmitRejected ||
+        recoveryDatabase.listRecoveryOperations()[0]?.id !== restartedOperationId
+      ) {
+        throw new Error('A queued retrieval did not survive restart or reject a repeated submit.')
+      }
+
+      const recoveryStatuses = new Map<string, LiveRetrievalStatus>([
+        [restartedQueue.operationId, {
+          state: 'deposited',
+          receiptPath: join(recoverySmokeRoot, 'deleted', `${restartedQueue.operationId}.csv`)
+        }]
+      ])
+      const recoveryHelper: HelperRequester = {
+        request: async <T>(method: string, params: object = {}): Promise<T> => {
+          const input = params as { queue?: LiveRetrievalQueue; path?: string; expectedSha256?: string }
+          if (method === 'inspect-live-retrieval' && input.queue) {
+            return (recoveryStatuses.get(input.queue.operationId) ?? {
+              state: 'unknown', receiptPath: null
+            }) as T
+          }
+          if ((method === 'copy-live-incoming' || method === 'ack-live-incoming') && input.path) {
+            return {
+              sha256: input.expectedSha256,
+              receiptPath: `${input.path}.${method === 'copy-live-incoming' ? 'copied' : 'acknowledged'}`
+            } as T
+          }
+          throw new Error(`Unexpected recovery smoke helper method: ${method}`)
+        }
+      }
+      if (
+        await reconcileLiveRecoveryOperations(recoveryHelper, recoveryDatabase, diagnostics) !== 1 ||
+        recoveryDatabase.getVaultItems([recoveryImport.importedIds[0]!], true)[0]?.state !== 'retrieved' ||
+        recoveryDatabase.getRecoveryOperationCount() !== 0
+      ) {
+        throw new Error('A deposited retrieval did not reconcile after a simulated Cairn restart.')
+      }
+
+      const generatedOperationId = randomUUID()
+      const generatedQueues = [
+        queue(`${generatedOperationId}-0`, 'b'),
+        queue(`${generatedOperationId}-1`, 'c')
+      ]
+      recoveryDatabase.prepareDeliveryOperation({
+        operationId: generatedOperationId,
+        destination: 'live://personal-inventory/augments',
+        payloadSha256: 'smoke-generated-delivery',
+        startedAtUtc: new Date().toISOString(),
+        detail: {
+          phase: 'queued',
+          smokeTest: true,
+          queues: generatedQueues,
+          records: ['smoke-augment-a', 'smoke-augment-b']
+        }
+      })
+      recoveryDatabase.markDeliveryNeedsRecovery(
+        generatedOperationId,
+        new Error('Simulated Grim Dawn exit during a multi-item delivery.')
+      )
+      recoveryStatuses.set(generatedQueues[0]!.operationId, {
+        state: 'deposited',
+        receiptPath: join(recoverySmokeRoot, 'deleted', `${generatedQueues[0]!.operationId}.csv`)
+      })
+      recoveryStatuses.set(generatedQueues[1]!.operationId, {
+        state: 'rejected',
+        receiptPath: join(recoverySmokeRoot, 'incoming', `${generatedQueues[1]!.operationId}.csv`)
+      })
+      if (
+        await reconcileLiveRecoveryOperations(recoveryHelper, recoveryDatabase, diagnostics) !== 1 ||
+        !recoveryDatabase.hasCommittedOperation(generatedOperationId)
+      ) {
+        throw new Error('A partial multi-item supply delivery did not reconcile deterministically.')
+      }
+
+      const staleOperationId = randomUUID()
+      const staleQueue = queue(`${staleOperationId}-0`, 'd')
+      recoveryDatabase.prepareRetrievalOperation({
+        operationId: staleOperationId,
+        stashPath: 'live://gdia/hc',
+        sourceSha256: 'smoke-stale-receipt',
+        startedAtUtc: new Date().toISOString(),
+        vaultItemIds: [recoveryImport.importedIds[1]!],
+        detail: {
+          phase: 'queued',
+          smokeTest: true,
+          vaultItemIds: [recoveryImport.importedIds[1]!],
+          queues: [staleQueue]
+        }
+      })
+      recoveryDatabase.markRetrievalNeedsRecovery(
+        staleOperationId,
+        new Error('Simulated stale receipt.')
+      )
+      recoveryStatuses.set(staleQueue.operationId, { state: 'unknown', receiptPath: null })
+      if (
+        await reconcileLiveRecoveryOperations(recoveryHelper, recoveryDatabase, diagnostics) !== 0 ||
+        recoveryDatabase.getRecoveryOperationCount() !== 1 ||
+        recoveryDatabase.getVaultItems([recoveryImport.importedIds[1]!], true)[0]?.state !== 'retrieval_pending'
+      ) {
+        throw new Error('A stale or mismatched receipt did not remain fail-closed for audit.')
+      }
+      recoveryDatabase.failRetrievalOperation(
+        staleOperationId,
+        [recoveryImport.importedIds[1]!],
+        new Error('Smoke cleanup after verified fail-closed stale receipt.')
+      )
+      if (recoveryDatabase.getDiagnosticSummary().quickCheck.some(
+        (value) => value.toLocaleLowerCase() !== 'ok'
+      )) {
+        throw new Error('Recovery reconciliation damaged the archive database.')
+      }
+    } finally {
+      recoveryDatabase?.close()
+      await rm(recoverySmokeRoot, { recursive: true, force: true })
+    }
     const recoveryOperationId = randomUUID()
     database.prepareRetrievalOperation({
       operationId: recoveryOperationId,
@@ -3376,11 +3820,11 @@ async function runSmokeTest(
       detail: { phase: 'prepared', smokeTest: true, scenario: 'helper_timeout' }
     })
     database.markRetrievalNeedsRecovery(recoveryOperationId, new Error('Simulated lost response.'))
-    const diagnostics = database.getDiagnosticSummary()
+    const databaseDiagnostics = database.getDiagnosticSummary()
     if (
-      diagnostics.quickCheck.some((value) => value.toLocaleLowerCase() !== 'ok') ||
+      databaseDiagnostics.quickCheck.some((value) => value.toLocaleLowerCase() !== 'ok') ||
       database.getRecoveryOperationCount() !== 1 ||
-      !diagnostics.recoveryOperations.some(
+      !databaseDiagnostics.recoveryOperations.some(
         (operation) => operation.id === recoveryOperationId && operation.state === 'needs_recovery'
       )
     ) {
@@ -3396,6 +3840,11 @@ async function runSmokeTest(
         rejectedRetrievalRollback: 'verified',
         generatedDeliveryJournal: 'verified',
         uncertainOutcomeRecovery: 'verified',
+        restartRecovery: 'verified',
+        offlineReceiptRecovery: 'verified',
+        staleReceipt: 'rejected',
+        multiItemRecovery: 'verified',
+        multiItemLiveIngest: 'verified',
         databaseIntegrity: 'verified',
         archiveBackupRestore: 'verified',
         archiveRollCache: 'verified',
@@ -4417,7 +4866,7 @@ app.whenReady().then(async () => {
   }
 
   if (process.env.CAIRN_CODEX_SMOKE_TEST === '1') {
-    void runSmokeTest(helper, database)
+    void runSmokeTest(helper, database, diagnostics)
     return
   }
 

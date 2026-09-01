@@ -20,6 +20,8 @@ const skillQuery = argument('--skill-query')
 const skillSelectFirst = process.argv.includes('--skill-select-first')
 const oracleMinimumLevel = argument('--oracle-min-level')
 const oracleMaximumLevel = argument('--oracle-max-level')
+const oracleSurprise = process.argv.includes('--oracle-surprise')
+const supplyCategory = argument('--supply-category')
 const plannerDisplay = argument('--planner-display')
 const miAffixFilter = argument('--mi-affix-filter')
 const expectedMiRows = argument('--expected-mi-rows')
@@ -47,6 +49,7 @@ const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
 const verifyPlannerActions = process.argv.includes('--verify-planner-actions')
 const verifyBoundedKeyboard = process.argv.includes('--verify-bounded-keyboard')
+const verifySupplySelection = process.argv.includes('--verify-supply-selection')
 const verifyResponsiveTools = process.argv.includes('--verify-responsive-tools')
 const assertNoOverflow = process.argv.includes('--assert-no-overflow')
 const verifyFarmingPaging = process.argv.includes('--verify-farming-paging')
@@ -73,6 +76,9 @@ if (onboardingStep !== null && (!Number.isInteger(Number(onboardingStep)) || Num
 }
 if (plannerDisplay !== null && !['table', 'cards', 'map'].includes(plannerDisplay)) {
   throw new Error(`--planner-display must be table, cards, or map; received ${plannerDisplay}.`)
+}
+if (supplyCategory !== null && !['writs', 'augments'].includes(supplyCategory)) {
+  throw new Error(`--supply-category must be writs or augments; received ${supplyCategory}.`)
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
@@ -133,6 +139,8 @@ const env = {
   ...(skillSelectFirst ? { CAIRN_CODEX_SCREENSHOT_SKILL_SELECT_FIRST: '1' } : {}),
   ...(oracleMinimumLevel ? { CAIRN_CODEX_SCREENSHOT_ORACLE_MIN_LEVEL: oracleMinimumLevel } : {}),
   ...(oracleMaximumLevel ? { CAIRN_CODEX_SCREENSHOT_ORACLE_MAX_LEVEL: oracleMaximumLevel } : {}),
+  ...(oracleSurprise ? { CAIRN_CODEX_SCREENSHOT_ORACLE_SURPRISE: '1' } : {}),
+  ...(supplyCategory ? { CAIRN_CODEX_SCREENSHOT_SUPPLY_CATEGORY: supplyCategory } : {}),
   ...(plannerDisplay ? { CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY: plannerDisplay } : {}),
   ...(transferSection ? { CAIRN_CODEX_SCREENSHOT_TRANSFER_SECTION: transferSection } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
@@ -141,6 +149,7 @@ const env = {
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
   ...(verifyPlannerActions ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS: '1' } : {}),
   ...(verifyBoundedKeyboard ? { CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD: '1' } : {}),
+  ...(verifySupplySelection ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLY_SELECTION: '1' } : {}),
   ...(verifyResponsiveTools ? { CAIRN_CODEX_SCREENSHOT_VERIFY_RESPONSIVE_TOOLS: '1' } : {}),
   ...(verifyFarmingPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING: '1' } : {}),
   ...(simulateWorkspaceError ? { CAIRN_CODEX_SCREENSHOT_RENDER_ERROR: '1' } : {}),
@@ -288,6 +297,8 @@ console.log(JSON.stringify({
   skillSelectFirst,
   oracleMinimumLevel,
   oracleMaximumLevel,
+  oracleSurprise,
+  supplyCategory,
   plannerDisplay,
   miAffixFilter: miAffixFilter ?? null,
   miNativeRestore,
@@ -301,6 +312,7 @@ console.log(JSON.stringify({
   verifyPlannerNavigation,
   verifyPlannerActions,
   verifyBoundedKeyboard,
+  verifySupplySelection,
   verifyResponsiveTools,
   assertNoOverflow,
   verifyFarmingPaging,

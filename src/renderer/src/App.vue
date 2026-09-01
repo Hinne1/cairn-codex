@@ -408,7 +408,7 @@ const oracleMaximumLevel = ref(initialPreferences.search.oracleMaximumLevel)
 const oracleQuery = ref('')
 const oracleSortMode = ref<OracleSortMode>('score')
 const oracleSortDirection = ref<SortDirection>('desc')
-const oracleVisibleCount = ref(12)
+const oraclePage = ref(1)
 const discoveredCharacters = ref<CharacterSaveProfile[]>([])
 const characterImportLoading = ref(false)
 const characterImportError = ref<string | null>(null)
@@ -455,7 +455,7 @@ const selectedSupplyIds = ref<string[]>([])
 const reusableSupplyQuery = ref('')
 const supplyCategory = ref<SupplyCategory>('writs')
 const supplySlotFilter = ref<SupplySlotFilter>('all')
-const supplyVisibleCount = ref(60)
+const supplyPage = ref(1)
 const experimentalToolsEnabled = ref(safeModeActive.value ? false : initialPreferences.workspace.experimentalToolsEnabled)
 const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>([...initialPreferences.workspace.visibleTools])
 const toolSettingsOpen = ref(false)
@@ -812,7 +812,10 @@ const supplyVaultItems = computed<SupplyOption[]>(() => {
       }
     })
 })
-const visibleSupplyVaultItems = computed(() => supplyVaultItems.value.slice(0, supplyVisibleCount.value))
+const visibleSupplyVaultItems = computed(() => {
+  const start = (supplyPage.value - 1) * 60
+  return supplyVaultItems.value.slice(start, start + 60)
+})
 const workspaceToolIdSet = computed(() => new Set(visibleWorkspaceToolIds.value))
 const visibleWorkspaceTools = computed(() =>
   workspaceToolDefinitions
@@ -1052,12 +1055,6 @@ const filteredItems = computed(() => {
       return structuredQuery.matches(itemStructuredSearchDocument(item))
     })
     .sort(compareItems)
-})
-
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredItems.value.length / pageSize)))
-const visibleItems = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredItems.value.slice(start, start + pageSize)
 })
 
 const collectionSets = computed<CollectionSet[]>(() => {
@@ -1463,7 +1460,6 @@ const filteredOracleCandidates = computed(() => {
       return comparison * direction
     })
 })
-const visibleOracleCandidates = computed(() => filteredOracleCandidates.value.slice(0, oracleVisibleCount.value))
 const oracleReadinessCounts = computed(() => ({
   ready: oracleCandidates.value.filter((candidate) => candidate.readiness === 'ready').length,
   near: oracleCandidates.value.filter((candidate) => candidate.readiness === 'near').length,
@@ -2400,7 +2396,7 @@ watch(oracleStyle, (oracleStyle) => preferenceRepository.update('search', { orac
 watch(oracleMinimumLevel, (oracleMinimumLevel) => preferenceRepository.update('search', { oracleMinimumLevel }))
 watch(oracleMaximumLevel, (oracleMaximumLevel) => preferenceRepository.update('search', { oracleMaximumLevel }))
 watch([oracleClass, oracleStyle, oracleReadiness, oracleMinimumLevel, oracleMaximumLevel, oracleQuery], () => {
-  oracleVisibleCount.value = 12
+  oraclePage.value = 1
 })
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
@@ -2521,7 +2517,7 @@ watch(supplySlotFilter, () => {
   selectedSupplyIds.value = []
 })
 watch([supplyCategory, supplySlotFilter, reusableSupplyQuery], () => {
-  supplyVisibleCount.value = 60
+  supplyPage.value = 1
 })
 watch([dismantlingQuery, dismantlingMode, dismantlingRarity], () => {
   dismantlingVisibleCount.value = 120
@@ -3586,7 +3582,7 @@ function openMaterials(category: MaterialCategory = 'all'): void {
 
 function openStashOracle(): void {
   activeView.value = 'oracle'
-  oracleVisibleCount.value = 12
+  oraclePage.value = 1
 }
 
 function surpriseMeWithOracle(): void {
@@ -3594,7 +3590,7 @@ function surpriseMeWithOracle(): void {
   oracleStyle.value = 'all'
   oracleReadiness.value = 'all'
   oracleQuery.value = ''
-  oracleVisibleCount.value = 12
+  oraclePage.value = 1
 }
 
 function sendOracleCandidateToPlanner(candidate: (typeof oracleCandidates.value)[number]): void {
@@ -3625,6 +3621,7 @@ async function openSupplies(): Promise<void> {
   activeView.value = 'supplies'
   reusableSupplyQuery.value = ''
   supplySlotFilter.value = 'all'
+  supplyPage.value = 1
   await refreshVault()
   await pollLiveLifecycle()
   if (liveStatus.value?.state === 'ready') await refreshHeaderCharacters()
@@ -4457,11 +4454,6 @@ function matchesCategory(item: CollectionItem, category: string): boolean {
   return slots[category]?.includes(item.slot) ?? false
 }
 
-function goToPage(page: number): void {
-  currentPage.value = Math.min(Math.max(page, 1), pageCount.value)
-  window.scrollTo({ top: 410, behavior: 'smooth' })
-}
-
 function openItem(item: CollectionItem): void {
   hideTooltip()
   selectedRecord.value = item.record
@@ -5002,7 +4994,7 @@ function supplyEffectLines(item: CollectionItem): string[] {
   ]
 }
 
-function queueSupplyTooltip(item: SupplyOption, event: MouseEvent | FocusEvent): void {
+function queueSupplyTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLElement): void {
   if (item.catalogItem) queueTooltip(item.catalogItem, event)
 }
 
@@ -6424,10 +6416,18 @@ function formatPercentile(value: number | null | undefined): string {
         </ExplorerToolbar>
         <p class="explorer-context-note">Scores measure archived mechanical support and equipability—not whether a build is fashionable.</p>
 
-        <div v-if="visibleOracleCandidates.length" class="oracle-grid">
+        <BoundedResultSurface
+          v-model:page="oraclePage"
+          class="oracle-results"
+          :items="filteredOracleCandidates"
+          :get-key="candidate => candidate.key"
+          :page-size="12"
+          label="Stash Oracle build recommendations"
+          layout="grid"
+          navigable
+        >
+          <template #item="{ item: candidate }">
           <article
-            v-for="candidate in visibleOracleCandidates"
-            :key="candidate.key"
             class="oracle-card"
             :class="`readiness-${candidate.readiness}`"
           >
@@ -6492,18 +6492,15 @@ function formatPercentile(value: number | null | undefined): string {
               <button type="button" @click="selectedSkill = candidate.skill; activeView = 'skills'">Inspect {{ candidate.skill }}</button>
             </footer>
           </article>
-        </div>
-        <div v-else class="oracle-empty">
-          <strong>The Oracle found no coherent signal with these filters.</strong>
-          <p>Try a lower item-level floor, another mastery, or “Surprise me.” One archived supporting item is enough to seed a wild card.</p>
-          <button type="button" @click="surpriseMeWithOracle">Clear filters</button>
-        </div>
-        <button
-          v-if="filteredOracleCandidates.length > visibleOracleCandidates.length"
-          type="button"
-          class="oracle-more"
-          @click="oracleVisibleCount += 12"
-        >Show 12 more</button>
+          </template>
+          <template #empty>
+            <div class="oracle-empty">
+              <strong>The Oracle found no coherent signal with these filters.</strong>
+              <p>Try a lower item-level floor, another mastery, or “Surprise me.” One archived supporting item is enough to seed a wild card.</p>
+              <button type="button" @click="surpriseMeWithOracle">Clear filters</button>
+            </div>
+          </template>
+        </BoundedResultSurface>
       </section>
 
       <section v-else-if="activeView === 'planner'" class="leveling-planner" aria-label="Character leveling shopping list">
@@ -7084,10 +7081,26 @@ function formatPercentile(value: number | null | undefined): string {
             <button type="button" :class="{ active: transferMode === 'offline' }" @click="transferMode = 'offline'">Offline</button>
           </div>
         </div>
-        <div v-if="supplyVaultItems.length" class="supply-grid">
-          <label
-            v-for="item in visibleSupplyVaultItems"
-            :key="item.id"
+        <BoundedResultSurface
+          v-model:page="supplyPage"
+          v-model:selected-keys="selectedSupplyIds"
+          class="supply-results bounded-tooltip-results"
+          :items="supplyVaultItems"
+          :get-key="item => item.id"
+          :page-size="60"
+          :selection-disabled="vaultBusy"
+          :is-item-disabled="item => !item.eligible"
+          :empty-title="reusableSupplyQuery ? 'No matching supplies' : 'No supplies unlocked'"
+          :empty-detail="reusableSupplyQuery ? 'No unlocked supplies match this search and category.' : 'No supplies are unlocked in this category yet.'"
+          label="Available reusable supplies"
+          layout="grid"
+          selection-mode="multiple"
+          item-described-by="item-tooltip"
+          @item-focus="(_key, item, element) => queueSupplyTooltip(item, element)"
+          @item-blur="scheduleTooltipHide"
+        >
+          <template #item="{ item, selected }">
+          <article
             class="supply-card"
             :class="{ locked: !item.eligible }"
             :title="item.catalogItem ? 'Hover for the full in-game tooltip' : undefined"
@@ -7097,7 +7110,7 @@ function formatPercentile(value: number | null | undefined): string {
             @focusin="queueSupplyTooltip(item, $event)"
             @focusout="scheduleTooltipHide"
           >
-            <input type="checkbox" :checked="selectedSupplyIds.includes(item.id)" :disabled="vaultBusy || !item.eligible" @change="toggleSupply(item.id)" />
+            <input type="checkbox" :checked="selected" :disabled="vaultBusy || !item.eligible" @click.stop @change="toggleSupply(item.id)" />
             <span class="supply-icon">
               <img v-if="item.catalogItem && itemIconUrl(item.catalogItem)" :src="itemIconUrl(item.catalogItem)!" alt="" />
             </span>
@@ -7111,15 +7124,9 @@ function formatPercentile(value: number | null | undefined): string {
               <small v-else class="supply-no-effects">No visible stat effect is indexed.</small>
             </span>
             <b>{{ item.reusable ? '∞' : item.stackCount }}</b>
-          </label>
-        </div>
-        <button
-          v-if="visibleSupplyVaultItems.length < supplyVaultItems.length"
-          class="supply-show-more"
-          type="button"
-          @click="supplyVisibleCount += 60"
-        >Show 60 more · {{ supplyVaultItems.length - visibleSupplyVaultItems.length }} remaining</button>
-        <p v-if="supplyVaultItems.length === 0" class="vault-empty">{{ reusableSupplyQuery ? 'No unlocked supplies match this filter.' : 'No supplies unlocked in this category yet.' }}</p>
+          </article>
+          </template>
+        </BoundedResultSurface>
         <button
           class="supply-dispense"
           type="button"
@@ -7996,22 +8003,29 @@ function formatPercentile(value: number | null | undefined): string {
       </section>
 
       <template v-else-if="snapshot">
-        <section class="catalog-grid" :aria-label="activeCategory + ' collection items'">
+        <BoundedResultSurface
+          v-model:page="currentPage"
+          class="catalog-results bounded-tooltip-results"
+          :items="filteredItems"
+          :get-key="item => item.record"
+          :page-size="pageSize"
+          :empty-title="activeView === 'materials' ? 'No matching components or consumables' : 'No matching collection items'"
+          empty-detail="Try changing the current search or filters."
+          :label="activeCategory + ' collection items'"
+          layout="grid"
+          interactive
+          item-described-by="item-tooltip"
+          @activate="(_key, item) => openItem(item)"
+          @item-focus="(_key, item, element) => showTooltip(item, element)"
+          @item-blur="scheduleTooltipHide"
+        >
+          <template #item="{ item }">
           <article
-            v-for="item in visibleItems"
-            :key="item.record"
             class="item-card"
             :class="{ missing: !isCollectionOwned(item), 'awakening-available': itemAvailableByAwakeningOnly(item), legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare', component: item.rarity === 'component', consumable: item.rarity === 'consumable' }"
-            role="button"
-            tabindex="0"
-            aria-describedby="item-tooltip"
             @mouseenter="queueTooltip(item, $event)"
             @mousemove="moveTooltip"
             @mouseleave="scheduleTooltipHide"
-            @focus="queueTooltip(item, $event)"
-            @blur="scheduleTooltipHide"
-            @click="openItem(item)"
-            @keydown.enter="openItem(item)"
           >
             <div class="item-mark" aria-hidden="true">
               <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
@@ -8049,14 +8063,8 @@ function formatPercentile(value: number | null | undefined): string {
             </button>
             <span v-if="item.pinnedInstanceKey" class="pin-indicator">Pinned choice</span>
           </article>
-          <div v-if="visibleItems.length === 0" class="no-results">No items match these filters.</div>
-        </section>
-
-        <nav v-if="pageCount > 1" class="pagination" aria-label="Catalog pages">
-          <button type="button" :disabled="currentPage === 1" @click="goToPage(currentPage - 1)">Previous</button>
-          <span>Page {{ currentPage }} of {{ pageCount }}</span>
-          <button type="button" :disabled="currentPage === pageCount" @click="goToPage(currentPage + 1)">Next</button>
-        </nav>
+          </template>
+        </BoundedResultSurface>
       </template>
     </main>
     </WorkspaceErrorBoundary>

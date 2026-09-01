@@ -105,6 +105,11 @@ including its rank, conversion, special-modifier, and level sorts. Leveling Plan
 bounded result window for both its table and card modes; favorites and ignored-base controls stop
 row activation and remain keyed to item records. Grid navigation derives its column count from
 the rendered row so ArrowUp and ArrowDown remain correct as the responsive card grid reflows.
+Collection and Components & Consumables mount 48 item cards per page through the same grid
+contract. Stash Oracle retains its ranked 12-card page and uses navigation-only grid focus so
+its nested planning and inspection actions remain explicit. Supplies mounts 60 options per page,
+retains selected record keys across paging, and uses per-record disabled state so unavailable
+augments cannot enter the transfer selection even through card or keyboard activation.
 The measured cross-workspace baseline and remaining focused migration owners live in
 `design-foundation.md`; do not reopen #21 as a broad catch-all when one workspace-sized issue is
 sufficient.

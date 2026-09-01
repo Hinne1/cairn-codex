@@ -5163,7 +5163,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       if (scanError) throw new Error('Renderer collection scan failed: ' + scanError)
       const ready = await window.webContents.executeJavaScript(
         `(Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
-         Boolean(document.querySelector('.catalog-grid, .set-grid'))) &&
+         Boolean(document.querySelector('.catalog-grid, .catalog-results, .set-grid'))) &&
          (!document.querySelector('.primary-action')?.disabled ||
           Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
           Boolean(document.querySelector('.background-scan'))) &&
@@ -5440,6 +5440,18 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        const supplyCategory = process.env.CAIRN_CODEX_SCREENSHOT_SUPPLY_CATEGORY
+        if (supplyCategory) {
+          await window.webContents.executeJavaScript(`
+            (async () => {
+              const select = document.querySelector('.supplies-workspace .explorer-toolbar-filters select')
+              if (!(select instanceof HTMLSelectElement)) throw new Error('Supply category control was not rendered.')
+              select.value = ${JSON.stringify(supplyCategory)}
+              select.dispatchEvent(new Event('change', { bubbles: true }))
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD === '1') {
           interactionTimings.boundedKeyboardMs = await window.webContents.executeJavaScript(`
             (async () => {
@@ -5585,6 +5597,53 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLY_SELECTION === '1') {
+          await window.webContents.executeJavaScript(`
+            (async () => {
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const rows = () => [...document.querySelectorAll('.supply-results .bounded-results-item')]
+              for (let attempt = 0; attempt < 40 && rows().length === 0; attempt += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 50))
+              }
+              const firstRows = rows()
+              const eligible = firstRows.find((row) => row.getAttribute('aria-disabled') !== 'true')
+              if (!(eligible instanceof HTMLElement)) {
+                const disabled = firstRows.find((row) => row.getAttribute('aria-disabled') === 'true')
+                if (!(disabled instanceof HTMLElement)) throw new Error('No supply was available for selection verification.')
+                disabled.click()
+                await frames()
+                if (disabled.getAttribute('aria-selected') === 'true' || disabled.querySelector('input:checked')) {
+                  throw new Error('An ineligible supply was selected.')
+                }
+                return
+              }
+              const identity = eligible.textContent?.replace(/\s+/g, ' ').trim()
+              eligible.click()
+              await frames()
+              if (eligible.getAttribute('aria-selected') !== 'true' || !eligible.querySelector('input:checked')) {
+                throw new Error('Eligible supply selection did not synchronize card and checkbox state.')
+              }
+              const disabled = firstRows.find((row) => row.getAttribute('aria-disabled') === 'true')
+              if (disabled instanceof HTMLElement) {
+                disabled.click()
+                await frames()
+                if (disabled.getAttribute('aria-selected') === 'true') throw new Error('An ineligible supply was selected.')
+              }
+              const next = document.querySelector('.supply-results .bounded-results-footer nav button:last-of-type')
+              if (!(next instanceof HTMLButtonElement) || next.disabled) throw new Error('Supply selection verification needs a second page.')
+              next.click()
+              await frames()
+              const previous = document.querySelector('.supply-results .bounded-results-footer nav button:first-of-type')
+              if (!(previous instanceof HTMLButtonElement) || previous.disabled) throw new Error('Supply page did not advance.')
+              previous.click()
+              await frames()
+              const restored = rows().find((row) => row.textContent?.replace(/\s+/g, ' ').trim() === identity)
+              if (!(restored instanceof HTMLElement) || restored.getAttribute('aria-selected') !== 'true') {
+                throw new Error('Keyed supply selection did not survive paging.')
+              }
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_DISMANTLING_PREVIEW === '1') {
           await window.webContents.executeJavaScript(`
             [...document.querySelectorAll('.dismantling-toolbar button')]
@@ -5667,6 +5726,18 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
         }
         const oracleMinimumLevel = process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MIN_LEVEL
         const oracleMaximumLevel = process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MAX_LEVEL
+        if (process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_SURPRISE === '1') {
+          const surprised = await window.webContents.executeJavaScript(`
+            (async () => {
+              const button = [...document.querySelectorAll('.oracle-explorer-toolbar .explorer-toolbar-actions button')]
+                .find((candidate) => candidate.textContent?.trim() === 'Surprise me')
+              button?.click()
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              return Boolean(button)
+            })()
+          `)
+          if (!surprised) throw new Error('Stash Oracle Surprise me action was not available.')
+        }
         if (oracleMinimumLevel || oracleMaximumLevel) {
           await window.webContents.executeJavaScript(`
             (async () => {
@@ -6072,7 +6143,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           operationRows: document.querySelectorAll('.operation-history-row').length,
           plannerRows: document.querySelectorAll('.planner-table-results .planner-table-row').length,
           plannerCards: document.querySelectorAll('.planner-card-results .planner-card').length,
-          boundedRows: document.querySelectorAll('.bounded-tooltip-results .bounded-results-item').length,
+          boundedRows: document.querySelectorAll('.bounded-results .bounded-results-item').length,
           skillRows: document.querySelectorAll('.skill-table-results .skill-table-row').length,
           dismantlingRows: document.querySelectorAll('.dismantling-row').length,
           farmingRows: document.querySelectorAll('.farm-list .bounded-results-item > article').length,

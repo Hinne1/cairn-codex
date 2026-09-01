@@ -347,6 +347,13 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
   gap: 12px;
   padding-top: 24px;
 }
+.catalog-results { padding-top: 24px; }
+.catalog-results .bounded-results-collection.is-grid {
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 12px;
+}
+.catalog-results .bounded-results-item,
+.catalog-results .item-card { height: 100%; }
 
 .item-card {
   min-height: 268px;
@@ -599,7 +606,10 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .oracle-more, .oracle-empty button { flex: 0 0 auto; padding: 11px 17px; border: 1px solid #80663a; border-radius: 6px; color: #ecd28e; background: linear-gradient(#49371f, #2c2418); cursor: pointer; font-weight: 650; }
 .oracle-explorer-toolbar { margin-bottom: 7px; }
 .explorer-context-note { margin: 0 0 16px; color: #736d62; font-size: 9px; }
-.oracle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 13px; }
+.oracle-grid,
+.oracle-results .bounded-results-collection.is-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 13px; }
+.oracle-results .bounded-results-item,
+.oracle-results .oracle-card { height: 100%; }
 .oracle-card { display: flex; flex-direction: column; min-width: 0; padding: 18px; border: 1px solid #3d382e; border-radius: 9px; background: linear-gradient(145deg, rgba(35, 32, 26, .97), rgba(20, 20, 17, .97)); box-shadow: 0 9px 25px rgba(0,0,0,.16); }
 .oracle-card.readiness-ready { border-color: #6c6136; box-shadow: inset 3px 0 #a98b43, 0 9px 25px rgba(0,0,0,.2); }
 .oracle-card.readiness-near { border-color: #4b5235; box-shadow: inset 3px 0 #70814a; }
@@ -644,7 +654,8 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .oracle-empty p { max-width: 570px; margin: 0 0 6px; font-size: 10px; line-height: 1.5; }
 .oracle-more { display: block; margin: 15px auto 0; }
 @media (max-width: 980px) {
-  .oracle-grid { grid-template-columns: 1fr; }
+  .oracle-grid,
+  .oracle-results .bounded-results-collection.is-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
   .oracle-evidence > div { grid-template-columns: 1fr; }
@@ -655,7 +666,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .supply-status .state-connected { color: #a8c878; }
 .supply-status .state-connecting { color: #dfb864; }
 .supply-status .state-offline { color: #c97e6c; }
-.supply-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 8px; margin: 16px 0; }
+.supply-grid,
+.supply-results .bounded-results-collection.is-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 8px; margin: 16px 0; }
+.supply-results .bounded-results-item.is-selected { background: transparent; box-shadow: none; }
 .supply-card { display: grid; grid-template-columns: auto 42px 1fr auto; align-items: start; gap: 11px; min-height: 66px; padding: 12px; border: 1px solid #39352d; border-radius: 6px; background: rgba(25,24,20,.82); cursor: pointer; }
 .supply-card:has(input:checked) { border-color: #8a6d39; background: #2b261d; box-shadow: inset 3px 0 #bf9144; }
 .supply-card.locked { opacity: .48; cursor: not-allowed; }

@@ -29,6 +29,7 @@ import {
   type SpecialRecoveryDestination,
   type MapRegionLocation,
   type RetrievalResult,
+  type RendererErrorReport,
   type ObservedStashItem,
   type StagingTabInspection,
   type StartupPhaseEvent,
@@ -58,6 +59,7 @@ import {
   diagnosticPrivacyViolations,
   redactDiagnosticValue
 } from './diagnostics'
+import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-recovery'
 
 // Packaged GUI launches do not always have a durable console attached. Electron's
 // child processes can outlive a terminal or diagnostic launcher and inherit its
@@ -69,6 +71,10 @@ for (const stream of [process.stdout, process.stderr]) {
   })
 }
 
+// Isolated screenshot runs must work on CI and remote Windows sessions that have
+// no usable GPU process. Production keeps Electron's normal acceleration path.
+if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) app.disableHardwareAcceleration()
+
 const CATALOG_PRESENTATION_VERSION = 32
 const DOUBLE_RARE_MI_BITMAP = 'character/item_doubleraremonsterinfrequent.tex'
 const ROLL_ANALYSIS_VERSION = 4
@@ -77,6 +83,9 @@ const SAHDINAS_MEMENTO = {
   record: 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr',
   name: "Sahdina's Memento"
 } as const
+const SAFE_MODE_ARGUMENT = '--cairn-safe-mode'
+const safeModeRequested = process.argv.includes(SAFE_MODE_ARGUMENT) ||
+  (Boolean(process.env.CAIRN_CODEX_SCREENSHOT_PATH) && process.env.CAIRN_CODEX_SCREENSHOT_SAFE_MODE === '1')
 const applicationStartedAt = Date.now()
 const startupStatus: StartupStatus = {
   startedAtUtc: new Date(applicationStartedAt).toISOString(),
@@ -601,7 +610,8 @@ function registerIpcHandlers(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase,
   archiveBackups: ArchiveBackupService,
-  diagnostics: DiagnosticLogger
+  diagnostics: DiagnosticLogger,
+  startupRecovery: StartupRecoveryService
 ): () => Promise<void> {
   let writeQueue: Promise<void> = Promise.resolve()
   let latestCollection: CollectionSnapshot | null = null
@@ -659,9 +669,9 @@ function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.getAppStatus, async (): Promise<AppStatus> => {
     try {
       await helper.request('health')
-      return { appVersion: app.getVersion(), helper: 'available', mode: 'read-only' }
+      return { appVersion: app.getVersion(), helper: 'available', mode: 'read-only', safeMode: startupRecovery.getStatus() }
     } catch {
-      return { appVersion: app.getVersion(), helper: 'unavailable', mode: 'read-only' }
+      return { appVersion: app.getVersion(), helper: 'unavailable', mode: 'read-only', safeMode: startupRecovery.getStatus() }
     }
   })
   ipcMain.handle(IPC_CHANNELS.getDebugLogging, (): DebugLoggingStatus => {
@@ -699,6 +709,34 @@ function registerIpcHandlers(
       diagnostics.info('navigation', 'workspace.opened', { view: input.view })
     }
   )
+  ipcMain.handle(
+    IPC_CHANNELS.reportRendererError,
+    (_event, input: RendererErrorReport): void => {
+      if (
+        !input || !/^[0-9a-f-]{36}$/i.test(input.correlationId) ||
+        typeof input.workspace !== 'string' || input.workspace.length > 64 ||
+        typeof input.message !== 'string' || input.message.length < 1 || input.message.length > 500 ||
+        (input.stack !== null && (typeof input.stack !== 'string' || input.stack.length > 4000))
+      ) {
+        throw new Error('Renderer error report is outside its safe bounds.')
+      }
+      diagnostics.error(
+        'renderer',
+        'workspace.failed',
+        new Error(input.message),
+        { correlationId: input.correlationId, workspace: input.workspace, stack: input.stack }
+      )
+    }
+  )
+  const restartWithSafeMode = (safe: boolean): void => {
+    const args = process.argv.slice(1).filter((argument) => argument !== SAFE_MODE_ARGUMENT)
+    if (safe) args.push(SAFE_MODE_ARGUMENT)
+    diagnostics.info('recovery', safe ? 'safe-mode.requested' : 'normal-mode.requested')
+    app.relaunch({ args })
+    app.quit()
+  }
+  ipcMain.handle(IPC_CHANNELS.restartInSafeMode, (): void => restartWithSafeMode(true))
+  ipcMain.handle(IPC_CHANNELS.restartNormally, (): void => restartWithSafeMode(false))
   ipcMain.handle(IPC_CHANNELS.getStartupStatus, (): StartupStatus => presentStartupStatus())
   ipcMain.handle(
     IPC_CHANNELS.reportStartupPhase,
@@ -709,7 +747,11 @@ function registerIpcHandlers(
         'roll-analysis-started', 'roll-analysis-settled', 'roll-analysis-skipped'
       ]
       if (!phases.includes(input?.phase)) throw new Error('Unknown startup phase event.')
-      return recordStartupPhase(input.phase, diagnostics)
+      const status = recordStartupPhase(input.phase, diagnostics)
+      if (input.phase === 'interactive') void startupRecovery.markHealthy().catch((error) => {
+        diagnostics.error('recovery', 'startup-health.persist-failed', error)
+      })
+      return status
     }
   )
   ipcMain.handle(IPC_CHANNELS.openDataDirectory, async (): Promise<string> => {
@@ -4680,7 +4722,7 @@ function rememberWindowState(window: BrowserWindow): void {
   ).catch((error) => console.warn('Could not persist window placement.', error))
 }
 
-async function createWindow(): Promise<void> {
+async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void> {
   const screenshotPath = process.env.CAIRN_CODEX_SCREENSHOT_PATH
   const savedState = screenshotPath ? null : await readWindowState()
   const savedBounds = visibleWindowBounds(savedState)
@@ -4725,10 +4767,20 @@ async function createWindow(): Promise<void> {
   window.webContents.once('did-finish-load', revealWindow)
   if (!screenshotPath) setTimeout(revealWindow, 1500)
 
+  const recoveryQuery = {
+    safeMode: recoveryStatus.active ? '1' : '0',
+    safeModeSuggested: process.env.CAIRN_CODEX_SCREENSHOT_SAFE_MODE_SUGGESTED === '1'
+      ? '1'
+      : recoveryStatus.suggested ? '1' : '0',
+    failedStarts: process.env.CAIRN_CODEX_SCREENSHOT_FAILED_STARTS ?? String(recoveryStatus.failedStarts),
+    simulateWorkspaceError: process.env.CAIRN_CODEX_SCREENSHOT_RENDER_ERROR === '1' ? '1' : '0'
+  }
   if (process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL)
+    const rendererUrl = new URL(process.env.ELECTRON_RENDERER_URL)
+    for (const [key, value] of Object.entries(recoveryQuery)) rendererUrl.searchParams.set(key, value)
+    void window.loadURL(rendererUrl.toString())
   } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'))
+    void window.loadFile(join(__dirname, '../renderer/index.html'), { query: recoveryQuery })
   }
   window.webContents.on('did-fail-load', (_event, code, description) => {
     console.error('[window] renderer load failed', { code, description })
@@ -4773,8 +4825,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       )
       if (scanError) throw new Error('Renderer collection scan failed: ' + scanError)
       const ready = await window.webContents.executeJavaScript(
-        `Boolean(document.querySelector('.catalog-grid, .set-grid')) &&
+        `(Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
+         Boolean(document.querySelector('.catalog-grid, .set-grid'))) &&
          (!document.querySelector('.primary-action')?.disabled ||
+          Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
           Boolean(document.querySelector('.background-scan'))) &&
          (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN === '1')}
            ? !document.querySelector('.background-scan')
@@ -5184,10 +5238,24 @@ app.whenReady().then(async () => {
   // truncated before the database setting becomes available below.
   const diagnostics = new DiagnosticLogger(diagnosticsDirectory, true)
   await diagnostics.initialize()
+  const startupRecoveryPath = process.env.CAIRN_CODEX_SMOKE_TEST === '1'
+    ? join(app.getPath('temp'), `cairn-codex-startup-recovery-${process.pid}.json`)
+    : join(app.getPath('userData'), 'startup-recovery.json')
+  const startupRecovery = new StartupRecoveryService(startupRecoveryPath, safeModeRequested)
+  const startupRecoveryStatus = await startupRecovery.markStarted().catch((error) => {
+    diagnostics.error('recovery', 'startup-health.read-failed', error)
+    return startupRecovery.getStatus()
+  })
+  let rendererProcessFailed = false
   process.on('uncaughtExceptionMonitor', (error) => {
     diagnostics.error('failure', 'main-process.uncaught-exception', error)
   })
   app.on('render-process-gone', (_event, _webContents, details) => {
+    if (details.reason === 'clean-exit') return
+    rendererProcessFailed = true
+    void startupRecovery.markRendererFailure().catch((error) => {
+      diagnostics.error('recovery', 'startup-health.failure-persist-failed', error)
+    })
     diagnostics.warn('failure', 'renderer-process.gone', {
       reason: details.reason,
       exitCode: details.exitCode
@@ -5203,7 +5271,8 @@ app.whenReady().then(async () => {
   diagnostics.info('startup', 'electron.ready', {
     appVersion: app.getVersion(),
     packaged: app.isPackaged,
-    electronVersion: process.versions.electron
+    electronVersion: process.versions.electron,
+    safeMode: startupRecoveryStatus
   })
   console.log('[startup] Electron ready; opening Cairn Codex services.')
   Menu.setApplicationMenu(null)
@@ -5320,10 +5389,10 @@ app.whenReady().then(async () => {
     databasePath,
     archiveBackupDirectory
   )
-  const flushIpcWrites = registerIpcHandlers(helper, database, archiveBackups, diagnostics)
+  const flushIpcWrites = registerIpcHandlers(helper, database, archiveBackups, diagnostics, startupRecovery)
   diagnostics.info('startup', 'ipc.registered')
   console.log('[startup] IPC handlers registered; creating the main window.')
-  void createWindow()
+  void createWindow(startupRecoveryStatus)
   void archiveBackups.ensureStartupBackup()
     .then((backup) => {
       if (backup) console.log(`[archive-backup] verified ${backup.fileName}`)
@@ -5336,7 +5405,12 @@ app.whenReady().then(async () => {
     event.preventDefault()
     void flushIpcWrites()
       .catch((error) => console.error('[shutdown] queued archive work failed', error))
-      .finally(() => {
+      .finally(async () => {
+        if (!rendererProcessFailed) {
+          await startupRecovery.markHealthy().catch((error) => {
+            diagnostics.error('recovery', 'startup-health.shutdown-persist-failed', error)
+          })
+        }
         helper.dispose()
         database.close()
         shutdownReady = true
@@ -5345,7 +5419,7 @@ app.whenReady().then(async () => {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow(startupRecovery.getStatus())
   })
 })
 

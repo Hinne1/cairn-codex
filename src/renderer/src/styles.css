@@ -1245,6 +1245,74 @@ body.onboarding-active { overflow: hidden; }
 .history-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .history-chips span { padding: 7px 9px; border: 1px solid #3b372f; border-radius: 999px; color: #8f8675; font-size: 10px; }
 
+.safe-mode-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 16px 32px 0;
+  padding: 14px 18px;
+  border: 1px solid #715a2f;
+  border-radius: 8px;
+  background: linear-gradient(110deg, rgba(68, 53, 27, 0.82), rgba(28, 27, 21, 0.96));
+  box-shadow: inset 3px 0 #c99d4a;
+}
+.safe-mode-banner > div:first-child { display: grid; gap: 4px; }
+.safe-mode-banner p { margin: 0; }
+.safe-mode-banner strong { color: #ecd6a8; font: 500 17px Georgia, serif; }
+.safe-mode-banner span { color: #a99c86; font-size: 12px; line-height: 1.45; }
+.safe-mode-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.safe-mode-actions button, .workspace-error-actions button, .root-recovery-actions button {
+  padding: 9px 13px;
+  border: 1px solid #725a2e;
+  border-radius: 5px;
+  color: #e7c779;
+  background: #2d271c;
+}
+.safe-mode-actions button.secondary { color: #b9ac95; border-color: #494238; background: #1c1b18; }
+.safe-mode-offer-backdrop {
+  position: fixed;
+  z-index: 130;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(7, 7, 6, 0.82);
+  backdrop-filter: blur(5px);
+}
+.safe-mode-offer {
+  width: min(620px, 100%);
+  padding: 30px;
+  border: 1px solid #725a2e;
+  border-radius: 10px;
+  outline: none;
+  background: linear-gradient(145deg, #25221c, #151513);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.62), inset 4px 0 #c79b46;
+}
+.safe-mode-offer h2, .workspace-error h2 { margin: 6px 0 12px; color: #eadfc9; font: 500 30px Georgia, serif; }
+.safe-mode-offer > p:not(.section-label), .workspace-error > p { color: #a99f8e; line-height: 1.65; }
+.safe-mode-offer-note { display: grid; gap: 4px; margin: 20px 0; padding: 14px; border: 1px solid #40392e; background: rgba(12, 12, 10, 0.4); }
+.safe-mode-offer-note strong { color: #c8b489; }
+.safe-mode-offer-note span { color: #887f70; font-size: 12px; line-height: 1.5; }
+.workspace-error {
+  margin: 32px;
+  padding: 32px;
+  border: 1px solid #6b4835;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(48, 35, 27, 0.9), rgba(19, 18, 15, 0.98));
+  box-shadow: inset 4px 0 #c47b4f;
+}
+.workspace-error dl, .root-recovery dl { display: grid; gap: 8px; margin: 18px 0; }
+.workspace-error dl div, .root-recovery dl div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
+.workspace-error dt, .root-recovery dt { color: #766f63; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.workspace-error dd, .root-recovery dd { min-width: 0; margin: 0; color: #bdb09a; overflow-wrap: anywhere; }
+.workspace-error-actions, .root-recovery-actions, .interface-recovery-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.root-recovery { min-height: 100vh; display: grid; place-items: center; padding: 32px; background: #10100f; }
+.root-recovery > section { width: min(700px, 100%); padding: 36px; border: 1px solid #6b4835; border-radius: 10px; background: linear-gradient(145deg, #2b221c, #151513); box-shadow: inset 4px 0 #c47b4f; }
+.root-recovery h1 { margin: 6px 0 12px; color: #eadfc9; font: 500 34px Georgia, serif; }
+.root-recovery p, .root-recovery small { color: #a99f8e; line-height: 1.6; }
+.root-recovery small { display: block; margin-top: 18px; }
+
 @keyframes breathe {
   50% { transform: scale(1.04); box-shadow: inset 0 0 28px rgba(198, 151, 66, 0.16), 0 0 24px rgba(198, 151, 66, 0.08); }
 }
@@ -1324,4 +1392,7 @@ body.onboarding-active { overflow: hidden; }
   .operation-history-row { grid-template-columns: 1fr; }
   .operation-meta { grid-column: auto; }
   .quarantine-actions { flex-direction: column; }
+  .safe-mode-banner { align-items: stretch; flex-direction: column; margin-inline: 24px; }
+  .safe-mode-offer { padding: 24px; }
+  .workspace-error { margin: 24px; padding: 24px; }
 }

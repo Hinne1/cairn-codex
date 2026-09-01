@@ -657,6 +657,53 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .supply-show-more { display: block; min-width: 260px; margin: 4px auto 14px; padding: 9px 16px; border: 1px solid #55472f; border-radius: 5px; color: #d5ba7b; background: #211d17; cursor: pointer; }
 .supply-show-more:hover { border-color: #96733d; background: #2a241b; }
 .workspace-tool-settings > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.onboarding-backdrop { position: fixed; z-index: 140; inset: 0; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 0, rgba(111,83,40,.2), transparent 42%), rgba(3,3,3,.86); backdrop-filter: blur(9px); }
+body.onboarding-active { overflow: hidden; }
+.onboarding-dialog { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; width: min(960px, 100%); max-height: calc(100vh - 48px); overflow: hidden; border: 1px solid #735d38; border-radius: 12px; outline: none; background: linear-gradient(145deg, #29241c, #131310 72%); box-shadow: 0 34px 110px rgba(0,0,0,.82); }
+.onboarding-header { display: flex; align-items: start; justify-content: space-between; gap: 24px; padding: 24px 28px 18px; border-bottom: 1px solid #3e362a; }
+.onboarding-header h2 { margin: 2px 0 6px; color: #f0e3c7; font: 500 31px Georgia, serif; }
+.onboarding-header p:not(.section-label) { max-width: 650px; margin: 0; color: #918775; font-size: 11px; line-height: 1.5; }
+.onboarding-skip { padding: 8px 11px; border: 1px solid #4b4336; border-radius: 5px; color: #a99c82; background: #1c1a16; cursor: pointer; white-space: nowrap; }
+.onboarding-progress { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 0; padding: 14px 28px; list-style: none; }
+.onboarding-progress li { position: relative; height: 3px; border-radius: 2px; background: #383329; }
+.onboarding-progress li span { position: absolute; top: -8px; left: 0; display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid #494237; border-radius: 50%; color: #71695b; background: #191815; font-size: 8px; }
+.onboarding-progress li.active, .onboarding-progress li.done { background: #b98c43; }
+.onboarding-progress li.active span, .onboarding-progress li.done span { border-color: #9e783e; color: #f1d492; background: #342819; }
+.onboarding-page { min-height: 390px; padding: 18px 28px 26px; overflow-y: auto; }
+.onboarding-page > h3 { margin: 3px 0 10px; color: #eadfc8; font: 500 25px Georgia, serif; }
+.onboarding-page > p:not(.section-label):not(.onboarding-callout) { max-width: 760px; margin: 0 0 18px; color: #9b9282; font-size: 12px; line-height: 1.65; }
+.onboarding-page > small { display: block; margin-top: 12px; color: #746d61; font-size: 9px; line-height: 1.55; }
+.onboarding-discovery-grid, .onboarding-choice-grid, .onboarding-concept-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.onboarding-discovery-grid article { display: flex; align-items: baseline; gap: 10px; padding: 18px; border: 1px solid #454034; border-radius: 7px; background: #191815; }
+.onboarding-discovery-grid article.ready { border-color: #52613d; background: #1b2117; }
+.onboarding-discovery-grid strong { color: #d8b968; font: 500 30px Georgia, serif; }
+.onboarding-discovery-grid article.ready strong { color: #b8d277; }
+.onboarding-discovery-grid span { color: #8d8474; font-size: 11px; }
+.onboarding-callout { margin: 12px 0 0; padding: 12px 14px; border: 1px solid #4c5539; border-left: 3px solid #91aa5b; border-radius: 5px; color: #aebb87; background: #1a2016; font-size: 10px; line-height: 1.55; }
+.onboarding-callout.warning { border-color: #70503b; border-left-color: #c27b51; color: #c7a18c; background: #251b17; }
+.onboarding-choice-grid article, .onboarding-concept-grid article { position: relative; display: grid; align-content: start; gap: 8px; padding: 18px; border: 1px solid #403a30; border-radius: 8px; background: rgba(24,23,19,.88); }
+.onboarding-choice-grid h4 { margin: 0; color: #e1d4b9; font: 500 19px Georgia, serif; }
+.onboarding-choice-grid p, .onboarding-concept-grid p { margin: 0; color: #8b8273; font-size: 10px; line-height: 1.55; }
+.onboarding-choice-grid code { color: #d5b96f; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.onboarding-choice-grid button { margin-top: 7px; padding: 10px 12px; border: 1px solid #705936; border-radius: 5px; color: #e3c47a; background: #31271a; cursor: pointer; }
+.onboarding-choice-grid button:disabled { opacity: .45; cursor: default; }
+.onboarding-choice-grid small { color: #6f685d; font-size: 9px; line-height: 1.45; }
+.choice-number { position: absolute; top: 12px; right: 14px; color: #4b4334; font: 500 22px Georgia, serif; }
+.onboarding-concept-grid strong { color: #d8c69f; font: 500 16px Georgia, serif; }
+.onboarding-concept-grid.final article:nth-child(2) { border-color: #5b4d33; }
+.onboarding-footer { display: flex; align-items: center; gap: 8px; padding: 14px 28px 18px; border-top: 1px solid #3e362a; background: rgba(18,17,14,.86); }
+.onboarding-footer span { flex: 1; }
+.onboarding-footer button { padding: 9px 15px; border: 1px solid #755c34; border-radius: 5px; color: #e7c779; background: #34291a; cursor: pointer; }
+.onboarding-footer button.secondary { border-color: #494238; color: #afa48d; background: #1c1a16; }
+@media (max-width: 700px) {
+  .onboarding-backdrop { padding: 10px; }
+  .onboarding-dialog { max-height: calc(100vh - 20px); }
+  .onboarding-header { padding: 18px; }
+  .onboarding-page { padding: 14px 18px 22px; }
+  .onboarding-discovery-grid, .onboarding-choice-grid, .onboarding-concept-grid { grid-template-columns: 1fr; }
+  .onboarding-footer { flex-wrap: wrap; padding: 12px 18px; }
+  .onboarding-footer span { display: none; }
+}
 .tool-settings-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(3,3,3,.76); }
 .tool-settings-dialog { width: min(860px, 100%); max-height: calc(100vh - 48px); overflow: hidden; border: 1px solid #6b5635; border-radius: 10px; background: linear-gradient(145deg, #25211a, #151411 76%); box-shadow: 0 32px 90px rgba(0,0,0,.72); }
 .tool-settings-dialog > header { display: flex; align-items: start; justify-content: space-between; gap: 20px; padding: 22px 24px 18px; border-bottom: 1px solid #3d352a; }

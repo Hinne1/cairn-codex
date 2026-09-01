@@ -51,7 +51,17 @@ try {
   if (!write.passed) throw new Error('Verified write transaction self-test failed.')
 
   const live = await request('self-test-live-queue')
-  if (!live.passed || live.fields !== 18) throw new Error('Live queue self-test failed.')
+  if (
+    !live.passed ||
+    live.fields !== 18 ||
+    !live.offlineRecoveryPassed ||
+    !live.staleReceiptRejected ||
+    !live.queuePathGuardPassed ||
+    !live.multiItemPassed ||
+    !live.unsupportedBuildRejected
+  ) {
+    throw new Error('Live queue self-test failed.')
+  }
   if (!/^[0-9a-f]{64}$/.test(live.hookSha256) || !/^[0-9a-f]{64}$/.test(live.injectorSha256)) {
     throw new Error('Native adapter fingerprints were not reported correctly.')
   }

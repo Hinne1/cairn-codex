@@ -28,6 +28,8 @@ const screenshotWidth = argument('--width')
 const screenshotHeight = argument('--height')
 const scrollTarget = argument('--scroll-target')
 const gdiaResultFixture = process.argv.includes('--gdia-result-fixture')
+const onboardingStep = argument('--onboarding-step')
+const dismissOnboarding = process.argv.includes('--dismiss-onboarding')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -41,6 +43,9 @@ if (screenshotWidth !== null && (!Number.isInteger(Number(screenshotWidth)) || N
 }
 if (screenshotHeight !== null && (!Number.isInteger(Number(screenshotHeight)) || Number(screenshotHeight) < 720 || Number(screenshotHeight) > 2400)) {
   throw new Error(`--height must be an integer from 720 through 2400; received ${screenshotHeight}.`)
+}
+if (onboardingStep !== null && (!Number.isInteger(Number(onboardingStep)) || Number(onboardingStep) < 0 || Number(onboardingStep) > 3)) {
+  throw new Error(`--onboarding-step must be an integer from 0 through 3; received ${onboardingStep}.`)
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
@@ -93,6 +98,8 @@ const env = {
   ...(screenshotWidth ? { CAIRN_CODEX_SCREENSHOT_WIDTH: screenshotWidth } : {}),
   ...(screenshotHeight ? { CAIRN_CODEX_SCREENSHOT_HEIGHT: screenshotHeight } : {}),
   ...(scrollTarget ? { CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET: scrollTarget } : {}),
+  ...(onboardingStep ? { CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP: onboardingStep } : {}),
+  ...(dismissOnboarding ? { CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING: '1' } : {}),
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(miAffixFilter ? { CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER: miAffixFilter } : {}),
   ...(miNativeRestore ? { CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE: '1' } : {}),

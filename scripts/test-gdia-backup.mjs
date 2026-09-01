@@ -27,6 +27,15 @@ try {
   assert(!initialInspection.backupReused, 'Preflight claimed a backup existed before any copy was created.')
   assert(initialInspection.requiredFreeBytes === 16 * 1024, 'Preflight reported the wrong required free space.')
   assert(!(await exists(backupDirectory)), 'Read-only backup preflight created the destination directory.')
+  await writeFile(`${sourcePath}-wal`, 'active WAL state')
+  let sqliteSidecarRejected = false
+  try {
+    await inspectGdiaBackup(sourcePath, backupDirectory)
+  } catch (error) {
+    sqliteSidecarRejected = String(error).includes('Close Item Assistant completely')
+  }
+  assert(sqliteSidecarRejected, 'Preflight accepted a source whose WAL could contain unbacked committed rows.')
+  await rm(`${sourcePath}-wal`)
   const first = await prepareGdiaBackup(sourcePath, backupDirectory, { now })
   assert(!first.reused, 'The first backup must create a recovery copy.')
   assert(first.sourceSha256 === sourceSha256, 'The source hash was not recorded before backup.')
@@ -174,6 +183,7 @@ try {
     passed: true,
     unchangedBackupReused: true,
     preflightReadOnly: true,
+    sqliteSidecarRejected: true,
     stalePreflightRejected: true,
     corruptedBackupRejected: true,
     retainedBackups: retained.length,

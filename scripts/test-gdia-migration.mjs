@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -9,10 +9,10 @@ const electronSource = rawArguments.includes('--electron-source')
 const options = parseOptions(rawArguments.filter((argument) => argument !== '--electron-source'))
 const requestedItems = positiveInteger(options.items ?? '4', '--items')
 const projectRoot = resolve(import.meta.dirname, '..')
-const appPath = resolve(options.app ?? (
+const appPath = resolve(options.app ?? process.env.CAIRN_CODEX_ELECTRON_PATH ?? (
   electronSource ? 'node_modules/electron/dist/electron.exe' : resolveRequired(options.app, '--app')
 ))
-const baseDatabasePath = resolveRequired(options['base-db'], '--base-db')
+const baseDatabasePath = options['base-db'] ? resolve(options['base-db']) : null
 const testRoot = join(projectRoot, 'local-cache', 'gdia-migration')
 const profileRoot = join(testRoot, 'profile')
 const sourceRoot = join(testRoot, 'item-assistant')
@@ -26,9 +26,11 @@ await rm(testRoot, { recursive: true, force: true })
 await mkdir(dirname(sourceDatabasePath), { recursive: true })
 await mkdir(queueDirectory, { recursive: true })
 await mkdir(profileRoot, { recursive: true })
-await copyFile(baseDatabasePath, targetDatabasePath)
+if (baseDatabasePath) await copyFile(baseDatabasePath, targetDatabasePath)
+else initializeTargetDatabase()
 
 const target = new DatabaseSync(targetDatabasePath)
+if (!baseDatabasePath) seedCatalog(target)
 const records = target.prepare(`
   SELECT record
   FROM catalog_item
@@ -93,7 +95,10 @@ source.close()
 const queueFields = [
   '18', '0', records[3], '', '', '3200000000', '0', '', '', '0', '', '0', '', '', '', '', '0', '1'
 ]
-await writeFile(join(queueDirectory, 'pending-test.csv'), queueFields.join(';') + '\r\n', 'utf8')
+const queuePath = join(queueDirectory, 'pending-test.csv')
+const queueBytes = Buffer.from(queueFields.join(';') + '\r\n', 'utf8')
+await writeFile(queuePath, queueBytes)
+const queueHash = createHash('sha256').update(queueBytes).digest('hex')
 const sourceHash = await sha256(sourceDatabasePath)
 
 const firstStarted = performance.now()
@@ -115,6 +120,10 @@ if (first.softcore !== expectedSoftcore || first.hardcore !== expectedHardcore) 
   )
 }
 assertPreflight(firstRun, false)
+await assertQueueReceipt(first.queueReceiptPath)
+const orphanBatchPath = join(backupDirectory, 'queue-receipts', 'a'.repeat(64))
+await mkdir(orphanBatchPath, { recursive: true })
+await writeFile(join(orphanBatchPath, 'orphan.csv'), 'uncommitted receipt')
 
 const repeatStarted = performance.now()
 const repeatRun = runImport('repeat')
@@ -124,6 +133,12 @@ if (repeated.vault !== first.vault || repeated.journal !== first.journal) {
   throw new Error('Repeated migration created duplicate vault items or journals.')
 }
 assertPreflight(repeatRun, true)
+if (await exists(orphanBatchPath)) {
+  throw new Error('The unchanged repeat did not reconcile an unreferenced queue receipt batch.')
+}
+if (repeated.queueReceiptPath !== first.queueReceiptPath) {
+  throw new Error('The unchanged repeat did not reuse the verified queue receipt batch.')
+}
 if (await sha256(sourceDatabasePath) !== sourceHash) {
   throw new Error('Item Assistant source database changed during the migration test.')
 }
@@ -133,6 +148,18 @@ const backupPath = join(backupDirectory, backups[0])
 const backupManifest = JSON.parse(await readFile(`${backupPath}.json`, 'utf8'))
 if (backupManifest.sourceSha256 !== sourceHash || await sha256(backupPath) !== sourceHash) {
   throw new Error('The retained source backup or manifest failed content verification.')
+}
+await writeFile(`${sourceDatabasePath}-wal`, 'active WAL state')
+let sqliteSidecarRejected = false
+try {
+  runImport('wal-sidecar')
+} catch (error) {
+  sqliteSidecarRejected = String(error).includes('Close Item Assistant completely')
+} finally {
+  await rm(`${sourceDatabasePath}-wal`, { force: true })
+}
+if (!sqliteSidecarRejected) {
+  throw new Error('The end-to-end migration accepted a database with unbacked SQLite sidecar state.')
 }
 
 console.log(JSON.stringify({
@@ -148,6 +175,9 @@ console.log(JSON.stringify({
   unchangedBackupReused: true,
   preflightVerified: true,
   namedStagesVerified: true,
+  queueReceiptBatchVerified: true,
+  orphanReceiptBatchReconciled: true,
+  sqliteSidecarRejected: true,
   sourcePreserved: true,
   firstDurationMs,
   repeatDurationMs
@@ -198,7 +228,17 @@ function assertPreflight(run, reused) {
   }
   if (
     preflight.backupReused !== reused ||
-    preflight.requiredFreeBytes !== (reused ? 0 : preflight.backupBytes) ||
+    preflight.sourceBackupRequiredBytes !== (reused ? 0 : preflight.backupBytes) ||
+    preflight.queueReceiptBytes !== queueBytes.length ||
+    preflight.archiveGrowthReserveBytes !== preflight.sourceItems * 4096 ||
+    preflight.archiveBackupReserveBytes < preflight.archiveGrowthReserveBytes ||
+    preflight.requiredFreeBytes !== (
+      preflight.sourceBackupRequiredBytes +
+      preflight.queueReceiptBytes +
+      preflight.archiveGrowthReserveBytes +
+      preflight.archiveBackupReserveBytes +
+      128 * 1024
+    ) ||
     preflight.availableFreeBytes < preflight.requiredFreeBytes ||
     !preflight.destinationMode.includes('Softcore and Hardcore kept separate')
   ) {
@@ -226,15 +266,74 @@ function inspectTarget() {
       ) OR CAST(serialized_item AS TEXT) LIKE '%3200000000%'
       GROUP BY is_hardcore
     `).all(700000000 + databaseItemCount - 1)
+    const queueReceipt = database.prepare(`
+      SELECT backup_path FROM operation_journal WHERE stash_path = ?
+    `).get(queuePath)
     return {
       vault: count(database, 'vault_item'),
       journal: count(database, 'operation_journal'),
       softcore: Number(modes.find((row) => Number(row.hardcore) === 0)?.count ?? 0),
       hardcore: Number(modes.find((row) => Number(row.hardcore) === 1)?.count ?? 0),
-      queue: Number(database.prepare("SELECT COUNT(*) AS count FROM vault_item WHERE CAST(serialized_item AS TEXT) LIKE '%3200000000%'").get().count)
+      queue: Number(database.prepare("SELECT COUNT(*) AS count FROM vault_item WHERE CAST(serialized_item AS TEXT) LIKE '%3200000000%'").get().count),
+      queueReceiptPath: String(queueReceipt?.backup_path ?? '')
     }
   } finally {
     database.close()
+  }
+}
+
+async function assertQueueReceipt(path) {
+  if (!path || await sha256(path) !== queueHash) {
+    throw new Error('The imported queue item did not retain an exact verified receipt.')
+  }
+  const manifest = JSON.parse(await readFile(join(dirname(path), 'batch.json'), 'utf8'))
+  const expectedFingerprint = createHash('sha256')
+    .update(`pending-test.csv\0${queueHash}\0`)
+    .digest('hex')
+  if (
+    manifest.fingerprint !== expectedFingerprint ||
+    manifest.files?.[0]?.sha256 !== queueHash ||
+    manifest.files?.[0]?.bytes !== queueBytes.length
+  ) {
+    throw new Error('The queue receipt batch manifest did not verify its complete source set.')
+  }
+}
+
+function initializeTargetDatabase() {
+  const initialized = spawnSync(appPath, [
+    ...(electronSource ? ['.'] : []),
+    `--user-data-dir=${profileRoot}`
+  ], {
+    env: {
+      ...process.env,
+      CAIRN_CODEX_DATABASE_PATH: targetDatabasePath,
+      CAIRN_CODEX_INITIALIZE_DATABASE: '1'
+    },
+    encoding: 'utf8',
+    timeout: 120_000,
+    windowsHide: true
+  })
+  if (initialized.status !== 0) {
+    throw new Error(
+      `Could not initialize the generated Cairn archive (${initialized.status}): ` +
+      `${initialized.error?.message || initialized.stderr || initialized.stdout || 'no process output'}`
+    )
+  }
+}
+
+function seedCatalog(database) {
+  const insertCatalog = database.prepare(`
+    INSERT INTO catalog_item (
+      record, name, rarity, item_class, slot, level_requirement, item_level,
+      set_name, set_record, bitmap, content_pack, updated_at_utc
+    ) VALUES (?, ?, 'legendary', 'Weapon', 'one-handed', 1, 1, NULL, NULL, NULL, 'base', ?)
+  `)
+  for (let index = 0; index < 4; index += 1) {
+    insertCatalog.run(
+      `records/cairn-test/importable-${index}.dbr`,
+      `Generated import item ${index}`,
+      '2026-09-01T00:00:00.000Z'
+    )
   }
 }
 
@@ -245,6 +344,16 @@ function count(database, table) {
 async function sha256(path) {
   const bytes = await import('node:fs/promises').then(({ readFile }) => readFile(path))
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+async function exists(path) {
+  try {
+    await stat(path)
+    return true
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
 }
 
 function parseOptions(args) {

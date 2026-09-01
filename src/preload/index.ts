@@ -54,6 +54,8 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.importGdiaDatabase) as Promise<GdiaImportResult>,
   getLastGdiaImportResult: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getLastGdiaImportResult) as Promise<GdiaImportResult | null>,
+  getGdiaImportProgress: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getGdiaImportProgress) as Promise<GdiaImportProgress | null>,
   onGdiaImportProgress: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, progress: GdiaImportProgress): void => listener(progress)
     ipcRenderer.on(IPC_CHANNELS.gdiaImportProgress, handler)

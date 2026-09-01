@@ -10,6 +10,7 @@ export const IPC_CHANNELS = {
   openArchiveBackupDirectory: 'app:open-archive-backup-directory',
   importGdiaDatabase: 'app:import-gdia-database',
   getLastGdiaImportResult: 'app:get-last-gdia-import-result',
+  getGdiaImportProgress: 'app:get-gdia-import-progress',
   gdiaImportProgress: 'app:gdia-import-progress',
   getRecoveryStatus: 'app:get-recovery-status',
   getCachedCollection: 'collection:get-cached',
@@ -163,6 +164,10 @@ export interface GdiaImportPreflight {
   sourceSoftcoreItems: number
   unsupportedItems: number
   backupBytes: number
+  sourceBackupRequiredBytes: number
+  queueReceiptBytes: number
+  archiveGrowthReserveBytes: number
+  archiveBackupReserveBytes: number
   requiredFreeBytes: number
   availableFreeBytes: number
   backupReused: boolean
@@ -192,6 +197,7 @@ export interface CairnCodexApi {
   openArchiveBackupDirectory: () => Promise<string>
   importGdiaDatabase: () => Promise<GdiaImportResult>
   getLastGdiaImportResult: () => Promise<GdiaImportResult | null>
+  getGdiaImportProgress: () => Promise<GdiaImportProgress | null>
   onGdiaImportProgress: (listener: (progress: GdiaImportProgress) => void) => () => void
   getRecoveryStatus: () => Promise<RecoveryStatus>
   discoverGrimDawn: () => Promise<GrimDawnDiscovery>

@@ -93,9 +93,11 @@ export async function prepareGdiaBackup(
     .filter((entry) => entry.valid && entry.manifest?.sourceSha256 === sourceSha256)
     .sort((left, right) => manifestTime(right) - manifestTime(left))[0]
   if (reusable?.manifest) {
+    await assertNoGdiaSqliteSidecars(sourcePath)
     if ((await hashFile(sourcePath)) !== sourceSha256) {
       throw new Error('The GDIA database changed while its existing backup was being verified; import was aborted.')
     }
+    await assertNoGdiaSqliteSidecars(sourcePath)
     await pruneBackups(existing, reusable.backupPath, retention)
     return {
       backupPath: reusable.backupPath,
@@ -123,9 +125,11 @@ export async function prepareGdiaBackup(
   let manifestPublished = false
   try {
     await copyFile(sourcePath, temporaryPath)
+    await assertNoGdiaSqliteSidecars(sourcePath)
     const backupSha256 = await hashFile(temporaryPath)
     const backupMetadata = await stat(temporaryPath)
     const sourceSha256AfterCopy = await hashFile(sourcePath)
+    await assertNoGdiaSqliteSidecars(sourcePath)
     if (
       backupMetadata.size !== sourceBytes ||
       backupSha256 !== sourceSha256 ||
@@ -273,13 +277,29 @@ async function diskAvailableBytes(directory: string): Promise<bigint> {
 }
 
 async function inspectStableSource(path: string): Promise<{ sourceSha256: string; sourceBytes: number }> {
+  await assertNoGdiaSqliteSidecars(path)
   const metadataBeforeHash = await stat(path)
   const sourceSha256 = await hashFile(path)
   const metadataAfterHash = await stat(path)
-  if (metadataBeforeHash.size !== metadataAfterHash.size) {
+  await assertNoGdiaSqliteSidecars(path)
+  if (
+    metadataBeforeHash.size !== metadataAfterHash.size ||
+    metadataBeforeHash.mtimeMs !== metadataAfterHash.mtimeMs
+  ) {
     throw new Error('The GDIA database changed while it was being hashed; import was aborted.')
   }
   return { sourceSha256, sourceBytes: metadataAfterHash.size }
+}
+
+export async function assertNoGdiaSqliteSidecars(sourcePath: string): Promise<void> {
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    if (await fileExists(`${sourcePath}${suffix}`)) {
+      throw new Error(
+        `Item Assistant still has SQLite state in ${basename(sourcePath)}${suffix}. ` +
+        'Close Item Assistant completely, wait for it to checkpoint the database, and analyze again.'
+      )
+    }
+  }
 }
 
 async function nearestExistingDirectory(path: string): Promise<string> {

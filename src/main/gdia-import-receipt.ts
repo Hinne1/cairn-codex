@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { GdiaImportResult } from '@shared/contracts'
 
@@ -32,15 +32,39 @@ export async function writeLastGdiaImportResult(
   result: GdiaImportResult
 ): Promise<void> {
   if (!validResult(result) || result.canceled) throw new Error('Refusing to persist an invalid Item Assistant import receipt.')
+  await mkdir(backupDirectory, { recursive: true })
   const path = join(backupDirectory, RECEIPT_NAME)
   const temporaryPath = `${path}.${randomUUID()}.tmp`
   const stored: StoredReceipt = { receiptVersion: RECEIPT_VERSION, result }
+  let temporary = null as Awaited<ReturnType<typeof open>> | null
   try {
-    await writeFile(temporaryPath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8')
+    temporary = await open(temporaryPath, 'wx')
+    await temporary.writeFile(`${JSON.stringify(stored, null, 2)}\n`, 'utf8')
+    await temporary.sync()
+    await temporary.close()
+    temporary = null
     await rename(temporaryPath, path)
+    const published = await open(path, 'r+')
+    try {
+      await published.sync()
+    } finally {
+      await published.close()
+    }
+    await syncDirectory(backupDirectory)
   } catch (error) {
+    await temporary?.close().catch(() => undefined)
     await rm(temporaryPath, { force: true }).catch(() => undefined)
     throw error
+  }
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === 'win32') return
+  const directory = await open(path, 'r')
+  try {
+    await directory.sync()
+  } finally {
+    await directory.close()
   }
 }
 

@@ -101,8 +101,84 @@ internal sealed class LiveGameAdapter : IDisposable
         {
             throw new InvalidDataException("The bundled Cairn live adapter failed fingerprint verification.");
         }
+        var unsupportedBuildRejected = !VerifiedRetailGameDlls.ContainsKey(new string('0', 64)) &&
+            !string.Equals(CrashingRetailHookSha256, VerifiedRetailHookSha256,
+                StringComparison.OrdinalIgnoreCase);
+        var recoveryRoot = Path.Combine(Path.GetTempPath(), $"cairn-live-recovery-{Guid.NewGuid():N}");
+        var offlineRecoveryPassed = false;
+        var staleReceiptRejected = false;
+        var queuePathGuardPassed = false;
+        var multiItemPassed = false;
+        try
+        {
+            var outgoing = Path.Combine(recoveryRoot, "outgoing", "hc");
+            var deleted = Path.Combine(recoveryRoot, "deleted", "hc");
+            var incoming = Path.Combine(recoveryRoot, "ingoing");
+            Directory.CreateDirectory(outgoing);
+            Directory.CreateDirectory(deleted);
+            Directory.CreateDirectory(incoming);
+            var bytes = Encoding.UTF8.GetBytes(serialized);
+            var semanticHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            var pendingPath = Path.Combine(outgoing, "cairn-self-test-pending.csv");
+            var pendingQueue = new LiveRetrievalQueue(
+                "self-test-pending", pendingPath, semanticHash, true, [], []);
+            File.WriteAllBytes(pendingPath, bytes);
+            var pending = InspectRetrievalFiles(pendingQueue, recoveryRoot);
+            File.Delete(pendingPath);
+            var depositedPath = Path.Combine(deleted, "cairn-self-test-pending.csv");
+            File.WriteAllBytes(depositedPath, bytes);
+            var deposited = InspectRetrievalFiles(pendingQueue, recoveryRoot);
+
+            var rejectedPath = Path.Combine(incoming, "cairn-self-test-rejected.csv");
+            var rejectedQueue = new LiveRetrievalQueue(
+                "self-test-rejected",
+                Path.Combine(outgoing, "cairn-self-test-rejected.csv"),
+                semanticHash,
+                true,
+                [depositedPath],
+                []);
+            File.WriteAllBytes(rejectedPath, bytes);
+            var rejected = InspectRetrievalFiles(rejectedQueue, recoveryRoot);
+            offlineRecoveryPassed = pending.State == "pending" &&
+                deposited.State == "deposited" && rejected.State == "rejected";
+            multiItemPassed = deposited.State == "deposited" && rejected.State == "rejected";
+
+            var stalePath = Path.Combine(incoming, "cairn-self-test-stale.csv");
+            var staleQueue = new LiveRetrievalQueue(
+                "self-test-stale",
+                Path.Combine(outgoing, "cairn-self-test-stale.csv"),
+                semanticHash,
+                true,
+                [depositedPath],
+                [rejectedPath]);
+            File.WriteAllText(stalePath,
+                serialized.Replace("records/items/test.dbr", "records/items/stale.dbr"));
+            staleReceiptRejected = InspectRetrievalFiles(staleQueue, recoveryRoot).State == "unknown";
+
+            try
+            {
+                InspectRetrievalFiles(
+                    pendingQueue with { OutgoingPath = Path.Combine(Path.GetTempPath(), "outside.csv") },
+                    recoveryRoot);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                queuePathGuardPassed = true;
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(recoveryRoot)) Directory.Delete(recoveryRoot, true);
+        }
+        if (!offlineRecoveryPassed || !staleReceiptRejected || !queuePathGuardPassed ||
+            !multiItemPassed || !unsupportedBuildRejected)
+        {
+            throw new InvalidDataException("The Cairn live recovery state machine failed its self-test.");
+        }
         return new LiveQueueSelfTestResult(
-            true, 18, sample.Seed, sample.AffixRerolls, hookHash, injectorHash);
+            true, 18, sample.Seed, sample.AffixRerolls, hookHash, injectorHash,
+            offlineRecoveryPassed, staleReceiptRejected, queuePathGuardPassed, multiItemPassed,
+            unsupportedBuildRejected);
     }
 
     public LiveGameStatus Inspect()
@@ -469,36 +545,63 @@ internal sealed class LiveGameAdapter : IDisposable
     {
         lock (sync)
         {
-            DemandReady();
-            if (File.Exists(queue.OutgoingPath))
-            {
-                return new LiveRetrievalStatus("pending", null);
-            }
-            var deleted = Path.Combine(queueDirectory!, "deleted", queue.IsHardcore ? "hc" : "sc");
-            var queueName = Path.GetFileName(queue.OutgoingPath);
-            var exactDeposited = Path.Combine(deleted, queueName);
-            var deposited = FileMatchesSemanticHash(exactDeposited, queue.SemanticSha256)
-                ? exactDeposited
-                : MatchingFiles(deleted, queue.SemanticSha256)
-                .Except(queue.BaselineDeleted, StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-            if (deposited is not null)
-            {
-                return new LiveRetrievalStatus("deposited", deposited);
-            }
-            var incoming = Path.Combine(queueDirectory!, "ingoing");
-            var exactRejected = Path.Combine(incoming, queueName);
-            var rejected = FileMatchesSemanticHash(exactRejected, queue.SemanticSha256)
-                ? exactRejected
-                : MatchingFiles(incoming, queue.SemanticSha256)
-                .Except(queue.BaselineIncoming, StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-            return rejected is null
-                ? new LiveRetrievalStatus("unknown", null)
-                : new LiveRetrievalStatus("rejected", rejected);
+            return InspectRetrievalFiles(
+                queue,
+                Path.Combine(LiveDataDirectory(), "itemqueue"));
         }
+    }
+
+    private static LiveRetrievalStatus InspectRetrievalFiles(
+        LiveRetrievalQueue queue,
+        string queueRoot)
+    {
+        if (!Regex.IsMatch(queue.SemanticSha256, "^[0-9a-f]{64}$", RegexOptions.IgnoreCase))
+        {
+            throw new InvalidDataException("The live queue recovery hash is invalid.");
+        }
+        var outgoing = Path.Combine(queueRoot, "outgoing", queue.IsHardcore ? "hc" : "sc");
+        var outgoingPath = ValidateQueueFilePath(queue.OutgoingPath, outgoing);
+        if (File.Exists(outgoingPath))
+        {
+            return new LiveRetrievalStatus("pending", null);
+        }
+        var deleted = Path.Combine(queueRoot, "deleted", queue.IsHardcore ? "hc" : "sc");
+        var queueName = Path.GetFileName(outgoingPath);
+        var exactDeposited = Path.Combine(deleted, queueName);
+        var deposited = FileMatchesSemanticHash(exactDeposited, queue.SemanticSha256)
+            ? exactDeposited
+            : MatchingFiles(deleted, queue.SemanticSha256)
+            .Except(queue.BaselineDeleted, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+        if (deposited is not null)
+        {
+            return new LiveRetrievalStatus("deposited", deposited);
+        }
+        var incoming = Path.Combine(queueRoot, "ingoing");
+        var exactRejected = Path.Combine(incoming, queueName);
+        var rejected = FileMatchesSemanticHash(exactRejected, queue.SemanticSha256)
+            ? exactRejected
+            : MatchingFiles(incoming, queue.SemanticSha256)
+            .Except(queue.BaselineIncoming, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+        return rejected is null
+            ? new LiveRetrievalStatus("unknown", null)
+            : new LiveRetrievalStatus("rejected", rejected);
+    }
+
+    private static string ValidateQueueFilePath(string path, string expectedDirectory)
+    {
+        var root = Path.GetFullPath(expectedDirectory) + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(path);
+        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) ||
+            !fullPath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException(
+                "The retained live queue path is outside Cairn's outgoing queue.");
+        }
+        return fullPath;
     }
 
     private static bool FileMatchesSemanticHash(string path, string semanticHash)
@@ -1106,7 +1209,12 @@ internal sealed record LiveQueueSelfTestResult(
     uint Seed,
     uint AffixRerolls,
     string HookSha256,
-    string InjectorSha256);
+    string InjectorSha256,
+    bool OfflineRecoveryPassed,
+    bool StaleReceiptRejected,
+    bool QueuePathGuardPassed,
+    bool MultiItemPassed,
+    bool UnsupportedBuildRejected);
 internal sealed record LiveQueueSettings(
     int LootFrom,
     int DepositTo,

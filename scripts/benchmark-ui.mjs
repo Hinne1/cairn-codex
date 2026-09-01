@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { copyFile, cp, mkdir, readFile, rm } from 'node:fs/promises'
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 function argument(name) {
@@ -27,6 +27,9 @@ const collapseTrackers = process.argv.includes('--collapse-trackers')
 const screenshotWidth = argument('--width')
 const screenshotHeight = argument('--height')
 const scrollTarget = argument('--scroll-target')
+const gdiaResultFixture = process.argv.includes('--gdia-result-fixture')
+const onboardingStep = argument('--onboarding-step')
+const dismissOnboarding = process.argv.includes('--dismiss-onboarding')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -40,6 +43,9 @@ if (screenshotWidth !== null && (!Number.isInteger(Number(screenshotWidth)) || N
 }
 if (screenshotHeight !== null && (!Number.isInteger(Number(screenshotHeight)) || Number(screenshotHeight) < 720 || Number(screenshotHeight) > 2400)) {
   throw new Error(`--height must be an integer from 720 through 2400; received ${screenshotHeight}.`)
+}
+if (onboardingStep !== null && (!Number.isInteger(Number(onboardingStep)) || Number(onboardingStep) < 0 || Number(onboardingStep) > 3)) {
+  throw new Error(`--onboarding-step must be an integer from 0 through 3; received ${onboardingStep}.`)
 }
 
 const testRoot = resolve('local-cache', 'ui-benchmark')
@@ -55,6 +61,31 @@ if (fixture) {
   await mkdir(profileRoot, { recursive: true })
   await copyFile(resolve(baseDatabase), resolve(profileRoot, 'cairn-codex.sqlite3'))
 }
+if (gdiaResultFixture) {
+  if (!fixture) throw new Error('--gdia-result-fixture requires an isolated --fixture source.')
+  const receiptDirectory = resolve(profileRoot, 'migrations', 'gdia')
+  await mkdir(receiptDirectory, { recursive: true })
+  await writeFile(resolve(receiptDirectory, 'last-import.json'), `${JSON.stringify({
+    receiptVersion: 1,
+    result: {
+      canceled: false,
+      sourcePath: 'C:\\Synthetic QA\\ItemAssistant\\data\\userdata.db',
+      sourceItems: 20001,
+      sourceDatabaseItems: 20000,
+      sourceQueueItems: 1,
+      sourceHardcoreItems: 10000,
+      sourceSoftcoreItems: 10001,
+      importedItems: 20000,
+      duplicateItems: 0,
+      unsupportedItems: 1,
+      backupPath: 'C:\\Synthetic QA\\backups\\userdata.verified.bak',
+      backupReused: false,
+      receiptPersisted: true,
+      completedAtUtc: '2026-09-01T03:30:00.000Z',
+      durationMs: 995
+    }
+  }, null, 2)}\n`, 'utf8')
+}
 
 const env = {
   ...process.env,
@@ -67,6 +98,8 @@ const env = {
   ...(screenshotWidth ? { CAIRN_CODEX_SCREENSHOT_WIDTH: screenshotWidth } : {}),
   ...(screenshotHeight ? { CAIRN_CODEX_SCREENSHOT_HEIGHT: screenshotHeight } : {}),
   ...(scrollTarget ? { CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET: scrollTarget } : {}),
+  ...(onboardingStep ? { CAIRN_CODEX_SCREENSHOT_ONBOARDING_STEP: onboardingStep } : {}),
+  ...(dismissOnboarding ? { CAIRN_CODEX_SCREENSHOT_DISMISS_ONBOARDING: '1' } : {}),
   ...(category ? { CAIRN_CODEX_SCREENSHOT_CATEGORY: category } : {}),
   ...(miAffixFilter ? { CAIRN_CODEX_SCREENSHOT_MI_AFFIX_FILTER: miAffixFilter } : {}),
   ...(miNativeRestore ? { CAIRN_CODEX_SCREENSHOT_MI_NATIVE_RESTORE: '1' } : {}),
@@ -120,6 +153,9 @@ if (
     `${report.renderedState?.viewport?.height ?? 'unknown'}.`
   )
 }
+if (scrollTarget && !report.renderedState?.scrollTargetFound) {
+  throw new Error(`Screenshot scroll target was not rendered: ${scrollTarget}.`)
+}
 if (expectedMiRows !== null) {
   const expected = Number(expectedMiRows)
   const rendered = report.renderedState?.miRows?.length ?? 0
@@ -162,7 +198,10 @@ console.log(JSON.stringify({
   openSearchHelp,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
+  scrollTarget,
+  scrollY: report.renderedState.scrollY,
   fixture,
+  gdiaResultFixture,
   matchedItems: itemCount,
   renderedCards: report.renderedState?.cards,
   renderedVaultRows: report.renderedState?.vaultRows,

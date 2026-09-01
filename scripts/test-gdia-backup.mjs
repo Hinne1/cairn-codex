@@ -4,8 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   GDIA_BACKUP_RETENTION,
+  inspectGdiaBackup,
   prepareGdiaBackup
 } from '../src/main/gdia-backup.ts'
+import {
+  readLastGdiaImportResult,
+  writeLastGdiaImportResult
+} from '../src/main/gdia-import-receipt.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'cairn-gdia-backup-'))
 const sourcePath = join(root, 'userdata.db')
@@ -16,6 +21,21 @@ const now = () => new Date(clock += 1_000)
 try {
   await writeFile(sourcePath, Buffer.alloc(16 * 1024, 0x41))
   const sourceSha256 = await sha256(sourcePath)
+  const initialInspection = await inspectGdiaBackup(sourcePath, backupDirectory, {
+    availableBytes: async () => 64n * 1024n
+  })
+  assert(!initialInspection.backupReused, 'Preflight claimed a backup existed before any copy was created.')
+  assert(initialInspection.requiredFreeBytes === 16 * 1024, 'Preflight reported the wrong required free space.')
+  assert(!(await exists(backupDirectory)), 'Read-only backup preflight created the destination directory.')
+  await writeFile(`${sourcePath}-wal`, 'active WAL state')
+  let sqliteSidecarRejected = false
+  try {
+    await inspectGdiaBackup(sourcePath, backupDirectory)
+  } catch (error) {
+    sqliteSidecarRejected = String(error).includes('Close Item Assistant completely')
+  }
+  assert(sqliteSidecarRejected, 'Preflight accepted a source whose WAL could contain unbacked committed rows.')
+  await rm(`${sourcePath}-wal`)
   const first = await prepareGdiaBackup(sourcePath, backupDirectory, { now })
   assert(!first.reused, 'The first backup must create a recovery copy.')
   assert(first.sourceSha256 === sourceSha256, 'The source hash was not recorded before backup.')
@@ -25,6 +45,20 @@ try {
   assert(repeated.reused, 'An unchanged import did not reuse its verified backup.')
   assert(repeated.backupPath === first.backupPath, 'An unchanged import selected a different backup.')
   assert((await backupNames(backupDirectory)).length === 1, 'An unchanged import retained another full backup.')
+  const repeatInspection = await inspectGdiaBackup(sourcePath, backupDirectory)
+  assert(repeatInspection.backupReused, 'Preflight did not recognize the verified unchanged backup.')
+  assert(repeatInspection.requiredFreeBytes === 0, 'Preflight required another full copy for an unchanged source.')
+
+  await writeFile(sourcePath, Buffer.alloc(16 * 1024, 0x42))
+  let stalePreflightRejected = false
+  try {
+    await prepareGdiaBackup(sourcePath, backupDirectory, { now, expectedSourceSha256: sourceSha256 })
+  } catch (error) {
+    stalePreflightRejected = String(error).includes('changed after preflight')
+  }
+  assert(stalePreflightRejected, 'A source changed after preflight was not rejected before backup mutation.')
+  assert((await backupNames(backupDirectory)).length === 1, 'Stale preflight rejection changed retained backups.')
+  await writeFile(sourcePath, Buffer.alloc(16 * 1024, 0x41))
 
   await writeFile(first.backupPath, 'corrupted backup')
   const recovered = await prepareGdiaBackup(sourcePath, backupDirectory, { now })
@@ -124,9 +158,33 @@ try {
   assert(distinctHashes.includes(sha256Bytes(Buffer.alloc(8 * 1024, 0x63))), 'Distinct retention removed the newest historical revision.')
   assert(distinctHashes.includes(sha256Bytes(Buffer.alloc(8 * 1024, 0x62))), 'Distinct retention did not backfill with an older unique revision.')
 
+  const completedAtUtc = '2026-09-01T00:10:00.000Z'
+  await writeLastGdiaImportResult(backupDirectory, {
+    canceled: false,
+    sourcePath,
+    sourceItems: 4,
+    sourceDatabaseItems: 3,
+    sourceQueueItems: 1,
+    sourceHardcoreItems: 2,
+    sourceSoftcoreItems: 2,
+    importedItems: 3,
+    duplicateItems: 0,
+    unsupportedItems: 1,
+    backupPath: recovered.backupPath,
+    backupReused: false,
+    receiptPersisted: true,
+    completedAtUtc,
+    durationMs: 1250
+  })
+  const durableResult = await readLastGdiaImportResult(backupDirectory)
+  assert(durableResult?.completedAtUtc === completedAtUtc, 'The durable import result was not restored exactly.')
+
   console.log(JSON.stringify({
     passed: true,
     unchangedBackupReused: true,
+    preflightReadOnly: true,
+    sqliteSidecarRejected: true,
+    stalePreflightRejected: true,
     corruptedBackupRejected: true,
     retainedBackups: retained.length,
     retention: GDIA_BACKUP_RETENTION,
@@ -136,7 +194,8 @@ try {
     unmanagedBackupPreserved: true,
     publicationOrphanReconciled: true,
     managedTemporaryRemoved: true,
-    distinctHashRetention: true
+    distinctHashRetention: true,
+    durableImportResult: true
   }, null, 2))
 } finally {
   await rm(root, { recursive: true, force: true })

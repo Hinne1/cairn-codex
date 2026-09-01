@@ -1,8 +1,30 @@
 # Item Assistant import safety
 
-Cairn imports Item Assistant data from an immutable, verified source backup. It never queries
-`userdata.db` for item rows until the backup copy has been published and its SHA-256 digest
-matches the digest recorded before copying.
+Cairn imports Item Assistant data from an immutable, verified source backup. Read-only preflight
+may count rows in `userdata.db`, but committed import rows are read only from the published backup.
+Preflight and backup both fail closed if SQLite WAL, shared-memory, or rollback-journal sidecars
+exist, because those files can contain committed state that is not present in the main database.
+
+## Preflight and progress contract
+
+- File selection starts a read-only preflight. Cairn hashes the source, counts database and
+  pending-queue copies, preserves the Softcore/Hardcore split, estimates unsupported records
+  against the current catalog, verifies reusable backups, and reads destination free space. Its
+  conservative reserve includes a new source copy when needed, queue receipts, bounded archive
+  growth, the post-import archive backup, and fixed receipt/manifest overhead.
+- The confirmation surface identifies the exact source path, copy counts, unsupported estimate,
+  backup bytes, required and available free space, and the archive destination mode. Canceling
+  there is the final safe cancellation boundary and leaves both backup storage and the archive
+  untouched.
+- After confirmation, the source database hash and pending-queue fingerprint must still match
+  preflight. The import then reports bounded named stages: source verification, backup protection,
+  immutable-backup reading, archive commit, and durable-result finalization. Backup and archive
+  mutation stages deliberately run to completion rather than exposing unsafe mid-write cancel.
+- A versioned `last-import.json` receipt is flushed and atomically published beside the managed
+  source backups while the shutdown-drained write queue still owns the import. Settings restores
+  the receipt after restart and shows completion time, duration,
+  import/duplicate/unsupported counts, mode split, and backup reuse. Receipt publication failure
+  is surfaced without misreporting the already committed archive transaction as rolled back.
 
 ## Source backup policy
 
@@ -24,5 +46,8 @@ matches the digest recorded before copying.
   after the current source has a verified recovery copy, always preserves that copy, and removes
   invalid, duplicate, or older managed entries beyond the bound.
 
-Pending Item Assistant queue CSVs keep their separate receipt-copy and verification behavior.
-They are not folded into the database content identity.
+Pending Item Assistant queue CSVs are staged and verified as a complete fingerprinted batch, then
+published with a versioned manifest before the archive transaction. A transaction failure removes
+a newly published batch. A process interruption can leave only a complete verified batch; the next
+confirmed import reuses the matching batch or removes unreferenced managed batches. Journaled batch
+paths are never removed. Queue contents remain separate from the database content identity.

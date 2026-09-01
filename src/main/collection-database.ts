@@ -163,6 +163,27 @@ export class CollectionDatabase {
     }
   }
 
+  getStorageFootprintBytes(): number {
+    const pageCount = this.database.prepare('PRAGMA page_count').get() as { page_count: number }
+    const pageSize = this.database.prepare('PRAGMA page_size').get() as { page_size: number }
+    const bytes = Number(pageCount.page_count) * Number(pageSize.page_size)
+    if (!Number.isSafeInteger(bytes) || bytes < 0) {
+      throw new Error('The archive storage footprint is too large to reserve safely.')
+    }
+    return bytes
+  }
+
+  getGdiaQueueReceiptBackupPaths(): string[] {
+    const rows = this.database.prepare(`
+      SELECT backup_path
+      FROM operation_journal
+      WHERE operation = 'ingest'
+        AND backup_path IS NOT NULL
+        AND json_extract(detail_json, '$.adapter') = 'gdia-sqlite-migration-v1'
+    `).all() as Array<{ backup_path: string }>
+    return rows.map((row) => row.backup_path)
+  }
+
   getDiagnosticSummary(): CollectionDatabaseDiagnosticSummary {
     const schema = this.database.prepare('PRAGMA user_version').get() as { user_version: number }
     const integrity = this.database.prepare('PRAGMA quick_check').all() as Array<Record<string, string>>
@@ -551,6 +572,21 @@ export class CollectionDatabase {
       this.database.exec('ROLLBACK')
       throw error
     }
+  }
+
+  countUnsupportedVaultItems(baseRecords: readonly string[]): number {
+    const catalogItem = this.database.prepare('SELECT 1 FROM catalog_item WHERE record = ?')
+    const supported = new Map<string, boolean>()
+    let unsupported = 0
+    for (const record of baseRecords) {
+      let exists = supported.get(record)
+      if (exists === undefined) {
+        exists = Boolean(catalogItem.get(record))
+        supported.set(record, exists)
+      }
+      if (!exists) unsupported += 1
+    }
+    return unsupported
   }
 
   importVaultItems(input: VaultImport): VaultImportResult {

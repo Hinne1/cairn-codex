@@ -11,6 +11,7 @@ import {
   type DiagnosticExportResult,
   type DismantlingPreview,
   type DebugLoggingStatus,
+  type GdiaImportProgress,
   type GdiaImportResult,
   type GrimDawnDiscovery,
   type IngestResult,
@@ -51,6 +52,15 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.openArchiveBackupDirectory) as Promise<string>,
   importGdiaDatabase: () =>
     ipcRenderer.invoke(IPC_CHANNELS.importGdiaDatabase) as Promise<GdiaImportResult>,
+  getLastGdiaImportResult: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getLastGdiaImportResult) as Promise<GdiaImportResult | null>,
+  getGdiaImportProgress: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getGdiaImportProgress) as Promise<GdiaImportProgress | null>,
+  onGdiaImportProgress: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: GdiaImportProgress): void => listener(progress)
+    ipcRenderer.on(IPC_CHANNELS.gdiaImportProgress, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.gdiaImportProgress, handler)
+  },
   getRecoveryStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getRecoveryStatus) as Promise<RecoveryStatus>,
   getCachedCollection: (sourcePaths, basis) =>

@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   createBoundedResultWindow,
   moveBoundedResultKey,
@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
   pageSize?: number
   totalCount?: number
   remote?: boolean
+  pagination?: 'pages' | 'continuous'
   layout?: 'list' | 'grid' | 'table'
   loading?: boolean
   error?: string | null
@@ -36,6 +37,7 @@ const props = withDefaults(defineProps<{
   pageSize: 50,
   totalCount: undefined,
   remote: false,
+  pagination: 'pages',
   layout: 'list',
   loading: false,
   error: null,
@@ -62,6 +64,14 @@ const emit = defineEmits<{
 
 const itemElements = new Map<BoundedResultKey, HTMLElement>()
 const activeKey = ref<BoundedResultKey | null>(null)
+const continuousStartPage = ref(1)
+const continuousEndPage = ref(1)
+const continuousLeadingSpace = ref(0)
+const continuousChanging = ref(false)
+const continuousTopSentinel = ref<HTMLElement | null>(null)
+const continuousBottomSentinel = ref<HTMLElement | null>(null)
+const discardedPageHeights = new Map<number, number>()
+let continuousObserver: IntersectionObserver | null = null
 const resultWindow = computed(() => createBoundedResultWindow({
   items: props.items,
   getKey: props.getKey,
@@ -70,8 +80,20 @@ const resultWindow = computed(() => createBoundedResultWindow({
   totalCount: props.totalCount,
   remote: props.remote
 }))
-const entryKeys = computed(() => resultWindow.value.entries.map((entry) => entry.key))
-const showResults = computed(() => !props.loading && !props.error && resultWindow.value.entries.length > 0)
+const continuousEnabled = computed(() => props.pagination === 'continuous' && !props.remote)
+const continuousEntries = computed(() => {
+  const firstIndex = Math.max(0, (continuousStartPage.value - 1) * props.pageSize)
+  const lastIndex = Math.min(props.items.length, continuousEndPage.value * props.pageSize)
+  return props.items.slice(firstIndex, lastIndex).map((item, offset) => {
+    const index = firstIndex + offset
+    return { item, index, key: props.getKey(item, index) }
+  })
+})
+const visibleEntries = computed(() => continuousEnabled.value ? continuousEntries.value : resultWindow.value.entries)
+const entryKeys = computed(() => visibleEntries.value.map((entry) => entry.key))
+const visibleFirstIndex = computed(() => (visibleEntries.value[0]?.index ?? 0) + 1)
+const visibleLastIndex = computed(() => (visibleEntries.value.at(-1)?.index ?? 0) + 1)
+const showResults = computed(() => !props.loading && !props.error && visibleEntries.value.length > 0)
 const selectable = computed(() => props.selectionMode !== 'none')
 const focusable = computed(() => selectable.value || props.navigable || props.interactive)
 const usesGridSemantics = computed(() => props.layout === 'grid' && focusable.value)
@@ -91,6 +113,26 @@ watch(entryKeys, (keys) => {
 
 watch(() => [props.page, resultWindow.value.pageCount] as const, () => {
   if (props.page !== resultWindow.value.page) emit('update:page', resultWindow.value.page)
+})
+
+watch(() => props.page, (page) => {
+  if (!continuousEnabled.value || page === continuousEndPage.value) return
+  resetContinuousWindow(page)
+})
+
+watch(() => [props.items, props.pagination] as const, () => {
+  resetContinuousWindow(props.page)
+}, { immediate: true })
+
+watch(() => props.layout, () => {
+  if (!continuousEnabled.value) return
+  const anchor = viewportAnchor()
+  const anchorTop = elementTop(anchor?.key)
+  const focusedKey = focusedEntry()?.key
+  continuousChanging.value = true
+  continuousLeadingSpace.value = 0
+  discardedPageHeights.clear()
+  void settleContinuousWindow(anchor?.key, anchorTop, focusedKey)
 })
 
 function rememberElement(key: BoundedResultKey, element: Element | null): void {
@@ -187,6 +229,155 @@ function changePage(page: number): void {
   const bounded = Math.min(Math.max(page, 1), resultWindow.value.pageCount)
   if (bounded !== resultWindow.value.page) emit('update:page', bounded)
 }
+
+function resetContinuousWindow(page: number): void {
+  const boundedPage = Math.min(Math.max(page, 1), resultWindow.value.pageCount)
+  continuousEndPage.value = boundedPage
+  continuousStartPage.value = Math.max(1, boundedPage - 1)
+  continuousLeadingSpace.value = 0
+  discardedPageHeights.clear()
+}
+
+function entryAtIndex(index: number): { key: BoundedResultKey } | undefined {
+  return visibleEntries.value.find((entry) => entry.index === index)
+}
+
+function focusedEntry(): { key: BoundedResultKey, index: number } | undefined {
+  const focused = document.activeElement
+  return visibleEntries.value.find((entry) => itemElements.get(entry.key) === focused)
+}
+
+function unobscuredViewportTop(): number {
+  const topbar = document.querySelector<HTMLElement>('.topbar')
+  if (!topbar) return 0
+  const position = window.getComputedStyle(topbar).position
+  if (position !== 'fixed' && position !== 'sticky') return 0
+  return Math.min(window.innerHeight, Math.max(0, topbar.getBoundingClientRect().bottom))
+}
+
+function viewportAnchor(): { key: BoundedResultKey, index: number } | undefined {
+  const visibleTop = unobscuredViewportTop()
+  const focused = focusedEntry()
+  if (focused) {
+    const rect = itemElements.get(focused.key)?.getBoundingClientRect()
+    if (rect && rect.bottom > visibleTop && rect.top < window.innerHeight) return focused
+  }
+  return visibleEntries.value.find((entry) => {
+    const rect = itemElements.get(entry.key)?.getBoundingClientRect()
+    return Boolean(rect && rect.bottom > visibleTop && rect.top < window.innerHeight)
+  })
+}
+
+function elementTop(key: BoundedResultKey | undefined): number | null {
+  if (key === undefined) return null
+  return itemElements.get(key)?.getBoundingClientRect().top ?? null
+}
+
+function keepElementInViewport(element: HTMLElement): void {
+  const rect = element.getBoundingClientRect()
+  const visibleTop = unobscuredViewportTop()
+  const availableHeight = Math.max(0, window.innerHeight - visibleTop)
+  const offset = rect.height > availableHeight
+    ? rect.top - visibleTop
+    : rect.top < visibleTop
+      ? rect.top - visibleTop
+      : rect.bottom > window.innerHeight
+        ? rect.bottom - window.innerHeight
+        : 0
+  if (offset !== 0) window.scrollBy(0, offset)
+}
+
+async function settleContinuousWindow(
+  anchorKey?: BoundedResultKey,
+  anchorTop?: number | null,
+  focusKey?: BoundedResultKey
+): Promise<void> {
+  await nextTick()
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  if (anchorKey !== undefined && anchorTop !== null && anchorTop !== undefined) {
+    const nextTop = elementTop(anchorKey)
+    if (nextTop !== null) window.scrollBy(0, nextTop - anchorTop)
+  }
+  if (focusKey !== undefined) {
+    const focusElement = itemElements.get(focusKey)
+    if (focusElement) {
+      keepElementInViewport(focusElement)
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      keepElementInViewport(focusElement)
+      focusElement.focus({ preventScroll: true })
+    }
+  }
+  continuousChanging.value = false
+}
+
+function loadNextContinuousPage(): void {
+  if (!continuousEnabled.value || continuousChanging.value || continuousEndPage.value >= resultWindow.value.pageCount) return
+  continuousChanging.value = true
+  const spansTwoPages = continuousEndPage.value > continuousStartPage.value
+  const retained = spansTwoPages ? entryAtIndex(continuousStartPage.value * props.pageSize) : undefined
+  const first = visibleEntries.value[0]
+  const anchor = viewportAnchor() ?? retained
+  const focused = focusedEntry()
+  const restoreFocus = focused && retained && focused.index < continuousStartPage.value * props.pageSize
+    ? anchor?.key
+    : undefined
+  const retainedTop = elementTop(retained?.key)
+  const anchorTop = elementTop(anchor?.key)
+  if (spansTwoPages && first && retainedTop !== null) {
+    const firstTop = elementTop(first.key)
+    if (firstTop !== null) {
+      const discardedHeight = Math.max(0, retainedTop - firstTop)
+      discardedPageHeights.set(continuousStartPage.value, discardedHeight)
+      continuousLeadingSpace.value += discardedHeight
+    }
+    continuousStartPage.value += 1
+  }
+  continuousEndPage.value += 1
+  emit('update:page', continuousEndPage.value)
+  void settleContinuousWindow(anchor?.key, anchorTop, restoreFocus)
+}
+
+function loadPreviousContinuousPage(): void {
+  if (!continuousEnabled.value || continuousChanging.value || continuousStartPage.value <= 1) return
+  continuousChanging.value = true
+  const anchor = viewportAnchor() ?? visibleEntries.value[0]
+  const focused = focusedEntry()
+  const trailingPageFirstIndex = (continuousEndPage.value - 1) * props.pageSize
+  const restoreFocus = focused && focused.index >= trailingPageFirstIndex ? anchor?.key : undefined
+  const anchorTop = elementTop(anchor?.key)
+  const previousPage = continuousStartPage.value - 1
+  continuousLeadingSpace.value = Math.max(
+    0,
+    continuousLeadingSpace.value - (discardedPageHeights.get(previousPage) ?? 0)
+  )
+  continuousStartPage.value = previousPage
+  continuousEndPage.value = Math.max(previousPage, continuousEndPage.value - 1)
+  emit('update:page', continuousEndPage.value)
+  void settleContinuousWindow(anchor?.key, anchorTop, restoreFocus)
+}
+
+function connectContinuousObserver(): void {
+  continuousObserver?.disconnect()
+  continuousObserver = null
+  if (!continuousEnabled.value || !showResults.value || typeof IntersectionObserver === 'undefined') return
+  continuousObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue
+      if (entry.target === continuousBottomSentinel.value) loadNextContinuousPage()
+      else if (entry.target === continuousTopSentinel.value) loadPreviousContinuousPage()
+    }
+  }, { root: null, rootMargin: '500px 0px' })
+  if (continuousTopSentinel.value) continuousObserver.observe(continuousTopSentinel.value)
+  if (continuousBottomSentinel.value) continuousObserver.observe(continuousBottomSentinel.value)
+}
+
+watch(
+  () => [continuousEnabled.value, showResults.value, continuousTopSentinel.value, continuousBottomSentinel.value] as const,
+  () => void nextTick(connectContinuousObserver)
+)
+
+onMounted(() => void nextTick(connectContinuousObserver))
+onBeforeUnmount(() => continuousObserver?.disconnect())
 </script>
 
 <template>
@@ -214,6 +405,21 @@ function changePage(page: number): void {
     </div>
 
     <div
+      v-if="continuousEnabled && continuousLeadingSpace > 0"
+      class="bounded-results-leading-space"
+      :style="{ height: `${continuousLeadingSpace}px` }"
+      aria-hidden="true"
+    />
+
+    <div
+      v-if="showResults && continuousEnabled"
+      ref="continuousTopSentinel"
+      class="bounded-results-continuation is-previous"
+    >
+      <button v-if="continuousStartPage > 1" type="button" @click="loadPreviousContinuousPage">Load previous results</button>
+    </div>
+
+    <div
       v-if="showResults"
       :class="['bounded-results-collection', `is-${layout}`]"
       :role="collectionRole"
@@ -222,10 +428,11 @@ function changePage(page: number): void {
     >
       <slot name="header" />
       <div
-        v-for="entry in resultWindow.entries"
+        v-for="entry in visibleEntries"
         :key="entry.key"
         :ref="(element) => rememberSemanticElement(entry.key, element as Element | null, false)"
         :class="usesGridSemantics ? 'bounded-results-row' : ['bounded-results-item', { 'is-selected': selectable && selectedKeys.includes(entry.key), 'is-disabled': entryDisabled(entry) }]"
+        :data-result-key="!usesGridSemantics ? String(entry.key) : undefined"
         :role="usesGridSemantics ? 'row' : itemRole"
         :aria-selected="!usesGridSemantics && selectable ? selectedKeys.includes(entry.key) : undefined"
         :aria-disabled="!usesGridSemantics && selectable && entryDisabled(entry) ? true : undefined"
@@ -240,6 +447,7 @@ function changePage(page: number): void {
           v-if="usesGridSemantics"
           :ref="(element) => rememberSemanticElement(entry.key, element as Element | null, true)"
           class="bounded-results-item"
+          :data-result-key="String(entry.key)"
           :class="{ 'is-selected': selectable && selectedKeys.includes(entry.key), 'is-disabled': entryDisabled(entry) }"
           role="gridcell"
           :aria-selected="selectable ? selectedKeys.includes(entry.key) : undefined"
@@ -270,12 +478,24 @@ function changePage(page: number): void {
       </div>
     </div>
 
+    <div
+      v-if="showResults && continuousEnabled"
+      ref="continuousBottomSentinel"
+      class="bounded-results-continuation is-next"
+    >
+      <button v-if="continuousEndPage < resultWindow.pageCount" type="button" @click="loadNextContinuousPage">Load next results</button>
+    </div>
+
     <footer v-if="showResults" class="bounded-results-footer">
-      <span>
+      <span v-if="continuousEnabled">
+        Showing {{ visibleFirstIndex.toLocaleString() }}–{{ visibleLastIndex.toLocaleString() }}
+        of {{ resultWindow.totalCount.toLocaleString() }}
+      </span>
+      <span v-else>
         {{ (resultWindow.firstIndex + 1).toLocaleString() }}–{{ resultWindow.lastIndex.toLocaleString() }}
         of {{ resultWindow.totalCount.toLocaleString() }}
       </span>
-      <nav v-if="resultWindow.pageCount > 1" aria-label="Result pages">
+      <nav v-if="!continuousEnabled && resultWindow.pageCount > 1" aria-label="Result pages">
         <button type="button" :disabled="!resultWindow.hasPrevious" @click="changePage(resultWindow.page - 1)">Previous</button>
         <span>Page {{ resultWindow.page }} of {{ resultWindow.pageCount }}</span>
         <button type="button" :disabled="!resultWindow.hasNext" @click="changePage(resultWindow.page + 1)">Next</button>
@@ -355,6 +575,22 @@ function changePage(page: number): void {
   font-size: var(--cc-font-size-sm);
 }
 .bounded-results-footer nav { display: flex; align-items: center; gap: var(--cc-space-5); }
+.bounded-results-leading-space { min-height: 0; pointer-events: none; }
+.bounded-results-continuation {
+  display: flex;
+  min-height: 1px;
+  justify-content: center;
+}
+.bounded-results-continuation button {
+  min-height: var(--cc-control-height-sm);
+  margin: var(--cc-space-3) 0;
+  padding: 0 var(--cc-space-5);
+  border: 1px solid var(--cc-border-strong);
+  border-radius: var(--cc-radius-sm);
+  color: var(--cc-text-primary);
+  background: var(--cc-surface-3);
+  cursor: pointer;
+}
 
 @keyframes bounded-results-spin { to { transform: rotate(360deg); } }
 

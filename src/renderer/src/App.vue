@@ -2678,13 +2678,16 @@ async function exportPreferences(): Promise<void> {
 
 function handleZoomWheel(event: WheelEvent): void {
   const tooltip = tooltipElement.value
-  if (tooltipRecord.value && tooltip && tooltip.scrollHeight > tooltip.clientHeight) {
-    event.preventDefault()
-    tooltip.scrollTop = Math.max(
+  if (event.altKey && !event.ctrlKey && tooltipRecord.value && tooltip && tooltip.scrollHeight > tooltip.clientHeight) {
+    const nextScrollTop = Math.max(
       0,
       Math.min(tooltip.scrollTop + event.deltaY, tooltip.scrollHeight - tooltip.clientHeight)
     )
-    return
+    if (nextScrollTop !== tooltip.scrollTop) {
+      event.preventDefault()
+      tooltip.scrollTop = nextScrollTop
+      return
+    }
   }
   if (!event.ctrlKey) return
   event.preventDefault()
@@ -5135,8 +5138,8 @@ function formatRollValue(value: number): string {
         >
           <template #aside>
             <div class="segmented-control planner-display" aria-label="Planner display">
-              <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">Table</button>
-              <button type="button" :class="{ active: plannerDisplay === 'grid' }" @click="plannerDisplay = 'grid'">Cards</button>
+              <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">List</button>
+              <button type="button" :class="{ active: plannerDisplay === 'grid' }" @click="plannerDisplay = 'grid'">Grid</button>
               <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI sources</button>
             </div>
           </template>
@@ -5289,6 +5292,7 @@ function formatRollValue(value: number): string {
             :items="plannerRows"
             :get-key="row => row.item.record"
             :page-size="50"
+            pagination="continuous"
             :layout="plannerDisplay === 'list' ? 'table' : 'grid'"
             :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
             :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select a mastery or skill, widen the item level range, or restore an ignored base.'"
@@ -6072,7 +6076,7 @@ function formatRollValue(value: number): string {
           <span>Item Level: {{ tooltipItem.itemLevel }}</span>
           <em v-if="tooltipItem.contentPack !== 'base'">{{ tooltipItem.contentPack.toUpperCase() }}</em>
           <small class="tooltip-controls">
-            <span v-if="tooltipElement && tooltipElement.scrollHeight > tooltipElement.clientHeight">[Mouse Wheel to Scroll]</span>
+            <span v-if="tooltipElement && tooltipElement.scrollHeight > tooltipElement.clientHeight">[Alt + Mouse Wheel to Scroll Tooltip]</span>
             <span v-if="itemVersionCounterpart(tooltipItem)">[V to View {{ tooltipItem.upgradeRecord ? 'Awakened' : 'Original' }} Version]</span>
             <span v-if="tooltipHasMore(tooltipItem)">[Hold Ctrl to Show Full Drop Details]</span>
           </small>

@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import BoundedResultSurface from './components/BoundedResultSurface.vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import FailureProbe from './components/FailureProbe.vue'
-import ItemAssistantImport from './components/ItemAssistantImport.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
 import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
@@ -43,6 +42,14 @@ import {
   type CollectionControls,
   type MaterialsControls
 } from './workspaces/collection-materials'
+import SettingsWorkspace from './workspaces/SettingsWorkspace.vue'
+import {
+  defaultWorkspaceToolIds,
+  essentialWorkspaceToolIds,
+  workspaceToolDefinitions,
+  type MiCountingMode,
+  type WorkspaceToolId
+} from './workspaces/settings'
 import SuppliesWorkspace from './workspaces/SuppliesWorkspace.vue'
 import {
   buildReusableSupplySummary,
@@ -159,9 +166,6 @@ import type {
 } from '@shared/contracts'
 import type { AnyBackgroundJobSnapshot } from '@shared/background-jobs'
 
-type MiCountingMode = 'base' | 'tier'
-type WorkspaceToolId = 'sets' | 'materials' | 'skills' | 'oracle' | 'planner' | 'mi-workshop' | 'supplies' | 'farming' | 'dismantling' | 'trivia' | 'todo'
-
 interface TooltipAffix {
   record: string
   name: string
@@ -214,28 +218,6 @@ interface CollectionTriviaFact {
   itemRecord?: string
 }
 
-interface WorkspaceToolDefinition {
-  id: WorkspaceToolId
-  label: string
-  detail: string
-  experimental?: boolean
-}
-
-const workspaceToolDefinitions: WorkspaceToolDefinition[] = [
-  { id: 'sets', label: 'Sets', detail: 'Set completion, bonuses, recipes, and visual modifiers.' },
-  { id: 'materials', label: 'Components & Consumables', detail: 'Components, crafting materials, and consumable formulas.' },
-  { id: 'skills', label: 'Skill Explorer', detail: 'Every item that ranks, converts, or otherwise modifies a skill.' },
-  { id: 'oracle', label: 'Stash Oracle', detail: 'Build archetypes suggested by the items already in your archive.', experimental: true },
-  { id: 'planner', label: 'Leveling Planner', detail: 'Character shopping lists and leveling routes.' },
-  { id: 'mi-workshop', label: 'MI Workshop', detail: 'Stored Monster Infrequents, affixes, and stat comparisons.' },
-  { id: 'supplies', label: 'Supplies', detail: 'Reusable boosts, merits, warrants, augments, and runes.' },
-  { id: 'farming', label: 'Collection Farming', detail: 'Areas ranked by potential collection progress.' },
-  { id: 'dismantling', label: 'Dismantling Lab', detail: 'Read-only Inventor cost and material-yield simulation.', experimental: true },
-  { id: 'trivia', label: 'Collection Trivia', detail: 'Roll, duplicate, and collection curiosities.' },
-  { id: 'todo', label: 'To-do', detail: 'Your small in-app task list.' }
-]
-const defaultWorkspaceToolIds = workspaceToolDefinitions.map((tool) => tool.id)
-const essentialWorkspaceToolIds: WorkspaceToolId[] = ['sets', 'skills', 'planner', 'mi-workshop', 'supplies']
 const startupRecoveryParameters = new URLSearchParams(window.location.search)
 const safeModeActive = ref(startupRecoveryParameters.get('safeMode') === '1')
 const safeModeSuggested = ref(startupRecoveryParameters.get('safeModeSuggested') === '1')
@@ -477,11 +459,6 @@ const tooltipPosition = ref({ left: 0, top: 0 })
 const tooltipMaxHeight = computed(() => Math.max(180, window.innerHeight - tooltipPosition.value.top - 14))
 const onboardingInstallCount = computed(() => discovery.value?.installations.length ?? 0)
 const onboardingSaveCount = computed(() => discovery.value?.saveLocations.length ?? 0)
-const onboardingStatusLabel = computed(() => onboardingStatus.value === 'completed'
-  ? 'Completed'
-  : onboardingStatus.value === 'skipped'
-    ? 'Skipped · resume any time'
-    : `In progress · step ${onboardingStep.value + 1}`)
 const tooltipElement = ref<HTMLElement | null>(null)
 const tooltipDetailsHeld = ref(false)
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
@@ -502,10 +479,6 @@ const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.va
 const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
 const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, searchQueryOptions(searchSchemas.vault)))
 const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, searchQueryOptions(searchSchemas.history)))
-
-const archiveModeCount = computed(() =>
-  [false, true].filter((isHardcore) => archiveModeEnabled(isHardcore)).length
-)
 
 const categories = collectionCategories
 
@@ -2167,11 +2140,6 @@ function formatBackupDate(value: string): string {
   })
 }
 
-function formatBackupSize(value: number): string {
-  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`
-}
-
 async function createArchiveBackup(): Promise<void> {
   if (archiveBackupBusy.value) return
   archiveBackupBusy.value = 'backup'
@@ -2222,6 +2190,18 @@ async function restoreArchiveBackup(): Promise<void> {
 async function openArchiveBackupDirectory(): Promise<void> {
   const error = await window.cairnCodex.openArchiveBackupDirectory()
   if (error) reportTransferProblem(`Windows could not open CC's archive backup folder: ${error}`)
+}
+
+function handleArchiveBackupAction(action: 'backup' | 'export' | 'restore' | 'open-folder'): void {
+  if (action === 'backup') void createArchiveBackup()
+  else if (action === 'export') void exportArchiveBackup()
+  else if (action === 'restore') void restoreArchiveBackup()
+  else void openArchiveBackupDirectory()
+}
+
+function handleSafeModeRestart(enabled: boolean): void {
+  if (enabled) void restartInSafeMode()
+  else void restartNormally()
 }
 
 async function handleGdiaImportCompleted(result: GdiaImportResult): Promise<void> {
@@ -2505,13 +2485,6 @@ async function selectSourceModeForBasis(basis: CollectionBasis, isHardcore: bool
     ? { archivePaths: [...paths] }
     : { indexPaths: [...paths] })
   if (collectionBasis.value === basis) await loadSelectedSources()
-}
-
-function archiveModeEnabled(isHardcore: boolean): boolean {
-  const modePaths = new Set(
-    stashChoices.value.filter((stash) => stash.isHardcore === isHardcore).map((stash) => stash.path)
-  )
-  return archiveStashPaths.value.some((path) => modePaths.has(path))
 }
 
 async function setArchiveModeEnabled(isHardcore: boolean, enabled: boolean): Promise<void> {
@@ -5616,321 +5589,64 @@ function formatRollValue(value: number): string {
         @open-item="openItem"
       />
 
-      <section v-else-if="activeView === 'settings'" class="settings-workspace" aria-label="Cairn Codex settings">
-        <ToolHeader
-          eyebrow="Settings"
-          title="Collection and transfer behavior"
-          description="Long-lived choices live here. Search, filters, and sorting remain workspace controls."
-        />
-
-        <div class="settings-grid">
-          <article class="settings-card onboarding-settings-card">
-            <p class="section-label">Getting started</p>
-            <h3>First-run guide</h3>
-            <p>Reopen the guided tour for discovery, Item Assistant migration, archive/live transfers, SC/HC identity, backups, and experimental tools.</p>
-            <div class="settings-status">
-              <span class="status-dot" :class="{ dim: onboardingStatus !== 'completed' }" />
-              <span><strong>{{ onboardingStatusLabel }}</strong>The guide never hides recovery or support controls.</span>
-            </div>
-            <div class="archive-backup-actions">
-              <button class="settings-action" type="button" @click="resumeOnboarding(false)">{{ onboardingStatus === 'in-progress' ? 'Resume guide' : 'Open guide' }}</button>
-              <button class="settings-action" type="button" @click="resumeOnboarding(true)">Start from beginning</button>
-            </div>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Live game</p>
-            <h3>Connection lifecycle</h3>
-            <label class="settings-toggle">
-              <input
-                type="checkbox"
-                :checked="autoLiveConnect"
-                :disabled="safeModeActive"
-                @change="setAutoLiveConnect(($event.target as HTMLInputElement).checked)"
-              />
-              <span><strong>Auto-connect</strong><small>{{ safeModeActive ? 'Paused while recovery safe mode is active.' : 'Connect when Grim Dawn starts and disconnect when it exits.' }}</small></span>
-            </label>
-            <div class="settings-status">
-              <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
-              <span><strong>{{ gameConnectionLabel }}</strong>{{ liveStatus?.detail ?? 'Checking live adapter…' }}</span>
-            </div>
-            <small class="settings-recommendation"><strong>Recommended:</strong> {{ connectionRecommendation }}</small>
-            <button class="settings-action" type="button" @click="showConnectionDiagnostics = true">View connection diagnostics</button>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Display</p>
-            <h3>Interface scale</h3>
-            <div class="zoom-controls">
-              <button type="button" @click="setZoom(zoomFactor - 0.1)">−</button>
-              <strong>{{ Math.round(zoomFactor * 100) }}%</strong>
-              <button type="button" @click="setZoom(zoomFactor + 0.1)">+</button>
-              <button type="button" @click="setZoom(1)">Reset</button>
-            </div>
-            <small>Ctrl + mouse wheel works anywhere in CC.</small>
-          </article>
-
-          <article class="settings-card workspace-tool-settings">
-            <header>
-              <div><p class="section-label">Workspace</p><h3>Visible tools</h3></div>
-              <div class="workspace-tool-presets">
-                <button type="button" @click="showEssentialWorkspaceTools">Essentials</button>
-                <button type="button" @click="showAllWorkspaceTools">Show all</button>
-              </div>
-            </header>
-            <p>Collection remains the permanent home view. Choose which specialist tools appear below the progress tracker.</p>
-            <label class="settings-toggle experimental-tools-toggle">
-              <input
-                type="checkbox"
-                :checked="experimentalToolsEnabled && !safeModeActive"
-                :disabled="safeModeActive"
-                @change="setExperimentalToolsEnabled(($event.target as HTMLInputElement).checked)"
-              />
-              <span><strong>Enable experimental tools</strong><small>{{ safeModeActive ? 'Unavailable while recovery safe mode is active.' : 'Shows Stash Oracle and the read-only Dismantling Lab. Their recommendations and simulations are explicitly provisional.' }}</small></span>
-            </label>
-            <div class="workspace-tool-options">
-              <label v-for="tool in workspaceToolDefinitions" :key="tool.id" class="settings-toggle compact">
-                <input
-                  type="checkbox"
-                  :checked="tool.experimental && !experimentalToolsEnabled ? false : workspaceToolSelected(tool.id)"
-                  :disabled="tool.experimental && !experimentalToolsEnabled"
-                  @change="setWorkspaceToolVisible(tool.id, ($event.target as HTMLInputElement).checked)"
-                />
-                <span><strong>{{ tool.label }}{{ tool.experimental ? ' · Experimental' : '' }}</strong><small>{{ tool.detail }}</small></span>
-              </label>
-            </div>
-          </article>
-
-          <ItemAssistantImport :disabled="!snapshot" @completed="handleGdiaImportCompleted" />
-
-          <article class="settings-card archive-protection-settings">
-            <p class="section-label">Archive protection</p>
-            <h3>Verified rotating backups</h3>
-            <p>CC keeps up to 12 verified snapshots after archive changes, plus three emergency pre-restore snapshots. Backups contain the Codex database only; Grim Dawn saves and stashes remain separate.</p>
-            <div v-if="archiveBackupStatus?.latest" class="archive-backup-latest">
-              <span class="status-dot" />
-              <div>
-                <strong>Last verified {{ formatBackupDate(archiveBackupStatus.latest.createdAtUtc) }}</strong>
-                <small>
-                  {{ archiveBackupStatus.latest.vaultItemCount.toLocaleString() }} stored copies ·
-                  {{ formatBackupSize(archiveBackupStatus.latest.sizeBytes) }} ·
-                  {{ archiveBackupStatus.latest.reason }}
-                </small>
-              </div>
-            </div>
-            <div v-else class="archive-backup-latest empty">
-              <span class="status-dot dim" />
-              <div><strong>No verified backup yet</strong><small>CC will create one automatically, or you can start one now.</small></div>
-            </div>
-            <small v-if="archiveBackupStatus">
-              {{ archiveBackupStatus.backups.length }} rotating backup{{ archiveBackupStatus.backups.length === 1 ? '' : 's' }} retained locally.
-            </small>
-            <div class="archive-backup-actions">
-              <button class="settings-action" type="button" :disabled="Boolean(archiveBackupBusy)" @click="createArchiveBackup">
-                {{ archiveBackupBusy === 'backup' ? 'Verifying backup…' : 'Back up now' }}
-              </button>
-              <button class="settings-action" type="button" :disabled="Boolean(archiveBackupBusy)" @click="exportArchiveBackup">
-                {{ archiveBackupBusy === 'export' ? 'Exporting…' : 'Export backup…' }}
-              </button>
-              <button class="settings-action danger" type="button" :disabled="Boolean(archiveBackupBusy)" @click="restoreArchiveBackup">
-                {{ archiveBackupBusy === 'restore' ? 'Verifying restore…' : 'Restore backup…' }}
-              </button>
-              <button class="settings-action" type="button" :disabled="Boolean(archiveBackupBusy)" @click="openArchiveBackupDirectory">Open backup folder</button>
-            </div>
-            <small>Restore is staged for restart and first preserves the current archive as an emergency backup.</small>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Collection progress</p>
-            <h3>Monster Infrequent counting</h3>
-            <label class="settings-toggle">
-              <input v-model="miCountingMode" type="radio" value="base" />
-              <span>
-                <strong>Count each MI base once</strong>
-                <small>Recommended. Owning any level tier completes that named base; exact tiers remain visible and retrievable.</small>
-              </span>
-            </label>
-            <label class="settings-toggle">
-              <input v-model="miCountingMode" type="radio" value="tier" />
-              <span>
-                <strong>Count every level tier</strong>
-                <small>Strict mode. Each obtainable required-level variant is a separate collection entry.</small>
-              </span>
-            </label>
-            <small>This changes completion statistics only. Farming, Skill Explorer, and Leveling Planner always retain the full MI tier catalog; stored copies are never merged or discarded.</small>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Legacy tools</p>
-            <h3>Stash Scanner</h3>
-            <label class="settings-toggle">
-              <input type="checkbox" :checked="showLegacyScanner" @change="setLegacyScannerVisible(($event.target as HTMLInputElement).checked)" />
-              <span><strong>Show legacy stash scanner</strong><small>Expose physical-stash source controls and the diagnostic Stash Scanner collection mode.</small></span>
-            </label>
-            <small>The Codex Archive remains the default and recommended collection source.</small>
-          </article>
-
-          <article v-if="showLegacyScanner" class="settings-card source-settings">
-            <header>
-              <div><p class="section-label">Stash Scanner</p><h3>Physical copy sources</h3></div>
-              <div class="source-presets">
-                <button type="button" @click="selectSourceModeForBasis('stashes', false)">SC</button>
-                <button type="button" @click="selectSourceModeForBasis('stashes', true)">HC</button>
-              </div>
-            </header>
-            <p>Controls which Grim Dawn stash files the diagnostic scanner reads. These counts are separate from copies stored in the Codex Archive.</p>
-            <div class="settings-source-list">
-              <label v-for="stash in stashChoices" :key="`index:${stash.path}`" class="source-option">
-                <input
-                  type="checkbox"
-                  :checked="indexStashPaths.includes(stash.path)"
-                  :disabled="indexStashPaths.length === 1 && indexStashPaths.includes(stash.path)"
-                  @change="toggleSourceForBasis('stashes', stash.path)"
-                />
-                <span :class="stash.isHardcore ? 'hardcore' : 'softcore'">{{ stash.isHardcore ? 'HC' : 'SC' }}</span>
-                <div><strong>{{ stash.modLabel || 'Base game' }}</strong><small>{{ stash.path }}</small></div>
-              </label>
-            </div>
-          </article>
-
-          <article class="settings-card source-settings">
-            <header>
-              <div><p class="section-label">Codex Archive</p><h3>Archive mode scope</h3></div>
-            </header>
-            <p>Archive copies retain their game mode, not an originating stash. Enable either mode or both.</p>
-            <div class="archive-mode-options">
-              <label class="archive-mode-option">
-                <input
-                  type="checkbox"
-                  :checked="archiveModeEnabled(false)"
-                  :disabled="archiveModeCount === 1 && archiveModeEnabled(false)"
-                  @change="setArchiveModeEnabled(false, ($event.target as HTMLInputElement).checked)"
-                />
-                <span class="mode-badge softcore">SC</span>
-                <span><strong>Softcore</strong><small>Show archived Softcore copies.</small></span>
-              </label>
-              <label class="archive-mode-option">
-                <input
-                  type="checkbox"
-                  :checked="archiveModeEnabled(true)"
-                  :disabled="archiveModeCount === 1 && archiveModeEnabled(true)"
-                  @change="setArchiveModeEnabled(true, ($event.target as HTMLInputElement).checked)"
-                />
-                <span class="mode-badge hardcore">HC</span>
-                <span><strong>Hardcore</strong><small>Show archived Hardcore copies.</small></span>
-              </label>
-            </div>
-          </article>
-
-          <article class="settings-card retrieval-settings">
-            <p class="section-label">Retrieval</p>
-            <h3>Closed-game transfer target</h3>
-            <select v-model="selectedStashPath" :disabled="vaultBusy">
-              <option v-for="stash in stashChoices" :key="stash.path" :value="stash.path">
-                {{ stash.isHardcore ? 'Hardcore' : 'Softcore' }} · {{ stash.path }}
-              </option>
-            </select>
-            <small>Live retrieval always targets {{ liveStatus?.depositTabDescription ?? 'the second-to-last shared stash tab' }}.</small>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Stored supplies</p>
-            <h3>Dispensing behavior</h3>
-            <label class="settings-toggle">
-              <input
-                type="checkbox"
-                :checked="infiniteSupplies"
-                :disabled="infiniteSuppliesBusy || vaultBusy"
-                @change="setInfiniteSupplies(($event.target as HTMLInputElement).checked)"
-              />
-              <span>
-                <strong>Infinite supplies</strong>
-                <small>Keep an unlocked faction boost, difficulty merit, Nemesis warrant, augment, or movement rune after dispensing one copy.</small>
-              </span>
-            </label>
-            <small v-if="infiniteSupplies">Each return emits one unit; the archived unlock remains available.</small>
-            <small v-else>Disabled: returning a stored supply consumes that archived stack like an ordinary item.</small>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Game data</p>
-            <h3>Installed-data cache</h3>
-            <p>Item records, drop-source graphs, map regions, and monster placements are cached locally. Game updates invalidate the cache automatically.</p>
-            <button class="settings-action" type="button" :disabled="scanning" @click="rebuildGameDataIndex">
-              {{ scanning && scanActivity === 'game-data' ? 'Rebuilding index…' : 'Rebuild game-data index' }}
-            </button>
-            <small>Use this after changing mods or if a location looks stale.</small>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Lost quest-item recovery</p>
-            <h3>Sahdina’s Memento fixer</h3>
-            <p>Crate left this secret necklace sellable. Create exactly one clean replacement through CC’s verified live-delivery queue.</p>
-            <div class="settings-status">
-              <span class="status-dot" :class="{ dim: liveStatus?.state !== 'ready' }" />
-              <span>
-                <strong>{{ liveStatus?.state === 'ready' ? 'Grim Dawn connected' : 'Live game required' }}</strong>
-                {{ liveStatus?.state === 'ready' ? 'Choose the active character inventory or verified shared-stash destination.' : 'Connect from the app header before recovering the item.' }}
-              </span>
-            </div>
-            <div class="interface-recovery-actions">
-              <button
-                class="settings-action"
-                type="button"
-                :disabled="vaultBusy || liveStatus?.state !== 'ready'"
-                @click="recoverSahdinasMemento('character-inventory')"
-              >{{ sahdinaRecoveryBusy === 'character-inventory' ? 'Delivering…' : 'Recover to inventory' }}</button>
-              <button
-                class="settings-action"
-                type="button"
-                :disabled="vaultBusy || liveStatus?.state !== 'ready'"
-                @click="recoverSahdinasMemento('shared-stash')"
-              >{{ sahdinaRecoveryBusy === 'shared-stash' ? 'Delivering…' : 'Recover to shared stash' }}</button>
-            </div>
-            <small>Use this only if the original secret quest item was accidentally sold or otherwise lost.</small>
-          </article>
-
-          <article class="settings-card">
-            <p class="section-label">Support and recovery</p>
-            <h3>Local diagnostics</h3>
-            <div v-if="recoveryStatus?.requiresAttention" class="recovery-alert">
-              <strong>Pause transfers</strong>
-              <span>{{ recoveryStatus.operations.length }} journal operation{{ recoveryStatus.operations.length === 1 ? '' : 's' }} require a recovery audit.</span>
-              <code v-for="operation in recoveryStatus.operations.slice(0, 5)" :key="operation.id">
-                {{ operation.operation }} · {{ operation.state }} · {{ operation.id }}
-              </code>
-            </div>
-            <label class="settings-toggle">
-              <input
-                type="checkbox"
-                :checked="debugLoggingStatus.enabled"
-                :disabled="debugLoggingBusy"
-                @change="setDebugLogging(($event.target as HTMLInputElement).checked)"
-              />
-              <span>
-                <strong>Debug logging</strong>
-                <small>Capture additional helper timings for up to {{ debugLoggingStatus.maxAgeDays }} days. Logs rotate after {{ debugLoggingStatus.maxFiles }} bounded files and never include item payloads or character names.</small>
-              </span>
-            </label>
-            <p>Export one redacted JSON support bundle with rotating logs, job timings, versions and fingerprints, database integrity, and unfinished-operation state. Personal paths, character names, item payloads, saves, archives, queues, receipts, and credentials are excluded.</p>
-            <button class="settings-action" type="button" :disabled="diagnosticsBusy" @click="exportDiagnostics">
-              {{ diagnosticsBusy ? 'Collecting diagnostics…' : 'Export redacted support bundle' }}
-            </button>
-            <button class="settings-action" type="button" :disabled="preferenceExportBusy" @click="exportPreferences">
-              {{ preferenceExportBusy ? 'Exporting preferences…' : 'Export preferences' }}
-            </button>
-            <small>Preference exports contain your planner profiles, to-dos, and configured local source paths. Keep them private; use the redacted support bundle for public bug reports.</small>
-            <button class="settings-action" type="button" @click="openDataDirectory">Open data and backups folder</button>
-            <div class="interface-recovery-actions">
-              <button class="settings-action" type="button" @click="resetInterfacePreferences">Reset interface preferences</button>
-              <button v-if="safeModeActive" class="settings-action" type="button" :disabled="safeModeBusy" @click="restartNormally">Restart normally</button>
-              <button v-else class="settings-action" type="button" :disabled="safeModeBusy" @click="restartInSafeMode">Restart in safe mode</button>
-            </div>
-            <small>Interface reset preserves the Codex Archive, planner profiles, to-do list, source selection, saves, stashes, and backups.</small>
-            <small>Standard diagnostics retain at most 3 × 256 KB for 7 days. Debug mode retains at most 6 × 1 MB for 14 days. Preserve the data folder after an uncertain transfer, but never post saves or the archive database publicly.</small>
-          </article>
-        </div>
-      </section>
+      <SettingsWorkspace
+        v-else-if="activeView === 'settings'"
+        v-model:mi-counting-mode="miCountingMode"
+        v-model:selected-stash-path="selectedStashPath"
+        :onboarding-status="onboardingStatus"
+        :onboarding-step="onboardingStep"
+        :auto-live-connect="autoLiveConnect"
+        :safe-mode-active="safeModeActive"
+        :live-status="liveStatus"
+        :game-connection-label="gameConnectionLabel"
+        :connection-recommendation="connectionRecommendation"
+        :zoom-factor="zoomFactor"
+        :experimental-tools-enabled="experimentalToolsEnabled"
+        :workspace-tool-definitions="workspaceToolDefinitions"
+        :visible-workspace-tool-ids="visibleWorkspaceToolIds"
+        :snapshot-ready="Boolean(snapshot)"
+        :archive-backup-status="archiveBackupStatus"
+        :archive-backup-busy="archiveBackupBusy"
+        :show-legacy-scanner="showLegacyScanner"
+        :stash-choices="stashChoices"
+        :index-stash-paths="indexStashPaths"
+        :archive-stash-paths="archiveStashPaths"
+        :vault-busy="vaultBusy"
+        :infinite-supplies="infiniteSupplies"
+        :infinite-supplies-busy="infiniteSuppliesBusy"
+        :scanning="scanning"
+        :scan-activity="scanActivity"
+        :sahdina-recovery-busy="sahdinaRecoveryBusy"
+        :recovery-status="recoveryStatus"
+        :debug-logging-status="debugLoggingStatus"
+        :debug-logging-busy="debugLoggingBusy"
+        :diagnostics-busy="diagnosticsBusy"
+        :preference-export-busy="preferenceExportBusy"
+        :safe-mode-busy="safeModeBusy"
+        @resume-onboarding="resumeOnboarding"
+        @set-auto-live-connect="setAutoLiveConnect"
+        @show-connection-diagnostics="showConnectionDiagnostics = true"
+        @set-zoom="setZoom"
+        @show-essential-tools="showEssentialWorkspaceTools"
+        @show-all-tools="showAllWorkspaceTools"
+        @set-experimental-tools="setExperimentalToolsEnabled"
+        @set-tool-visible="setWorkspaceToolVisible"
+        @gdia-import-completed="handleGdiaImportCompleted"
+        @archive-backup="handleArchiveBackupAction"
+        @set-legacy-scanner-visible="setLegacyScannerVisible"
+        @select-source-mode="selectSourceModeForBasis"
+        @toggle-source="toggleSourceForBasis"
+        @set-archive-mode="setArchiveModeEnabled"
+        @set-infinite-supplies="setInfiniteSupplies"
+        @rebuild-game-data-index="rebuildGameDataIndex"
+        @recover-sahdina="recoverSahdinasMemento"
+        @set-debug-logging="setDebugLogging"
+        @export-diagnostics="exportDiagnostics"
+        @export-preferences="exportPreferences"
+        @open-data-directory="openDataDirectory"
+        @reset-interface-preferences="resetInterfacePreferences"
+        @restart-safe-mode="handleSafeModeRestart"
+      />
 
       <section v-else-if="activeView === 'vault'" class="vault-workspace" aria-label="Item vault">
         <ToolHeader

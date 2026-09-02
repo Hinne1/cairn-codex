@@ -230,6 +230,16 @@ restoration replaces the appropriate snapshot, while user edits reset only that 
 Raw query edits enter typed route history immediately, while the expensive catalog projection uses
 a workspace-owned 120 ms debounce and cancels pending work on unmount.
 
+Settings is a focused system workspace rather than a searchable explorer. `SettingsWorkspace.vue`
+owns its fourteen configuration cards, Item Assistant entry point, tool-visibility form, archive
+scope presentation, MI counting controls, backup/support presentation, and all control labeling.
+`settings.ts` owns the pure onboarding-status, archive-mode, formatting, and workspace-tool
+definition model used by both the route and Collection's customization entry point. `App.vue`
+retains preference state and narrow effect adapters for preload operations, confirmation dialogs,
+notifications, collection refresh, safe-mode restart, and live delivery. Settings never reaches the
+preload bridge directly. Its MI counting and retrieval target models continue to update the same
+shell-owned persisted refs, so extraction does not create a second preference source of truth.
+
 ## Semantic badges and Grim Dawn rarity
 
 Dialog focus, reduced-motion behavior, and the remaining keyboard-audit debt are specified in

@@ -63,6 +63,8 @@ const verifyOracleWorkspace = process.argv.includes('--verify-oracle-workspace')
 const verifyDismantlingWorkspace = process.argv.includes('--verify-dismantling-workspace')
 const verifySkillExplorerWorkspace = process.argv.includes('--verify-skill-explorer-workspace')
 const verifyMiWorkshopWorkspace = process.argv.includes('--verify-mi-workshop-workspace')
+const verifySettingsWorkspace = process.argv.includes('--verify-settings-workspace')
+const expectSafeSettings = process.argv.includes('--expect-safe-settings')
 const simulateWorkspaceError = process.argv.includes('--simulate-workspace-error')
 const safeMode = process.argv.includes('--safe-mode')
 const safeModeSuggested = process.argv.includes('--safe-mode-suggested')
@@ -174,6 +176,8 @@ const env = {
   ...(verifyDismantlingWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE: '1' } : {}),
   ...(verifySkillExplorerWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SKILL_EXPLORER_WORKSPACE: '1' } : {}),
   ...(verifyMiWorkshopWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_MI_WORKSHOP_WORKSPACE: '1' } : {}),
+  ...(verifySettingsWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SETTINGS_WORKSPACE: '1' } : {}),
+  ...(expectSafeSettings ? { CAIRN_CODEX_SCREENSHOT_EXPECT_SAFE_SETTINGS: '1' } : {}),
   ...(simulateWorkspaceError ? { CAIRN_CODEX_SCREENSHOT_RENDER_ERROR: '1' } : {}),
   ...(safeMode ? { CAIRN_CODEX_SCREENSHOT_SAFE_MODE: '1' } : {}),
   ...(safeModeSuggested ? {
@@ -392,6 +396,8 @@ console.log(JSON.stringify({
   verifyDismantlingWorkspace,
   verifySkillExplorerWorkspace,
   verifyMiWorkshopWorkspace,
+  verifySettingsWorkspace,
+  expectSafeSettings,
   screenshotWidth: report.renderedState.viewport.width,
   screenshotHeight: report.renderedState.viewport.height,
   scrollTarget,

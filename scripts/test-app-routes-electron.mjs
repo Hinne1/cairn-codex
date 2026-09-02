@@ -46,6 +46,20 @@ runGate('Sets and item drawer', [
   '--width', '520', '--height', '900', '--screenshot-name', 'typed-routes-verify-narrow'
 ])
 
+runGate('Settings full-screen workspace and system navigation', [
+  '--electron-source', '--fixture', 'settings',
+  '--route-hash', verifiedRoute({ version: 1, workspace: 'settings', controls: {} }),
+  '--dismiss-onboarding', '--verify-navigation', '--verify-settings-workspace', '--assert-no-overflow', '--disable-gpu',
+  '--width', '520', '--height', '1000', '--screenshot-name', 'settings-workspace-verify-narrow'
+])
+
+runGate('Settings safe-mode gating', [
+  '--electron-source', '--fixture', 'settings',
+  '--route-hash', verifiedRoute({ version: 1, workspace: 'settings', controls: {} }),
+  '--safe-mode', '--verify-settings-workspace', '--expect-safe-settings', '--assert-no-overflow', '--disable-gpu',
+  '--width', '520', '--height', '1000', '--screenshot-name', 'settings-safe-mode-verify-narrow'
+])
+
 runGate('Planner map atlas selection', [
   '--electron-source', '--fixture', 'planner', '--query', 'Wendigo',
   '--route-hash', verifiedRoute({
@@ -87,4 +101,4 @@ runGate('Accessible modal focus', [
   '--width', '520', '--height', '900', '--screenshot-name', 'accessible-dialog-focus'
 ])
 
-console.log('Typed-route Electron gates passed for Collection, Sets, Planner map restoration, and native/custom accessible modal focus.')
+console.log('Electron route gates passed for Collection, Sets, Settings/system navigation, Planner map restoration, and native/custom accessible modal focus.')

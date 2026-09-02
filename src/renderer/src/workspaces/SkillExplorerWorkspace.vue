@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, useId } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import { compileSearchQuery } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
@@ -10,7 +10,9 @@ import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import {
   createSkillExplorerRows,
+  nextSkillSuggestionIndex,
   nextSkillSortControls,
+  skillSortAriaValue,
   type SkillExplorerControls,
   updateSkillExplorerControls
 } from './skill-explorer'
@@ -34,6 +36,7 @@ const emit = defineEmits<{
 const controls = defineModel<SkillExplorerControls>('controls', { required: true })
 const pickerOpen = ref(false)
 const pickerIndex = ref(0)
+const skillListboxId = `skill-name-options-${useId()}`
 
 function controlModel<K extends keyof SkillExplorerControls>(key: K, resetPage = true) {
   return computed({
@@ -71,6 +74,14 @@ const suggestions = computed(() => {
     })
     .slice(0, 40)
 })
+const skillOptionIds = computed(() => new Map(
+  props.skillNames.map((skill, index) => [skill, `${skillListboxId}-option-${index}`])
+))
+const activeSuggestion = computed(() => pickerOpen.value ? suggestions.value[pickerIndex.value] : undefined)
+const activeSuggestionId = computed(() => {
+  const skill = activeSuggestion.value
+  return skill ? skillOptionIds.value.get(skill) : undefined
+})
 const searchError = computed(() => {
   const error = structuredQuery.value.error
   if (!error) return null
@@ -83,6 +94,28 @@ function openPicker(): void {
     (skill) => skill.toLocaleLowerCase() === selectedSkill.value.trim().toLocaleLowerCase()
   )
   pickerIndex.value = exact >= 0 ? exact : 0
+  revealActiveSuggestion()
+}
+
+function revealActiveSuggestion(): void {
+  void nextTick(() => {
+    const optionId = activeSuggestionId.value
+    const listbox = document.getElementById(skillListboxId)
+    const option = optionId ? document.getElementById(optionId) : null
+    if (!(listbox instanceof HTMLElement) || !(option instanceof HTMLElement)) return
+    const optionTop = option.offsetTop
+    const optionBottom = optionTop + option.offsetHeight
+    if (optionTop < listbox.scrollTop) listbox.scrollTop = optionTop
+    else if (optionBottom > listbox.scrollTop + listbox.clientHeight) {
+      listbox.scrollTop = optionBottom - listbox.clientHeight
+    }
+  })
+}
+
+function handlePickerInput(): void {
+  pickerOpen.value = true
+  pickerIndex.value = 0
+  revealActiveSuggestion()
 }
 
 function selectSkill(skill: string): void {
@@ -97,10 +130,16 @@ function handlePickerKey(event: KeyboardEvent): void {
   }
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
-    if (!pickerOpen.value) openPicker()
-    const step = event.key === 'ArrowDown' ? 1 : -1
+    const pickerWasOpen = pickerOpen.value
+    if (!pickerWasOpen) openPicker()
     const count = suggestions.value.length
-    if (count > 0) pickerIndex.value = (pickerIndex.value + step + count) % count
+    pickerIndex.value = nextSkillSuggestionIndex(
+      pickerIndex.value,
+      count,
+      event.key === 'ArrowDown' ? 'next' : 'previous',
+      pickerWasOpen
+    )
+    revealActiveSuggestion()
     return
   }
   if (event.key === 'Enter' && pickerOpen.value) {
@@ -146,23 +185,28 @@ function showFocusedTooltip(_key: string | number, row: { item: CollectionItem }
             autocomplete="off"
             aria-autocomplete="list"
             :aria-expanded="pickerOpen"
-            aria-controls="skill-name-options"
+            aria-haspopup="listbox"
+            :aria-controls="pickerOpen ? skillListboxId : undefined"
+            :aria-activedescendant="activeSuggestionId"
             placeholder="Choose or type a skill…"
             @focus="openPicker"
-            @input="pickerOpen = true; pickerIndex = 0"
+            @input="handlePickerInput"
             @keydown="handlePickerKey"
           />
           <button v-if="selectedSkill" type="button" aria-label="Clear selected skill" @click="selectedSkill = ''; openPicker()">×</button>
         </span>
-        <span v-if="pickerOpen" id="skill-name-options" class="skill-suggestions" role="listbox">
+        <span v-if="pickerOpen" :id="skillListboxId" class="skill-suggestions" role="listbox" aria-label="Indexed skills">
           <button
             v-for="(skill, index) in suggestions"
             :key="skill"
+            :id="skillOptionIds.get(skill)"
             type="button"
             role="option"
+            tabindex="-1"
             :aria-selected="index === pickerIndex"
             :class="{ active: index === pickerIndex }"
             @mouseenter="pickerIndex = index"
+            @mousedown.prevent
             @click="selectSkill(skill)"
           >{{ skill }}</button>
           <small v-if="suggestions.length === 0">No indexed skill matches that text.</small>
@@ -210,13 +254,13 @@ function showFocusedTooltip(_key: string | number, row: { item: CollectionItem }
     >
       <template #header>
         <div class="skill-table-header" role="row">
-          <span role="columnheader"><button type="button" @click="changeSort('item')">Item {{ sort === 'item' ? (direction === 'asc' ? '↑' : '↓') : '' }}</button></span>
-          <span role="columnheader"><button type="button" @click="changeSort('slot')">Slot <template v-if="sort === 'slot'">{{ direction === 'asc' ? '↑' : '↓' }}</template></button></span>
-          <span role="columnheader"><button type="button" @click="changeSort('amount')">Ranks {{ sort === 'amount' ? (direction === 'asc' ? '↑' : '↓') : '' }}</button></span>
-          <span role="columnheader"><button type="button" @click="changeSort('conversion')">Target {{ sort === 'conversion' ? (direction === 'asc' ? '↑' : '↓') : '' }}</button></span>
+          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'item')"><button type="button" @click="changeSort('item')">Item <span v-if="sort === 'item'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
+          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'slot')"><button type="button" @click="changeSort('slot')">Slot <span v-if="sort === 'slot'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
+          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'amount')"><button type="button" @click="changeSort('amount')">Ranks <span v-if="sort === 'amount'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
+          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'conversion')"><button type="button" @click="changeSort('conversion')">Target <span v-if="sort === 'conversion'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
           <span role="columnheader">Conversion details</span>
-          <span role="columnheader"><button type="button" @click="changeSort('special')">Special modifier <template v-if="sort === 'special'">{{ direction === 'asc' ? '↑' : '↓' }}</template></button></span>
-          <span role="columnheader"><button type="button" @click="changeSort('level')">Level {{ sort === 'level' ? (direction === 'asc' ? '↑' : '↓') : '' }}</button></span>
+          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'special')"><button type="button" @click="changeSort('special')">Special modifier <span v-if="sort === 'special'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
+          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'level')"><button type="button" @click="changeSort('level')">Level <span v-if="sort === 'level'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
         </div>
       </template>
       <template #item="{ item: row }">

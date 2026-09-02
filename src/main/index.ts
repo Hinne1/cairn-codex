@@ -1149,7 +1149,10 @@ function registerIpcHandlers(
     archive: { persistSnapshot: (snapshot) => database.persistSnapshot(snapshot) },
     projector: {
       projectSources: projectCollectionSources,
-      present: (snapshot, basis) => presentCollection(helper, database, snapshot, basis)
+      present: (snapshot, basis) => process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
+        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y'
+        ? Promise.resolve({ ...snapshot, basis })
+        : presentCollection(helper, database, snapshot, basis)
     },
     hydration: {
       hydrateAll: ({ installationPath, batchLimit, onProgress }) =>
@@ -1607,6 +1610,59 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
       sha256: (isHardcore ? '1' : '0').repeat(64)
     }))
     return { ...fixture, basis: 'archive', scannedStashes: stashes, availableStashes: stashes }
+  }
+  if (name === 'bounded-grid-a11y') {
+    const fixture = createScreenshotCollectionFixture('skill-explorer')
+    const supplySlotFamilies = ['weapon', 'armor', 'jewelry'] as const
+    const items = fixture.items.map((item, index): CollectionItem => {
+      if (index < 60) return item
+      const presentation = item.presentation!
+      return {
+        ...item,
+        presentation: {
+          ...presentation,
+          sections: presentation.sections.map((section) => ({
+            ...section,
+            heading: section.heading === 'Wendigo Totem' ? 'Savagery' : section.heading,
+            lines: section.lines.map((line) => ({
+              ...line,
+              label: line.label.replace('Wendigo Totem', 'Savagery')
+            }))
+          })),
+          searchText: presentation.searchText.replaceAll('wendigo totem', 'savagery')
+        }
+      }
+    })
+    const supplies = items.slice(0, 6).map((item, index): CollectionItem => ({
+      ...item,
+      record: `records/items/synthetic/a11y_augment_${index}.dbr`,
+      name: `Accessible Grid Augment ${index + 1}`,
+      rarity: 'faction',
+      itemClass: 'augment',
+      slot: 'augment',
+      supplySlotFamilies: [supplySlotFamilies[index % supplySlotFamilies.length]!],
+      availableCount: 0,
+      discovered: true,
+      acquisition: {
+        sources: ['Synthetic QA faction vendor'],
+        sourceRecords: [],
+        locations: [],
+        factions: [{
+          kind: 'item',
+          faction: 'Synthetic QA',
+          reputation: 'Revered',
+          vendorRecord: `records/creatures/npcs/merchants/synthetic_a11y_${index}.dbr`
+        }],
+        crafting: null
+      }
+    }))
+    return {
+      ...fixture,
+      items,
+      supplies,
+      supplySummary: { rarity: 'supply', total: supplies.length, collected: 0, availableCopies: 0 },
+      skillMasteries: { ...fixture.skillMasteries, Savagery: 'Shaman' }
+    }
   }
   if (name === 'farming-routes') {
     const fixture = createScreenshotCollectionFixture('search-help')
@@ -5649,6 +5705,98 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               select.value = ${JSON.stringify(supplyCategory)}
               select.dispatchEvent(new Event('change', { bubbles: true }))
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+            })()
+          `)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_GRID_SEMANTICS === '1') {
+          interactionTimings.boundedGridSemanticsMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
+                .find((button) => (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === label)
+              const openWorkspace = async (label) => {
+                const button = workspaceButton(label)
+                if (!(button instanceof HTMLButtonElement)) throw new Error(label + ' workspace control was not available.')
+                button.click()
+                await frames()
+              }
+              const assertGrid = (selector, label, expectedCount) => {
+                const root = document.querySelector(selector)
+                const collection = root?.querySelector(':scope > .bounded-results-collection')
+                if (!(root instanceof HTMLElement) || collection?.getAttribute('role') !== 'grid') {
+                  throw new Error(label + ' did not expose a grid result collection.')
+                }
+                const rows = [...collection.children]
+                if (rows.length !== expectedCount || rows.some((row) => row.getAttribute('role') !== 'row')) {
+                  throw new Error(label + ' did not expose exactly ' + expectedCount + ' direct grid rows.')
+                }
+                const cells = rows.map((row) => row.querySelector(':scope > .bounded-results-item[role="gridcell"]'))
+                if (cells.some((cell) => !(cell instanceof HTMLElement))) {
+                  throw new Error(label + ' grid rows did not each own one direct gridcell.')
+                }
+                if (cells[0]?.tabIndex !== 0 || cells.slice(1).some((cell) => cell.tabIndex !== -1)) {
+                  throw new Error(label + ' did not retain one roving gridcell tab stop.')
+                }
+                return cells
+              }
+              const verifyGridNavigation = async (cells, label) => {
+                if (cells.length < 2) throw new Error(label + ' needs at least two cells for keyboard verification.')
+                const first = cells[0]
+                const firstTop = first.getBoundingClientRect().top
+                const expectedDown = cells.find((cell) => cell.getBoundingClientRect().top > firstTop + 1) ?? cells[1]
+                first.focus()
+                first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+                await frames()
+                if (document.activeElement !== expectedDown) {
+                  throw new Error(label + ' ArrowDown did not follow the visual grid after semantic row wrapping.')
+                }
+                expectedDown.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+                await frames()
+                if (document.activeElement !== first) {
+                  throw new Error(label + ' ArrowUp did not return through the visual grid after semantic row wrapping.')
+                }
+              }
+
+              const collectionCells = assertGrid('.catalog-results', 'Collection', 48)
+              const ownedCollectionCards = document.querySelectorAll('.item-card:not(.missing)').length
+              if (ownedCollectionCards < 2) throw new Error('The bounded-grid fixture did not preserve seeded archive evidence.')
+              await verifyGridNavigation(collectionCells, 'Collection')
+              collectionCells[0].click()
+              await frames()
+              if (!document.querySelector('.item-drawer')) throw new Error('Collection gridcell activation did not open its item drawer.')
+              document.querySelector('.drawer-close')?.click()
+              await frames()
+
+              await openWorkspace('Stash Oracle')
+              const oracleRoot = document.querySelector('.oracle-results')
+              const oracleCount = oracleRoot?.querySelectorAll('.bounded-results-row').length ?? 0
+              if (oracleCount < 2 || oracleCount > 12) {
+                throw new Error('Stash Oracle rendered ' + oracleCount + ' rows after Collection showed ' + ownedCollectionCards + ' owned cards.')
+              }
+              const oracleCells = assertGrid('.oracle-results', 'Stash Oracle', oracleCount)
+              await verifyGridNavigation(oracleCells, 'Stash Oracle')
+
+              await openWorkspace('Supplies')
+              if (!document.querySelector('.supply-results .bounded-results-state.is-empty')) {
+                throw new Error('Supplies did not retain its shared empty state before selecting augments.')
+              }
+              const category = document.querySelector('.supplies-workspace .explorer-toolbar-filters select')
+              if (!(category instanceof HTMLSelectElement)) throw new Error('Supplies category control was not rendered.')
+              category.value = 'augments'
+              category.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              const supplyCells = assertGrid('.supply-results', 'Supplies', 6)
+              if (supplyCells.some((cell) => cell.getAttribute('aria-selected') !== 'false' || cell.getAttribute('aria-disabled') !== 'true')) {
+                throw new Error('Supplies selection and disabled semantics did not remain on each gridcell.')
+              }
+              supplyCells[0].focus()
+              supplyCells[0].dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+              await frames()
+              if (supplyCells[0].getAttribute('aria-selected') !== 'false') {
+                throw new Error('Disabled Supplies gridcell changed selection after keyboard activation.')
+              }
+              return performance.now() - started
             })()
           `)
         }

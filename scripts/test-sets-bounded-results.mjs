@@ -62,7 +62,7 @@ assert.match(app, /watch\([\s\S]*?setProgressFilter[\s\S]*?setFeatureFilter[\s\S
 assert.match(app, /case 'sets':[\s\S]*?searchQuery\.value = route\.controls\.query[\s\S]*?currentPage\.value = route\.controls\.page/)
 assert.doesNotMatch(app, /v-for="set in visibleSets"/)
 assert.doesNotMatch(app, /visibleSets\.length === 0/)
-assert.match(boundedSurface, /props\.layout === 'grid' && !focusable\.value/)
+assert.match(boundedSurface, /props\.layout === 'grid' && !usesGridSemantics\.value/)
 assert.match(boundedSurface, /usesListSemantics\.value[\s\S]*?'list'[\s\S]*?'listitem'/)
 assert.match(styles, /\.set-results \.bounded-results-collection\.is-grid/)
 assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.set-results \.bounded-results-collection\.is-grid/)

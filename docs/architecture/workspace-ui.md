@@ -91,6 +91,10 @@ pure paging and keyboard model in `src/renderer/src/bounded-results.ts`.
 - `list`, `grid`, and CSS-table layouts share the same result model. Selectable and interactive
   surfaces use roving focus with Arrow keys, Home, End, Enter, and Space. Grid surfaces derive
   the visible column count from rendered rows unless a fixed keyboard column count is required.
+- Passive visual-card grids expose `list` / `listitem` semantics. Interactive, navigable, and
+  selectable card grids expose the complete `grid` / `row` / `gridcell` ownership chain, with
+  roving focus, selection, disabled state, and descriptions attached to the focusable gridcell.
+  CSS-table results retain their existing `grid` / `row` / `gridcell` structure.
 - A dense comparison table may retain its useful desktop columns at compact widths only inside
   a labeled local horizontal scroller. That region must receive keyboard focus, expose a visible
   scrolling hint, retain the identity column while scrolling where practical, and must never

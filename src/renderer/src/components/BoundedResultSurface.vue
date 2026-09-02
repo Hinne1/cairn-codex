@@ -73,7 +73,8 @@ const entryKeys = computed(() => resultWindow.value.entries.map((entry) => entry
 const showResults = computed(() => !props.loading && !props.error && resultWindow.value.entries.length > 0)
 const selectable = computed(() => props.selectionMode !== 'none')
 const focusable = computed(() => selectable.value || props.navigable || props.interactive)
-const usesListSemantics = computed(() => props.layout === 'list' || (props.layout === 'grid' && !focusable.value))
+const usesGridSemantics = computed(() => props.layout === 'grid' && focusable.value)
+const usesListSemantics = computed(() => props.layout === 'list' || (props.layout === 'grid' && !usesGridSemantics.value))
 const collectionRole = computed(() => usesListSemantics.value
   ? (selectable.value ? 'listbox' : 'list')
   : 'grid')
@@ -94,6 +95,11 @@ watch(() => [props.page, resultWindow.value.pageCount] as const, () => {
 function rememberElement(key: BoundedResultKey, element: Element | null): void {
   if (element instanceof HTMLElement) itemElements.set(key, element)
   else itemElements.delete(key)
+}
+
+function rememberSemanticElement(key: BoundedResultKey, element: Element | null, gridCell: boolean): void {
+  if (usesGridSemantics.value !== gridCell) return
+  rememberElement(key, element)
 }
 
 function entryDisabled(entry: { item: T }): boolean {
@@ -133,8 +139,11 @@ function navigate(intent: BoundedNavigationIntent): void {
 function visibleGridColumns(): number {
   const first = itemElements.get(entryKeys.value[0] ?? '')
   if (!first) return Math.max(1, props.keyboardColumns)
-  const firstTop = first.offsetTop
-  const count = entryKeys.value.findIndex((key) => itemElements.get(key)?.offsetTop !== firstTop)
+  const firstTop = first.getBoundingClientRect().top
+  const count = entryKeys.value.findIndex((key) => {
+    const top = itemElements.get(key)?.getBoundingClientRect().top
+    return top !== undefined && Math.abs(top - firstTop) > 1
+  })
   return count > 0 ? count : Math.max(1, entryKeys.value.length)
 }
 
@@ -200,20 +209,43 @@ function changePage(page: number): void {
       <div
         v-for="entry in resultWindow.entries"
         :key="entry.key"
-        :ref="(element) => rememberElement(entry.key, element as Element | null)"
-        class="bounded-results-item"
-        :class="{ 'is-selected': selectable && selectedKeys.includes(entry.key), 'is-disabled': entryDisabled(entry) }"
-        :role="itemRole"
-        :aria-selected="selectable ? selectedKeys.includes(entry.key) : undefined"
-        :aria-disabled="selectable && entryDisabled(entry) ? true : undefined"
-        :aria-describedby="itemDescribedBy"
-        :tabindex="focusable ? (activeKey === entry.key ? 0 : -1) : undefined"
-        @focus="handleItemFocus($event, entry)"
-        @blur="emit('item-blur', entry.key, entry.item, $event)"
-        @click="activateEntry(entry)"
-        @keydown="handleKeydown($event, entry)"
+        :ref="(element) => rememberSemanticElement(entry.key, element as Element | null, false)"
+        :class="usesGridSemantics ? 'bounded-results-row' : ['bounded-results-item', { 'is-selected': selectable && selectedKeys.includes(entry.key), 'is-disabled': entryDisabled(entry) }]"
+        :role="usesGridSemantics ? 'row' : itemRole"
+        :aria-selected="!usesGridSemantics && selectable ? selectedKeys.includes(entry.key) : undefined"
+        :aria-disabled="!usesGridSemantics && selectable && entryDisabled(entry) ? true : undefined"
+        :aria-describedby="!usesGridSemantics ? itemDescribedBy : undefined"
+        :tabindex="!usesGridSemantics && focusable ? (activeKey === entry.key ? 0 : -1) : undefined"
+        @focus="!usesGridSemantics && handleItemFocus($event, entry)"
+        @blur="!usesGridSemantics && emit('item-blur', entry.key, entry.item, $event)"
+        @click="!usesGridSemantics && activateEntry(entry)"
+        @keydown="!usesGridSemantics && handleKeydown($event, entry)"
       >
+        <div
+          v-if="usesGridSemantics"
+          :ref="(element) => rememberSemanticElement(entry.key, element as Element | null, true)"
+          class="bounded-results-item"
+          :class="{ 'is-selected': selectable && selectedKeys.includes(entry.key), 'is-disabled': entryDisabled(entry) }"
+          role="gridcell"
+          :aria-selected="selectable ? selectedKeys.includes(entry.key) : undefined"
+          :aria-disabled="selectable && entryDisabled(entry) ? true : undefined"
+          :aria-describedby="itemDescribedBy"
+          :tabindex="activeKey === entry.key ? 0 : -1"
+          @focus="handleItemFocus($event, entry)"
+          @blur="emit('item-blur', entry.key, entry.item, $event)"
+          @click="activateEntry(entry)"
+          @keydown="handleKeydown($event, entry)"
+        >
+          <slot
+            name="item"
+            :item="entry.item"
+            :item-key="entry.key"
+            :index="entry.index"
+            :selected="selectable && selectedKeys.includes(entry.key)"
+          />
+        </div>
         <slot
+          v-else
           name="item"
           :item="entry.item"
           :item-key="entry.key"
@@ -247,7 +279,11 @@ function changePage(page: number): void {
   grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
   gap: var(--cc-space-5);
 }
-.bounded-results-item { min-width: 0; border-radius: var(--cc-radius-sm); }
+.bounded-results-row,
+.bounded-results-item { min-width: 0; }
+.bounded-results-row { height: 100%; }
+.bounded-results-row > .bounded-results-item { height: 100%; }
+.bounded-results-item { border-radius: var(--cc-radius-sm); }
 .bounded-results-item[tabindex] { cursor: pointer; }
 .bounded-results-item[tabindex]:focus-visible {
   outline: 2px solid var(--cc-focus);

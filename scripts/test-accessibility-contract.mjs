@@ -39,14 +39,15 @@ const componentPaths = [
   '../src/renderer/src/components/OnboardingDialog.vue',
   '../src/renderer/src/components/PlannerSetupDialog.vue'
 ]
-const [components, controller, app, tokens] = await Promise.all([
+const [components, controller, app, tokens, boundedResults] = await Promise.all([
   Promise.all(componentPaths.map(async (path) => ({
     path,
     source: await readFile(new URL(path, import.meta.url), 'utf8')
   }))),
   readFile(new URL('../src/renderer/src/modal-focus.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/renderer/src/semantic-tokens.css', import.meta.url), 'utf8')
+  readFile(new URL('../src/renderer/src/semantic-tokens.css', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8')
 ])
 
 for (const { path, source } of components) {
@@ -72,6 +73,11 @@ assert.match(tokens, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation
 assert.match(tokens, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?transition-duration: 0\.01ms !important/iu)
 assert.match(tokens, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?scroll-behavior: auto !important/iu)
 
+assert.match(boundedResults, /const usesGridSemantics = computed\(\(\) => props\.layout === 'grid' && focusable\.value\)/u)
+assert.match(boundedResults, /:role="usesGridSemantics \? 'row' : itemRole"[\s\S]*?v-if="usesGridSemantics"[\s\S]*?role="gridcell"/u)
+assert.match(boundedResults, /props\.layout === 'grid' && !usesGridSemantics\.value/u)
+assert.match(boundedResults, /getBoundingClientRect\(\)\.top/u)
+
 console.log(JSON.stringify({
   passed: true,
   sharedDialogComponents: components.length,
@@ -80,5 +86,6 @@ console.log(JSON.stringify({
   escapedFocusRecovery: true,
   focusRestoration: true,
   modalHistoryBlocked: true,
-  reducedMotionOverride: true
+  reducedMotionOverride: true,
+  boundedGridOwnership: true
 }, null, 2))

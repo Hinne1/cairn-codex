@@ -46,7 +46,8 @@ shared-controller adoption, the legacy-dialog debt ceiling, and the reduced-moti
 Electron route gates additionally exercise both native Advanced Search and custom Planner
 setup dialogs. It wraps Tab and Shift+Tab, attempts to move focus outside each modal, blocks modal
 history navigation, verifies listener cleanup and detached-trigger fallback, closes with Escape,
-restores the trigger, and verifies viewport containment at 520 px.
+restores the trigger, and verifies viewport containment at 520 px. The custom-dialog gate observes
+the exact captured `focusin` registration and requires its matching removal on unmount.
 
 The remaining #16 work is a documented keyboard and assistive-technology audit of Collection,
 Transfers, Settings, Sets, Planner, and search; migration of the four App-owned dialogs; and a

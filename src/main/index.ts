@@ -5933,6 +5933,20 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const opener = document.querySelector('.planner-new-plan')
               const outside = document.querySelector('.topbar-actions button:not([disabled]), .history-nav button:not([disabled])')
               if (!(opener instanceof HTMLButtonElement) || !(outside instanceof HTMLButtonElement)) return false
+              const originalAddEventListener = document.addEventListener
+              const originalRemoveEventListener = document.removeEventListener
+              const registeredModalFocusListeners = []
+              const removedModalFocusListeners = new Set()
+              document.addEventListener = function (type, listener, options) {
+                if (type === 'focusin' && options === true) registeredModalFocusListeners.push(listener)
+                return originalAddEventListener.call(this, type, listener, options)
+              }
+              document.removeEventListener = function (type, listener, options) {
+                if (type === 'focusin' && options === true && registeredModalFocusListeners.includes(listener)) {
+                  removedModalFocusListeners.add(listener)
+                }
+                return originalRemoveEventListener.call(this, type, listener, options)
+              }
               opener.focus()
               opener.click()
               await frames()
@@ -5984,6 +5998,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               await frames()
               if (document.querySelector('.planner-setup-dialog') || document.activeElement !== opener) {
                 throw new Error('Planner setup did not close and restore focus to its opener.')
+              }
+              document.addEventListener = originalAddEventListener
+              document.removeEventListener = originalRemoveEventListener
+              if (
+                registeredModalFocusListeners.length !== 1 ||
+                removedModalFocusListeners.size !== registeredModalFocusListeners.length
+              ) {
+                throw new Error('Planner setup did not remove its exact captured focus listener: ' + JSON.stringify({
+                  registered: registeredModalFocusListeners.length,
+                  removed: removedModalFocusListeners.size
+                }))
               }
               outside.focus()
               outside.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))

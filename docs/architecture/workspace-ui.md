@@ -218,6 +218,18 @@ established delay. Changing a user-facing query, filter, metric, or sort resets 
 restoration replaces the complete snapshot without a watcher erasing the restored page. Page-only
 changes update the bounded result window without invalidating the archive grouping projection.
 
+Collection and Components & Consumables share one extracted catalog workspace without sharing
+control state. `CollectionMaterialsWorkspace.vue` owns each route's query, ownership/category/
+rarity filters, sort, page reset, category rail, 48-card bounded result surface, and card markup;
+`collection-materials.ts` owns deterministic category, ownership, recipe, strict double-rare,
+structured-query, and sorting projection. `App.vue` keeps two complete typed control snapshots so
+switching between Collection, Materials, and Sets cannot leak filters or paging across tools. The
+shell retains Collection's dashboard, completion trackers, and tool launcher plus narrow adapters
+for search documents, category progress, global tooltips, item drawers, and live retrieval. Route
+restoration replaces the appropriate snapshot, while user edits reset only that route to page one.
+Raw query edits enter typed route history immediately, while the expensive catalog projection uses
+a workspace-owned 120 ms debounce and cancels pending work on unmount.
+
 ## Semantic badges and Grim Dawn rarity
 
 Dialog focus, reduced-motion behavior, and the remaining keyboard-audit debt are specified in

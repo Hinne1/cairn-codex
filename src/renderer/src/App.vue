@@ -34,6 +34,15 @@ import {
   type MiWorkshopControls,
   updateMiWorkshopControls
 } from './workspaces/mi-workshop'
+import CollectionMaterialsWorkspace from './workspaces/CollectionMaterialsWorkspace.vue'
+import {
+  collectionCategories,
+  matchesCollectionCategory,
+  updateCollectionMaterialsControls,
+  type CollectionMaterialsControls,
+  type CollectionControls,
+  type MaterialsControls
+} from './workspaces/collection-materials'
 import SuppliesWorkspace from './workspaces/SuppliesWorkspace.vue'
 import {
   buildReusableSupplySummary,
@@ -73,7 +82,6 @@ import {
   type SetProgressFilter,
   type SetSortMode,
   type SortDirection,
-  type SortMode,
   type TransferMode,
   type TransferSection,
   type VaultRarityFilter,
@@ -285,7 +293,6 @@ const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
         : 'idle'
 )
 const zoomFactor = ref(initialPreferences.appearance.zoomFactor)
-const activeCategory = ref('All')
 const activeView = ref<ActiveView>('collection')
 const collectionSystemDestinationActive = computed(() =>
   activeView.value !== 'vault' && activeView.value !== 'settings'
@@ -295,10 +302,20 @@ const specialistWorkspaceActive = computed(() =>
 )
 const query = ref('')
 const searchQuery = ref('')
-const ownership = ref<OwnershipFilter>('all')
 const rarityFilter = ref<RarityFilter>('all')
-const sortMode = ref<SortMode>('recent')
-const sortDirection = ref<SortDirection>('desc')
+const collectionControls = ref<CollectionControls>({
+  category: 'All', query: '', ownership: 'all', rarity: 'all', sort: 'recent', direction: 'desc', page: 1
+})
+const materialsControls = ref<MaterialsControls>({
+  category: 'all', query: '', ownership: 'all', rarity: 'all', sort: 'recent', direction: 'desc', page: 1
+})
+const activeCollectionMaterialsControls = computed<CollectionMaterialsControls>({
+  get: () => activeView.value === 'materials' ? materialsControls.value : collectionControls.value,
+  set: (controls) => {
+    if (activeView.value === 'materials') materialsControls.value = controls as MaterialsControls
+    else collectionControls.value = controls as CollectionControls
+  }
+})
 const trackerCollapsed = ref(initialPreferences.appearance.trackerCollapsed)
 const miCountingMode = ref<MiCountingMode>(initialPreferences.workspace.miCountingMode)
 const showLegacyScanner = ref(initialPreferences.workspace.showLegacyScanner)
@@ -404,7 +421,6 @@ const supplySession = createSupplySession()
 const experimentalToolsEnabled = ref(safeModeActive.value ? false : initialPreferences.workspace.experimentalToolsEnabled)
 const visibleWorkspaceToolIds = ref<WorkspaceToolId[]>([...initialPreferences.workspace.visibleTools])
 const toolSettingsOpen = ref(false)
-const materialCategory = ref<MaterialCategory>('all')
 const farmingControls = ref<CollectionFarmingControls>({ query: '', rarity: 'all', page: 1 })
 const dismantlingControls = ref<DismantlingControls>({ query: '', mode: 'all', rarity: 'all' })
 const dismantlingSession = createDismantlingSession()
@@ -481,12 +497,6 @@ let appHistoryReady = false
 let restoringAppHistory = false
 let appHistoryIndex = 0
 let appHistoryMaximum = 0
-const pageSize = 48
-
-const collectionSearchQuery = computed(() => compileSearchQuery(
-  searchQuery.value,
-  searchQueryOptions(activeView.value === 'materials' ? searchSchemas.materials : searchSchemas.collection)
-))
 const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, searchQueryOptions(searchSchemas.sets)))
 const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
 const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
@@ -497,20 +507,7 @@ const archiveModeCount = computed(() =>
   [false, true].filter((isHardcore) => archiveModeEnabled(isHardcore)).length
 )
 
-const categories = [
-  'All',
-  'Head',
-  'Chest',
-  'Shoulders',
-  'Hands',
-  'Legs',
-  'Feet',
-  'Waist',
-  'Weapons',
-  'Offhands',
-  'Jewelry',
-  'Relics'
-]
+const categories = collectionCategories
 
 const targetStash = computed(() =>
   stashChoices.value.find((stash) => stash.path === selectedStashPath.value) ?? null
@@ -727,7 +724,7 @@ const categoryProgressByName = computed(() => {
       : `item:${item.record.toLocaleLowerCase()}`
     const owned = isCollectionOwned(item)
     for (const category of categories) {
-      if (!matchesCategory(item, category)) continue
+      if (!matchesCollectionCategory(item, category)) continue
       const entries = entriesByCategory.get(category)!
       entries.set(key, Boolean(entries.get(key) || owned))
     }
@@ -739,38 +736,6 @@ const categoryProgressByName = computed(() => {
     progress.set(category, `${collected} / ${entries.size}`)
   }
   return progress
-})
-
-const filteredItems = computed(() => {
-  if (!snapshot.value) return []
-  const structuredQuery = collectionSearchQuery.value
-  const sourceItems = activeView.value === 'materials'
-    ? (snapshot.value.materials ?? [])
-    : snapshot.value.items
-  return sourceItems
-    .filter((item) => activeView.value === 'materials' || matchesCategory(item, activeCategory.value))
-    .filter((item) => activeView.value !== 'materials' || materialCategory.value === 'all' ||
-      (materialCategory.value === 'component'
-        ? item.rarity === 'component'
-        : item.slot === materialCategory.value))
-    .filter((item) =>
-      activeView.value === 'materials' ||
-      rarityFilter.value === 'all' ||
-      (rarityFilter.value === 'recipe'
-        ? Boolean(item.acquisition?.crafting)
-        : rarityFilter.value === 'double-rare'
-          ? item.rarity === 'mi' && doubleRareMiBaseRecords.value.has(item.record.toLocaleLowerCase())
-          : item.rarity === rarityFilter.value)
-    )
-    .filter((item) => {
-      if (ownership.value === 'owned') return isCollectionOwned(item)
-      if (ownership.value === 'missing') return !isCollectionOwned(item)
-      return true
-    })
-    .filter((item) => {
-      return structuredQuery.matches(itemStructuredSearchDocument(item))
-    })
-    .sort(compareItems)
 })
 
 const collectionSets = computed<CollectionSet[]>(() => {
@@ -978,18 +943,6 @@ const collectionTrivia = computed<CollectionTriviaFact[]>(() => {
 
   return facts
 })
-
-const displayedResultCount = computed(() =>
-  activeView.value === 'settings'
-    ? 0
-    : activeView.value === 'vault'
-    ? transferSection.value === 'quarantine'
-      ? quarantineVaultPage.value.total
-      : operationHistory.value.total
-    : activeView.value === 'sets'
-      ? visibleSets.value.length
-      : filteredItems.value.length
-)
 
 const plannerCatalogItems = computed(() => [
   ...(snapshot.value?.items ?? []),
@@ -1514,16 +1467,14 @@ function currentAppRoute(): AppRoute {
   const itemRecord = selectedRecord.value
   switch (activeView.value) {
     case 'collection': return { version: 1, workspace: 'collection', itemRecord, controls: {
-      category: activeCategory.value, query: query.value, ownership: ownership.value, rarity: rarityFilter.value,
-      sort: sortMode.value, direction: sortDirection.value, page: currentPage.value
+      ...collectionControls.value
     } }
     case 'sets': return { version: 1, workspace: 'sets', itemRecord, controls: {
       query: query.value, progress: setProgressFilter.value, feature: setFeatureFilter.value,
       sort: setSortMode.value, direction: setSortDirection.value, page: currentPage.value
     } }
     case 'materials': return { version: 1, workspace: 'materials', itemRecord, controls: {
-      category: materialCategory.value, query: query.value, ownership: ownership.value, rarity: rarityFilter.value,
-      sort: sortMode.value, direction: sortDirection.value, page: currentPage.value
+      ...materialsControls.value
     } }
     case 'skills': return { version: 1, workspace: 'skills', itemRecord, controls: {
       ...skillExplorerControls.value
@@ -1583,13 +1534,7 @@ function restoreAppRoute(route: AppRoute): void {
   selectedRecord.value = route.itemRecord
   switch (route.workspace) {
     case 'collection':
-      activeCategory.value = route.controls.category
-      query.value = route.controls.query
-      ownership.value = route.controls.ownership
-      rarityFilter.value = route.controls.rarity
-      sortMode.value = route.controls.sort
-      sortDirection.value = route.controls.direction
-      currentPage.value = route.controls.page
+      collectionControls.value = { ...route.controls }
       break
     case 'sets':
       query.value = route.controls.query
@@ -1600,13 +1545,7 @@ function restoreAppRoute(route: AppRoute): void {
       currentPage.value = route.controls.page
       break
     case 'materials':
-      materialCategory.value = route.controls.category
-      query.value = route.controls.query
-      ownership.value = route.controls.ownership
-      rarityFilter.value = route.controls.rarity
-      sortMode.value = route.controls.sort
-      sortDirection.value = route.controls.direction
-      currentPage.value = route.controls.page
+      materialsControls.value = { ...route.controls }
       break
     case 'skills':
       skillExplorerControls.value = { ...route.controls }
@@ -1702,7 +1641,7 @@ function returnToCollection(): void {
 }
 
 watch(
-  [activeView, activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, setProgressFilter, setFeatureFilter, setSortMode, setSortDirection, materialCategory],
+  [query, rarityFilter, setProgressFilter, setFeatureFilter, setSortMode, setSortDirection],
   () => {
     if (restoringAppHistory) return
     currentPage.value = 1
@@ -1716,11 +1655,6 @@ watch(query, (value) => {
     searchQuery.value = value
     searchQueryTimer = null
   }, 120)
-})
-
-watch(sortMode, (mode) => {
-  if (restoringAppHistory) return
-  sortDirection.value = mode === 'name' ? 'asc' : 'desc'
 })
 
 watch(setSortMode, (mode) => {
@@ -1762,9 +1696,9 @@ watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId], (
 }, { flush: 'post' })
 watch(
   [
-    activeCategory, query, ownership, rarityFilter, sortMode, sortDirection, currentPage,
+    collectionControls, materialsControls,
+    query, rarityFilter, currentPage,
     setProgressFilter, setFeatureFilter, setSortMode, setSortDirection,
-    materialCategory,
     skillExplorerControls,
     oracleControls,
     miWorkshopControls,
@@ -2888,31 +2822,36 @@ function rarity(name: 'epic' | 'legendary' | 'mi'): CollectionRaritySummary | un
 
 function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
   activeView.value = 'collection'
-  activeCategory.value = 'All'
-  rarityFilter.value = value
+  collectionControls.value = updateCollectionMaterialsControls(
+    collectionControls.value,
+    { category: 'All', rarity: value },
+    true
+  )
   window.scrollTo({ top: 500, behavior: preferredScrollBehavior() })
 }
 
 function filterToAllRarities(): void {
   activeView.value = 'collection'
-  activeCategory.value = 'All'
-  ownership.value = 'all'
-  rarityFilter.value = 'all'
+  collectionControls.value = updateCollectionMaterialsControls(
+    collectionControls.value,
+    { category: 'All', ownership: 'all', rarity: 'all' },
+    true
+  )
   window.scrollTo({ top: 420, behavior: preferredScrollBehavior() })
 }
 
 function filterToRecipes(): void {
   activeView.value = 'collection'
-  activeCategory.value = 'All'
-  ownership.value = 'all'
-  rarityFilter.value = 'recipe'
+  collectionControls.value = updateCollectionMaterialsControls(
+    collectionControls.value,
+    { category: 'All', ownership: 'all', rarity: 'recipe' },
+    true
+  )
   window.scrollTo({ top: 500, behavior: preferredScrollBehavior() })
 }
 
 function openAffixWorkshop(): void {
   activeView.value = 'mi-workshop'
-  activeCategory.value = 'All'
-  rarityFilter.value = 'all'
 }
 
 function openSets(): void {
@@ -2928,11 +2867,15 @@ function openOracleSet(name: string): void {
   query.value = name
 }
 
-function openMaterials(category: MaterialCategory = 'all'): void {
+function openMaterials(category?: MaterialCategory): void {
   activeView.value = 'materials'
-  materialCategory.value = category
-  query.value = ''
-  ownership.value = 'all'
+  if (category !== undefined) {
+    materialsControls.value = updateCollectionMaterialsControls(
+      materialsControls.value,
+      { category, query: '', ownership: 'all' },
+      true
+    )
+  }
 }
 
 function openStashOracle(): void {
@@ -3595,26 +3538,6 @@ function readableError(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }
 
-function compareItems(left: CollectionItem, right: CollectionItem): number {
-  let comparison = 0
-  if (sortMode.value === 'level') {
-    comparison = left.levelRequirement - right.levelRequirement
-  } else if (sortMode.value === 'completion') {
-    comparison = Number(isCollectionOwned(left)) - Number(isCollectionOwned(right))
-    if (comparison === 0) comparison = left.availableCount - right.availableCount
-  } else if (sortMode.value === 'recent') {
-    comparison =
-      (left.firstDiscoveredAt ? Date.parse(left.firstDiscoveredAt) : 0) -
-      (right.firstDiscoveredAt ? Date.parse(right.firstDiscoveredAt) : 0)
-  } else if (sortMode.value === 'roll') {
-    comparison = (left.bestRollPercentile ?? -1) - (right.bestRollPercentile ?? -1)
-  } else {
-    comparison = left.name.localeCompare(right.name)
-  }
-  if (comparison === 0) comparison = left.name.localeCompare(right.name)
-  return sortDirection.value === 'asc' ? comparison : -comparison
-}
-
 function setCompletionPercent(set: CollectionSet): string {
   return ((set.collected / set.items.length) * 100).toFixed(1) + '%'
 }
@@ -3681,24 +3604,6 @@ function bestStoredCopy(record: string): VaultListItem | null {
       (leftCopy?.rollAnalysis?.overallEstimatedPercentile ?? -1)
     )
   })[0]!
-}
-
-function matchesCategory(item: CollectionItem, category: string): boolean {
-  const slots: Record<string, string[]> = {
-    Head: ['head'],
-    Chest: ['chest'],
-    Shoulders: ['shoulders'],
-    Hands: ['hands'],
-    Legs: ['legs'],
-    Feet: ['feet'],
-    Waist: ['waist'],
-    Weapons: ['weapon'],
-    Offhands: ['offhand', 'shield'],
-    Jewelry: ['ring', 'amulet', 'medal'],
-    Relics: ['relic']
-  }
-  if (category === 'All') return true
-  return slots[category]?.includes(item.slot) ?? false
 }
 
 function openItem(item: CollectionItem): void {
@@ -4925,7 +4830,7 @@ function formatRollValue(value: number): string {
         <div v-if="!trackerCollapsed" class="metrics">
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'all'"
+          :aria-pressed="collectionControls.rarity === 'all'"
           @click="filterToAllRarities"
         >
           <div class="metric-heading">
@@ -4940,7 +4845,7 @@ function formatRollValue(value: number): string {
         </button>
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'legendary'"
+          :aria-pressed="collectionControls.rarity === 'legendary'"
           @click="filterToRarity('legendary')"
         >
           <div class="metric-heading">
@@ -4956,7 +4861,7 @@ function formatRollValue(value: number): string {
         </button>
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'epic'"
+          :aria-pressed="collectionControls.rarity === 'epic'"
           @click="filterToRarity('epic')"
         >
           <div class="metric-heading">
@@ -4971,7 +4876,7 @@ function formatRollValue(value: number): string {
         </button>
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'mi'"
+          :aria-pressed="collectionControls.rarity === 'mi'"
           @click="filterToRarity('mi')"
         >
           <div class="metric-heading">
@@ -5058,7 +4963,7 @@ function formatRollValue(value: number): string {
         </button>
         <button
           type="button"
-          :aria-pressed="rarityFilter === 'recipe'"
+          :aria-pressed="collectionControls.rarity === 'recipe'"
           @click="filterToRecipes"
         >
           <div class="metric-heading">
@@ -5143,40 +5048,19 @@ function formatRollValue(value: number): string {
         @customize="toolSettingsOpen = true"
       />
 
-      <nav v-if="snapshot && activeView === 'collection'" class="category-tabs" aria-label="Item categories">
-        <button
-          v-for="category in categories"
-          :key="category"
-          type="button"
-          :class="{ active: category === activeCategory }"
-          @click="activeCategory = category"
-        >
-          <span>{{ category }}</span>
-          <small>{{ categoryProgress(category) }}</small>
-        </button>
-      </nav>
-
       <ExplorerToolbar
-        v-if="snapshot && (activeView === 'collection' || activeView === 'sets' || activeView === 'materials')"
+        v-if="snapshot && activeView === 'sets'"
         class="collection-explorer-toolbar"
         v-model="query"
-        v-bind="activeView === 'sets' ? searchGuidance.sets : activeView === 'materials' ? searchGuidance.materials : searchGuidance.collection"
-        :search-label="activeView === 'sets' ? 'Search sets' : activeView === 'materials' ? 'Search components & consumables' : 'Search collection'"
+        v-bind="searchGuidance.sets"
+        search-label="Search sets"
         placeholder="Name, stat, skill… (try skill:wendigo)"
-        :result-count="displayedResultCount"
-        :result-label="activeView === 'sets' ? 'sets' : 'results'"
-        :search-error="searchErrorMessage(activeView === 'sets' ? setSearchQuery : collectionSearchQuery)"
+        :result-count="visibleSets.length"
+        result-label="sets"
+        :search-error="searchErrorMessage(setSearchQuery)"
       >
         <template #filters>
-          <label v-if="activeView === 'collection' || activeView === 'materials'">
-            <span>Collection status</span>
-            <select v-model="ownership" autocomplete="off">
-              <option value="all">All items</option>
-              <option value="owned">Collected</option>
-              <option value="missing">Missing</option>
-            </select>
-          </label>
-          <label v-if="activeView === 'sets'">
+          <label>
             <span>Set progress</span>
             <select v-model="setProgressFilter" autocomplete="off">
               <option value="all">All sets</option>
@@ -5185,16 +5069,7 @@ function formatRollValue(value: number): string {
               <option value="unstarted">Unstarted</option>
             </select>
           </label>
-          <label v-if="activeView === 'materials'">
-            <span>Category</span>
-            <select v-model="materialCategory" autocomplete="off">
-              <option value="all">All materials</option>
-              <option value="component">Components</option>
-              <option value="material">Materials</option>
-              <option value="potion-formula">Potion formulas</option>
-            </select>
-          </label>
-          <label v-if="activeView === 'sets'">
+          <label>
             <span>Rarity</span>
             <select v-model="rarityFilter" autocomplete="off">
               <option value="all">All set rarities</option>
@@ -5202,19 +5077,7 @@ function formatRollValue(value: number): string {
               <option value="epic">Epic sets</option>
             </select>
           </label>
-          <label v-else-if="activeView !== 'materials'">
-            <span>Rarity</span>
-            <select v-model="rarityFilter" autocomplete="off">
-              <option value="all">All rarities</option>
-              <option value="legendary">Legendary</option>
-              <option value="epic">Epic</option>
-              <option value="mi">Monster Infrequent</option>
-              <option value="double-rare">Double rare MIs</option>
-              <option value="rare">Rare items</option>
-              <option value="recipe">Craftable from recipe</option>
-            </select>
-          </label>
-          <label v-if="activeView === 'sets'">
+          <label>
             <span>Special feature</span>
             <select v-model="setFeatureFilter" autocomplete="off">
               <option value="all">All set effects</option>
@@ -5225,26 +5088,15 @@ function formatRollValue(value: number): string {
         <template #sort>
           <label>
             <span>Sort by</span>
-            <select v-if="activeView === 'sets'" v-model="setSortMode" autocomplete="off">
+            <select v-model="setSortMode" autocomplete="off">
               <option value="completion">Completion</option>
               <option value="level">Required level</option>
               <option value="name">Name</option>
             </select>
-            <select v-else v-model="sortMode" autocomplete="off">
-              <option value="recent">Recently collected</option>
-              <option value="completion">Collected status</option>
-              <option value="name">Name</option>
-              <option value="level">Level</option>
-              <option value="roll">Best roll</option>
-            </select>
           </label>
           <label>
             <span>Order</span>
-            <select v-if="activeView === 'sets'" v-model="setSortDirection" autocomplete="off">
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </select>
-            <select v-else v-model="sortDirection" autocomplete="off">
+            <select v-model="setSortDirection" autocomplete="off">
               <option value="asc">Ascending</option>
               <option value="desc">Descending</option>
             </select>
@@ -5252,8 +5104,28 @@ function formatRollValue(value: number): string {
         </template>
       </ExplorerToolbar>
 
+      <CollectionMaterialsWorkspace
+        v-if="snapshot && (activeView === 'collection' || activeView === 'materials')"
+        v-model:controls="activeCollectionMaterialsControls"
+        :mode="activeView === 'materials' ? 'materials' : 'collection'"
+        :items="activeView === 'materials' ? (snapshot.materials ?? []) : snapshot.items"
+        :double-rare-mi-base-records="doubleRareMiBaseRecords"
+        :search-document-for-item="itemStructuredSearchDocument"
+        :category-progress="categoryProgress"
+        :icon-url-for-item="itemIconUrl"
+        :best-stored-copy-for-item="bestStoredCopy"
+        :live-ready="liveStatus?.state === 'ready'"
+        :retrieval-busy="vaultBusy"
+        @show-tooltip="showTooltip"
+        @queue-tooltip="queueTooltip"
+        @move-tooltip="moveTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+        @retrieve-live="retrieveArchivedCopyLive"
+      />
+
       <SkillExplorerWorkspace
-        v-if="activeView === 'skills'"
+        v-else-if="activeView === 'skills'"
         v-model:controls="skillExplorerControls"
         :items="plannerCatalogItems"
         :skill-names="skillNames"
@@ -6433,70 +6305,6 @@ function formatRollValue(value: number): string {
         <div v-if="visibleSets.length === 0" class="no-results">No sets match these filters.</div>
       </section>
 
-      <template v-else-if="snapshot">
-        <BoundedResultSurface
-          v-model:page="currentPage"
-          class="catalog-results bounded-tooltip-results"
-          :items="filteredItems"
-          :get-key="item => item.record"
-          :page-size="pageSize"
-          :empty-title="activeView === 'materials' ? 'No matching components or consumables' : 'No matching collection items'"
-          empty-detail="Try changing the current search or filters."
-          :label="activeCategory + ' collection items'"
-          layout="grid"
-          interactive
-          item-described-by="item-tooltip"
-          @activate="(_key, item) => openItem(item)"
-          @item-focus="(_key, item, element) => showTooltip(item, element)"
-          @item-blur="scheduleTooltipHide"
-        >
-          <template #item="{ item }">
-          <article
-            class="item-card"
-            :class="{ missing: !isCollectionOwned(item), 'awakening-available': itemAvailableByAwakeningOnly(item), legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare', component: item.rarity === 'component', consumable: item.rarity === 'consumable' }"
-            @mouseenter="queueTooltip(item, $event)"
-            @mousemove="moveTooltip"
-            @mouseleave="scheduleTooltipHide"
-          >
-            <div class="item-mark" aria-hidden="true">
-              <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
-              <span v-else>{{ isCollectionOwned(item) ? '✓' : '?' }}</span>
-              <span v-if="item.upgradeRecord" class="awakening-sigil card-awakening-sigil"><i /></span>
-            </div>
-            <div class="item-copy">
-              <h3>{{ item.name }}</h3>
-              <p>{{ rarityLabel(item) }} · {{ item.slot }} · Lv{{ item.levelRequirement }}</p>
-              <small v-if="item.upgradeRecord" class="awakening-label">Awakenable</small>
-              <small v-if="item.setName">{{ item.setName }}</small>
-            </div>
-            <div class="card-result">
-              <strong v-if="activeView !== 'materials' && item.bestRollPercentile !== null" class="roll-score">
-                ★ {{ item.bestRollPercentile.toFixed(1) }}%
-              </strong>
-              <span v-else-if="activeView !== 'materials'" class="roll-score dim">★ —</span>
-              <strong v-if="item.availableCount > 0">
-                {{ item.availableCount }} {{ activeView === 'materials' ? (item.slot === 'potion-formula' ? 'learned' : 'stored') : item.availableCount === 1 ? 'copy' : 'copies' }}
-              </strong>
-              <strong v-else-if="itemAvailableByAwakeningOnly(item)" class="awakening-available">{{ awakeningAvailabilityLabel(item) }}</strong>
-              <strong v-else-if="item.recipeUnlocked">Recipe unlocked · no stored copy</strong>
-              <strong v-else-if="item.discovered">Discovered · no copies</strong>
-              <strong v-else>Not found</strong>
-            </div>
-            <button
-              v-if="liveStatus?.state === 'ready' && bestStoredCopy(item.record)"
-              class="card-live-retrieve"
-              type="button"
-              :disabled="vaultBusy"
-              title="Return the best stored copy to Grim Dawn"
-              @click.stop="retrieveArchivedCopyLive(bestStoredCopy(item.record)!.id)"
-            >
-              Retrieve live
-            </button>
-            <span v-if="item.pinnedInstanceKey" class="pin-indicator">Pinned choice</span>
-          </article>
-          </template>
-        </BoundedResultSurface>
-      </template>
     </main>
     </WorkspaceErrorBoundary>
 

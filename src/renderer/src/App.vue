@@ -31,6 +31,7 @@ import {
   type SupplyOption
 } from './workspaces/supplies'
 import { createNotificationService, type AppNotification } from './notification-service'
+import { preferredScrollBehavior } from './motion-preference'
 import {
   resetUiPreferences,
   type RendererFailureReport
@@ -3024,7 +3025,7 @@ function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
   activeView.value = 'collection'
   activeCategory.value = 'All'
   rarityFilter.value = value
-  window.scrollTo({ top: 500, behavior: 'smooth' })
+  window.scrollTo({ top: 500, behavior: preferredScrollBehavior() })
 }
 
 function filterToAllRarities(): void {
@@ -3032,7 +3033,7 @@ function filterToAllRarities(): void {
   activeCategory.value = 'All'
   ownership.value = 'all'
   rarityFilter.value = 'all'
-  window.scrollTo({ top: 420, behavior: 'smooth' })
+  window.scrollTo({ top: 420, behavior: preferredScrollBehavior() })
 }
 
 function filterToRecipes(): void {
@@ -3040,7 +3041,7 @@ function filterToRecipes(): void {
   activeCategory.value = 'All'
   ownership.value = 'all'
   rarityFilter.value = 'recipe'
-  window.scrollTo({ top: 500, behavior: 'smooth' })
+  window.scrollTo({ top: 500, behavior: preferredScrollBehavior() })
 }
 
 function openAffixWorkshop(): void {

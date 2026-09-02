@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { nextModalFocusTarget } from '../src/renderer/src/modal-focus.ts'
+import { preferredScrollBehavior } from '../src/renderer/src/motion-preference.ts'
 
 const root = { id: 'dialog' }
 const first = { id: 'first' }
@@ -17,6 +18,8 @@ assert.equal(nextModalFocusTarget(root, controls, middle, false), null)
 assert.equal(nextModalFocusTarget(root, controls, outside, false), first)
 assert.equal(nextModalFocusTarget(root, controls, outside, true), last)
 assert.equal(nextModalFocusTarget(root, [], outside, false), root)
+assert.equal(preferredScrollBehavior(true), 'auto')
+assert.equal(preferredScrollBehavior(false), 'smooth')
 
 const componentPaths = [
   '../src/renderer/src/components/AdvancedSearchDialog.vue',
@@ -46,6 +49,8 @@ assert.match(controller, /target\?\.isConnected/u)
 
 const legacyAppDialogCount = (app.match(/role="dialog"/gu) ?? []).length
 assert.equal(legacyAppDialogCount, 4, 'App.vue dialog debt changed; migrate or document it instead of adding another private modal.')
+assert.doesNotMatch(app, /behavior:\s*['"]smooth['"]/u, 'JavaScript scrolling must honor reduced motion.')
+assert.match(app, /behavior: preferredScrollBehavior\(\)/u)
 
 assert.match(tokens, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation-duration: 0\.01ms !important/iu)
 assert.match(tokens, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation-iteration-count: 1 !important/iu)

@@ -33,6 +33,10 @@ effectively zero time. This includes older hard-coded spinners and entrance anim
 yet consume the transition token. Loading and connection state must still be conveyed by text or
 semantic status, never by motion alone.
 
+JavaScript scrolling uses `preferredScrollBehavior()` so the same media preference changes smooth
+Collection jumps to immediate movement. CSS cannot override a `window.scrollTo()` behavior option,
+so direct hard-coded smooth scrolling is rejected by the accessibility contract.
+
 ## Verification
 
 `npm run test:accessibility` checks focus-cycle edge cases, escape containment, restoration guards,

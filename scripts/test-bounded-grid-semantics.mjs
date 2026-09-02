@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { moveBoundedVisualRowKey } from '../src/renderer/src/bounded-results.ts'
 
 const [component, collection, oracle, supplies, main, benchmark, packageJson] = await Promise.all([
   readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
@@ -31,5 +32,25 @@ assert.doesNotMatch(main, /oracleCount === 0/)
 assert.match(main, /Supplies selection and disabled semantics/)
 assert.match(benchmark, /--verify-bounded-grid-semantics/)
 assert.match(packageJson, /test:bounded-grid-semantics:electron/)
+
+const variableHeightGrid = [
+  { key: 'a', left: 0, top: 0 },
+  { key: 'b', left: 300, top: 0 },
+  { key: 'c', left: 0, top: 420 },
+  { key: 'd', left: 300, top: 420 }
+]
+assert.equal(moveBoundedVisualRowKey(variableHeightGrid, 'a', 'row-down'), 'c')
+assert.equal(moveBoundedVisualRowKey(variableHeightGrid, 'b', 'row-down'), 'd')
+assert.equal(moveBoundedVisualRowKey(variableHeightGrid, 'c', 'row-up'), 'a')
+assert.equal(moveBoundedVisualRowKey(variableHeightGrid, 'b', 'row-up'), 'b')
+assert.equal(moveBoundedVisualRowKey(variableHeightGrid, 'c', 'row-down'), 'c')
+assert.equal(moveBoundedVisualRowKey(variableHeightGrid, 'missing', 'row-down'), null)
+
+const singleRowGrid = [
+  { key: 'left', left: 0, top: 0 },
+  { key: 'right', left: 300, top: 0 }
+]
+assert.equal(moveBoundedVisualRowKey(singleRowGrid, 'left', 'row-down'), 'left')
+assert.equal(moveBoundedVisualRowKey(singleRowGrid, 'right', 'row-up'), 'right')
 
 console.log('Bounded grid semantics contract passed for interactive, navigable, selectable, and passive visual-grid modes.')

@@ -21,7 +21,7 @@ complete document on the next launch.
 Version 1 separates settings by purpose:
 
 - `appearance`, `workspace`, and `search` are disposable interface preferences. They include
-  the theme, zoom, tracker layout, planner presentation, visible and experimental tools,
+  the theme, zoom, tracker and workspace-navigation density, planner presentation, visible and experimental tools,
   Monster Infrequent tier counting, and remembered explorer choices.
 - `planner` and `notes` contain user-authored builds, ignored/favorite records, and to-dos.
   Planner profiles may include a combined class name and its two masteries; older profiles
@@ -53,13 +53,18 @@ back through the previous file and newest valid snapshot if the primary file is 
 When no canonical file exists, the repository checks the historical keys and performs one
 compatibility migration. Legacy keys are intentionally retained for rollback and origin imports.
 
-Changes to this schema require:
+Breaking changes to this schema require:
 
 1. incrementing the schema version;
 2. adding an explicit migration from every supported older version;
 3. validating new fields with bounded fallbacks;
 4. classifying each new field as interface, user-authored, operational, or onboarding state;
 5. extending `test:preferences`, including proof that interface reset preserves durable state.
+
+Bounded optional interface fields may be added to the current version when older documents remain
+valid and receive an explicit safe default. The adaptive-sidebar density preference follows that
+rule: older version-1 documents load expanded, while every newly canonicalized document includes
+the boolean field.
 
 ## Export
 

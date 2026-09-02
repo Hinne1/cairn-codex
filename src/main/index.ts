@@ -5383,7 +5383,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       if (scanError) throw new Error('Renderer collection scan failed: ' + scanError)
       const ready = await window.webContents.executeJavaScript(
         `(Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
-          Boolean(document.querySelector('.catalog-grid, .catalog-results, .set-grid, .workspace-switcher, .settings-workspace, .vault-workspace'))) &&
+          Boolean(document.querySelector('.catalog-grid, .catalog-results, .set-grid, .workspace-sidebar, .settings-workspace, .vault-workspace'))) &&
          (!document.querySelector('.primary-action')?.disabled ||
           Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
           Boolean(document.querySelector('.background-scan'))) &&
@@ -5506,9 +5506,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               await new Promise((resolve) => setTimeout(resolve, 100))
               document.querySelector('.onboarding-skip')?.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              const destination = [...document.querySelectorAll('.workspace-tabs button, .workspace-switcher button, .category-tabs button, .system-nav button')]
+              const destination = [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id], .category-tabs button, .system-nav button')]
                 .find((button) =>
-                  (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
+                  (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
               destination?.click()
               await new Promise((resolve) => setTimeout(resolve, 100))
               return { elapsedMs: performance.now() - started, opened: Boolean(destination) }
@@ -5518,35 +5518,45 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           interactionTimings.categoryMs = categoryResult.elapsedMs
         }
         const plannerDisplay = process.env.CAIRN_CODEX_SCREENSHOT_PLANNER_DISPLAY
-        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SWITCHER === '1') {
-          interactionTimings.workspaceSwitcherMs = await window.webContents.executeJavaScript(`
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SIDEBAR === '1') {
+          interactionTimings.workspaceSidebarMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              const switcher = document.querySelector('.workspace-switcher')
-              const rail = switcher?.querySelector('.workspace-tool-rail')
-              const home = switcher?.querySelector('.workspace-home')
-              const active = rail?.querySelector('[aria-current="page"]')
-              const customize = switcher?.querySelector('.workspace-customize')
-              if (!switcher || !rail || !home || !active || !customize) {
-                throw new Error('The focused workspace switcher did not render all required controls.')
+              const sidebar = document.querySelector('.workspace-sidebar')
+              const home = sidebar?.querySelector('[data-tool-id="collection"]')
+              const active = sidebar?.querySelector('.workspace-nav-tools [aria-current="page"]')
+              const customize = sidebar?.querySelector('[aria-label="Customize visible tools"]')
+              const toggle = sidebar?.querySelector('.workspace-sidebar-toggle')
+              if (!sidebar || !home || !active || !customize || !toggle) {
+                throw new Error('The workspace sidebar did not render all required controls.')
               }
-              const switcherRect = switcher.getBoundingClientRect()
-              const railRect = rail.getBoundingClientRect()
+              const sidebarRect = sidebar.getBoundingClientRect()
               const activeRect = active.getBoundingClientRect()
-              for (const control of [home, active, customize]) {
+              const visibleControls = [home, active, customize, toggle]
+                .filter((control) => control.getClientRects().length > 0)
+              for (const control of visibleControls) {
                 control.focus()
-                if (document.activeElement !== control) throw new Error('A workspace switcher control could not receive keyboard focus.')
+                if (document.activeElement !== control) throw new Error('A workspace sidebar control could not receive keyboard focus.')
               }
               if (
-                switcherRect.left < 0 || switcherRect.right > window.innerWidth ||
-                railRect.left < switcherRect.left || railRect.right > switcherRect.right ||
-                activeRect.left < railRect.left - 1 || activeRect.right > railRect.right + 1 ||
+                sidebarRect.left < 0 || sidebarRect.right > window.innerWidth ||
+                activeRect.left < sidebarRect.left - 1 || activeRect.right > sidebarRect.right + 1 ||
                 document.documentElement.scrollWidth > window.innerWidth + 1
               ) {
-                throw new Error('The focused workspace switcher is clipped or causing page-level overflow.')
+                throw new Error('The workspace sidebar is clipped or causing page-level overflow.')
               }
-              const activeLabel = active.textContent?.trim()
+              const activeLabel = active.querySelector('.workspace-nav-label')?.textContent?.trim()
+              if (toggle.getClientRects().length > 0) {
+                const beganCollapsed = sidebar.classList.contains('collapsed')
+                toggle.click()
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+                if (sidebar.classList.contains('collapsed') === beganCollapsed) {
+                  throw new Error('The workspace sidebar density toggle did not change its state.')
+                }
+                toggle.click()
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              }
               customize.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const activeSetting = [...document.querySelectorAll('.tool-settings-options label')]
@@ -5557,17 +5567,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               activeSetting.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              if (!document.querySelector('.hero') || document.querySelector('.workspace-switcher')) {
+              if (!document.querySelector('.hero') || !document.querySelector('.workspace-sidebar')) {
                 throw new Error('Hiding the active specialist did not return to the Collection dashboard.')
               }
               activeSetting.click()
               document.querySelector('.tool-settings-done')?.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              const restoredDestination = [...document.querySelectorAll('.workspace-tabs button')]
+              const restoredDestination = [...document.querySelectorAll('.workspace-shortcuts button')]
                 .find((button) => button.querySelector('span')?.textContent?.trim() === activeLabel)
               restoredDestination?.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              if (document.querySelector('.workspace-tool-rail [aria-current="page"]')?.textContent?.trim() !== activeLabel) {
+              if (document.querySelector('.workspace-sidebar .workspace-nav-tools [aria-current="page"] .workspace-nav-label')?.textContent?.trim() !== activeLabel) {
                 throw new Error('The restored specialist did not reopen in the focused shell.')
               }
               return performance.now() - started
@@ -5603,8 +5613,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const started = performance.now()
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const workspace = document.querySelector('.vault-workspace')
-              if (!workspace || document.querySelector('.workspace-switcher')) {
-                throw new Error('Transfers must render as a focused system workspace without the specialist tool rail.')
+              if (!workspace || document.querySelector('.workspace-sidebar')) {
+                throw new Error('Transfers must render as a focused system workspace without the workspace sidebar.')
               }
               const sectionButtons = [...workspace.querySelectorAll('.transfer-section-tabs button')]
               if (sectionButtons.length !== 3) throw new Error('Transfers did not retain its three section controls.')
@@ -5906,8 +5916,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             (async () => {
               const started = performance.now()
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
-                .find((button) => (button.querySelector('span')?.textContent ?? button.textContent)?.trim() === label)
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
+                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent ?? button.textContent)?.trim() === label)
               const openWorkspace = async (label) => {
                 const button = workspaceButton(label)
                 if (!(button instanceof HTMLButtonElement)) throw new Error(label + ' workspace control was not available.')
@@ -6370,8 +6380,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               await wait(100)
               const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
                 .find((button) => button.textContent?.trim() === label)
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
-                .find((button) => button.querySelector('span')?.textContent?.trim() === label)
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
+                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent)?.trim() === label)
               const waitForPopState = () => new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(new Error('Supplies mode verification did not emit popstate.')), 1500)
                 window.addEventListener('popstate', () => {
@@ -6537,7 +6547,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                   .find((button) => button.textContent?.trim() === 'Collection')
                 collection?.click()
                 await frames()
-                const planner = [...document.querySelectorAll('.workspace-tabs button')]
+                const planner = [...document.querySelectorAll('.workspace-shortcuts button')]
                   .find((button) => button.querySelector('span')?.textContent?.trim() === 'Leveling Planner')
                 planner?.click()
                 await frames()
@@ -7389,10 +7399,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               })
               const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
                 .find((button) => button.textContent?.trim() === label)
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
-                .find((button) => button.querySelector('span')?.textContent?.trim() === label)
-              const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
-                document.querySelector('.workspace-tool-rail button[aria-current="page"]')?.textContent?.trim()
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
+                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent)?.trim() === label)
+              const openCollectionWorkspace = async () => {
+                const collection = workspaceButton('Collection')
+                if (!(collection instanceof HTMLButtonElement) || !collection.isConnected) {
+                  throw new Error('Live Collection workspace route was unavailable.')
+                }
+                collection.click()
+                await frames()
+              }
+              const activeWorkspace = () => document.querySelector('.workspace-sidebar [aria-current="page"] .workspace-nav-label')?.textContent?.trim()
               const expectedInitialControls = ${JSON.stringify(expectedRouteControls)}
               const assertInitialControls = (state) => {
                 for (const [key, expected] of Object.entries(expectedInitialControls)) {
@@ -7563,10 +7580,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 throw new Error('Native form restoration disagreed with application route state.')
               }
 
-              const collection = systemButton('Collection')
-              if (!(collection instanceof HTMLButtonElement)) throw new Error('Collection route was unavailable.')
-              collection.click()
-              await frames()
+              await openCollectionWorkspace()
               assertTypedEntry('collection', false)
               const workshop = workspaceButton('MI Workshop')
               if (!(workshop instanceof HTMLButtonElement)) throw new Error('MI Workshop child route was unavailable from Collection.')
@@ -7590,8 +7604,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (window.history.state.route.controls.query !== 'materials-only-query') {
                 throw new Error('Materials did not own its typed query state.')
               }
-              collection.click()
-              await frames()
+              await openCollectionWorkspace()
               const restoredCollection = assertTypedEntry('collection', false)
               if (JSON.stringify(restoredCollection.route.controls) !== JSON.stringify(collectionBeforeMaterials.route.controls)) {
                 throw new Error('Materials controls leaked into Collection: ' + JSON.stringify({
@@ -7606,8 +7619,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (restoredMaterials.route.controls.query !== 'materials-only-query') {
                 throw new Error('Returning to Materials did not preserve its independent typed query.')
               }
-              collection.click()
-              await frames()
+              await openCollectionWorkspace()
               assertTypedEntry('collection', false)
               return performance.now() - started
             })()
@@ -7661,11 +7673,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const started = performance.now()
               const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
                 .find((button) => button.textContent?.trim() === label)
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-tabs button, .workspace-tool-rail button')]
-                .find((button) => button.querySelector('span')?.textContent?.trim() === label)
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
+                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent)?.trim() === label)
               const currentSystemView = () => document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim()
-              const activeWorkspace = () => document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
-                document.querySelector('.workspace-tool-rail button[aria-current="page"]')?.textContent?.trim()
+              const activeWorkspace = () => document.querySelector('.workspace-sidebar [aria-current="page"] .workspace-nav-label')?.textContent?.trim()
               const assertSettings = () => {
                 if (currentSystemView() !== 'Settings' || !document.querySelector('.settings-workspace')) {
                   throw new Error('Settings destination and content were not restored together.')
@@ -7673,11 +7684,13 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               const assertCollection = () => {
                 if (
-                  currentSystemView() !== 'Collection' ||
+                  currentSystemView() !== undefined ||
                   activeWorkspace() !== 'Collection' ||
-                  !document.querySelector('.category-tabs')
+                  !document.querySelector('.workspace-sidebar') ||
+                  !document.querySelector('.category-tabs') ||
+                  systemButton('Collection')
                 ) {
-                  throw new Error('Collection destination and main workspace were not restored together.')
+                  throw new Error('Collection was duplicated in system and workspace navigation.')
                 }
               }
               const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
@@ -7750,8 +7763,13 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!sets) throw new Error('Sets child workspace was not rendered for navigation verification.')
               sets.click()
               await waitForFrames()
-              if (currentSystemView() !== 'Collection' || activeWorkspace() !== 'Sets' || document.querySelector('.category-tabs')) {
-                throw new Error('Collection did not remain current while its Sets child workspace was active.')
+              if (
+                currentSystemView() !== undefined ||
+                activeWorkspace() !== 'Sets' ||
+                document.querySelector('.category-tabs') ||
+                systemButton('Collection')
+              ) {
+                throw new Error('Specialist workspace retained a system-level Collection control.')
               }
               const backToCollection = waitForPopState()
               window.history.back()
@@ -7791,8 +7809,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 await frames()
               }
               const workspace = document.querySelector('.settings-workspace')
-              if (!workspace || document.querySelector('.workspace-switcher')) {
-                throw new Error('Settings must render as a focused system workspace without the specialist tool rail.')
+              if (!workspace || document.querySelector('.workspace-sidebar')) {
+                throw new Error('Settings must render as a focused system workspace without the workspace sidebar.')
               }
               if (workspace.querySelectorAll('.settings-card').length !== 14) {
                 throw new Error('Settings extraction did not retain all fourteen cards.')
@@ -7960,8 +7978,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           scrollX: window.scrollX,
           scrollY: window.scrollY,
           scrollTargetFound: Boolean(document.querySelector(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET ?? 'body')})),
-          activeWorkspace: document.querySelector('.workspace-tabs button.active span')?.textContent?.trim() ??
-            document.querySelector('.workspace-tool-rail button[aria-current="page"]')?.textContent?.trim() ??
+          activeWorkspace: document.querySelector('.workspace-sidebar [aria-current="page"] .workspace-nav-label')?.textContent?.trim() ??
             document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim(),
           documentWidth: document.documentElement.scrollWidth,
           horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,

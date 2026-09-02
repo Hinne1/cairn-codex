@@ -6,7 +6,7 @@ import FailureProbe from './components/FailureProbe.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
 import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
-import WorkspaceSwitcher from './components/WorkspaceSwitcher.vue'
+import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
 import type { CollectionFarmingControls } from './workspaces/collection-farming'
@@ -287,9 +287,6 @@ const activeView = ref<ActiveView>('collection')
 const collectionSystemDestinationActive = computed(() =>
   activeView.value !== 'vault' && activeView.value !== 'settings'
 )
-const specialistWorkspaceActive = computed(() =>
-  activeView.value !== 'collection' && activeView.value !== 'vault' && activeView.value !== 'settings'
-)
 const query = ref('')
 const searchQuery = ref('')
 const rarityFilter = ref<RarityFilter>('all')
@@ -307,6 +304,7 @@ const activeCollectionMaterialsControls = computed<CollectionMaterialsControls>(
   }
 })
 const trackerCollapsed = ref(initialPreferences.appearance.trackerCollapsed)
+const navigationCollapsed = ref(initialPreferences.appearance.navigationCollapsed)
 const miCountingMode = ref<MiCountingMode>(initialPreferences.workspace.miCountingMode)
 const showLegacyScanner = ref(initialPreferences.workspace.showLegacyScanner)
 const setProgressFilter = ref<SetProgressFilter>('all')
@@ -1713,6 +1711,7 @@ watch(plannerLevelCap, (level) => {
   if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
 })
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
+watch(navigationCollapsed, (navigationCollapsed) => preferenceRepository.update('appearance', { navigationCollapsed }))
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (restoringAppHistory) return
   plannerPage.value = 1
@@ -4468,9 +4467,8 @@ function formatRollValue(value: number): string {
             To-do <span v-if="remainingTodoCount" class="todo-nav-count">{{ remainingTodoCount }}</span>
           </button>
           <button
+            v-if="!collectionSystemDestinationActive"
             type="button"
-            :class="{ active: collectionSystemDestinationActive }"
-            :aria-current="collectionSystemDestinationActive ? 'page' : undefined"
             @click="returnToCollection"
           >
             Collection
@@ -4752,6 +4750,23 @@ function formatRollValue(value: number): string {
       @export-diagnostics="exportDiagnostics"
     >
     <FailureProbe v-if="simulateWorkspaceFailure" />
+    <div
+      class="workspace-layout"
+      :class="{
+        'has-sidebar': snapshot && collectionSystemDestinationActive,
+        'navigation-collapsed': navigationCollapsed
+      }"
+    >
+      <WorkspaceSidebar
+        v-if="snapshot && collectionSystemDestinationActive"
+        :active-id="activeView"
+        :tools="visibleWorkspaceTools"
+        :collapsed="navigationCollapsed"
+        @home="returnToCollection"
+        @select="openWorkspaceTool"
+        @customize="toolSettingsOpen = true"
+        @toggle="navigationCollapsed = !navigationCollapsed"
+      />
     <main>
       <section v-if="appInitializing || activeBackgroundJob" class="background-scan" aria-live="polite">
         <span class="scan-spinner" aria-hidden="true" />
@@ -4972,10 +4987,7 @@ function formatRollValue(value: number): string {
         <div><p class="section-label">Tools</p><small>Keep this workspace as focused—or as gloriously cluttered—as you like.</small></div>
         <button type="button" @click="toolSettingsOpen = true">Customize tools</button>
       </header>
-      <nav v-if="snapshot && activeView === 'collection'" class="workspace-tabs" aria-label="Cairn Codex workspace">
-        <button type="button" class="active" aria-current="page" @click="activeView = 'collection'">
-          <span>Collection</span><small>Items and copies</small>
-        </button>
+      <nav v-if="snapshot && activeView === 'collection'" class="workspace-shortcuts" aria-label="Tool shortcuts">
         <button v-if="workspaceToolVisible('sets')" type="button" @click="activeView = 'sets'">
           <span>Sets</span><small>{{ setSummary.collected }} / {{ setSummary.total }} complete</small>
         </button>
@@ -5010,15 +5022,6 @@ function formatRollValue(value: number): string {
           <span>To-do</span><small>{{ remainingTodoCount }} remaining</small>
         </button>
       </nav>
-
-      <WorkspaceSwitcher
-        v-if="snapshot && specialistWorkspaceActive"
-        :active-id="activeView"
-        :tools="visibleWorkspaceTools"
-        @home="returnToCollection"
-        @select="openWorkspaceTool"
-        @customize="toolSettingsOpen = true"
-      />
 
       <ExplorerToolbar
         v-if="snapshot && activeView === 'sets'"
@@ -5836,8 +5839,8 @@ function formatRollValue(value: number): string {
           </article>
         </template>
       </BoundedResultSurface>
-
     </main>
+    </div>
     </WorkspaceErrorBoundary>
 
     <Teleport to="body">

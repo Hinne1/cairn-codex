@@ -4,7 +4,9 @@ import { compileSearchQuery } from '../src/shared/search-query.ts'
 import {
   buildSkillNames,
   createSkillExplorerRows,
+  nextSkillSuggestionIndex,
   nextSkillSortControls,
+  skillSortAriaValue,
   skillMatchForItem,
   updateSkillExplorerControls
 } from '../src/renderer/src/workspaces/skill-explorer.ts'
@@ -37,6 +39,14 @@ assert.deepEqual(nextSkillSortControls({ ...controls, sort: 'amount' }, 'amount'
   direction: 'asc',
   page: 1
 })
+assert.equal(nextSkillSuggestionIndex(7, 10, 'next', false), 0)
+assert.equal(nextSkillSuggestionIndex(7, 10, 'previous', false), 9)
+assert.equal(nextSkillSuggestionIndex(9, 10, 'next', true), 0)
+assert.equal(nextSkillSuggestionIndex(0, 10, 'previous', true), 9)
+assert.equal(nextSkillSuggestionIndex(4, 0, 'next', true), 0)
+assert.equal(skillSortAriaValue('level', 'asc', 'level'), 'ascending')
+assert.equal(skillSortAriaValue('level', 'desc', 'level'), 'descending')
+assert.equal(skillSortAriaValue('level', 'desc', 'item'), undefined)
 
 function line(label, minimum, tone = 'default') {
   return { label, minimum, maximum: null, unit: minimum === null ? '' : '%', prefix: '', suffix: '', tone }
@@ -123,11 +133,13 @@ const archiveRows = createSkillExplorerRows(items, { ...controls, scope: 'archiv
 })
 assert.deepEqual(archiveRows.map((row) => row.item.record), ['rank', 'mi-low'])
 
-const [app, workspace, model] = await Promise.all([
+const [app, workspace, model, packageSource] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/SkillExplorerWorkspace.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/renderer/src/workspaces/skill-explorer.ts', import.meta.url), 'utf8')
+  readFile(new URL('../src/renderer/src/workspaces/skill-explorer.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../package.json', import.meta.url), 'utf8')
 ])
+const packageJson = JSON.parse(packageSource)
 
 assert.match(app, /<SkillExplorerWorkspace[\s\S]*?v-(?:else-)?if="activeView === 'skills'"/)
 assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>/)
@@ -140,9 +152,19 @@ assert.match(workspace, /emit\('queue-tooltip', row\.item/)
 assert.match(workspace, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.item, element\)/)
 assert.match(workspace, /@item-focus="showFocusedTooltip"/)
 assert.match(workspace, /emit\('open-item', row\.item/)
+assert.match(workspace, /:aria-activedescendant="activeSuggestionId"/)
+assert.match(workspace, /:aria-controls="pickerOpen \? skillListboxId : undefined"/)
+assert.match(workspace, /props\.skillNames\.map\(\(skill, index\) => \[skill, `\$\{skillListboxId\}-option-\$\{index\}`\]\)/)
+assert.match(workspace, /role="option"[\s\S]*?tabindex="-1"[\s\S]*?:aria-selected="index === pickerIndex"/)
+assert.match(workspace, /@mousedown\.prevent[\s\S]*?@click="selectSkill\(skill\)"/)
+assert.match(workspace, /function revealActiveSuggestion[\s\S]*?listbox\.scrollTop/)
+assert.match(workspace, /role="columnheader" :aria-sort="skillSortAriaValue\(sort, direction, 'level'\)"/)
+assert.match(workspace, /v-if="sort === 'level'" aria-hidden="true"/)
 assert.match(app, /<SkillExplorerWorkspace[\s\S]*?@show-tooltip="showTooltip"/)
 assert.doesNotMatch(workspace, /window\.cairnCodex/)
 assert.match(model, /export function createSkillExplorerRows/)
 assert.match(model, /export function skillMatchForItem/)
+assert.match(packageJson.scripts['test:skill-explorer-workspace:electron'], /test-skill-explorer-workspace-electron\.mjs/)
+assert.match(packageJson.scripts.verify, /test:skill-explorer-workspace:electron/)
 
-console.log('Skill Explorer workspace passed: typed control ownership, skill matching, MI tier collapse, structured filtering, sorting, global tooltip adapters, and a bounded 50-row result surface.')
+console.log('Skill Explorer workspace passed: typed control ownership, accessible combobox traversal and sorting, skill matching, MI tier collapse, structured filtering, global tooltip adapters, and a bounded 50-row result surface.')

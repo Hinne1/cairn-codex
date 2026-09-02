@@ -2151,7 +2151,13 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
         collected: items.filter((item) => item.rarity === rarity && item.discovered).length,
         availableCopies: items.filter((item) => item.rarity === rarity).reduce((total, item) => total + item.availableCount, 0)
       })),
-      skillMasteries: { 'Wendigo Totem': 'Shaman' }
+      skillMasteries: Object.fromEntries([
+        ['Wendigo Totem', 'Shaman'],
+        ...Array.from({ length: 60 }, (_, index) => [
+          `Synthetic Skill ${String(index + 1).padStart(3, '0')}`,
+          'Synthetic QA'
+        ])
+      ])
     }
   }
   if (name !== 'search-help') throw new Error(`Unknown screenshot fixture: ${name}`)
@@ -6586,6 +6592,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               levelSort.click()
               await frames()
               if (!levelSort.textContent?.includes('↓')) throw new Error('Skill Explorer level sort did not select descending order.')
+              const levelColumn = levelSort.closest('[role="columnheader"]')
+              if (levelColumn?.getAttribute('aria-sort') !== 'descending') {
+                throw new Error('Skill Explorer level sort did not expose descending aria-sort state.')
+              }
+              const sortedColumns = [...document.querySelectorAll('.skill-table-header [role="columnheader"][aria-sort]')]
+              if (sortedColumns.length !== 1 || sortedColumns[0] !== levelColumn) {
+                throw new Error('Skill Explorer exposed sort state on more than the active column.')
+              }
+              if (levelSort.querySelector('[aria-hidden="true"]')?.textContent?.trim() !== '↓') {
+                throw new Error('Skill Explorer sort direction glyph was not decorative.')
+              }
               const next = root.querySelector('.bounded-results-footer nav button:last-of-type')
               if (next instanceof HTMLButtonElement && !next.disabled) {
                 next.click()
@@ -6605,13 +6622,132 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const picker = document.querySelector('.skill-combobox input')
               if (!(picker instanceof HTMLInputElement)) throw new Error('Skill picker was unavailable.')
               picker.focus()
-              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              picker.value = ''
+              picker.dispatchEvent(new Event('input', { bubbles: true }))
               await frames()
-              const activeOption = document.querySelector('.skill-suggestions [role="option"].active')
-              if (!(activeOption instanceof HTMLButtonElement)) throw new Error('Skill picker keyboard traversal did not expose an active option.')
               picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
               await frames()
-              if (document.querySelector('.skill-suggestions')) throw new Error('Escape did not close the Skill picker.')
+              if (picker.hasAttribute('aria-controls') || picker.hasAttribute('aria-activedescendant')) {
+                throw new Error('Closed Skill picker retained a dangling ARIA popup reference.')
+              }
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              await frames()
+              const listbox = document.querySelector('.skill-suggestions')
+              let options = [...document.querySelectorAll('.skill-suggestions [role="option"]')]
+              const activeOption = document.querySelector('.skill-suggestions [role="option"].active')
+              if (!(activeOption instanceof HTMLButtonElement)) throw new Error('Skill picker keyboard traversal did not expose an active option.')
+              const activeOptionId = picker.getAttribute('aria-activedescendant')
+              if (
+                document.activeElement !== picker ||
+                !(listbox instanceof HTMLElement) ||
+                picker.getAttribute('aria-controls') !== listbox.id ||
+                !activeOptionId ||
+                activeOption.id !== activeOptionId ||
+                document.getElementById(activeOptionId) !== activeOption ||
+                activeOption.tabIndex !== -1 ||
+                activeOption.getAttribute('aria-selected') !== 'true'
+              ) {
+                throw new Error('Skill picker did not keep input focus on its active-descendant option.')
+              }
+              const optionIds = options.map((option) => option.id)
+              if (
+                options.length < 20 ||
+                optionIds.some((id) => !id) ||
+                new Set(optionIds).size !== options.length ||
+                options.some((option) => !(option instanceof HTMLButtonElement) || option.tabIndex !== -1)
+              ) {
+                throw new Error('Skill picker options did not expose unique IDs without extra Tab stops.')
+              }
+              const stableOption = options[10]
+              const stableSkill = stableOption?.textContent?.trim()
+              const stableOptionId = stableOption?.id
+              if (!stableSkill || !stableOptionId) throw new Error('Skill picker stable-ID option was unavailable.')
+              picker.value = stableSkill
+              picker.dispatchEvent(new Event('input', { bubbles: true }))
+              await frames()
+              const filteredStableOption = [...document.querySelectorAll('.skill-suggestions [role="option"]')]
+                .find((option) => option.textContent?.trim() === stableSkill)
+              if (filteredStableOption?.id !== stableOptionId) {
+                throw new Error('Skill picker option ID changed when its suggestion list was filtered.')
+              }
+              picker.value = ''
+              picker.dispatchEvent(new Event('input', { bubbles: true }))
+              await frames()
+              options = [...document.querySelectorAll('.skill-suggestions [role="option"]')]
+              const initialScrollTop = listbox.scrollTop
+              for (let index = 0; index < 20; index += 1) {
+                picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              }
+              await frames()
+              const traversedOptionId = picker.getAttribute('aria-activedescendant')
+              const traversedOption = traversedOptionId ? document.getElementById(traversedOptionId) : null
+              if (!(traversedOption instanceof HTMLButtonElement) || document.activeElement !== picker) {
+                throw new Error('Repeated Skill picker traversal lost its input-owned active descendant.')
+              }
+              const listboxRect = listbox.getBoundingClientRect()
+              const traversedRect = traversedOption.getBoundingClientRect()
+              if (
+                listbox.scrollTop <= initialScrollTop ||
+                traversedRect.top < listboxRect.top - 1 ||
+                traversedRect.bottom > listboxRect.bottom + 1
+              ) {
+                throw new Error('Skill picker did not scroll its keyboard-active option into view.')
+              }
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+              await frames()
+              if (picker.getAttribute('aria-activedescendant') === traversedOptionId || document.activeElement !== picker) {
+                throw new Error('Arrow Up did not move the Skill picker active descendant backward.')
+              }
+              const pointerOption = options[10]
+              if (!(pointerOption instanceof HTMLButtonElement)) throw new Error('Skill picker pointer option was unavailable.')
+              const pointerSkill = pointerOption.textContent?.trim()
+              const mousedownAllowed = pointerOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+              if (mousedownAllowed || document.activeElement !== picker) {
+                throw new Error('Pointer interaction moved focus away from the Skill picker input.')
+              }
+              pointerOption.click()
+              await frames()
+              if (
+                !pointerSkill ||
+                picker.value !== pointerSkill ||
+                document.querySelector('.skill-suggestions') ||
+                picker.hasAttribute('aria-controls') ||
+                picker.hasAttribute('aria-activedescendant')
+              ) {
+                throw new Error('Pointer selection did not select and close the Skill picker option.')
+              }
+              picker.value = ''
+              picker.dispatchEvent(new Event('input', { bubbles: true }))
+              await frames()
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+              await frames()
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+              await frames()
+              const keyboardOptionId = picker.getAttribute('aria-activedescendant')
+              const keyboardOption = keyboardOptionId ? document.getElementById(keyboardOptionId) : null
+              const reopenedOptions = [...document.querySelectorAll('.skill-suggestions [role="option"]')]
+              if (!(keyboardOption instanceof HTMLButtonElement) || keyboardOption !== reopenedOptions.at(-1)) {
+                throw new Error('Arrow Up did not open the Skill picker on its final option.')
+              }
+              const selectedSkill = keyboardOption.textContent?.trim()
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+              await frames()
+              if (!selectedSkill || picker.value !== selectedSkill || document.querySelector('.skill-suggestions')) {
+                throw new Error('Enter did not select and close the active Skill picker option.')
+              }
+              picker.dispatchEvent(new Event('input', { bubbles: true }))
+              await frames()
+              if (!document.querySelector('.skill-suggestions')) throw new Error('Skill picker did not reopen for Escape verification.')
+              picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+              await frames()
+              if (
+                document.querySelector('.skill-suggestions') ||
+                picker.value !== selectedSkill ||
+                picker.hasAttribute('aria-controls') ||
+                picker.hasAttribute('aria-activedescendant')
+              ) {
+                throw new Error('Escape did not close the Skill picker without changing its value.')
+              }
               return performance.now() - started
             })()
           `)

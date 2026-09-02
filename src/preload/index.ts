@@ -21,6 +21,7 @@ import {
   type LiveSupplyDispenseResult,
   type OperationHistoryPage,
   type OperationHistoryRequest,
+  type PreferenceBootstrapResult,
   type PreferenceLoadReport,
   type SpecialItemRecoveryResult,
   type RetrievalResult,
@@ -115,6 +116,10 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.reportRendererError, report) as Promise<void>,
   reportPreferenceLoad: (report: PreferenceLoadReport) =>
     ipcRenderer.invoke(IPC_CHANNELS.reportPreferenceLoad, report) as Promise<void>,
+  loadPreferences: (origin, candidateSerialized) =>
+    ipcRenderer.invoke(IPC_CHANNELS.loadPreferences, { origin, candidateSerialized }) as Promise<PreferenceBootstrapResult>,
+  savePreferences: (serialized) =>
+    ipcRenderer.invoke(IPC_CHANNELS.savePreferences, { serialized }) as Promise<void>,
   exportPreferences: (serialized) =>
     ipcRenderer.invoke(IPC_CHANNELS.exportPreferences, { serialized }) as Promise<DiagnosticExportResult>,
   getStartupStatus: () =>

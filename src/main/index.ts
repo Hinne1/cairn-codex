@@ -61,6 +61,7 @@ import {
   DiagnosticLogger
 } from './diagnostics'
 import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-recovery'
+import { PreferenceFileStore } from './preference-file-store.ts'
 import {
   BackgroundJobCanceledError,
   BackgroundJobCoordinator,
@@ -79,6 +80,7 @@ import {
   validatePath,
   validatePathAndVaultIds,
   validatePinnedBest,
+  validatePreferenceBootstrap,
   validatePreferenceLoad,
   validateRendererError,
   validateSerializedPreferences,
@@ -735,6 +737,7 @@ function registerIpcHandlers(
   const collectionCachePath = join(app.getPath('userData'), 'collection-snapshot.json')
   const mapLocationCachePath = join(app.getPath('userData'), 'map-location-index.json')
   const gdiaBackupDirectory = join(app.getPath('userData'), 'migrations', 'gdia')
+  const preferenceStore = new PreferenceFileStore(join(app.getPath('userData'), 'preferences.json'))
   let gdiaImportProgress: GdiaImportProgress | null = null
   const operations = new MainOperationCoordinator({
     diagnostics,
@@ -874,6 +877,23 @@ function registerIpcHandlers(
     IPC_CHANNELS.reportPreferenceLoad,
     (_event, input: PreferenceLoadReport) => diagnosticsService.reportPreferenceLoad(input),
     validatePreferenceLoad
+  )
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.loadPreferences,
+    async (_event, input: { origin: string; candidateSerialized: string | null }) => {
+      const result = await preferenceStore.bootstrap(input.origin, input.candidateSerialized)
+      diagnostics.info('settings', result.recovered ? 'preferences.file-recovered' : 'preferences.file-loaded', {
+        importedOrigin: result.importedOrigin,
+        backupCount: result.backupCount
+      })
+      return result
+    },
+    validatePreferenceBootstrap
+  )
+  ipcDomains.diagnostics.handle(
+    IPC_CHANNELS.savePreferences,
+    (_event, input: { serialized: string }) => preferenceStore.save(input.serialized),
+    validateSerializedPreferences
   )
   ipcDomains.diagnostics.handle(
     IPC_CHANNELS.exportPreferences,
@@ -1590,6 +1610,7 @@ function registerIpcHandlers(
   return async () => {
     stopPublishingJobs()
     await queuedArchiveBackups.flush()
+    await preferenceStore.flush()
     await operations.flush()
     await archiveBackups.flush()
     diagnostics.info('startup', 'application.shutdown')

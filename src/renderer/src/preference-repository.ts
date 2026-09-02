@@ -2,6 +2,7 @@ import { ONBOARDING_STEP_COUNT, ONBOARDING_VERSION, type OnboardingStatus } from
 
 export const PREFERENCE_STORAGE_KEY = 'cairn-codex-preferences'
 export const PREFERENCE_SCHEMA_VERSION = 1
+export const MAX_PLANNER_PROFILES = 100
 
 export type PreferenceLoadSource = 'fresh' | 'legacy' | 'stored'
 export type CollectionBasisPreference = 'stashes' | 'archive'
@@ -178,27 +179,36 @@ function createPlannerProfile(
 }
 
 function validPlannerProfile(value: unknown, fallbackTime: string): StoredPlannerProfile | null {
-  if (!value || typeof value !== 'object') return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const profile = value as Partial<StoredPlannerProfile>
-  if (typeof profile.id !== 'string' || !profile.id || typeof profile.name !== 'string' ||
-      !Array.isArray(profile.skills) || !profile.skills.every((skill) => typeof skill === 'string') ||
-      typeof profile.levelCap !== 'number') return null
+  const serialized = JSON.stringify(value)
+  let hash = 2166136261
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  const id = typeof profile.id === 'string' && profile.id
+    ? profile.id
+    : `recovered-${(hash >>> 0).toString(16).padStart(8, '0')}`
   const masteries = stringArray(profile.masteries, 2, 40)
   return {
-    id: profile.id,
-    name: profile.name.slice(0, 60),
-    ...(typeof profile.className === 'string' ? { className: profile.className.slice(0, 80) } : {}),
-    ...(masteries ? { masteries } : {}),
-    skills: profile.skills.slice(0, 128),
+    ...profile,
+    id,
+    name: typeof profile.name === 'string' && profile.name.trim()
+      ? profile.name.slice(0, 60)
+      : 'Recovered plan',
+    className: typeof profile.className === 'string' ? profile.className.slice(0, 80) : undefined,
+    masteries: masteries ?? undefined,
+    skills: stringArray(profile.skills, 128, 200) ?? [],
     excludedSkills: stringArray(profile.excludedSkills, 128, 200) ?? [],
     minimumLevel: clampNumber(profile.minimumLevel, 1, 1, 100),
     levelCap: clampNumber(profile.levelCap, 70, 1, 100),
     source: profile.source === 'character' ? 'character' : 'manual',
-    ...(typeof profile.characterPath === 'string' ? { characterPath: profile.characterPath } : {}),
-    ...(typeof profile.characterLevel === 'number'
-      ? { characterLevel: clampNumber(profile.characterLevel, 1, 1, 100) }
-      : {}),
-    ...(typeof profile.isHardcore === 'boolean' ? { isHardcore: profile.isHardcore } : {}),
+    characterPath: typeof profile.characterPath === 'string' ? profile.characterPath : undefined,
+    characterLevel: typeof profile.characterLevel === 'number'
+      ? clampNumber(profile.characterLevel, 1, 1, 100)
+      : undefined,
+    isHardcore: typeof profile.isHardcore === 'boolean' ? profile.isHardcore : undefined,
     modifiedAt: typeof profile.modifiedAt === 'string' ? profile.modifiedAt : fallbackTime
   }
 }
@@ -409,16 +419,24 @@ function validateStored(
     result.search.oracleMaximumLevel = readNumber(source.search.oracleMaximumLevel, 'search.oracleMaximumLevel', result.search.oracleMaximumLevel, 1, 100)
   } else invalid('search')
   if (source.planner && typeof source.planner === 'object') {
-    if (Array.isArray(source.planner.profiles) && source.planner.profiles.length <= 100) {
-      const profiles = source.planner.profiles.map((profile) => validPlannerProfile(profile, fallback.meta.updatedAtUtc))
+    if (Array.isArray(source.planner.profiles)) {
+      const candidates = source.planner.profiles
+        .slice(0, MAX_PLANNER_PROFILES)
+        .map((profile) => validPlannerProfile(profile, fallback.meta.updatedAtUtc))
         .filter((profile): profile is StoredPlannerProfile => Boolean(profile))
+      const profiles = [...new Map(candidates.map((profile) => [profile.id, profile])).values()]
       if (profiles.length) result.planner.profiles = profiles
-      if (profiles.length !== source.planner.profiles.length || !profiles.length) invalid('planner.profiles')
+      if (profiles.length !== source.planner.profiles.length || profiles.length !== candidates.length || !profiles.length) {
+        invalid('planner.profiles')
+      }
     } else invalid('planner.profiles')
     if (typeof source.planner.selectedProfileId === 'string' &&
       result.planner.profiles.some((profile) => profile.id === source.planner!.selectedProfileId)) {
       result.planner.selectedProfileId = source.planner.selectedProfileId
-    } else invalid('planner.selectedProfileId')
+    } else {
+      invalid('planner.selectedProfileId')
+      result.planner.selectedProfileId = result.planner.profiles[0]?.id ?? result.planner.selectedProfileId
+    }
     const ignored = stringArray(source.planner.ignoredRecords)
     const favorites = stringArray(source.planner.favoriteRecords)
     if (ignored) result.planner.ignoredRecords = ignored; else invalid('planner.ignoredRecords')

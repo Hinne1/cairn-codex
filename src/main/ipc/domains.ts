@@ -7,7 +7,8 @@ export const MAIN_IPC_CHANNELS = {
   diagnostics: [
     IPC_CHANNELS.getAppStatus, IPC_CHANNELS.getDebugLogging, IPC_CHANNELS.setDebugLogging,
     IPC_CHANNELS.recordNavigation, IPC_CHANNELS.reportRendererError,
-    IPC_CHANNELS.reportPreferenceLoad, IPC_CHANNELS.exportPreferences,
+    IPC_CHANNELS.reportPreferenceLoad, IPC_CHANNELS.loadPreferences,
+    IPC_CHANNELS.savePreferences, IPC_CHANNELS.exportPreferences,
     IPC_CHANNELS.getRecoveryStatus, IPC_CHANNELS.exportDiagnostics
   ],
   backups: [

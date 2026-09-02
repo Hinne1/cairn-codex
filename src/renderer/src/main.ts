@@ -8,6 +8,7 @@ import {
   resetUiPreferences,
   type RendererFailureReport
 } from './renderer-recovery'
+import { PREFERENCE_STORAGE_KEY } from './preference-repository'
 import './styles.css'
 
 applyThemeManifest(document.documentElement, CAIRN_THEME_MANIFEST)
@@ -49,7 +50,9 @@ function renderRootRecovery(error: unknown, existingFailure?: RendererFailureRep
     if (action === 'safe') void window.cairnCodex.restartInSafeMode()
     if (action === 'reset') {
       resetUiPreferences(localStorage)
-      location.reload()
+      const serialized = localStorage.getItem(PREFERENCE_STORAGE_KEY)
+      void (serialized ? window.cairnCodex.savePreferences(serialized) : Promise.resolve())
+        .finally(() => location.reload())
     }
     if (action === 'diagnostics') void window.cairnCodex.exportDiagnostics()
   })
@@ -57,18 +60,23 @@ function renderRootRecovery(error: unknown, existingFailure?: RendererFailureRep
   recovery.querySelector<HTMLButtonElement>('[data-action="reload"]')?.focus()
 }
 
-const app = createApp(App)
-app.config.errorHandler = (error) => {
-  const failure = rendererFailureReport(error, 'active workspace')
-  const handled = !window.dispatchEvent(new CustomEvent(RENDERER_FAILURE_EVENT, {
-    detail: failure,
-    cancelable: true
-  }))
-  if (!handled) renderRootRecovery(error, failure)
+async function bootstrap(): Promise<void> {
+  const origin = location.protocol === 'file:' ? 'file://' : location.origin
+  const durable = await window.cairnCodex.loadPreferences(
+    origin,
+    localStorage.getItem(PREFERENCE_STORAGE_KEY)
+  )
+  if (durable.serialized !== null) localStorage.setItem(PREFERENCE_STORAGE_KEY, durable.serialized)
+  const app = createApp(App)
+  app.config.errorHandler = (error) => {
+    const failure = rendererFailureReport(error, 'active workspace')
+    const handled = !window.dispatchEvent(new CustomEvent(RENDERER_FAILURE_EVENT, {
+      detail: failure,
+      cancelable: true
+    }))
+    if (!handled) renderRootRecovery(error, failure)
+  }
+  app.mount('#app')
 }
 
-try {
-  app.mount('#app')
-} catch (error) {
-  renderRootRecovery(error)
-}
+void bootstrap().catch((error) => renderRootRecovery(error))

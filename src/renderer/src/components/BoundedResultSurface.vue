@@ -73,10 +73,11 @@ const entryKeys = computed(() => resultWindow.value.entries.map((entry) => entry
 const showResults = computed(() => !props.loading && !props.error && resultWindow.value.entries.length > 0)
 const selectable = computed(() => props.selectionMode !== 'none')
 const focusable = computed(() => selectable.value || props.navigable || props.interactive)
-const collectionRole = computed(() => props.layout === 'list'
+const usesListSemantics = computed(() => props.layout === 'list' || (props.layout === 'grid' && !focusable.value))
+const collectionRole = computed(() => usesListSemantics.value
   ? (selectable.value ? 'listbox' : 'list')
   : 'grid')
-const itemRole = computed(() => props.layout === 'list'
+const itemRole = computed(() => usesListSemantics.value
   ? (selectable.value ? 'option' : 'listitem')
   : 'row')
 

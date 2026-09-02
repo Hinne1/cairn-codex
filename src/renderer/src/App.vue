@@ -1537,7 +1537,12 @@ function restoreAppRoute(route: AppRoute): void {
       collectionControls.value = { ...route.controls }
       break
     case 'sets':
+      if (searchQueryTimer) {
+        clearTimeout(searchQueryTimer)
+        searchQueryTimer = null
+      }
       query.value = route.controls.query
+      searchQuery.value = route.controls.query
       setProgressFilter.value = route.controls.progress
       setFeatureFilter.value = route.controls.feature
       setSortMode.value = route.controls.sort

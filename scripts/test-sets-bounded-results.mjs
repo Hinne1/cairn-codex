@@ -46,8 +46,9 @@ const empty = createBoundedResultWindow({
 assert.equal(empty.entries.length, 0)
 assert.equal(empty.totalCount, 0)
 
-const [app, styles, main, benchmark, packageJson] = await Promise.all([
+const [app, boundedSurface, styles, main, benchmark, packageJson] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8'),
   readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('./benchmark-ui.mjs', import.meta.url), 'utf8'),
@@ -58,8 +59,11 @@ assert.match(app, /v-else-if="activeView === 'sets'"[\s\S]*?v-model:page="curren
 assert.match(app, /:items="visibleSets"[\s\S]*?:get-key="set => set\.record"[\s\S]*?:page-size="50"/)
 assert.match(app, /#item="\{ item: set \}"[\s\S]*?:data-set-record="set\.record"/)
 assert.match(app, /watch\([\s\S]*?setProgressFilter[\s\S]*?setFeatureFilter[\s\S]*?setSortMode[\s\S]*?setSortDirection[\s\S]*?currentPage\.value = 1/)
+assert.match(app, /case 'sets':[\s\S]*?searchQuery\.value = route\.controls\.query[\s\S]*?currentPage\.value = route\.controls\.page/)
 assert.doesNotMatch(app, /v-for="set in visibleSets"/)
 assert.doesNotMatch(app, /visibleSets\.length === 0/)
+assert.match(boundedSurface, /props\.layout === 'grid' && !focusable\.value/)
+assert.match(boundedSurface, /usesListSemantics\.value[\s\S]*?'list'[\s\S]*?'listitem'/)
 assert.match(styles, /\.set-results \.bounded-results-collection\.is-grid/)
 assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.set-results \.bounded-results-collection\.is-grid/)
 assert.match(main, /name === 'sets-bounded'/)

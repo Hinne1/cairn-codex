@@ -5662,6 +5662,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!root || cards().length !== 50) {
                 throw new Error('The 202-set fixture did not mount exactly 50 set cards on page one.')
               }
+              const collection = root.querySelector('.bounded-results-collection')
+              const semanticItems = [...root.querySelectorAll('.bounded-results-item')]
+              if (collection?.getAttribute('role') !== 'list' || semanticItems.some((item) => item.getAttribute('role') !== 'listitem')) {
+                throw new Error('Passive Set cards did not retain valid list/listitem semantics inside their visual grid.')
+              }
               const firstPageRecord = firstRecord()
               if (!firstPageRecord) throw new Error('Sets did not expose stable set identity.')
               const next = nextButton()
@@ -6882,25 +6887,59 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 const initialSet = assertTypedEntry('sets', false)
                 assertInitialControls(initialSet)
                 if (activeWorkspace() !== 'Sets') throw new Error('Direct Sets deep link did not restore its workspace.')
+                const setsRoot = document.querySelector('.set-results')
+                const currentSetPage = () => setsRoot?.querySelector('.bounded-results-footer nav span')?.textContent?.trim() ?? ''
+                if (!currentSetPage().includes('Page 2')) throw new Error('Direct Sets deep link did not restore page two.')
                 const setItem = document.querySelector('.set-card li button')
                 if (!(setItem instanceof HTMLButtonElement)) throw new Error('Deep-linked Sets route did not render an item link.')
                 setItem.click()
                 await frames()
                 const setItemState = assertTypedEntry('sets', true)
                 if (!document.querySelector('.item-drawer')) throw new Error('Set item link did not open its typed item route.')
-                const backToSet = waitForPopState()
-                window.history.back()
-                await backToSet
+
+                const closeDrawer = document.querySelector('.drawer-close')
+                if (!(closeDrawer instanceof HTMLButtonElement)) throw new Error('Set item drawer did not expose its close action.')
+                closeDrawer.click()
+                await frames()
                 assertTypedEntry('sets', false)
-                if (document.querySelector('.item-drawer')) throw new Error('Back did not close the set item route.')
-                const forwardToSetItem = waitForPopState()
-                window.history.forward()
-                await forwardToSetItem
+                if (!currentSetPage().includes('Page 2')) throw new Error('Closing the Set item drawer did not retain page two.')
+
+                const search = document.querySelector('.collection-explorer-toolbar .explorer-search input')
+                if (!(search instanceof HTMLInputElement)) throw new Error('Sets search was unavailable for route restoration.')
+                search.value = 'no-such-route-restoration-set'
+                search.dispatchEvent(new Event('input', { bubbles: true }))
+                await new Promise((resolve) => setTimeout(resolve, 175))
+                await frames()
+                const restrictedState = assertTypedEntry('sets', false)
+                if (restrictedState.route.controls.page !== 1 || !document.querySelector('.set-results .bounded-results-state.is-empty')) {
+                  throw new Error('Restrictive Sets search did not replace history with its page-one empty state.')
+                }
+
+                const backToSetItem = waitForPopState()
+                window.history.back()
+                await backToSetItem
+                await new Promise((resolve) => setTimeout(resolve, 175))
+                const restoredItem = assertTypedEntry('sets', true)
                 if (
-                  !document.querySelector('.item-drawer') ||
-                  window.history.state.route.itemRecord !== setItemState.route.itemRecord
+                  restoredItem.route.itemRecord !== setItemState.route.itemRecord ||
+                  !currentSetPage().includes('Page 2') ||
+                  !document.querySelector('.item-drawer')
                 ) {
-                  throw new Error('Forward did not restore the set item route.')
+                  throw new Error('Back did not restore the Set item route on page two after a restrictive search.')
+                }
+
+                const forwardToRestrictedSet = waitForPopState()
+                window.history.forward()
+                await forwardToRestrictedSet
+                await new Promise((resolve) => setTimeout(resolve, 175))
+                if (
+                  document.querySelector('.item-drawer') ||
+                  window.history.state.route.itemRecord !== null ||
+                  window.history.state.route.controls.query !== 'no-such-route-restoration-set' ||
+                  window.history.state.route.controls.page !== 1 ||
+                  !document.querySelector('.set-results .bounded-results-state.is-empty')
+                ) {
+                  throw new Error('Forward did not restore the restrictive Sets search route.')
                 }
                 return performance.now() - started
               }

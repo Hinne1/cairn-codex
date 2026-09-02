@@ -63,6 +63,23 @@ runGate('Planner map atlas selection', [
   '--width', '1440', '--height', '1000', '--screenshot-name', 'typed-routes-verify-planner'
 ])
 
+runGate('Custom accessible modal focus', [
+  '--electron-source', '--fixture', 'planner', '--query', 'Wendigo',
+  '--route-hash', verifiedRoute({
+    version: 1,
+    workspace: 'planner',
+    controls: {
+      profileId: null, skills: ['Wendigo Totem'], minimumLevel: 1, maximumLevel: 70,
+      query: '', ownership: 'all', showIgnored: false, sort: 'level', direction: 'asc',
+      display: 'map', page: 1, atlasQuery: 'Wendigo',
+      atlasRegion: 'synthetic qa:review hollow:typed route review', mapScope: 'all',
+      mapSort: 'items', mapDirection: 'desc'
+    }
+  }),
+  '--dismiss-onboarding', '--verify-accessible-modal', '--assert-no-overflow', '--disable-gpu',
+  '--width', '1440', '--height', '1000', '--screenshot-name', 'accessible-planner-focus'
+])
+
 runGate('Accessible modal focus', [
   '--electron-source', '--fixture', 'search-help', '--query', 'wendigo',
   '--category', 'Collection', '--open-search-help', '--verify-responsive-tools',
@@ -70,4 +87,4 @@ runGate('Accessible modal focus', [
   '--width', '520', '--height', '900', '--screenshot-name', 'accessible-dialog-focus'
 ])
 
-console.log('Typed-route Electron gates passed for Collection, Sets, Planner map restoration, and accessible modal focus.')
+console.log('Typed-route Electron gates passed for Collection, Sets, Planner map restoration, and native/custom accessible modal focus.')

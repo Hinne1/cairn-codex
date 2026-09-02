@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { nextModalFocusTarget } from '../src/renderer/src/modal-focus.ts'
+import {
+  connectedModalFocusTarget,
+  isModalHistoryShortcut,
+  nextModalFocusTarget
+} from '../src/renderer/src/modal-focus.ts'
 import { preferredScrollBehavior } from '../src/renderer/src/motion-preference.ts'
 
 const root = { id: 'dialog' }
@@ -18,6 +22,15 @@ assert.equal(nextModalFocusTarget(root, controls, middle, false), null)
 assert.equal(nextModalFocusTarget(root, controls, outside, false), first)
 assert.equal(nextModalFocusTarget(root, controls, outside, true), last)
 assert.equal(nextModalFocusTarget(root, [], outside, false), root)
+assert.equal(isModalHistoryShortcut({ altKey: true, key: 'ArrowLeft' }), true)
+assert.equal(isModalHistoryShortcut({ altKey: true, key: 'ArrowRight' }), true)
+assert.equal(isModalHistoryShortcut({ altKey: false, key: 'ArrowLeft' }), false)
+const connectedTarget = { id: 'connected', isConnected: true }
+const detachedTarget = { id: 'detached', isConnected: false }
+const connectedFallback = { id: 'fallback', isConnected: true }
+assert.equal(connectedModalFocusTarget(connectedTarget, connectedFallback), connectedTarget)
+assert.equal(connectedModalFocusTarget(detachedTarget, connectedFallback), connectedFallback)
+assert.equal(connectedModalFocusTarget(detachedTarget, detachedTarget), null)
 assert.equal(preferredScrollBehavior(true), 'auto')
 assert.equal(preferredScrollBehavior(false), 'smooth')
 
@@ -43,9 +56,11 @@ for (const { path, source } of components) {
 }
 
 assert.match(controller, /document\.addEventListener\('focusin', retainFocus, true\)/u)
+assert.match(controller, /document\.removeEventListener\('focusin', retainFocus, true\)/u)
 assert.match(controller, /event\.key === 'Escape'/u)
+assert.match(controller, /isModalHistoryShortcut\(event\)/u)
 assert.match(controller, /previouslyFocused/u)
-assert.match(controller, /target\?\.isConnected/u)
+assert.match(controller, /connectedModalFocusTarget\(target, fallback\)/u)
 
 const legacyAppDialogCount = (app.match(/role="dialog"/gu) ?? []).length
 assert.equal(legacyAppDialogCount, 4, 'App.vue dialog debt changed; migrate or document it instead of adding another private modal.')
@@ -64,5 +79,6 @@ console.log(JSON.stringify({
   tabCycle: true,
   escapedFocusRecovery: true,
   focusRestoration: true,
+  modalHistoryBlocked: true,
   reducedMotionOverride: true
 }, null, 2))

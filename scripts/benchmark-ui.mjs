@@ -54,6 +54,7 @@ const verifyBoundedKeyboard = process.argv.includes('--verify-bounded-keyboard')
 const verifySupplySelection = process.argv.includes('--verify-supply-selection')
 const verifySuppliesWorkspace = process.argv.includes('--verify-supplies-workspace')
 const verifyResponsiveTools = process.argv.includes('--verify-responsive-tools')
+const verifyAccessibleModal = process.argv.includes('--verify-accessible-modal')
 const assertNoOverflow = process.argv.includes('--assert-no-overflow')
 const verifyFarmingPaging = process.argv.includes('--verify-farming-paging')
 const verifyOracleWorkspace = process.argv.includes('--verify-oracle-workspace')
@@ -163,6 +164,7 @@ const env = {
   ...(verifySupplySelection ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLY_SELECTION: '1' } : {}),
   ...(verifySuppliesWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLIES_WORKSPACE: '1' } : {}),
   ...(verifyResponsiveTools ? { CAIRN_CODEX_SCREENSHOT_VERIFY_RESPONSIVE_TOOLS: '1' } : {}),
+  ...(verifyAccessibleModal ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ACCESSIBLE_MODAL: '1' } : {}),
   ...(verifyFarmingPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING: '1' } : {}),
   ...(verifyOracleWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ORACLE_WORKSPACE: '1' } : {}),
   ...(verifyDismantlingWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE: '1' } : {}),

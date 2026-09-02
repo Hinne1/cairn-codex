@@ -12,8 +12,10 @@ Component-owned modal dialogs use `src/renderer/src/modal-focus.ts`. The control
 - moves focus into the dialog after Vue finishes rendering it;
 - wraps forward and reverse Tab navigation across enabled, visible controls;
 - redirects programmatic focus that escapes an active modal;
+- blocks application-history shortcuts while modal focus is active;
 - handles Escape through the dialog's explicit close policy; and
-- restores focus only when the captured target is still connected.
+- restores focus after rendering only when the captured target is still connected, otherwise using
+  a connected application control as a logical fallback.
 
 Advanced Search supplies its first rule field as the initial target and its trigger as the explicit
 restore target. First-run onboarding and Planner setup initially focus their labeled dialog
@@ -41,9 +43,10 @@ so direct hard-coded smooth scrolling is rejected by the accessibility contract.
 
 `npm run test:accessibility` checks focus-cycle edge cases, escape containment, restoration guards,
 shared-controller adoption, the legacy-dialog debt ceiling, and the reduced-motion override. The
-compact Electron route gate additionally opens Advanced Search, wraps Tab and Shift+Tab, attempts
-to move focus outside the modal, closes with Escape, restores the trigger, and verifies viewport
-containment at 520 px.
+Electron route gates additionally exercise both native Advanced Search and custom Planner
+setup dialogs. It wraps Tab and Shift+Tab, attempts to move focus outside each modal, blocks modal
+history navigation, verifies listener cleanup and detached-trigger fallback, closes with Escape,
+restores the trigger, and verifies viewport containment at 520 px.
 
 The remaining #16 work is a documented keyboard and assistive-technology audit of Collection,
 Transfers, Settings, Sets, Planner, and search; migration of the four App-owned dialogs; and a

@@ -17,6 +17,7 @@ const MODAL_FOCUSABLE_SELECTOR = [
 export interface ModalDialogFocusOptions {
   initialFocus?: () => HTMLElement | null
   restoreFocus?: () => HTMLElement | null
+  restoreFallback?: () => HTMLElement | null
   onEscape?: () => void
 }
 
@@ -41,6 +42,18 @@ export function nextModalFocusTarget<T>(
   return null
 }
 
+export function isModalHistoryShortcut(event: Pick<KeyboardEvent, 'altKey' | 'key'>): boolean {
+  return event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+}
+
+export function connectedModalFocusTarget<T extends { isConnected: boolean }>(
+  target: T | null,
+  fallback: T | null
+): T | null {
+  if (target?.isConnected) return target
+  return fallback?.isConnected ? fallback : null
+}
+
 export function modalFocusableElements(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)]
     .filter((element) => (
@@ -49,6 +62,21 @@ export function modalFocusableElements(root: HTMLElement): HTMLElement[] {
       !element.closest('[inert]') &&
       (element.offsetParent !== null || element === document.activeElement)
     ))
+}
+
+function defaultRestoreFallback(): HTMLElement | null {
+  return [...document.querySelectorAll<HTMLElement>([
+    '.history-nav button:not([disabled])',
+    '.workspace-switcher button:not([disabled])',
+    'main button:not([disabled])',
+    'main a[href]',
+    'main input:not([disabled]):not([type="hidden"])',
+    'main select:not([disabled])',
+    'main [tabindex]:not([tabindex="-1"])'
+  ].join(', '))].find((element) => (
+    element.offsetParent !== null &&
+    !element.closest('[inert]')
+  )) ?? null
 }
 
 export function useModalDialogFocus(
@@ -73,6 +101,7 @@ export function useModalDialogFocus(
   }
 
   function activate(): void {
+    if (active) return
     previouslyFocused = options.restoreFocus?.() ?? (
       document.activeElement instanceof HTMLElement ? document.activeElement : null
     )
@@ -87,10 +116,18 @@ export function useModalDialogFocus(
     document.removeEventListener('focusin', retainFocus, true)
     const target = options.restoreFocus?.() ?? previouslyFocused
     previouslyFocused = null
-    if (restore && target?.isConnected) void nextTick(() => target.focus({ preventScroll: true }))
+    if (restore) void nextTick(() => {
+      const fallback = options.restoreFallback?.() ?? defaultRestoreFallback()
+      connectedModalFocusTarget(target, fallback)?.focus({ preventScroll: true })
+    })
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (isModalHistoryShortcut(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
     if (event.key === 'Escape' && options.onEscape) {
       event.preventDefault()
       event.stopPropagation()

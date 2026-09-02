@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { computed, ref } from 'vue'
 import { compileSearchQuery } from '../src/shared/search-query.ts'
 import {
   buildMiMetricOptions,
   compareCopiesByMiMetric,
+  createMiWorkshopProjectionControls,
   createMiWorkshopRows,
   miFamilyKey,
   miMetricLabel,
@@ -115,6 +117,30 @@ const rareHigh = copy('affix/rare-prefix.dbr', 'affix/rare-suffix.dbr', analysis
 const items = [item(), item({ record: 'records/items/legendary/not-mi.dbr', rarity: 'legendary' })]
 const copies = [magicPair, rareLow, rareHigh]
 
+const reactiveControls = ref({ ...controls })
+const reactiveProjectionControls = createMiWorkshopProjectionControls(reactiveControls)
+let reactiveProjectionExecutions = 0
+const reactiveRows = computed(() => {
+  reactiveProjectionExecutions += 1
+  return createMiWorkshopRows({
+    items,
+    affixes,
+    copies,
+    controls: reactiveProjectionControls.value,
+    query: compileSearchQuery(reactiveProjectionControls.value.query)
+  })
+})
+const initialProjectionControls = reactiveProjectionControls.value
+const initialReactiveRows = reactiveRows.value
+reactiveControls.value = updateMiWorkshopControls(reactiveControls.value, { page: 4 }, false)
+assert.strictEqual(reactiveProjectionControls.value, initialProjectionControls)
+assert.strictEqual(reactiveRows.value, initialReactiveRows)
+assert.equal(reactiveProjectionExecutions, 1, 'page-only navigation must not rerun the archive projection')
+reactiveControls.value = updateMiWorkshopControls(reactiveControls.value, { affix: 'double-rare' }, true)
+assert.notStrictEqual(reactiveProjectionControls.value, initialProjectionControls)
+assert.equal(reactiveRows.value.length, 1)
+assert.equal(reactiveProjectionExecutions, 2, 'a real projection filter change must rerun the archive projection')
+
 const rows = createMiWorkshopRows({ items, affixes, copies, controls, query: compileSearchQuery('') })
 assert.equal(rows.length, 2)
 assert.equal(rows[0].leader.instanceKey, magicPair.instanceKey)
@@ -170,10 +196,11 @@ const largeProjectionMs = performance.now() - largeStarted
 assert.equal(largeRows.length, 4)
 assert.equal(largeRows.reduce((total, row) => total + row.copies.length, 0), 20_000)
 
-const [app, workspace, model] = await Promise.all([
+const [app, workspace, model, main] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/MiWorkshopWorkspace.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/renderer/src/workspaces/mi-workshop.ts', import.meta.url), 'utf8')
+  readFile(new URL('../src/renderer/src/workspaces/mi-workshop.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 ])
 
 assert.match(app, /<MiWorkshopWorkspace[\s\S]*?v-else-if="activeView === 'mi-workshop'"/)
@@ -187,7 +214,7 @@ assert.match(workspace, /defineModel<MiWorkshopControls>\('controls'/)
 assert.match(workspace, /defineExpose\(\{ syncNativeControls \}\)/)
 assert.match(workspace, /<ToolHeader[\s\S]*?<ExplorerToolbar[\s\S]*?<BoundedResultSurface/)
 assert.match(workspace, /:page-size="50"/)
-assert.match(workspace, /const projectionControls = computed<MiWorkshopControls>[\s\S]*?page: 1[\s\S]*?controls: projectionControls\.value/)
+assert.match(workspace, /const projectionControls = createMiWorkshopProjectionControls\(controls\)[\s\S]*?controls: projectionControls\.value/)
 assert.doesNotMatch(workspace, /controls: controls\.value/)
 assert.match(workspace, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.base, element, row\.leader\)/)
 assert.match(workspace, /emit\('queue-tooltip', row\.base, \$event, row\.leader\)/)
@@ -195,5 +222,7 @@ assert.match(workspace, /emit\('open-item', row\.base\)/)
 assert.doesNotMatch(workspace, /window\.cairnCodex/)
 assert.match(model, /group\.prefixRarity === 'rare' && group\.suffixRarity === 'rare'/)
 assert.match(model, /export function createMiWorkshopRows/)
+assert.match(main, /miQuery: document\.querySelector\('\.mi-explorer-toolbar \.explorer-search input'\)\?\.value/)
+assert.match(main, /miAffixFilter: document\.querySelector\('\.mi-explorer-toolbar \.explorer-toolbar-filters select'\)\?\.value/)
 
 console.log(`MI Workshop workspace passed: typed control ownership, exact rare/rare filtering, grouping, structured affix search, metric leadership, level sorting, global tooltip adapters, and a bounded 50-row comparison surface. The generated 20k-copy projection completed in ${largeProjectionMs.toFixed(1)} ms.`)

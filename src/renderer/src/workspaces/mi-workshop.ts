@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import type {
   CollectionAffix,
   CollectionItem,
@@ -67,6 +67,27 @@ export function updateMiWorkshopControls(
   resetPage: boolean
 ): MiWorkshopControls {
   return { ...controls, ...patch, ...(resetPage ? { page: 1 } : {}) }
+}
+
+export function createMiWorkshopProjectionControls(
+  controls: Ref<MiWorkshopControls>
+): ComputedRef<MiWorkshopControls> {
+  // Keep one computed value per projection input. Vue only invalidates the combined object when
+  // one of these primitive values actually changes, so replacing the route snapshot for a
+  // page-only update preserves the projection input identity.
+  const query = computed(() => controls.value.query)
+  const affix = computed(() => controls.value.affix)
+  const metric = computed(() => controls.value.metric)
+  const metricDirection = computed(() => controls.value.metricDirection)
+  const sort = computed(() => controls.value.sort)
+  return computed(() => ({
+    query: query.value,
+    affix: affix.value,
+    metric: metric.value,
+    metricDirection: metricDirection.value,
+    sort: sort.value,
+    page: 1
+  }))
 }
 
 export function miFamilyKey(item: CollectionItem): string {

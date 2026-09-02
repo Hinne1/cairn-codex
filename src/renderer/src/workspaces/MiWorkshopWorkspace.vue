@@ -9,6 +9,7 @@ import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import {
   buildMiMetricOptions,
+  createMiWorkshopProjectionControls,
   createMiWorkshopRows,
   formatPercentile,
   miMetricLabel,
@@ -67,16 +68,7 @@ const showReserves = computed({
 const structuredQuery = computed(() => compileSearchQuery(query.value, searchQueryOptions(searchSchemas.miWorkshop)))
 const metricOptions = computed(() => buildMiMetricOptions(props.copies))
 const selectedMetricLabel = computed(() => miMetricLabel(metricOptions.value, metric.value))
-const projectionControls = computed<MiWorkshopControls>(() => ({
-  query: query.value,
-  affix: affix.value,
-  metric: metric.value,
-  metricDirection: metricDirection.value,
-  sort: sort.value,
-  // Paging belongs to BoundedResultSurface and must not invalidate the potentially large
-  // base/affix projection when the user only advances the mounted result window.
-  page: 1
-}))
+const projectionControls = createMiWorkshopProjectionControls(controls)
 const rows = computed(() => createMiWorkshopRows({
   items: props.items,
   affixes: props.affixes,

@@ -7014,8 +7014,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             prefixClass: row.children[2]?.className,
             suffixClass: row.children[3]?.className
           })),
-          miQuery: document.querySelector('.mi-workshop-search input')?.value,
-          miAffixFilter: document.querySelector('.mi-workshop-controls select')?.value,
+          miQuery: document.querySelector('.mi-explorer-toolbar .explorer-search input')?.value,
+          miAffixFilter: document.querySelector('.mi-explorer-toolbar .explorer-toolbar-filters select')?.value,
           drawer: document.querySelector('.item-drawer h2')?.textContent?.trim(),
           tooltip: document.querySelector('.game-tooltip')?.textContent?.trim(),
           tooltipRect: (() => {

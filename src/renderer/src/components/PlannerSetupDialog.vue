@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CharacterSaveProfile } from '@shared/contracts'
+import { useModalDialogFocus } from '../modal-focus'
 import type { StoredPlannerProfile } from '../preference-repository'
 import {
   plannerSkillsForMasteries,
@@ -37,7 +38,7 @@ const selectedSkills = ref<string[]>([])
 const skillDraft = ref('')
 const minimumLevel = ref(1)
 const levelCap = ref(100)
-const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+const modalFocus = useModalDialogFocus(dialog, { onEscape: () => emit('cancel') })
 
 const selectedClass = computed(() => props.classOptions.find((option) => option.className === selectedClassName.value) ?? null)
 const selectedCharacter = computed(() => props.characters.find((character) => character.path === selectedCharacterPath.value) ?? null)
@@ -67,12 +68,10 @@ const canContinue = computed(() => {
 
 onMounted(() => {
   document.body.classList.add('planner-setup-active')
-  void nextTick(() => dialog.value?.focus())
+  modalFocus.activate()
 })
-onBeforeUnmount(() => {
-  document.body.classList.remove('planner-setup-active')
-  void nextTick(() => previouslyFocused?.focus())
-})
+// Body state is presentation-only; focus restoration is owned by the shared modal controller.
+onBeforeUnmount(() => document.body.classList.remove('planner-setup-active'))
 
 watch(() => props.characters, (characters) => {
   if (source.value === 'character' && !selectedCharacterPath.value) {
@@ -170,25 +169,7 @@ function finish(): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    emit('cancel')
-    return
-  }
-  if (event.key !== 'Tab' || !dialog.value) return
-  const controls = [...dialog.value.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  )].filter((control) => control.offsetParent !== null)
-  if (!controls.length) return
-  const first = controls[0]!
-  const last = controls[controls.length - 1]!
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.value)) {
-    event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
+  modalFocus.handleKeydown(event)
 }
 </script>
 

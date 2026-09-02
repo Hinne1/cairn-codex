@@ -10,6 +10,7 @@ import {
   type AdvancedSearchRule
 } from '@shared/advanced-search'
 import type { SearchFieldDefinition, SearchWorkspaceSchema } from '@shared/search-schema'
+import { useModalDialogFocus } from '../modal-focus'
 
 const props = defineProps<{
   modelValue: string
@@ -30,6 +31,11 @@ const error = ref<string | null>(null)
 const errorRuleId = ref<number | null>(null)
 const dialogId = `advanced-search-${useId()}`
 const errorId = `${dialogId}-error`
+const modalFocus = useModalDialogFocus(dialog, {
+  initialFocus: () => firstControl.value,
+  restoreFocus: () => trigger.value,
+  onEscape: () => closeDialog()
+})
 
 const preview = computed(() => buildAdvancedSearchQuery(draft.value, props.schema))
 const searchSubject = computed(() => props.searchLabel.replace(/^Search\s+/iu, '').trim().toLocaleLowerCase())
@@ -72,12 +78,12 @@ function openDialog(): void {
   error.value = null
   errorRuleId.value = null
   dialog.value?.showModal()
-  void nextTick(() => firstControl.value?.focus())
+  modalFocus.activate()
 }
 
 function closeDialog(): void {
   dialog.value?.close()
-  void nextTick(() => trigger.value?.focus())
+  modalFocus.deactivate()
 }
 
 function resetDraft(): void {
@@ -119,21 +125,6 @@ function apply(): void {
   closeDialog()
 }
 
-function trapFocus(event: KeyboardEvent): void {
-  if (event.key !== 'Tab' || !dialog.value) return
-  const controls = [...dialog.value.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled]), input:not([disabled])')]
-    .filter((control) => control.offsetParent !== null)
-  if (!controls.length) return
-  const first = controls[0]!
-  const last = controls[controls.length - 1]!
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
-}
 </script>
 
 <template>
@@ -154,7 +145,7 @@ function trapFocus(event: KeyboardEvent): void {
       :aria-labelledby="`${dialogId}-title`"
       :aria-describedby="`${dialogId}-description`"
       @cancel.prevent="closeDialog"
-      @keydown="trapFocus"
+      @keydown="modalFocus.handleKeydown"
     >
       <form method="dialog" @submit.prevent="apply">
         <header>

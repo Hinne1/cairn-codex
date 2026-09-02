@@ -5907,6 +5907,142 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           `)
           if (!openedPlannerSetup) throw new Error('New plan dialog was not available for screenshot capture.')
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_ACCESSIBLE_MODAL === '1') {
+          const verifiedAccessibleModal = await window.webContents.executeJavaScript(`
+            (async () => {
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              document.querySelector('.onboarding-skip')?.click()
+              for (let attempt = 0; attempt < 20 && document.querySelector('.onboarding-dialog'); attempt += 1) {
+                await wait(25)
+              }
+              if (document.querySelector('.onboarding-dialog')) {
+                throw new Error('Persisted onboarding could not be dismissed before custom-dialog verification.')
+              }
+              await frames()
+              if (!document.querySelector('.planner-new-plan')) {
+                const collection = [...document.querySelectorAll('.system-nav button')]
+                  .find((button) => button.textContent?.trim() === 'Collection')
+                collection?.click()
+                await frames()
+                const planner = [...document.querySelectorAll('.workspace-tabs button')]
+                  .find((button) => button.querySelector('span')?.textContent?.trim() === 'Leveling Planner')
+                planner?.click()
+                await frames()
+              }
+              const opener = document.querySelector('.planner-new-plan')
+              const outside = document.querySelector('.topbar-actions button:not([disabled]), .history-nav button:not([disabled])')
+              if (!(opener instanceof HTMLButtonElement) || !(outside instanceof HTMLButtonElement)) return false
+              const originalAddEventListener = document.addEventListener
+              const originalRemoveEventListener = document.removeEventListener
+              const registeredModalFocusListeners = []
+              const removedModalFocusListeners = new Set()
+              document.addEventListener = function (type, listener, options) {
+                if (type === 'focusin' && options === true) registeredModalFocusListeners.push(listener)
+                return originalAddEventListener.call(this, type, listener, options)
+              }
+              document.removeEventListener = function (type, listener, options) {
+                if (type === 'focusin' && options === true && registeredModalFocusListeners.includes(listener)) {
+                  removedModalFocusListeners.add(listener)
+                }
+                return originalRemoveEventListener.call(this, type, listener, options)
+              }
+              opener.focus()
+              opener.click()
+              await frames()
+              let dialog = document.querySelector('.planner-setup-dialog')
+              for (let attempt = 0; attempt < 20 && dialog instanceof HTMLElement && !dialog.contains(document.activeElement); attempt += 1) {
+                await wait(25)
+                dialog = document.querySelector('.planner-setup-dialog')
+              }
+              if (!(dialog instanceof HTMLElement) || !dialog.contains(document.activeElement)) {
+                throw new Error('Planner setup did not open with focus inside its custom dialog: ' + JSON.stringify({
+                  dialog: dialog instanceof HTMLElement,
+                  activeTag: document.activeElement?.tagName,
+                  activeClass: document.activeElement instanceof HTMLElement ? document.activeElement.className : null,
+                  bodyClass: document.body.className
+                }))
+              }
+              outside.focus()
+              outside.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+              await frames()
+              if (!dialog.contains(document.activeElement)) {
+                throw new Error('The custom Planner setup dialog allowed programmatic focus to escape.')
+              }
+              const historyState = JSON.stringify(history.state)
+              const historyShortcut = new KeyboardEvent('keydown', {
+                key: 'ArrowLeft', altKey: true, bubbles: true, cancelable: true
+              })
+              let historyShortcutReachedWindow = false
+              const recordWindowHistoryShortcut = () => { historyShortcutReachedWindow = true }
+              window.addEventListener('keydown', recordWindowHistoryShortcut, { once: true })
+              document.activeElement?.dispatchEvent(historyShortcut)
+              window.removeEventListener('keydown', recordWindowHistoryShortcut)
+              await wait(200)
+              if (
+                !historyShortcut.defaultPrevented ||
+                historyShortcutReachedWindow ||
+                JSON.stringify(history.state) !== historyState ||
+                document.querySelector('.onboarding-dialog')
+              ) {
+                throw new Error('An application-history shortcut escaped the active modal: ' + JSON.stringify({
+                  defaultPrevented: historyShortcut.defaultPrevented,
+                  reachedWindow: historyShortcutReachedWindow,
+                  stateChanged: JSON.stringify(history.state) !== historyState,
+                  onboardingPresent: Boolean(document.querySelector('.onboarding-dialog'))
+                }))
+              }
+              document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Escape', bubbles: true, cancelable: true
+              }))
+              await frames()
+              if (document.querySelector('.planner-setup-dialog') || document.activeElement !== opener) {
+                throw new Error('Planner setup did not close and restore focus to its opener.')
+              }
+              document.addEventListener = originalAddEventListener
+              document.removeEventListener = originalRemoveEventListener
+              if (
+                registeredModalFocusListeners.length !== 1 ||
+                removedModalFocusListeners.size !== registeredModalFocusListeners.length
+              ) {
+                throw new Error('Planner setup did not remove its exact captured focus listener: ' + JSON.stringify({
+                  registered: registeredModalFocusListeners.length,
+                  removed: removedModalFocusListeners.size
+                }))
+              }
+              outside.focus()
+              outside.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+              await frames()
+              if (document.activeElement !== outside) {
+                throw new Error('Planner setup retained its focus listener after unmount: ' + JSON.stringify({
+                  activeTag: document.activeElement?.tagName,
+                  activeClass: document.activeElement instanceof HTMLElement ? document.activeElement.className : null,
+                  activeConnected: document.activeElement instanceof HTMLElement ? document.activeElement.isConnected : null,
+                  onboardingPresent: Boolean(document.querySelector('.onboarding-dialog')),
+                  plannerPresent: Boolean(document.querySelector('.planner-setup-dialog')),
+                  outsideClass: outside.className
+                }))
+              }
+
+              opener.focus()
+              opener.click()
+              await frames()
+              dialog = document.querySelector('.planner-setup-dialog')
+              if (!(dialog instanceof HTMLElement)) throw new Error('Planner setup did not reopen for detached-target verification.')
+              document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Escape', bubbles: true, cancelable: true
+              }))
+              opener.remove()
+              await frames()
+              await frames()
+              if (!(document.activeElement instanceof HTMLElement) || !document.activeElement.isConnected || document.activeElement === document.body) {
+                throw new Error('Detached opener did not restore focus to a connected application fallback.')
+              }
+              return true
+            })()
+          `)
+          if (!verifiedAccessibleModal) throw new Error('Planner setup custom-dialog verification controls were unavailable.')
+        }
         const oracleMinimumLevel = process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MIN_LEVEL
         const oracleMaximumLevel = process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_MAX_LEVEL
         if (process.env.CAIRN_CODEX_SCREENSHOT_ORACLE_SURPRISE === '1') {
@@ -6272,10 +6408,32 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                   viewport: { width: window.innerWidth, height: window.innerHeight }
                 }))
               }
-              dialog.querySelector('.advanced-search-close')?.click()
+              const dialogControls = [...dialog.querySelectorAll('button:not([disabled]), select:not([disabled]), input:not([disabled]):not([type="hidden"]), [tabindex]:not([tabindex="-1"])')]
+                .filter((control) => control instanceof HTMLElement && control.offsetParent !== null)
+              const firstDialogControl = dialogControls[0]
+              const lastDialogControl = dialogControls[dialogControls.length - 1]
+              if (!(firstDialogControl instanceof HTMLElement) || !(lastDialogControl instanceof HTMLElement)) {
+                throw new Error('Advanced search did not expose a keyboard focus cycle.')
+              }
+              lastDialogControl.focus()
+              lastDialogControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+              if (document.activeElement !== firstDialogControl) {
+                throw new Error('Tab did not wrap from the last Advanced search control to the first.')
+              }
+              firstDialogControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
+              if (document.activeElement !== lastDialogControl) {
+                throw new Error('Shift+Tab did not wrap from the first Advanced search control to the last.')
+              }
+              advancedTrigger.focus()
+              advancedTrigger.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+              await waitForFrames()
+              if (!dialog.contains(document.activeElement)) {
+                throw new Error('Advanced search allowed programmatic focus to escape the modal.')
+              }
+              document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
               await waitForFrames()
               if (dialog.open || document.activeElement !== advancedTrigger) {
-                throw new Error('Advanced search did not close and restore focus to its trigger.')
+                throw new Error('Escape did not close Advanced search and restore focus to its trigger.')
               }
               const localScroller = [...document.querySelectorAll('.skill-table-wrap, .planner-table-wrap, .mi-table-wrap')]
                 .find((element) => element instanceof HTMLElement && element.offsetParent !== null)

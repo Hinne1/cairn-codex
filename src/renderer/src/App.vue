@@ -22,6 +22,18 @@ import {
   type SkillExplorerControls,
   type SkillMatch
 } from './workspaces/skill-explorer'
+import MiWorkshopWorkspace from './workspaces/MiWorkshopWorkspace.vue'
+import {
+  buildMiMetricOptions,
+  compareCopiesByMiMetric,
+  createMiWorkshopSession,
+  humanStatName,
+  miFamilyKey,
+  miMetricLabel,
+  miMetricResult,
+  type MiWorkshopControls,
+  updateMiWorkshopControls
+} from './workspaces/mi-workshop'
 import SuppliesWorkspace from './workspaces/SuppliesWorkspace.vue'
 import {
   buildReusableSupplySummary,
@@ -51,9 +63,6 @@ import {
   type AppHistoryEntry,
   type AppRoute,
   type MaterialCategory,
-  type MiAffixFilter,
-  type MiMetricKey,
-  type MiSortMode,
   type OwnershipFilter,
   type PlannerDisplay,
   type PlannerMapScope,
@@ -395,6 +404,16 @@ const materialCategory = ref<MaterialCategory>('all')
 const farmingControls = ref<CollectionFarmingControls>({ query: '', rarity: 'all', page: 1 })
 const dismantlingControls = ref<DismantlingControls>({ query: '', mode: 'all', rarity: 'all' })
 const dismantlingSession = createDismantlingSession()
+const miWorkshopControls = ref<MiWorkshopControls>({
+  query: '',
+  affix: 'all',
+  metric: 'overall',
+  metricDirection: 'desc',
+  sort: 'metric',
+  page: 1
+})
+const miWorkshopSession = createMiWorkshopSession()
+const miWorkshopWorkspace = ref<{ syncNativeControls: () => void } | null>(null)
 const infiniteSupplies = ref(true)
 const infiniteSuppliesBusy = ref(false)
 const diagnosticsBusy = ref(false)
@@ -429,17 +448,6 @@ const todoInput = ref<HTMLInputElement | null>(null)
 const todos = ref<TodoItem[]>(structuredClone(initialPreferences.notes.todos))
 const manualDisconnectProcessId = ref<number | null>(null)
 const liveDisconnectPending = ref(false)
-const showMiReserves = ref(false)
-const miWorkshopQuery = ref('')
-const miAffixFilter = ref<MiAffixFilter>('all')
-const miComparisonMetric = ref<MiMetricKey>('overall')
-const miComparisonDirection = ref<SortDirection>('desc')
-const miSortMode = ref<MiSortMode>('metric')
-const miWorkshopPage = ref(1)
-const miAffixFilterSelect = ref<HTMLSelectElement | null>(null)
-const miComparisonMetricSelect = ref<HTMLSelectElement | null>(null)
-const miComparisonDirectionSelect = ref<HTMLSelectElement | null>(null)
-const miSortModeSelect = ref<HTMLSelectElement | null>(null)
 const canNavigateBack = ref(false)
 const canNavigateForward = ref(false)
 const autoLiveConnect = ref(safeModeActive.value ? false : initialPreferences.sources.autoLiveConnect)
@@ -478,7 +486,6 @@ const collectionSearchQuery = computed(() => compileSearchQuery(
 const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, searchQueryOptions(searchSchemas.sets)))
 const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
 const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
-const miStructuredQuery = computed(() => compileSearchQuery(miWorkshopQuery.value, searchQueryOptions(searchSchemas.miWorkshop)))
 const vaultStructuredQuery = computed(() => compileSearchQuery(vaultQuery.value, searchQueryOptions(searchSchemas.vault)))
 const historyStructuredQuery = computed(() => compileSearchQuery(transferHistoryQuery.value, searchQueryOptions(searchSchemas.history)))
 
@@ -1060,8 +1067,8 @@ const selectedCopies = computed(() => {
       if ((left.instanceKey === pinned) !== (right.instanceKey === pinned)) {
         return left.instanceKey === pinned ? -1 : 1
       }
-      const metric = selectedItem.value?.rarity === 'mi' ? miComparisonMetric.value : 'overall'
-      return compareCopiesByMiMetric(left, right, metric, miComparisonDirection.value)
+      const metric = selectedItem.value?.rarity === 'mi' ? miWorkshopControls.value.metric : 'overall'
+      return compareCopiesByMiMetric(left, right, metric, miWorkshopControls.value.metricDirection)
     })
 })
 
@@ -1300,149 +1307,21 @@ const activeCopyAffix = computed(() =>
     : null
 )
 
-const miMetricOptions = computed(() => {
-  const itemFields = new Set<string>()
-  const petFields = new Set<string>()
-  for (const copy of allOwnedCopies.value) {
-    for (const stat of copy.rollAnalysis?.stats ?? []) itemFields.add(stat.field)
-    for (const stat of copy.rollAnalysis?.petStats ?? []) petFields.add(stat.field)
-  }
-  const byLabel = (left: string, right: string) =>
-    humanStatName(left).localeCompare(humanStatName(right)) || left.localeCompare(right)
-  return {
-    quality: [
-      { key: 'overall' as MiMetricKey, label: 'Overall roll quality' },
-      { key: 'base' as MiMetricKey, label: 'Base roll quality' },
-      { key: 'prefix' as MiMetricKey, label: 'Prefix roll quality' },
-      { key: 'suffix' as MiMetricKey, label: 'Suffix roll quality' }
-    ],
-    item: [...itemFields].sort(byLabel).map((field) => ({
-      key: `item:${field}` as MiMetricKey,
-      label: humanStatName(field)
-    })),
-    pet: [...petFields].sort(byLabel).map((field) => ({
-      key: `pet:${field}` as MiMetricKey,
-      label: humanStatName(field)
-    }))
+const miMetricOptions = computed(() => buildMiMetricOptions(allOwnedCopies.value))
+const selectedMiMetricLabel = computed(() =>
+  miMetricLabel(miMetricOptions.value, miWorkshopControls.value.metric)
+)
+const selectedMiMetric = computed({
+  get: () => miWorkshopControls.value.metric,
+  set: (metric: MiWorkshopControls['metric']) => {
+    miWorkshopControls.value = updateMiWorkshopControls(miWorkshopControls.value, { metric }, true)
   }
 })
-
-const selectedMiMetricLabel = computed(() => {
-  const options = [
-    ...miMetricOptions.value.quality,
-    ...miMetricOptions.value.item,
-    ...miMetricOptions.value.pet
-  ]
-  const option = options.find((candidate) => candidate.key === miComparisonMetric.value)
-  if (!option) return 'Overall roll quality'
-  return miComparisonMetric.value.startsWith('pet:') ? `Pet · ${option.label}` : option.label
-})
-
-const miWorkshopRows = computed(() => {
-  if (!snapshot.value) return []
-  const bases = new Map(
-    snapshot.value.items
-      .filter((item) => item.rarity === 'mi')
-      .map((item) => [item.record.toLocaleLowerCase(), item])
-  )
-  const grouped = new Map<string, {
-    key: string
-    base: CollectionItem
-    prefix: string
-    prefixRarity: 'magical' | 'rare' | null
-    suffix: string
-    suffixRarity: 'magical' | 'rare' | null
-    copies: ObservedStashItem[]
-  }>()
-  for (const copy of allOwnedCopies.value) {
-    const base = bases.get(copy.baseRecord.toLocaleLowerCase())
-    if (!base) continue
-    const prefix = affixByRecord.value.get(copy.prefixRecord.toLocaleLowerCase())
-    const suffix = affixByRecord.value.get(copy.suffixRecord.toLocaleLowerCase())
-    const key = [copy.baseRecord, copy.prefixRecord, copy.suffixRecord]
-      .map((value) => value.toLocaleLowerCase())
-      .join('|')
-    const existing = grouped.get(key)
-    if (existing) existing.copies.push(copy)
-    else {
-      grouped.set(key, {
-        key,
-        base,
-        prefix: prefix?.name ?? (copy.prefixRecord ? copy.prefixRecord.split('/').at(-1) ?? copy.prefixRecord : 'No prefix'),
-        prefixRarity: prefix?.rarity ?? null,
-        suffix: suffix?.name ?? (copy.suffixRecord ? copy.suffixRecord.split('/').at(-1) ?? copy.suffixRecord : 'No suffix'),
-        suffixRarity: suffix?.rarity ?? null,
-        copies: [copy]
-      })
-    }
+const selectedMiMetricDirection = computed({
+  get: () => miWorkshopControls.value.metricDirection,
+  set: (metricDirection: MiWorkshopControls['metricDirection']) => {
+    miWorkshopControls.value = updateMiWorkshopControls(miWorkshopControls.value, { metricDirection }, true)
   }
-  const structuredQuery = miStructuredQuery.value
-  const direction = miComparisonDirection.value === 'asc' ? 1 : -1
-  return [...grouped.values()]
-    .map((group) => {
-      const copies = group.copies.sort((left, right) =>
-        compareCopiesByMiMetric(left, right, miComparisonMetric.value, 'desc')
-      )
-      return {
-        ...group,
-        copies,
-        leader: copies[0]!,
-        selectedMetric: miMetricResult(copies[0]!, miComparisonMetric.value)
-      }
-    })
-    .filter((group) => miAffixFilter.value === 'all' ||
-      (group.prefixRarity === 'rare' && group.suffixRarity === 'rare'))
-    .filter((group) => {
-      const presentation = [
-        presentationSearchText(group.base.presentation),
-        ...group.copies.flatMap((copy) => [
-        presentationSearchText(affixByRecord.value.get(copy.prefixRecord.toLocaleLowerCase())?.presentation),
-        presentationSearchText(affixByRecord.value.get(copy.suffixRecord.toLocaleLowerCase())?.presentation)
-        ])
-      ].join(' ')
-      return structuredQuery.matches({
-        text: [group.base.name, group.base.record, group.base.slot, group.base.levelRequirement, group.prefix, group.suffix, presentation].join(' '),
-        fields: {
-          name: group.base.name,
-          slot: group.base.slot,
-          level: group.base.levelRequirement,
-          prefix: group.prefix,
-          suffix: group.suffix,
-          affix: [group.prefix, group.suffix],
-          skill: presentation,
-          damage: presentation,
-          stat: presentation,
-          copies: group.copies.length
-        }
-      })
-    })
-    .sort(
-      (left, right) => {
-        if (miSortMode.value === 'metric') {
-          const leftValue = left.selectedMetric.value
-          const rightValue = right.selectedMetric.value
-          if (leftValue !== null || rightValue !== null) {
-            if (leftValue === null) return 1
-            if (rightValue === null) return -1
-            if (leftValue !== rightValue) return (leftValue - rightValue) * direction
-          }
-        }
-        if (miSortMode.value === 'level' && left.base.levelRequirement !== right.base.levelRequirement) {
-          return (left.base.levelRequirement - right.base.levelRequirement) * direction
-        }
-        if (miSortMode.value === 'name') {
-          const byName = left.base.name.localeCompare(right.base.name)
-          if (byName !== 0) return byName * direction
-        }
-        if (miSortMode.value === 'copies' && left.copies.length !== right.copies.length) {
-          return (left.copies.length - right.copies.length) * direction
-        }
-        return left.base.name.localeCompare(right.base.name) ||
-        (left.base.levelRequirement - right.base.levelRequirement) ||
-        left.prefix.localeCompare(right.prefix) ||
-        left.suffix.localeCompare(right.suffix)
-      }
-    )
 })
 
 function masteryMatchEffect(match: PlannerMasteryMatch): string {
@@ -1655,8 +1534,7 @@ function currentAppRoute(): AppRoute {
       ...oracleControls.value
     } }
     case 'mi-workshop': return { version: 1, workspace: 'mi-workshop', itemRecord, controls: {
-      query: miWorkshopQuery.value, affix: miAffixFilter.value, metric: miComparisonMetric.value,
-      metricDirection: miComparisonDirection.value, sort: miSortMode.value, page: miWorkshopPage.value
+      ...miWorkshopControls.value
     } }
     case 'supplies': return { version: 1, workspace: 'supplies', itemRecord, controls: {
       ...supplyControls.value
@@ -1691,14 +1569,6 @@ function writeAppHistory(mode: 'push' | 'replace', index = appHistoryIndex): voi
 function updateHistoryButtons(): void {
   canNavigateBack.value = appHistoryIndex > 0
   canNavigateForward.value = appHistoryIndex < appHistoryMaximum
-}
-
-function syncMiWorkshopControlElements(): void {
-  if (activeView.value !== 'mi-workshop') return
-  if (miAffixFilterSelect.value) miAffixFilterSelect.value.value = miAffixFilter.value
-  if (miComparisonMetricSelect.value) miComparisonMetricSelect.value.value = miComparisonMetric.value
-  if (miComparisonDirectionSelect.value) miComparisonDirectionSelect.value.value = miComparisonDirection.value
-  if (miSortModeSelect.value) miSortModeSelect.value.value = miSortMode.value
 }
 
 function restoreAppRoute(route: AppRoute): void {
@@ -1761,12 +1631,7 @@ function restoreAppRoute(route: AppRoute): void {
       }
       break
     case 'mi-workshop':
-      miWorkshopQuery.value = route.controls.query
-      miAffixFilter.value = route.controls.affix
-      miComparisonMetric.value = route.controls.metric
-      miComparisonDirection.value = route.controls.metricDirection
-      miSortMode.value = route.controls.sort
-      miWorkshopPage.value = route.controls.page
+      miWorkshopControls.value = { ...route.controls }
       break
     case 'supplies':
       supplyControls.value = { ...route.controls }
@@ -1794,7 +1659,7 @@ function restoreAppRoute(route: AppRoute): void {
     case 'settings': break
   }
   void nextTick(() => {
-    syncMiWorkshopControlElements()
+    if (route.workspace === 'mi-workshop') miWorkshopWorkspace.value?.syncNativeControls()
     if (route.workspace === 'vault') {
       scheduleOperationHistoryRefresh()
       scheduleVaultPageRefresh()
@@ -1808,7 +1673,6 @@ function handlePageShow(): void {
   const entry = parseAppHistoryEntry(window.history.state)
   const route = entry?.route ?? parseAppRouteHash(window.location.hash)
   if (route) restoreAppRoute(route)
-  else void nextTick(syncMiWorkshopControlElements)
 }
 
 function handleAppHistory(event: PopStateEvent): void {
@@ -1897,7 +1761,7 @@ watch(
     materialCategory,
     skillExplorerControls,
     oracleControls,
-    miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode, miWorkshopPage,
+    miWorkshopControls,
     plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
     plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
     plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
@@ -1922,10 +1786,6 @@ watch(plannerLevelCap, (level) => {
   if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
 })
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
-watch([miWorkshopQuery, miAffixFilter, miComparisonMetric, miComparisonDirection, miSortMode], () => {
-  if (restoringAppHistory) return
-  miWorkshopPage.value = 1
-})
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (restoringAppHistory) return
   plannerPage.value = 1
@@ -2027,7 +1887,6 @@ watch(selectedStashPath, async (path) => {
 watch(activeView, async (view) => {
   void window.cairnCodex.recordNavigation(view).catch(() => undefined)
   await nextTick()
-  syncMiWorkshopControlElements()
   window.scrollTo({ top: 0, behavior: 'auto' })
   if (view === 'vault' || view === 'supplies' || view === 'dismantling') {
     await refreshVault()
@@ -3754,10 +3613,6 @@ function setCompletionPercent(set: CollectionSet): string {
   return ((set.collected / set.items.length) * 100).toFixed(1) + '%'
 }
 
-function miFamilyKey(item: CollectionItem): string {
-  return `${item.slot}\0${item.name.normalize('NFKC').trim().toLocaleLowerCase()}`
-}
-
 function setReadyFromStorage(set: CollectionSet): boolean {
   return set.items.every((item) => item.availableCount > 0)
 }
@@ -3872,7 +3727,11 @@ function showItemVersion(item: CollectionItem): void {
 function openSelectedMiInWorkshop(): void {
   if (!selectedItem.value || selectedItem.value.rarity !== 'mi') return
   activeView.value = 'mi-workshop'
-  miWorkshopQuery.value = selectedItem.value.name
+  miWorkshopControls.value = {
+    ...miWorkshopControls.value,
+    query: selectedItem.value.name,
+    page: 1
+  }
   selectedRecord.value = null
 }
 
@@ -4681,140 +4540,10 @@ function copyAffixDelta(copy: ObservedStashItem, kind: 'prefix' | 'suffix'): str
   return 'Different from reference'
 }
 
-function humanStatName(field: string): string {
-  const names: Record<string, string> = {
-    characterStrength: 'Physique',
-    characterDexterity: 'Cunning',
-    characterAttackSpeedModifier: 'Attack speed',
-    characterSpellCastSpeedModifier: 'Cast speed',
-    characterRunSpeedModifier: 'Movement speed',
-    characterTotalSpeedModifier: 'Total speed',
-    characterIntelligence: 'Spirit',
-    characterLife: 'Health',
-    characterLifeModifier: 'Health',
-    characterMana: 'Energy',
-    characterManaModifier: 'Energy',
-    characterDefensiveAbility: 'Defensive ability',
-    characterOffensiveAbility: 'Offensive ability',
-    characterOffensiveAbilityModifier: 'Offensive ability',
-    conversionPercentage: 'Damage conversion',
-    offensiveTotalDamageModifier: 'All damage',
-    offensivePhysical: 'Physical damage',
-    offensivePhysicalModifier: 'Physical damage',
-    offensivePierce: 'Pierce damage',
-    offensivePierceModifier: 'Pierce damage',
-    offensiveFire: 'Fire damage',
-    offensiveFireModifier: 'Fire damage',
-    offensiveCold: 'Cold damage',
-    offensiveColdModifier: 'Cold damage',
-    offensiveLightning: 'Lightning damage',
-    offensiveLightningModifier: 'Lightning damage',
-    offensivePoison: 'Acid damage',
-    offensivePoisonModifier: 'Acid damage',
-    offensiveLife: 'Vitality damage',
-    offensiveLifeModifier: 'Vitality damage',
-    offensiveAether: 'Aether damage',
-    offensiveAetherModifier: 'Aether damage',
-    offensiveChaos: 'Chaos damage',
-    offensiveChaosModifier: 'Chaos damage',
-    offensiveElemental: 'Elemental damage',
-    offensiveElementalModifier: 'Elemental damage',
-    offensiveCritDamageModifier: 'Critical damage',
-    offensiveLifeLeechMin: 'Attack damage converted to health',
-    offensiveSlowPhysical: 'Internal trauma damage',
-    offensiveSlowPhysicalModifier: 'Internal trauma damage',
-    offensiveSlowBleeding: 'Bleeding damage',
-    offensiveSlowBleedingModifier: 'Bleeding damage',
-    offensiveSlowFire: 'Burn damage',
-    offensiveSlowFireModifier: 'Burn damage',
-    offensiveSlowCold: 'Frostburn damage',
-    offensiveSlowColdModifier: 'Frostburn damage',
-    offensiveSlowLightning: 'Electrocute damage',
-    offensiveSlowLightningModifier: 'Electrocute damage',
-    offensiveSlowPoison: 'Poison damage',
-    offensiveSlowPoisonModifier: 'Poison damage',
-    offensiveSlowLife: 'Vitality decay',
-    offensiveSlowLifeModifier: 'Vitality decay',
-    defensivePhysical: 'Physical resistance',
-    defensivePierce: 'Pierce resistance',
-    defensiveFire: 'Fire resistance',
-    defensiveCold: 'Cold resistance',
-    defensiveLightning: 'Lightning resistance',
-    defensivePoison: 'Acid resistance',
-    defensiveLife: 'Vitality resistance',
-    defensiveAether: 'Aether resistance',
-    defensiveChaos: 'Chaos resistance',
-    defensiveBleeding: 'Bleeding resistance',
-    defensiveElementalResistance: 'Elemental resistance'
-  }
-  return names[field] ?? field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (value) => value.toUpperCase())
-}
-
 function formatRollValue(value: number): string {
   return Number.isInteger(value) ? value.toString() : value.toFixed(1)
 }
 
-function miMetricResult(copy: ObservedStashItem, metric: MiMetricKey): {
-  value: number | null
-  percentile: number | null
-  display: string
-} {
-  const analysis = copy.rollAnalysis
-  if (!analysis) return { value: null, percentile: null, display: '—' }
-  const qualityValues: Record<'overall' | 'base' | 'prefix' | 'suffix', number | null> = {
-    overall: analysis.overallEstimatedPercentile,
-    base: analysis.baseEstimatedPercentile,
-    prefix: analysis.prefixEstimatedPercentile,
-    suffix: analysis.suffixEstimatedPercentile
-  }
-  if (metric === 'overall' || metric === 'base' || metric === 'prefix' || metric === 'suffix') {
-    const value = qualityValues[metric]
-    return { value, percentile: value, display: formatPercentile(value) }
-  }
-  const pet = metric.startsWith('pet:')
-  const field = metric.slice(metric.indexOf(':') + 1)
-  const stat = (pet ? analysis.petStats : analysis.stats)?.find((candidate) => candidate.field === field)
-  if (!stat) return { value: null, percentile: null, display: '—' }
-  return {
-    value: stat.value,
-    percentile: stat.estimatedPercentile,
-    display: `${formatRollValue(stat.value)}${stat.estimatedPercentile === null ? '' : ` · ${stat.estimatedPercentile.toFixed(0)}%`}`
-  }
-}
-
-function compareCopiesByMiMetric(
-  left: ObservedStashItem,
-  right: ObservedStashItem,
-  metric: MiMetricKey,
-  direction: SortDirection
-): number {
-  const leftMetric = miMetricResult(left, metric)
-  const rightMetric = miMetricResult(right, metric)
-  if (leftMetric.value === null && rightMetric.value !== null) return 1
-  if (leftMetric.value !== null && rightMetric.value === null) return -1
-  if (leftMetric.value !== null && rightMetric.value !== null && leftMetric.value !== rightMetric.value) {
-    return direction === 'asc'
-      ? leftMetric.value - rightMetric.value
-      : rightMetric.value - leftMetric.value
-  }
-  return (
-    (right.rollAnalysis?.overallEstimatedPercentile ?? -1) -
-    (left.rollAnalysis?.overallEstimatedPercentile ?? -1)
-  )
-}
-
-function presentationSearchText(presentation: ItemPresentation | undefined): string {
-  return (presentation?.sections ?? [])
-    .flatMap((section) => [
-      section.heading ?? '',
-      ...section.lines.map((line) => `${line.prefix} ${line.label} ${line.suffix}`)
-    ])
-    .join(' ')
-}
-
-function formatPercentile(value: number | null | undefined): string {
-  return value == null ? '—' : `${value.toFixed(1)}%`
-}
 </script>
 
 <template>
@@ -5942,141 +5671,24 @@ function formatPercentile(value: number | null | undefined): string {
         </template>
       </section>
 
-      <section v-else-if="activeView === 'mi-workshop'" class="mi-workshop" aria-label="Monster Infrequent workshop">
-        <ToolHeader
-          eyebrow="Monster Infrequent research"
-          title="MI Workshop"
-          description="Physical copies retain their exact level tier here regardless of the completion-counting preference. Affix combinations are grouped below, with the strongest rolled copy leading each group."
-          tone="green"
-        >
-          <template #aside>
-            <label class="reserve-toggle">
-              <input v-model="showMiReserves" type="checkbox" />
-              Show archived copies
-            </label>
-          </template>
-        </ToolHeader>
-        <div class="mi-workshop-summary">
-          <span><strong>{{ rarity('mi')?.collected ?? 0 }}</strong> {{ miCountingMode === 'base' ? 'MI bases collected' : 'MI tiers collected' }}</span>
-          <span><strong>{{ snapshot?.affixSummary.collected ?? 0 }}</strong> affixes discovered</span>
-          <span><strong>{{ miWorkshopRows.length }}</strong> combinations retained</span>
-        </div>
-        <ExplorerToolbar
-          class="mi-explorer-toolbar"
-          v-model="miWorkshopQuery"
-          v-bind="searchGuidance.miWorkshop"
-          search-label="Search workshop"
-          placeholder="Base, affix, stat, skill…"
-          :result-count="miWorkshopRows.length"
-          result-label="affix combinations"
-          tone="green"
-          :search-error="searchErrorMessage(miStructuredQuery)"
-        >
-          <template #filters>
-            <label>
-              <span>Affix quality</span>
-              <select ref="miAffixFilterSelect" v-model="miAffixFilter" autocomplete="off">
-                <option value="all">All combinations</option>
-                <option value="double-rare">Double rares only</option>
-              </select>
-            </label>
-            <label>
-              <span>Compare copies by</span>
-              <select ref="miComparisonMetricSelect" v-model="miComparisonMetric" autocomplete="off">
-                <optgroup label="Roll quality">
-                  <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
-                </optgroup>
-                <optgroup label="Item stats">
-                  <option v-for="option in miMetricOptions.item" :key="option.key" :value="option.key">{{ option.label }}</option>
-                </optgroup>
-                <optgroup label="Bonus to All Pets">
-                  <option v-for="option in miMetricOptions.pet" :key="option.key" :value="option.key">{{ option.label }}</option>
-                </optgroup>
-              </select>
-            </label>
-          </template>
-          <template #sort>
-            <label>
-              <span>Sort by</span>
-              <select ref="miSortModeSelect" v-model="miSortMode" autocomplete="off">
-                <option value="metric">Selected comparison</option>
-                <option value="level">Required level</option>
-                <option value="name">MI name</option>
-                <option value="copies">Stored copies</option>
-              </select>
-            </label>
-            <label>
-              <span>Order</span>
-              <select ref="miComparisonDirectionSelect" v-model="miComparisonDirection" autocomplete="off">
-                <option value="desc">Highest first</option>
-                <option value="asc">Lowest first</option>
-              </select>
-            </label>
-          </template>
-        </ExplorerToolbar>
-        <p id="mi-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
-        <BoundedResultSurface
-          v-model:page="miWorkshopPage"
-          class="mi-table-wrap mi-table-results bounded-tooltip-results"
-          :items="miWorkshopRows"
-          :get-key="row => row.key"
-          :page-size="50"
-          :empty-title="miWorkshopQuery ? 'No matching Monster Infrequents' : miAffixFilter === 'double-rare' ? 'No double-rare combinations retained' : 'The Workshop is empty'"
-          :empty-detail="miWorkshopQuery ? `No stored MI matches “${miWorkshopQuery}”.` : miAffixFilter === 'double-rare' ? 'No stored MI has both a rare prefix and a rare suffix.' : 'Archive a Monster Infrequent to start building the Workshop.'"
-          label="Monster Infrequent affix combinations"
-          aria-describedby="mi-table-scroll-help"
-          tabindex="0"
-          layout="table"
-          interactive
-          item-described-by="item-tooltip"
-          @activate="(_key, row) => openItem(row.base)"
-          @item-focus="(_key, row, element) => showTooltip(row.base, element, row.leader)"
-          @item-blur="scheduleTooltipHide"
-        >
-          <template #header>
-            <div class="mi-table-header" role="row">
-              <span role="columnheader">MI base</span>
-              <span role="columnheader">Level</span>
-              <span role="columnheader">Prefix</span>
-              <span role="columnheader">Suffix</span>
-              <span role="columnheader">{{ selectedMiMetricLabel }}</span>
-              <span role="columnheader">Stored</span>
-            </div>
-          </template>
-          <template #item="{ item: row }">
-            <div
-              class="mi-table-row"
-                @mouseenter="queueTooltip(row.base, $event, row.leader)"
-                @mousemove="moveTooltip"
-                @mouseleave="scheduleTooltipHide"
-            >
-              <span role="gridcell">
-                <span class="mi-base-cell">
-                  <img v-if="itemIconUrl(row.base)" :src="itemIconUrl(row.base)!" alt="" />
-                  <strong>{{ row.base.name }}</strong>
-                </span>
-              </span>
-              <span role="gridcell">{{ row.base.levelRequirement }}</span>
-              <span role="gridcell" :class="['affix-name', row.prefixRarity]">{{ row.prefix }}</span>
-              <span role="gridcell" :class="['affix-name', row.suffixRarity]">{{ row.suffix }}</span>
-              <span role="gridcell" class="mi-score-breakdown">
-                <span class="mi-selected-score"><small>Selected</small><strong>{{ row.selectedMetric.display }}</strong></span>
-                <span><small>Overall</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.overallEstimatedPercentile) }}</strong></span>
-                <span><small>Base</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.baseEstimatedPercentile) }}</strong></span>
-                <span><small>Prefix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.prefixEstimatedPercentile) }}</strong></span>
-                <span><small>Suffix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.suffixEstimatedPercentile) }}</strong></span>
-              </span>
-              <span role="gridcell" class="mi-stored-cell">
-                <strong>{{ row.copies.length }}</strong>
-                <small v-if="row.copies.length > 1">1 leader · {{ row.copies.length - 1 }} archived</small>
-                <span v-if="showMiReserves && row.copies.length > 1" class="reserve-scores">
-                  {{ row.copies.slice(1).map((copy) => miMetricResult(copy, miComparisonMetric).display).join(' · ') }}
-                </span>
-              </span>
-            </div>
-          </template>
-        </BoundedResultSurface>
-      </section>
+      <MiWorkshopWorkspace
+        v-else-if="activeView === 'mi-workshop'"
+        ref="miWorkshopWorkspace"
+        v-model:controls="miWorkshopControls"
+        :items="snapshot?.items ?? []"
+        :affixes="snapshot?.affixes ?? []"
+        :copies="allOwnedCopies"
+        :collected="rarity('mi')?.collected ?? 0"
+        :counting-mode="miCountingMode"
+        :affixes-discovered="snapshot?.affixSummary.collected ?? 0"
+        :session="miWorkshopSession"
+        :icon-url-for-item="itemIconUrl"
+        @queue-tooltip="queueTooltip"
+        @show-tooltip="showTooltip"
+        @move-tooltip="moveTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+      />
 
       <SuppliesWorkspace
         v-else-if="activeView === 'supplies'"
@@ -7136,7 +6748,7 @@ function formatPercentile(value: number | null | undefined): string {
           <button type="button" @click="openSelectedMiInWorkshop">Open in MI Workshop</button>
           <label>
             <span>Compare these copies by</span>
-            <select v-model="miComparisonMetric">
+            <select v-model="selectedMiMetric">
               <optgroup label="Roll quality">
                 <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
               </optgroup>
@@ -7150,7 +6762,7 @@ function formatPercentile(value: number | null | undefined): string {
           </label>
           <label>
             <span>Order</span>
-            <select v-model="miComparisonDirection">
+            <select v-model="selectedMiMetricDirection">
               <option value="desc">Highest first</option>
               <option value="asc">Lowest first</option>
             </select>
@@ -7252,7 +6864,7 @@ function formatPercentile(value: number | null | undefined): string {
                 >{{ copyOverallDelta(copy) }}</p>
                 <p v-if="selectedItem.rarity === 'mi'" class="copy-selected-metric">
                   <span>{{ selectedMiMetricLabel }}</span>
-                  <strong>{{ miMetricResult(copy, miComparisonMetric).display }}</strong>
+                  <strong>{{ miMetricResult(copy, miWorkshopControls.metric).display }}</strong>
                 </p>
                 <div class="copy-affixes">
                   <button

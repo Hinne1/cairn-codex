@@ -215,7 +215,8 @@ metric leadership, and deterministic group sorting. `App.vue` retains one typed 
 control snapshot, the shared comparison drawer, and narrow catalog/icon/global-tooltip/item-drawer
 adapters. Keyboard focus opens the affixed copy tooltip immediately; pointer hover keeps the
 established delay. Changing a user-facing query, filter, metric, or sort resets paging, while route
-restoration replaces the complete snapshot without a watcher erasing the restored page.
+restoration replaces the complete snapshot without a watcher erasing the restored page. Page-only
+changes update the bounded result window without invalidating the archive grouping projection.
 
 ## Semantic badges and Grim Dawn rarity
 

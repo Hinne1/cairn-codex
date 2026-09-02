@@ -129,7 +129,7 @@ const [app, workspace, model] = await Promise.all([
   readFile(new URL('../src/renderer/src/workspaces/skill-explorer.ts', import.meta.url), 'utf8')
 ])
 
-assert.match(app, /<SkillExplorerWorkspace[\s\S]*?v-if="activeView === 'skills'"/)
+assert.match(app, /<SkillExplorerWorkspace[\s\S]*?v-(?:else-)?if="activeView === 'skills'"/)
 assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>/)
 assert.match(app, /v-model:controls="skillExplorerControls"/)
 assert.doesNotMatch(app, /const skillItemRows|const skillSuggestions|const skillItemPage|const skillPickerOpen/)

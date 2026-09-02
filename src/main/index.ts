@@ -6813,6 +6813,38 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const backToCollection = waitForPopState()
               window.history.back()
               await backToCollection
+              const collectionBeforeMaterials = assertTypedEntry('collection', false)
+              const materials = workspaceButton('Components & Consumables')
+              if (!(materials instanceof HTMLButtonElement)) throw new Error('Materials child route was unavailable from Collection.')
+              materials.click()
+              await frames()
+              assertTypedEntry('materials', false)
+              const materialsSearch = document.querySelector('.collection-materials-workspace .explorer-search input')
+              if (!(materialsSearch instanceof HTMLInputElement)) throw new Error('Materials search control was not rendered.')
+              materialsSearch.value = 'materials-only-query'
+              materialsSearch.dispatchEvent(new Event('input', { bubbles: true }))
+              await frames()
+              if (window.history.state.route.controls.query !== 'materials-only-query') {
+                throw new Error('Materials did not own its typed query state.')
+              }
+              collection.click()
+              await frames()
+              const restoredCollection = assertTypedEntry('collection', false)
+              if (JSON.stringify(restoredCollection.route.controls) !== JSON.stringify(collectionBeforeMaterials.route.controls)) {
+                throw new Error('Materials controls leaked into Collection: ' + JSON.stringify({
+                  before: collectionBeforeMaterials.route.controls,
+                  after: restoredCollection.route.controls
+                }))
+              }
+              const materialsAgain = workspaceButton('Components & Consumables')
+              materialsAgain?.click()
+              await frames()
+              const restoredMaterials = assertTypedEntry('materials', false)
+              if (restoredMaterials.route.controls.query !== 'materials-only-query') {
+                throw new Error('Returning to Materials did not preserve its independent typed query.')
+              }
+              collection.click()
+              await frames()
               assertTypedEntry('collection', false)
               return performance.now() - started
             })()

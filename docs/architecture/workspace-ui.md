@@ -240,6 +240,16 @@ notifications, collection refresh, safe-mode restart, and live delivery. Setting
 preload bridge directly. Its MI counting and retrieval target models continue to update the same
 shell-owned persisted refs, so extraction does not create a second preference source of truth.
 
+Transfers is also a focused system workspace, but its archive mutations remain deliberately
+outside the route component. `TransfersWorkspace.vue` owns the ingest/dispense/quarantine section
+navigation, structured history and quarantine controls, bounded remote result presentation,
+return-mode presentation, keyed quarantine selection, and disabled-action policy. `transfers.ts`
+owns one typed session shared by route history, the workspace, and shell service adapters plus pure
+operation formatting and search-error projection. `App.vue` retains archive queries, live/offline
+delivery, quarantine release, safety refreshes, recovery coordination, notifications, and
+confirmation/preload boundaries behind five narrow callbacks. The workspace never reaches the
+preload bridge and historical operations remain noninteractive.
+
 ## Semantic badges and Grim Dawn rarity
 
 Dialog focus, reduced-motion behavior, and the remaining keyboard-audit debt are specified in

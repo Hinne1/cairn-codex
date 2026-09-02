@@ -5514,6 +5514,69 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_TRANSFERS_WORKSPACE === '1') {
+          interactionTimings.transfersWorkspaceMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const workspace = document.querySelector('.vault-workspace')
+              if (!workspace || document.querySelector('.workspace-switcher')) {
+                throw new Error('Transfers must render as a focused system workspace without the specialist tool rail.')
+              }
+              const sectionButtons = [...workspace.querySelectorAll('.transfer-section-tabs button')]
+              if (sectionButtons.length !== 3) throw new Error('Transfers did not retain its three section controls.')
+              const activeSection = () => workspace.querySelector('.transfer-section-tabs button.active strong')?.textContent?.trim()
+              if (activeSection() !== 'Dispense history') throw new Error('Transfers section model did not accept the requested history route.')
+              const historyInput = workspace.querySelector('.vault-explorer-toolbar input')
+              if (!(historyInput instanceof HTMLInputElement) || historyInput.value !== 'failed') {
+                throw new Error('Transfers history query model did not restore its typed route value.')
+              }
+              const outcome = workspace.querySelector('.vault-explorer-toolbar select')
+              if (!(outcome instanceof HTMLSelectElement)) throw new Error('Transfers outcome control was not rendered.')
+              outcome.value = 'failed'
+              outcome.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              if (outcome.value !== 'failed') throw new Error('Transfers history outcome model did not update.')
+
+              const quarantine = sectionButtons.find((button) => button.textContent?.includes('Quarantined items'))
+              if (!(quarantine instanceof HTMLButtonElement)) throw new Error('Transfers quarantine control was not rendered.')
+              quarantine.click()
+              await frames()
+              if (!workspace.querySelector('.quarantine-workspace') || workspace.querySelector('.operation-history')) {
+                throw new Error('Transfers section switch did not replace history with quarantine.')
+              }
+              const modeButtons = [...workspace.querySelectorAll('.transfer-mode-tabs button')]
+              if (modeButtons.length !== 2) throw new Error('Transfers quarantine did not retain both return modes.')
+              modeButtons[1].click()
+              await frames()
+              if (!workspace.querySelector('.vault-target') || !modeButtons[1].classList.contains('active')) {
+                throw new Error('Transfers offline return-mode model did not update its presentation.')
+              }
+              const returnButton = workspace.querySelector('.quarantine-actions button')
+              if (!(returnButton instanceof HTMLButtonElement) || !returnButton.disabled) {
+                throw new Error('Empty quarantine unexpectedly enabled a destructive return action.')
+              }
+
+              const dispense = sectionButtons.find((button) => button.textContent?.includes('Dispense history'))
+              dispense?.click()
+              await frames()
+              if (activeSection() !== 'Dispense history' || historyInput.value !== 'failed') {
+                throw new Error('Transfers session did not preserve history controls across section remounts.')
+              }
+              const controls = window.history.state?.route?.controls
+              if (
+                window.history.state?.route?.workspace !== 'vault' ||
+                controls?.section !== 'dispense-history' ||
+                controls?.historyQuery !== 'failed' ||
+                controls?.historyOutcome !== 'failed' ||
+                controls?.mode !== 'offline'
+              ) {
+                throw new Error('Transfers session changes were not reflected in typed route state.')
+              }
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS === '1') {
           await window.webContents.executeJavaScript(`
             (() => {

@@ -60,6 +60,21 @@ runGate('Settings safe-mode gating', [
   '--width', '520', '--height', '1000', '--screenshot-name', 'settings-safe-mode-verify-narrow'
 ])
 
+runGate('Transfers workspace section and route state', [
+  '--electron-source', '--fixture', 'search-help', '--query', 'failed',
+  '--route-hash', verifiedRoute({
+    version: 1,
+    workspace: 'vault',
+    controls: {
+      mode: 'live', section: 'ingest-history', historyQuery: 'failed', historyOutcome: 'all', historyPage: 1,
+      vaultQuery: '', vaultRarity: 'all', vaultSort: 'recent', vaultDirection: 'desc', vaultPage: 1, quarantinePage: 1
+    }
+  }),
+  '--transfer-section', 'Dispense history', '--verify-transfers-workspace',
+  '--assert-no-overflow', '--disable-gpu', '--width', '520', '--height', '1000',
+  '--screenshot-name', 'transfers-workspace-verify-narrow'
+])
+
 runGate('Planner map atlas selection', [
   '--electron-source', '--fixture', 'planner', '--query', 'Wendigo',
   '--route-hash', verifiedRoute({

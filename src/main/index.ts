@@ -5569,7 +5569,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           `)
         }
         if (plannerDisplay) {
-          const plannerDisplayLabel = ({ table: 'Table', cards: 'Cards', map: 'MI sources' } as Record<string, string>)[plannerDisplay] ?? ''
+          const plannerDisplayLabel = ({ table: 'List', cards: 'Grid', map: 'MI sources' } as Record<string, string>)[plannerDisplay] ?? ''
           await window.webContents.executeJavaScript(`
             (async () => {
               const label = ${JSON.stringify(plannerDisplayLabel)}
@@ -5713,6 +5713,62 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               listFilter.dispatchEvent(new Event('change', { bubbles: true }))
               await frames()
               if (resultCount() !== 120) throw new Error('Planner shopping list did not recover after restoring the base.')
+              return performance.now() - started
+            })()
+          `)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_SCROLLING === '1') {
+          interactionTimings.plannerScrollingMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const buttons = [...document.querySelectorAll('.planner-display button')]
+              const list = buttons.find((button) => button.textContent?.trim() === 'List')
+              const grid = buttons.find((button) => button.textContent?.trim() === 'Grid')
+              if (!(list instanceof HTMLButtonElement) || !(grid instanceof HTMLButtonElement)) {
+                throw new Error('Planner scrolling verification could not find List and Grid views.')
+              }
+              if (!list.classList.contains('active')) list.click()
+              await frames()
+              const surface = document.querySelector('.planner-table-wrap')
+              if (!(surface instanceof HTMLElement)) throw new Error('Planner list surface was not rendered.')
+              if (getComputedStyle(surface).maxHeight !== 'none' || surface.clientHeight <= innerHeight) {
+                throw new Error('Planner list still creates a bottom-bounded vertical viewport.')
+              }
+              const initialRows = [...surface.querySelectorAll('.bounded-results-item')]
+              if (initialRows.length !== 50) throw new Error('Planner continuous window started with ' + initialRows.length + ' mounted rows instead of 50.')
+              initialRows[0]?.dispatchEvent(new FocusEvent('focus'))
+              await frames()
+              const wheel = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true })
+              window.dispatchEvent(wheel)
+              if (wheel.defaultPrevented) throw new Error('A visible planner tooltip still captures ordinary mouse-wheel input.')
+
+              const firstText = initialRows[0]?.textContent?.replace(/\\s+/g, ' ').trim()
+              let shifted = false
+              for (let attempt = 0; attempt < 3 && !shifted; attempt += 1) {
+                const next = surface.querySelector('.bounded-results-continuation.is-next button')
+                if (!(next instanceof HTMLButtonElement)) break
+                next.click()
+                await frames()
+                const rows = [...surface.querySelectorAll('.bounded-results-item')]
+                if (rows.length > 100) throw new Error('Planner continuous scrolling mounted ' + rows.length + ' rows; expected at most 100.')
+                shifted = rows[0]?.textContent?.replace(/\\s+/g, ' ').trim() !== firstText
+              }
+              if (!shifted || !surface.querySelector('.bounded-results-continuation.is-previous button')) {
+                throw new Error('Planner continuous scrolling did not advance its bounded two-page window.')
+              }
+              const listCount = surface.querySelectorAll('.bounded-results-item').length
+              grid.click()
+              await frames()
+              const gridCards = document.querySelectorAll('.planner-card-results .planner-card').length
+              if (gridCards !== listCount || !grid.classList.contains('active')) {
+                throw new Error('Planner Grid view did not preserve the continuous item window.')
+              }
+              list.click()
+              await frames()
+              if (!document.querySelector('.planner-table-results') || !list.classList.contains('active')) {
+                throw new Error('Planner List view did not restore the continuous item window.')
+              }
               return performance.now() - started
             })()
           `)

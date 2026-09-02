@@ -51,6 +51,7 @@ const verifyWorkspaceSwitcher = process.argv.includes('--verify-workspace-switch
 const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
 const verifyPlannerActions = process.argv.includes('--verify-planner-actions')
+const verifyPlannerScrolling = process.argv.includes('--verify-planner-scrolling')
 const verifyBoundedKeyboard = process.argv.includes('--verify-bounded-keyboard')
 const verifyBoundedGridSemantics = process.argv.includes('--verify-bounded-grid-semantics')
 const verifySupplySelection = process.argv.includes('--verify-supply-selection')
@@ -167,6 +168,7 @@ const env = {
   ...(openPlannerSetup ? { CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP: '1' } : {}),
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
   ...(verifyPlannerActions ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS: '1' } : {}),
+  ...(verifyPlannerScrolling ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_SCROLLING: '1' } : {}),
   ...(verifyBoundedKeyboard ? { CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_KEYBOARD: '1' } : {}),
   ...(verifyBoundedGridSemantics ? { CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_GRID_SEMANTICS: '1' } : {}),
   ...(verifySupplySelection ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLY_SELECTION: '1' } : {}),
@@ -389,6 +391,7 @@ console.log(JSON.stringify({
   openPlannerSetup,
   verifyPlannerNavigation,
   verifyPlannerActions,
+  verifyPlannerScrolling,
   verifyBoundedKeyboard,
   verifyBoundedGridSemantics,
   verifySupplySelection,

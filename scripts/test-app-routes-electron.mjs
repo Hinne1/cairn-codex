@@ -75,6 +75,22 @@ runGate('Transfers workspace section and route state', [
   '--screenshot-name', 'transfers-workspace-verify-narrow'
 ])
 
+runGate('Planner continuous scrolling and views', [
+  '--electron-source', '--fixture', 'planner', '--query', '',
+  '--route-hash', verifiedRoute({
+    version: 1,
+    workspace: 'planner',
+    controls: {
+      profileId: null, skills: ['Wendigo Totem'], minimumLevel: 1, maximumLevel: 70,
+      query: '', ownership: 'all', showIgnored: false, sort: 'level', direction: 'asc',
+      display: 'list', page: 1, atlasQuery: '', atlasRegion: null, mapScope: 'selected',
+      mapSort: 'items', mapDirection: 'desc'
+    }
+  }),
+  '--verify-planner-actions', '--verify-planner-scrolling', '--assert-no-overflow', '--disable-gpu',
+  '--width', '1440', '--height', '1000', '--screenshot-name', 'planner-continuous-results'
+])
+
 runGate('Planner map atlas selection', [
   '--electron-source', '--fixture', 'planner', '--query', 'Wendigo',
   '--route-hash', verifiedRoute({
@@ -116,4 +132,4 @@ runGate('Accessible modal focus', [
   '--width', '520', '--height', '900', '--screenshot-name', 'accessible-dialog-focus'
 ])
 
-console.log('Electron route gates passed for Collection, Sets, Settings/system navigation, Planner map restoration, and native/custom accessible modal focus.')
+console.log('Electron route gates passed for Collection, Sets, Settings/system navigation, Planner continuous List/Grid scrolling and map restoration, and native/custom accessible modal focus.')

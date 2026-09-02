@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import {
   createBoundedResultWindow,
   moveBoundedResultKey,
@@ -56,5 +57,23 @@ assert.deepEqual(updateBoundedSelection([], 'a', 'none'), [])
 assert.deepEqual(updateBoundedSelection(['a'], 'b', 'single'), ['b'])
 assert.deepEqual(updateBoundedSelection(['a'], 'b', 'multiple'), ['a', 'b'])
 assert.deepEqual(updateBoundedSelection(['a', 'b'], 'a', 'multiple'), ['b'])
+
+const [appSource, surfaceSource, styleSource] = await Promise.all([
+  readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
+])
+assert.match(appSource, /pagination="continuous"[\s\S]*?label="Leveling Planner item results"/u,
+  'The planner must use continuous bounded results instead of explicit page navigation.')
+assert.match(appSource, />List<\/button>[\s\S]*?>Grid<\/button>/u,
+  'The planner display switcher must expose clear List and Grid choices.')
+assert.match(appSource, /event\.altKey && !event\.ctrlKey[\s\S]*?tooltip\.scrollHeight > tooltip\.clientHeight/u,
+  'Tooltip wheel scrolling must require Alt so ordinary wheel input reaches the planner page.')
+assert.match(appSource, /\[Alt \+ Mouse Wheel to Scroll Tooltip\]/u)
+assert.match(surfaceSource, /pagination\?: 'pages' \| 'continuous'/u)
+assert.match(surfaceSource, /continuousEndPage\.value > continuousStartPage\.value/u,
+  'Continuous results must discard old pages rather than grow the mounted DOM without a bound.')
+assert.doesNotMatch(styleSource, /\.planner-table-wrap\s*\{[^}]*max-height/iu,
+  'The planner list must not create a height-bounded nested vertical scroller.')
 
 console.log('Bounded result contract passed for 20k and 50k generated collections; mounted entries remained capped at 50.')

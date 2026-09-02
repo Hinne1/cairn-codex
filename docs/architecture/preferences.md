@@ -9,6 +9,9 @@ The main-process file is deliberately renderer-origin independent. On first laun
 migration, the current `file://` or local development origin is imported without deleting its
 legacy browser copy. Each other origin is merged once by stable planner/to-do IDs, then recorded;
 it cannot later resurrect a plan the user deliberately deleted from the canonical document.
+The provenance list is capped at 32 origins. Once full, an unknown origin uses the durable
+document without importing its browser mirror; recorded origins are never evicted, so stale data
+cannot regain first-import status.
 If a browser mirror has a strictly newer document timestamp than the canonical envelope—for
 example, because its preceding file-write IPC failed—it is recovered as the same origin's newest
 complete document on the next launch.
@@ -42,7 +45,8 @@ silently discarded. Invalid values fall back to a bounded safe default while unr
 source, schema version, migration flag, and invalid field paths; they never include preference
 values, paths, character names, profile contents, or to-do text.
 
-Writes use a temporary file and atomic rename. The immediately previous valid envelope is kept,
+Writes use a compact, byte-bounded envelope, a temporary file, and atomic rename. Reads consume
+at most the envelope ceiling plus one detection byte before rejecting an oversized primary. The immediately previous valid envelope is kept,
 and changes to planner/to-do content create up to 12 rotating recovery snapshots. Startup falls
 back through the previous file and newest valid snapshot if the primary file is corrupt or absent.
 

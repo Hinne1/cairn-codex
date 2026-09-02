@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import {
+  canonicalPreferenceCandidate,
   createPreferenceRepository,
-  MAX_PLANNER_PROFILES,
   PREFERENCE_STORAGE_KEY
 } from '../src/renderer/src/preference-repository.ts'
+import { isPreferenceDocument } from '../src/shared/preference-schema.ts'
 
 class MemoryStorage {
   values = new Map()
@@ -16,6 +17,7 @@ let nextId = 0
 const createId = () => `profile-${++nextId}`
 
 const freshStorage = new MemoryStorage()
+assert.equal(canonicalPreferenceCandidate(freshStorage, fixedNow, createId), null)
 const fresh = createPreferenceRepository(freshStorage, fixedNow, createId)
 assert.equal(fresh.diagnostics.source, 'fresh')
 assert.equal(fresh.value.meta.profileKind, 'fresh')
@@ -40,6 +42,29 @@ legacyStorage.setItem('cairn-codex-collection-basis', 'stashes')
 legacyStorage.setItem('cairn-codex-onboarding-version', '1')
 legacyStorage.setItem('cairn-codex-onboarding-status', 'completed')
 legacyStorage.setItem('cairn-codex-onboarding-step', '3')
+
+const legacyCandidate = JSON.parse(canonicalPreferenceCandidate(legacyStorage, fixedNow, createId))
+assert.equal(legacyCandidate.meta.profileKind, 'returning')
+assert.equal(legacyCandidate.meta.updatedAtUtc, '1970-01-01T00:00:00.000Z')
+assert.equal(legacyCandidate.planner.profiles[0]?.name, 'Pet build')
+
+const malformedLegacyStorage = new MemoryStorage()
+malformedLegacyStorage.setItem('cairn-codex-skill', 'x'.repeat(500))
+malformedLegacyStorage.setItem('cairn-codex-retrieval-stash', 'y'.repeat(5000))
+const malformedLegacyCandidate = JSON.parse(canonicalPreferenceCandidate(
+  malformedLegacyStorage,
+  fixedNow,
+  createId
+))
+assert.equal(isPreferenceDocument(malformedLegacyCandidate), true)
+assert.equal(malformedLegacyCandidate.search.selectedSkill.length, 200)
+assert.equal(malformedLegacyCandidate.sources.retrievalStash.length, 4096)
+
+const oversizedLegacyStorage = new MemoryStorage()
+const maximumPaths = Array.from({ length: 512 }, (_, index) => `${index}-${'x'.repeat(4090)}`)
+oversizedLegacyStorage.setItem('cairn-codex-archive-sources', JSON.stringify(maximumPaths))
+oversizedLegacyStorage.setItem('cairn-codex-index-sources', JSON.stringify(maximumPaths))
+assert.equal(canonicalPreferenceCandidate(oversizedLegacyStorage, fixedNow, createId), null)
 
 const migrated = createPreferenceRepository(legacyStorage, fixedNow, createId)
 assert.equal(migrated.diagnostics.source, 'legacy')
@@ -92,37 +117,77 @@ assert.equal(recoverablePlanner.value.planner.profiles.length, 1)
 assert.equal(recoverablePlanner.value.planner.profiles[0]?.name, 'Old custom build')
 assert.match(recoverablePlanner.value.planner.profiles[0]?.id ?? '', /^recovered-[0-9a-f]{8}$/)
 assert.equal(recoverablePlanner.value.planner.profiles[0]?.levelCap, 70)
-assert.equal(
-  recoverablePlanner.value.planner.selectedProfileId,
-  recoverablePlanner.value.planner.profiles[0]?.id
-)
+assert.equal(recoverablePlanner.value.planner.selectedProfileId, recoverablePlanner.value.planner.profiles[0]?.id)
 
-const boundedPlannerStorage = new MemoryStorage()
-const boundedPlannerPreferences = JSON.parse(fresh.exportJson())
-boundedPlannerPreferences.planner.profiles = Array.from({ length: MAX_PLANNER_PROFILES + 5 }, (_, index) =>
-  index < 2
-    ? { name: 'Duplicate recovered build', skills: ['Field Command'] }
-    : { id: `bounded-${index}`, name: `Bounded build ${index}`, skills: [] }
-)
-boundedPlannerPreferences.planner.selectedProfileId = 'missing-bounded-id'
-boundedPlannerStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(boundedPlannerPreferences))
-const boundedPlanner = createPreferenceRepository(boundedPlannerStorage, fixedNow, createId)
-assert.equal(boundedPlanner.value.planner.profiles.length, MAX_PLANNER_PROFILES - 1)
-assert.equal(
-  new Set(boundedPlanner.value.planner.profiles.map(({ id }) => id)).size,
-  boundedPlanner.value.planner.profiles.length
-)
-assert.equal(boundedPlanner.value.planner.selectedProfileId, boundedPlanner.value.planner.profiles[0]?.id)
-assert.ok(boundedPlanner.diagnostics.invalidFields.includes('planner.profiles'))
-assert.ok(boundedPlanner.diagnostics.invalidFields.includes('planner.selectedProfileId'))
+const unknownProfileStorage = new MemoryStorage()
+const unknownProfilePreferences = JSON.parse(fresh.exportJson())
+unknownProfilePreferences.planner.profiles[0].unexpected = { archive: 'leak' }
+unknownProfileStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(unknownProfilePreferences))
+const unknownProfile = createPreferenceRepository(unknownProfileStorage, fixedNow, createId)
+assert.equal('unexpected' in unknownProfile.value.planner.profiles[0], false)
+assert.equal(JSON.parse(unknownProfile.exportJson()).planner.profiles[0].unexpected, undefined)
+
+const oversizedProfileStorage = new MemoryStorage()
+const oversizedProfilePreferences = JSON.parse(fresh.exportJson())
+oversizedProfilePreferences.planner.profiles = Array.from({ length: 250 }, () => ({}))
+oversizedProfilePreferences.planner.selectedProfileId = 'missing-id'
+oversizedProfileStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(oversizedProfilePreferences))
+const oversizedProfiles = createPreferenceRepository(oversizedProfileStorage, fixedNow, createId)
+assert.equal(oversizedProfiles.value.planner.profiles.length, 100)
+assert.equal(new Set(oversizedProfiles.value.planner.profiles.map(({ id }) => id)).size, 100)
+assert.ok(oversizedProfiles.diagnostics.invalidFields.includes('planner.profiles'))
 
 const corruptStorage = new MemoryStorage()
 const corrupt = JSON.parse(fresh.exportJson())
+corrupt.meta.updatedAtUtc = '2025-01-02T03:04:05.000Z'
 corrupt.appearance.zoomFactor = 'huge'
 corrupt.workspace.visibleTools = 'everything'
 corrupt.search.oracleMinimumLevel = null
 corrupt.notes.todos = [{ id: 'invalid' }]
+corrupt.unexpected = { archive: 'must not persist' }
 corruptStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(corrupt))
+const corruptCandidate = JSON.parse(canonicalPreferenceCandidate(corruptStorage, fixedNow, createId))
+assert.equal(corruptCandidate.meta.updatedAtUtc, '2025-01-02T03:04:05.000Z')
+assert.equal(corruptCandidate.unexpected, undefined)
+assert.equal(corruptCandidate.appearance.zoomFactor, 1)
+
+const timestamplessStorage = new MemoryStorage()
+const timestampless = structuredClone(corrupt)
+delete timestampless.meta.updatedAtUtc
+timestamplessStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(timestampless))
+const timestamplessCandidate = JSON.parse(canonicalPreferenceCandidate(
+  timestamplessStorage,
+  fixedNow,
+  createId
+))
+assert.equal(timestamplessCandidate.meta.updatedAtUtc, '1970-01-01T00:00:00.000Z')
+
+const malformedRecordsStorage = new MemoryStorage()
+const malformedRecords = structuredClone(corrupt)
+malformedRecords.meta.updatedAtUtc = ''
+malformedRecords.planner.profiles[0].modifiedAt = ''
+malformedRecords.notes.todos = [
+  { id: '', text: 'Empty id', done: false, createdAt: fixedNow() },
+  { id: 'x'.repeat(201), text: 'Long id', done: false, createdAt: fixedNow() },
+  { id: 'valid', text: 'Bad timestamp', done: false, createdAt: '' }
+]
+malformedRecordsStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(malformedRecords))
+const malformedRecordsCandidate = JSON.parse(canonicalPreferenceCandidate(
+  malformedRecordsStorage,
+  fixedNow,
+  createId
+))
+assert.equal(isPreferenceDocument(malformedRecordsCandidate), true)
+assert.equal(malformedRecordsCandidate.meta.updatedAtUtc, '1970-01-01T00:00:00.000Z')
+assert.equal(malformedRecordsCandidate.planner.profiles[0].modifiedAt, '1970-01-01T00:00:00.000Z')
+assert.deepEqual(malformedRecordsCandidate.notes.todos, [])
+
+const oversizedModernStorage = new MemoryStorage()
+const oversizedModern = structuredClone(corrupt)
+oversizedModern.sources.archivePaths = maximumPaths
+oversizedModern.sources.indexPaths = maximumPaths
+oversizedModernStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(oversizedModern))
+assert.equal(canonicalPreferenceCandidate(oversizedModernStorage, fixedNow, createId), null)
 const recovered = createPreferenceRepository(corruptStorage, fixedNow, createId)
 assert.equal(recovered.diagnostics.source, 'stored')
 assert.ok(recovered.diagnostics.invalidFields.includes('appearance.zoomFactor'))
@@ -145,6 +210,5 @@ console.log(JSON.stringify({
   nonDestructiveReset: true,
   plannerMetadataRoundTrip: true,
   recoverablePlannerProfilesPreserved: true,
-  boundedPlannerProfiles: boundedPlanner.value.planner.profiles.length,
   settingsOnlyExport: true
 }, null, 2))

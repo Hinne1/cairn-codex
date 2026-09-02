@@ -1,8 +1,12 @@
 import { ONBOARDING_STEP_COUNT, ONBOARDING_VERSION, type OnboardingStatus } from './onboarding.ts'
+import {
+  isPreferenceDocument,
+  MAX_PLANNER_PROFILES,
+  MAX_PREFERENCE_BYTES
+} from '../../shared/preference-schema.ts'
 
 export const PREFERENCE_STORAGE_KEY = 'cairn-codex-preferences'
 export const PREFERENCE_SCHEMA_VERSION = 1
-export const MAX_PLANNER_PROFILES = 100
 
 export type PreferenceLoadSource = 'fresh' | 'legacy' | 'stored'
 export type CollectionBasisPreference = 'stashes' | 'archive'
@@ -135,6 +139,8 @@ const legacyKeys = [
   'cairn-codex-onboarding-step'
 ] as const
 
+const STALE_PREFERENCE_TIMESTAMP = '1970-01-01T00:00:00.000Z'
+
 function clampNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
   const number = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback
@@ -188,36 +194,55 @@ function validPlannerProfile(value: unknown, fallbackTime: string): StoredPlanne
     hash = Math.imul(hash, 16777619)
   }
   const id = typeof profile.id === 'string' && profile.id
-    ? profile.id
+    ? profile.id.slice(0, 200)
     : `recovered-${(hash >>> 0).toString(16).padStart(8, '0')}`
   const masteries = stringArray(profile.masteries, 2, 40)
   return {
-    ...profile,
     id,
     name: typeof profile.name === 'string' && profile.name.trim()
       ? profile.name.slice(0, 60)
       : 'Recovered plan',
-    className: typeof profile.className === 'string' ? profile.className.slice(0, 80) : undefined,
-    masteries: masteries ?? undefined,
+    ...(typeof profile.className === 'string' ? { className: profile.className.slice(0, 80) } : {}),
+    ...(masteries ? { masteries } : {}),
     skills: stringArray(profile.skills, 128, 200) ?? [],
     excludedSkills: stringArray(profile.excludedSkills, 128, 200) ?? [],
     minimumLevel: clampNumber(profile.minimumLevel, 1, 1, 100),
     levelCap: clampNumber(profile.levelCap, 70, 1, 100),
     source: profile.source === 'character' ? 'character' : 'manual',
-    characterPath: typeof profile.characterPath === 'string' ? profile.characterPath : undefined,
-    characterLevel: typeof profile.characterLevel === 'number'
-      ? clampNumber(profile.characterLevel, 1, 1, 100)
-      : undefined,
-    isHardcore: typeof profile.isHardcore === 'boolean' ? profile.isHardcore : undefined,
-    modifiedAt: typeof profile.modifiedAt === 'string' ? profile.modifiedAt : fallbackTime
+    ...(typeof profile.characterPath === 'string' ? { characterPath: profile.characterPath.slice(0, 4096) } : {}),
+    ...(typeof profile.characterLevel === 'number'
+      ? { characterLevel: clampNumber(profile.characterLevel, 1, 1, 100) }
+      : {}),
+    ...(typeof profile.isHardcore === 'boolean' ? { isHardcore: profile.isHardcore } : {}),
+    modifiedAt: typeof profile.modifiedAt === 'string' && profile.modifiedAt
+      ? profile.modifiedAt.slice(0, 64)
+      : fallbackTime
   }
+}
+
+function validPlannerProfiles(values: unknown[], fallbackTime: string): StoredPlannerProfile[] {
+  const profiles: StoredPlannerProfile[] = []
+  const usedIds = new Set<string>()
+  for (const value of values.slice(0, MAX_PLANNER_PROFILES)) {
+    const profile = validPlannerProfile(value, fallbackTime)
+    if (!profile) continue
+    const baseId = profile.id.slice(0, 190)
+    let id = baseId
+    let suffix = 2
+    while (usedIds.has(id)) id = `${baseId}-${suffix++}`
+    usedIds.add(id)
+    profiles.push(id === profile.id ? profile : { ...profile, id })
+  }
+  return profiles
 }
 
 function validTodo(value: unknown): StoredTodoItem | null {
   if (!value || typeof value !== 'object') return null
   const todo = value as Partial<StoredTodoItem>
-  return typeof todo.id === 'string' && typeof todo.text === 'string' &&
-    typeof todo.done === 'boolean' && typeof todo.createdAt === 'string'
+  return typeof todo.id === 'string' && todo.id.length > 0 && todo.id.length <= 200 &&
+    typeof todo.text === 'string' && todo.text.length <= 500 &&
+    typeof todo.done === 'boolean' && typeof todo.createdAt === 'string' &&
+    todo.createdAt.length > 0 && todo.createdAt.length <= 64
     ? { id: todo.id, text: todo.text.slice(0, 500), done: todo.done, createdAt: todo.createdAt }
     : null
 }
@@ -264,7 +289,7 @@ function legacyPreferences(
   const defaults = interfaceDefaults()
   const parsedProfiles = parseJson(storage.getItem('cairn-codex-planner-profiles'))
   const profiles = Array.isArray(parsedProfiles)
-    ? parsedProfiles.map((profile) => validPlannerProfile(profile, now)).filter((profile): profile is StoredPlannerProfile => Boolean(profile))
+    ? validPlannerProfiles(parsedProfiles, now)
     : []
   if (!profiles.length) profiles.push(createPlannerProfile(storage, now, createId))
   const storedProfileId = storage.getItem('cairn-codex-planner-profile')
@@ -274,7 +299,7 @@ function legacyPreferences(
   const workspaceTools = stringArray(parseJson(storage.getItem('cairn-codex-visible-workspace-tools')))
   const allowedTools = new Set(DEFAULT_WORKSPACE_TOOLS)
   const visibleTools = workspaceTools
-    ? workspaceTools.filter((tool): tool is WorkspaceToolPreference => allowedTools.has(tool as WorkspaceToolPreference))
+    ? [...new Set(workspaceTools.filter((tool): tool is WorkspaceToolPreference => allowedTools.has(tool as WorkspaceToolPreference)))]
     : [...DEFAULT_WORKSPACE_TOOLS]
   if (Number(storage.getItem('cairn-codex-workspace-tools-version') ?? 0) < 2 && !visibleTools.includes('dismantling')) {
     visibleTools.push('dismantling')
@@ -385,7 +410,9 @@ function validateStored(
   if (source.meta && typeof source.meta === 'object') {
     if (source.meta.profileKind === 'fresh' || source.meta.profileKind === 'returning') result.meta.profileKind = source.meta.profileKind
     else invalid('meta.profileKind')
-    result.meta.updatedAtUtc = readString(source.meta.updatedAtUtc, 'meta.updatedAtUtc', result.meta.updatedAtUtc, 64)
+    if (typeof source.meta.updatedAtUtc === 'string' && source.meta.updatedAtUtc.length > 0) {
+      result.meta.updatedAtUtc = source.meta.updatedAtUtc.slice(0, 64)
+    } else invalid('meta.updatedAtUtc')
   } else invalid('meta')
   if (source.appearance && typeof source.appearance === 'object') {
     if (source.appearance.theme !== 'cairn') invalid('appearance.theme')
@@ -399,7 +426,9 @@ function validateStored(
     const visibleTools = stringArray(source.workspace.visibleTools)
     const allowed = new Set(DEFAULT_WORKSPACE_TOOLS)
     if (visibleTools) {
-      result.workspace.visibleTools = visibleTools.filter((tool): tool is WorkspaceToolPreference => allowed.has(tool as WorkspaceToolPreference))
+      result.workspace.visibleTools = [...new Set(visibleTools.filter(
+        (tool): tool is WorkspaceToolPreference => allowed.has(tool as WorkspaceToolPreference)
+      ))]
       if (result.workspace.visibleTools.length !== visibleTools.length) invalid('workspace.visibleTools')
     }
     else invalid('workspace.visibleTools')
@@ -420,22 +449,17 @@ function validateStored(
   } else invalid('search')
   if (source.planner && typeof source.planner === 'object') {
     if (Array.isArray(source.planner.profiles)) {
-      const candidates = source.planner.profiles
-        .slice(0, MAX_PLANNER_PROFILES)
-        .map((profile) => validPlannerProfile(profile, fallback.meta.updatedAtUtc))
-        .filter((profile): profile is StoredPlannerProfile => Boolean(profile))
-      const profiles = [...new Map(candidates.map((profile) => [profile.id, profile])).values()]
+      const profiles = validPlannerProfiles(source.planner.profiles, fallback.meta.updatedAtUtc)
       if (profiles.length) result.planner.profiles = profiles
-      if (profiles.length !== source.planner.profiles.length || profiles.length !== candidates.length || !profiles.length) {
-        invalid('planner.profiles')
-      }
+      if (profiles.length !== source.planner.profiles.length || !profiles.length ||
+          source.planner.profiles.length > MAX_PLANNER_PROFILES) invalid('planner.profiles')
     } else invalid('planner.profiles')
     if (typeof source.planner.selectedProfileId === 'string' &&
       result.planner.profiles.some((profile) => profile.id === source.planner!.selectedProfileId)) {
       result.planner.selectedProfileId = source.planner.selectedProfileId
     } else {
+      result.planner.selectedProfileId = result.planner.profiles[0]!.id
       invalid('planner.selectedProfileId')
-      result.planner.selectedProfileId = result.planner.profiles[0]?.id ?? result.planner.selectedProfileId
     }
     const ignored = stringArray(source.planner.ignoredRecords)
     const favorites = stringArray(source.planner.favoriteRecords)
@@ -466,6 +490,46 @@ function validateStored(
     result.onboarding.version = ONBOARDING_VERSION
   } else invalid('onboarding')
   return result
+}
+
+/**
+ * Returns the browser-origin preferences that may need importing into the durable store.
+ * Unlike createPreferenceRepository, this never writes to storage or advances updatedAtUtc:
+ * doing either before the durable store has chosen its source would make a stale browser
+ * mirror look newer than the file-backed preferences.
+ */
+export function canonicalPreferenceCandidate(
+  storage: PreferenceStorage,
+  now: () => string = () => new Date().toISOString(),
+  createId: () => string = () => crypto.randomUUID()
+): string | null {
+  const rawStored = storage.getItem(PREFERENCE_STORAGE_KEY)
+  const hasLegacy = legacyKeys.some((key) => storage.getItem(key) !== null)
+  if (rawStored === null && !hasLegacy) return null
+
+  const serialize = (candidate: AppPreferencesV1): string | null => {
+    if (!isPreferenceDocument(candidate)) return null
+    const serialized = JSON.stringify(candidate)
+    return new TextEncoder().encode(serialized).byteLength <= MAX_PREFERENCE_BYTES
+      ? serialized
+      : null
+  }
+
+  if (rawStored === null) {
+    const legacy = legacyPreferences(storage, STALE_PREFERENCE_TIMESTAMP, createId)
+    const candidate = validateStored(
+      legacy,
+      freshPreferences(STALE_PREFERENCE_TIMESTAMP, createId),
+      []
+    )
+    return serialize(candidate)
+  }
+
+  // A malformed modern mirror can still contribute recoverable fields, but it must not gain
+  // a fresh startup timestamp and displace a valid durable document.
+  const fallback = freshPreferences(STALE_PREFERENCE_TIMESTAMP, createId)
+  const candidate = validateStored(parseJson(rawStored), fallback, [])
+  return serialize(candidate)
 }
 
 export function createPreferenceRepository(

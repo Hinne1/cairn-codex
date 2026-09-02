@@ -7,6 +7,7 @@ import type {
   StartupPhaseEvent,
   VaultPageRequest
 } from '../../shared/contracts.ts'
+import { isPreferenceDocument, MAX_PREFERENCE_BYTES } from '../../shared/preference-schema.ts'
 
 function objectInput(input: unknown, message: string): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(message)
@@ -71,13 +72,13 @@ export function validatePreferenceLoad(input: unknown): PreferenceLoadReport {
 
 export function validateSerializedPreferences(input: unknown): { serialized: string } {
   const value = objectInput(input, 'Preference export is outside its safe bounds.')
-  if (typeof value.serialized !== 'string' || value.serialized.length > 2 * 1024 * 1024) {
+  if (typeof value.serialized !== 'string' || Buffer.byteLength(value.serialized, 'utf8') > MAX_PREFERENCE_BYTES) {
     throw new Error('Preference export is outside its safe bounds.')
   }
   let parsed: unknown
   try { parsed = JSON.parse(value.serialized) as unknown } catch { throw new Error('Preference export is not valid JSON.') }
-  if (!parsed || typeof parsed !== 'object' || (parsed as { version?: unknown }).version !== 1) {
-    throw new Error('Preference export has an unsupported schema version.')
+  if (!isPreferenceDocument(parsed)) {
+    throw new Error('Preference export does not match the supported schema.')
   }
   return { serialized: value.serialized }
 }
@@ -85,21 +86,13 @@ export function validateSerializedPreferences(input: unknown): { serialized: str
 export function validatePreferenceBootstrap(input: unknown): { origin: string; candidateSerialized: string | null } {
   const value = objectInput(input, 'Preference migration input is outside its safe bounds.')
   if (typeof value.origin !== 'string' || value.origin.length > 2048 ||
-      (value.candidateSerialized !== null && typeof value.candidateSerialized !== 'string') ||
-      (typeof value.candidateSerialized === 'string' && value.candidateSerialized.length > 2 * 1024 * 1024)) {
+      (value.candidateSerialized !== null && typeof value.candidateSerialized !== 'string')) {
     throw new Error('Preference migration input is outside its safe bounds.')
   }
-  let candidateSerialized = value.candidateSerialized as string | null
   if (value.candidateSerialized !== null) {
-    try {
-      validateSerializedPreferences({ serialized: value.candidateSerialized })
-    } catch {
-      // The main-process file is canonical. A corrupt browser mirror must not prevent
-      // it from loading, and is equivalent to an absent migration candidate.
-      candidateSerialized = null
-    }
+    validateSerializedPreferences({ serialized: value.candidateSerialized })
   }
-  return { origin: value.origin, candidateSerialized }
+  return { origin: value.origin, candidateSerialized: value.candidateSerialized as string | null }
 }
 
 const startupPhases = new Set<StartupPhaseEvent>([

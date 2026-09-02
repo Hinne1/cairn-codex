@@ -1,5 +1,4 @@
 import { createApp } from 'vue'
-import App from './App.vue'
 import './semantic-tokens.css'
 import { applyThemeManifest, CAIRN_THEME_MANIFEST } from './semantic-tokens'
 import {
@@ -8,7 +7,7 @@ import {
   resetUiPreferences,
   type RendererFailureReport
 } from './renderer-recovery'
-import { PREFERENCE_STORAGE_KEY } from './preference-repository'
+import { canonicalPreferenceCandidate, PREFERENCE_STORAGE_KEY } from './preference-repository'
 import './styles.css'
 
 applyThemeManifest(document.documentElement, CAIRN_THEME_MANIFEST)
@@ -62,11 +61,13 @@ function renderRootRecovery(error: unknown, existingFailure?: RendererFailureRep
 
 async function bootstrap(): Promise<void> {
   const origin = location.protocol === 'file:' ? 'file://' : location.origin
+  const candidate = canonicalPreferenceCandidate(localStorage)
   const durable = await window.cairnCodex.loadPreferences(
     origin,
-    localStorage.getItem(PREFERENCE_STORAGE_KEY)
+    candidate
   )
   if (durable.serialized !== null) localStorage.setItem(PREFERENCE_STORAGE_KEY, durable.serialized)
+  const { default: App } = await import('./App.vue')
   const app = createApp(App)
   app.config.errorHandler = (error) => {
     const failure = rendererFailureReport(error, 'active workspace')

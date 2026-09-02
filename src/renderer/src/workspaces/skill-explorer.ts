@@ -21,6 +21,29 @@ export interface SkillExplorerViewOptions {
   query: Pick<CompiledSearchQuery, 'matches'>
 }
 
+export type SkillSuggestionDirection = 'next' | 'previous'
+
+export function nextSkillSuggestionIndex(
+  currentIndex: number,
+  suggestionCount: number,
+  direction: SkillSuggestionDirection,
+  pickerWasOpen: boolean
+): number {
+  if (suggestionCount <= 0) return 0
+  if (!pickerWasOpen) return direction === 'next' ? 0 : suggestionCount - 1
+  const step = direction === 'next' ? 1 : -1
+  return (currentIndex + step + suggestionCount) % suggestionCount
+}
+
+export function skillSortAriaValue(
+  activeSort: SkillSort,
+  direction: SkillExplorerControls['direction'],
+  column: SkillSort
+): 'ascending' | 'descending' | undefined {
+  if (activeSort !== column) return undefined
+  return direction === 'asc' ? 'ascending' : 'descending'
+}
+
 export function updateSkillExplorerControls(
   controls: SkillExplorerControls,
   patch: Partial<SkillExplorerControls>,

@@ -52,3 +52,13 @@ the exact captured `focusin` registration and requires its matching removal on u
 The remaining #16 work is a documented keyboard and assistive-technology audit of Collection,
 Transfers, Settings, Sets, Planner, and search; migration of the four App-owned dialogs; and a
 single-announcement audit for changing background, transfer, and search status.
+
+## Composite selection and sorting
+
+Editable comboboxes keep DOM focus on their text input while their listbox is open. Arrow-key
+movement is exposed with `aria-activedescendant`, every option owns a stable DOM ID, and options do
+not add a second set of Tab stops. Sortable grid columns expose `aria-sort` only on the active
+column; visual direction glyphs are decorative. Skill Explorer is the reference implementation and
+`npm run test:skill-explorer-workspace:electron` verifies focus ownership, long-list scrolling,
+keyboard and pointer selection, Escape behavior, unique option IDs, and sort state against the
+rendered DOM at wide and compact widths. The focused gate is part of `npm run verify`.

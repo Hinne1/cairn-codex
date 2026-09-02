@@ -57,6 +57,7 @@ export interface AppPreferencesV1 {
     theme: PreferenceTheme
     zoomFactor: number
     trackerCollapsed: boolean
+    navigationCollapsed: boolean
     plannerDisplay: PlannerDisplayPreference
   }
   workspace: {
@@ -249,7 +250,10 @@ function validTodo(value: unknown): StoredTodoItem | null {
 
 function interfaceDefaults(): Pick<AppPreferencesV1, 'appearance' | 'workspace' | 'search'> {
   return {
-    appearance: { theme: 'cairn', zoomFactor: 1, trackerCollapsed: false, plannerDisplay: 'list' },
+    appearance: {
+      theme: 'cairn', zoomFactor: 1, trackerCollapsed: false,
+      navigationCollapsed: false, plannerDisplay: 'list'
+    },
     workspace: {
       visibleTools: [...DEFAULT_WORKSPACE_TOOLS], experimentalToolsEnabled: false,
       showLegacyScanner: false, miCountingMode: 'base'
@@ -320,6 +324,7 @@ function legacyPreferences(
       trackerCollapsed: storage.getItem('cairn-codex-tracker-layout-version') === '2'
         ? legacyBoolean(storage, 'cairn-codex-tracker-collapsed', false)
         : false,
+      navigationCollapsed: false,
       plannerDisplay: storage.getItem('cairn-codex-planner-display') === 'grid' ||
         storage.getItem('cairn-codex-planner-display') === 'map'
         ? storage.getItem('cairn-codex-planner-display') as PlannerDisplayPreference
@@ -418,6 +423,7 @@ function validateStored(
     if (source.appearance.theme !== 'cairn') invalid('appearance.theme')
     result.appearance.zoomFactor = readNumber(source.appearance.zoomFactor, 'appearance.zoomFactor', result.appearance.zoomFactor, 0.7, 1.8)
     result.appearance.trackerCollapsed = readBoolean(source.appearance.trackerCollapsed, 'appearance.trackerCollapsed', result.appearance.trackerCollapsed)
+    result.appearance.navigationCollapsed = readBoolean(source.appearance.navigationCollapsed, 'appearance.navigationCollapsed', result.appearance.navigationCollapsed)
     if (source.appearance.plannerDisplay === 'list' || source.appearance.plannerDisplay === 'grid' || source.appearance.plannerDisplay === 'map') {
       result.appearance.plannerDisplay = source.appearance.plannerDisplay
     } else if (source.appearance.plannerDisplay !== undefined) invalid('appearance.plannerDisplay')

@@ -17,13 +17,18 @@ Collection is the rich home dashboard. Its archive summary, refresh action, comp
 collection-basis controls, and full customizable tool launcher render only on Collection itself.
 They must not be repeated above a specialist tool.
 
-Specialist tools use `src/renderer/src/components/WorkspaceSwitcher.vue` immediately below the
-persistent system navigation. The switcher keeps Collection and tool customization fixed while
-the visible tool destinations occupy one bounded horizontal rail. The active destination uses
-`aria-current="page"` and scrolls into view when the route changes. Hiding the currently open
-tool returns to Collection; hidden and disabled experimental tools do not remain reachable from
-the rail. Transfers and Settings remain focused system workspaces and do not render either
-Collection launcher.
+Collection and specialist tools share `src/renderer/src/components/WorkspaceSidebar.vue` as one
+persistent navigation model. Collection is always first; the user's visible tools follow in the
+same configured order used by the dashboard shortcuts. The active route uses
+`aria-current="page"`. The sidebar supports a durable expanded/compact preference and collapses
+to icons at compact viewport widths without changing that preference. Hiding the currently open
+tool returns to Collection; hidden and disabled experimental tools do not remain reachable.
+
+The Collection dashboard retains its customizable tool cards as descriptive quick access, not as
+a second primary navigation system. It omits a redundant Collection card. Transfers and Settings
+remain focused system workspaces and render neither sidebar nor dashboard launcher. Their system
+bar exposes Collection as the return destination only while the sidebar is absent; Collection and
+specialist tools do not duplicate that destination in the system bar.
 
 ## Semantic foundation
 
@@ -271,7 +276,8 @@ piece being discovered. Surfaces must name those qualifications explicitly.
 
 ## Adding a workspace
 
-1. Register the route in the shared Collection launcher and focused workspace switcher.
+1. Register the route once in `workspaceToolDefinitions`; the shared sidebar and Collection
+   shortcuts must derive their visible destinations from the same preference.
 2. Use `ToolHeader` for the workspace heading.
 3. Use `ExplorerToolbar` if the result set is searchable or filterable.
 4. Keep query, filters, sorting, and result count reactive from the same source of truth.

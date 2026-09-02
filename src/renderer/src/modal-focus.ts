@@ -67,7 +67,7 @@ export function modalFocusableElements(root: HTMLElement): HTMLElement[] {
 function defaultRestoreFallback(): HTMLElement | null {
   return [...document.querySelectorAll<HTMLElement>([
     '.history-nav button:not([disabled])',
-    '.workspace-switcher button:not([disabled])',
+    '.workspace-sidebar button:not([disabled])',
     'main button:not([disabled])',
     'main a[href]',
     'main input:not([disabled]):not([type="hidden"])',

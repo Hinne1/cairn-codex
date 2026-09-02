@@ -74,11 +74,10 @@ profile, and reports active workspace, document overflow, and mounted result cou
 | Transfers | Focused system workspace; three explicit sections | 24,609 history operations/50 mounted; empty passed | Pass; no document overflow | Shared paging/navigation passed; final audit remains #16 | Preserve the focused shell and server-paged contract. |
 | Settings | Focused system workspace; no explorer by design | Form state; result paging not applicable | **Fail: document expands to 785px** | Form/dialog audit deferred to #16 | Fix grid/header/action overflow in #63. |
 
-The largest cross-workspace hierarchy problem is separate from individual tool styling: every
-Collection child currently repeats the full Collection hero, progress tracker, and tool launcher
-before its own `ToolHeader`. At 520px this pushes specialist content below approximately one full
-viewport. #62 keeps the rich dashboard on Collection while defining compact child-workspace
-navigation. #17 remains the code-ownership migration; #62 owns the visible behavior.
+The rich Collection dashboard remains exclusive to Collection. #102 replaces the former split
+dashboard-card/specialist-rail model with one adaptive persistent sidebar for Collection and its
+tools, while retaining the cards as descriptive dashboard shortcuts. Transfers and Settings stay
+focused system workspaces. #17 remains the code-ownership migration.
 
 The remaining result migrations are intentionally split by collision domain: #64 owns Sets,
 #65 owns Farming, #68 owns the mature manually capped card tools, and #25 retains Dismantling.

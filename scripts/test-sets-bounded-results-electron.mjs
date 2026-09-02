@@ -16,6 +16,7 @@ const common = ['--electron-source', '--category', 'Sets', '--disable-gpu', '--a
 
 runGate('normal', [
   ...common, '--fixture', 'sets-semantics', '--query', ' ',
+  '--verify-workspace-sidebar',
   '--expected-bounded-total', '3', '--expected-bounded-mounted', '3', '--expected-set-cards', '3',
   '--width', '1440', '--height', '1000', '--screenshot-name', 'sets-bounded-normal'
 ])
@@ -34,6 +35,7 @@ runGate('wide 202-set paging', [
 
 runGate('compact 202-set paging', [
   ...common, '--fixture', 'sets-bounded', '--query', ' ', '--verify-sets-paging',
+  '--verify-workspace-sidebar',
   '--expected-bounded-total', '202', '--expected-bounded-mounted', '50', '--expected-set-cards', '50',
   '--width', '520', '--height', '1000', '--screenshot-name', 'sets-bounded-compact'
 ])

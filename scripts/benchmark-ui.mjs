@@ -47,7 +47,7 @@ const transferSection = argument('--transfer-section')
 const routeHash = argument('--route-hash')
 const verifyNavigation = process.argv.includes('--verify-navigation')
 const verifyTypedRoutes = process.argv.includes('--verify-typed-routes')
-const verifyWorkspaceSwitcher = process.argv.includes('--verify-workspace-switcher')
+const verifyWorkspaceSidebar = process.argv.includes('--verify-workspace-sidebar')
 const openPlannerSetup = process.argv.includes('--open-planner-setup')
 const verifyPlannerNavigation = process.argv.includes('--verify-planner-navigation')
 const verifyPlannerActions = process.argv.includes('--verify-planner-actions')
@@ -164,7 +164,7 @@ const env = {
   ...(routeHash ? { CAIRN_CODEX_SCREENSHOT_ROUTE_HASH: routeHash } : {}),
   ...(verifyNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_NAVIGATION: '1' } : {}),
   ...(verifyTypedRoutes ? { CAIRN_CODEX_SCREENSHOT_VERIFY_TYPED_ROUTES: '1' } : {}),
-  ...(verifyWorkspaceSwitcher ? { CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SWITCHER: '1' } : {}),
+  ...(verifyWorkspaceSidebar ? { CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SIDEBAR: '1' } : {}),
   ...(openPlannerSetup ? { CAIRN_CODEX_SCREENSHOT_OPEN_PLANNER_SETUP: '1' } : {}),
   ...(verifyPlannerNavigation ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_NAVIGATION: '1' } : {}),
   ...(verifyPlannerActions ? { CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS: '1' } : {}),
@@ -387,7 +387,7 @@ console.log(JSON.stringify({
   enableAllTools,
   verifyNavigation,
   verifyTypedRoutes,
-  verifyWorkspaceSwitcher,
+  verifyWorkspaceSidebar,
   openPlannerSetup,
   verifyPlannerNavigation,
   verifyPlannerActions,

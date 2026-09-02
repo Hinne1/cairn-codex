@@ -41,7 +41,6 @@ const allowedProductNameLines = new Set([
   'src/renderer/src/App.vue::<h1>Cairn Codex</h1>',
   'src/renderer/src/App.vue::<nav class="system-nav" aria-label="Cairn Codex system views">',
   "src/renderer/src/App.vue::<strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</strong>",
-  'src/renderer/src/App.vue::<nav v-if="snapshot && activeView === \'collection\'" class="workspace-tabs" aria-label="Cairn Codex workspace">',
   'src/renderer/src/workspaces/SettingsWorkspace.vue::<section class="settings-workspace" aria-label="Cairn Codex settings">',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"Close Grim Dawn Item Assistant before enabling Cairn Codex live mode.");',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::0, WindowClassName, "Cairn Codex live host", 0,',

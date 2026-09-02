@@ -1596,6 +1596,18 @@ function registerIpcHandlers(
 
 function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
   if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
+  if (name === 'settings') {
+    const fixture = createScreenshotCollectionFixture('search-help')
+    const stashes = [false, true].map((isHardcore) => ({
+      path: `C:\\Synthetic QA\\settings\\${isHardcore ? 'transfer.gsh' : 'transfer.gst'}`,
+      isHardcore,
+      modLabel: 'Main campaign',
+      itemCount: 0,
+      lastWriteUtc: '2026-09-02T00:00:00.000Z',
+      sha256: (isHardcore ? '1' : '0').repeat(64)
+    }))
+    return { ...fixture, basis: 'archive', scannedStashes: stashes, availableStashes: stashes }
+  }
   if (name === 'farming-routes') {
     const fixture = createScreenshotCollectionFixture('search-help')
     const template = fixture.items[0]!
@@ -7208,6 +7220,123 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               window.history.back()
               await returnToSettings
               assertSettings()
+              return performance.now() - started
+            })()
+          `)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_SETTINGS_WORKSPACE === '1') {
+          interactionTimings.settingsWorkspaceMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (duration = 100) => new Promise((resolve) => setTimeout(resolve, duration))
+              const preferences = () => JSON.parse(localStorage.getItem('cairn-codex-preferences') || '{}')
+              const expectedSafeMode = ${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_EXPECT_SAFE_SETTINGS === '1')}
+              if (expectedSafeMode) {
+                const settingsButton = [...document.querySelectorAll('.system-nav button')]
+                  .find((button) => button.textContent?.trim() === 'Settings')
+                if (!(settingsButton instanceof HTMLButtonElement)) {
+                  throw new Error('Safe-mode Settings navigation control was not rendered.')
+                }
+                settingsButton.click()
+                await frames()
+              }
+              const workspace = document.querySelector('.settings-workspace')
+              if (!workspace || document.querySelector('.workspace-switcher')) {
+                throw new Error('Settings must render as a focused system workspace without the specialist tool rail.')
+              }
+              if (workspace.querySelectorAll('.settings-card').length !== 14) {
+                throw new Error('Settings extraction did not retain all fourteen cards.')
+              }
+
+              const autoConnect = workspace.querySelector('.settings-card input[type="checkbox"]')
+              const experimental = workspace.querySelector('.experimental-tools-toggle input')
+              if (!(autoConnect instanceof HTMLInputElement) || !(experimental instanceof HTMLInputElement)) {
+                throw new Error('Settings safety toggles were not rendered.')
+              }
+              if (expectedSafeMode) {
+                if (!autoConnect.disabled || !experimental.disabled || experimental.checked) {
+                  throw new Error('Safe mode did not disable auto-connect and experimental tools.')
+                }
+                return performance.now() - started
+              }
+              if (autoConnect.disabled || experimental.disabled) {
+                throw new Error('Ordinary Settings unexpectedly inherited safe-mode gating.')
+              }
+
+              experimental.click()
+              await frames()
+              if (!experimental.checked || preferences().workspace?.experimentalToolsEnabled !== true) {
+                throw new Error('Experimental-tools emit did not update the persisted shell preference.')
+              }
+              const oracleLabel = [...workspace.querySelectorAll('.workspace-tool-options label')]
+                .find((label) => label.textContent?.includes('Stash Oracle'))
+              const oracleToggle = oracleLabel?.querySelector('input')
+              if (!(oracleToggle instanceof HTMLInputElement) || oracleToggle.disabled) {
+                throw new Error('Enabling experimental tools did not enable the Stash Oracle control.')
+              }
+              const triviaLabel = [...workspace.querySelectorAll('.workspace-tool-options label')]
+                .find((label) => label.textContent?.includes('Collection Trivia'))
+              const triviaToggle = triviaLabel?.querySelector('input')
+              if (!(triviaToggle instanceof HTMLInputElement)) throw new Error('Tool visibility control was not rendered.')
+              const triviaInitiallyVisible = triviaToggle.checked
+              triviaToggle.click()
+              await frames()
+              if (preferences().workspace?.visibleTools?.includes('trivia') === triviaInitiallyVisible) {
+                throw new Error('Tool visibility emit did not persist the requested boolean argument.')
+              }
+
+              const tierMode = workspace.querySelector('input[type="radio"][value="tier"]')
+              if (!(tierMode instanceof HTMLInputElement)) throw new Error('MI counting model was not rendered.')
+              tierMode.click()
+              await frames()
+              if (!tierMode.checked || preferences().workspace?.miCountingMode !== 'tier') {
+                throw new Error('MI counting v-model did not update the persisted parent ref.')
+              }
+
+              const stashTarget = workspace.querySelector('.retrieval-settings select')
+              if (!(stashTarget instanceof HTMLSelectElement) || stashTarget.options.length !== 2) {
+                throw new Error('Settings fixture did not expose both retrieval targets.')
+              }
+              const nextStash = stashTarget.options[1].value
+              stashTarget.value = nextStash
+              stashTarget.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              await wait()
+              if (stashTarget.value !== nextStash || preferences().sources?.retrievalStash !== nextStash) {
+                throw new Error('Retrieval-target v-model did not update the persisted parent ref.')
+              }
+
+              const modeToggles = [...workspace.querySelectorAll('.archive-mode-options input')]
+              if (modeToggles.length !== 2 || !modeToggles.every((input) => input instanceof HTMLInputElement)) {
+                throw new Error('Settings fixture did not expose both archive-mode controls.')
+              }
+              for (const modeToggle of modeToggles) {
+                if (!modeToggle.checked) {
+                  modeToggle.click()
+                  await frames()
+                  await wait()
+                }
+              }
+              if (!modeToggles.every((input) => input.checked) || preferences().sources?.archivePaths?.length !== 2) {
+                throw new Error('Archive-mode enable events did not establish the two-mode test state.')
+              }
+              const [softcore, hardcore] = modeToggles
+              softcore.click()
+              await frames()
+              await wait()
+              if (softcore.checked || !hardcore.checked || !hardcore.disabled || preferences().sources?.archivePaths?.length !== 1) {
+                throw new Error('Disabling one archive mode did not protect the remaining mode.')
+              }
+              hardcore.click()
+              await frames()
+              if (!hardcore.checked) throw new Error('The disabled final archive mode was changed programmatically through the UI.')
+              softcore.click()
+              await frames()
+              await wait()
+              if (!softcore.checked || !hardcore.checked || hardcore.disabled || preferences().sources?.archivePaths?.length !== 2) {
+                throw new Error('Re-enabling the second archive mode did not restore both-mode state.')
+              }
               return performance.now() - started
             })()
           `)

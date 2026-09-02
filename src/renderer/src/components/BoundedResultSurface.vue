@@ -180,23 +180,26 @@ function focusKey(key: BoundedResultKey | null): void {
   })
 }
 
-function visualRowKey(intent: 'row-up' | 'row-down'): BoundedResultKey | null {
+function visualRowKey(
+  intent: 'row-up' | 'row-down',
+  currentKey: BoundedResultKey
+): BoundedResultKey | null {
   return moveBoundedVisualRowKey(entryKeys.value.flatMap((key) => {
     const rect = itemElements.get(key)?.getBoundingClientRect()
     return rect ? [{ key, left: rect.left, top: rect.top }] : []
-  }), activeKey.value, intent)
+  }), currentKey, intent)
 }
 
-function navigate(intent: BoundedNavigationIntent): void {
+function navigate(intent: BoundedNavigationIntent, currentKey: BoundedResultKey): void {
   if (props.layout === 'grid' && (intent === 'row-up' || intent === 'row-down')) {
-    const visualKey = visualRowKey(intent)
+    const visualKey = visualRowKey(intent, currentKey)
     if (visualKey !== null) {
       focusKey(visualKey)
       return
     }
   }
   const columns = props.layout === 'grid' ? visibleGridColumns() : props.keyboardColumns
-  focusKey(moveBoundedResultKey(entryKeys.value, activeKey.value, intent, columns))
+  focusKey(moveBoundedResultKey(entryKeys.value, currentKey, intent, columns))
 }
 
 function visibleGridColumns(): number {
@@ -221,7 +224,7 @@ function handleKeydown(event: KeyboardEvent, entry: { key: BoundedResultKey, ite
 
   if (intent) {
     event.preventDefault()
-    navigate(intent)
+    navigate(intent, entry.key)
     return
   }
   if (event.key === 'Enter' || event.key === ' ') {

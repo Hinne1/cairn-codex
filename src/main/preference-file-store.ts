@@ -1,10 +1,17 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import {
+  isPreferenceDocument,
+  MAX_PLANNER_PROFILES,
+  MAX_PREFERENCE_BYTES,
+  MAX_PREFERENCE_TODOS
+} from '../shared/preference-schema.ts'
 
 export const PREFERENCE_FILE_SCHEMA_VERSION = 1
 export const PREFERENCE_BACKUP_RETENTION = 12
-const MAX_PREFERENCE_BYTES = 2 * 1024 * 1024
+export const MAX_PREFERENCE_ENVELOPE_BYTES = MAX_PREFERENCE_BYTES + 256 * 1024
+const MAX_IMPORTED_ORIGINS = 32
 
 interface PreferenceEnvelope {
   version: 1
@@ -25,10 +32,7 @@ function preferenceDocument(serialized: string | null): Record<string, unknown> 
   if (serialized === null || Buffer.byteLength(serialized, 'utf8') > MAX_PREFERENCE_BYTES) return null
   try {
     const parsed = JSON.parse(serialized) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
-      (parsed as { version?: unknown }).version === 1
-      ? parsed as Record<string, unknown>
-      : null
+    return isPreferenceDocument(parsed) ? parsed : null
   } catch {
     return null
   }
@@ -37,21 +41,33 @@ function preferenceDocument(serialized: string | null): Record<string, unknown> 
 function validEnvelope(value: unknown): value is PreferenceEnvelope {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const envelope = value as Partial<PreferenceEnvelope>
-  return envelope.version === PREFERENCE_FILE_SCHEMA_VERSION &&
-    Number.isInteger(envelope.revision) && Number(envelope.revision) >= 1 &&
-    typeof envelope.updatedAtUtc === 'string' &&
-    Array.isArray(envelope.importedOrigins) &&
+  const exactKeys = Object.keys(envelope).length === 5 &&
+    ['version', 'revision', 'updatedAtUtc', 'importedOrigins', 'preferences']
+      .every((key) => Object.prototype.hasOwnProperty.call(envelope, key))
+  return exactKeys && envelope.version === PREFERENCE_FILE_SCHEMA_VERSION &&
+    Number.isSafeInteger(envelope.revision) && Number(envelope.revision) >= 1 &&
+    typeof envelope.updatedAtUtc === 'string' && envelope.updatedAtUtc.length > 0 &&
+    envelope.updatedAtUtc.length <= 64 && Number.isFinite(Date.parse(envelope.updatedAtUtc)) &&
+    Array.isArray(envelope.importedOrigins) && envelope.importedOrigins.length <= MAX_IMPORTED_ORIGINS &&
     envelope.importedOrigins.every((origin) => typeof origin === 'string' && origin.length <= 2048) &&
-    Boolean(envelope.preferences) && typeof envelope.preferences === 'object' &&
-    !Array.isArray(envelope.preferences) && envelope.preferences.version === 1
+    new Set(envelope.importedOrigins).size === envelope.importedOrigins.length &&
+    isPreferenceDocument(envelope.preferences) &&
+    Buffer.byteLength(JSON.stringify(envelope.preferences), 'utf8') <= MAX_PREFERENCE_BYTES
 }
 
 async function readEnvelope(path: string): Promise<PreferenceEnvelope | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null
   try {
-    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown
+    handle = await open(path, 'r')
+    const buffer = Buffer.allocUnsafe(MAX_PREFERENCE_ENVELOPE_BYTES + 1)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    if (bytesRead > MAX_PREFERENCE_ENVELOPE_BYTES) return null
+    const parsed = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8')) as unknown
     return validEnvelope(parsed) ? parsed : null
   } catch {
     return null
+  } finally {
+    await handle?.close().catch(() => undefined)
   }
 }
 
@@ -61,7 +77,7 @@ function recordArray(value: unknown): Array<Record<string, unknown>> {
     : []
 }
 
-function mergeById(current: unknown, incoming: unknown): Array<Record<string, unknown>> {
+function mergeById(current: unknown, incoming: unknown, maximumEntries: number): Array<Record<string, unknown>> {
   const merged = new Map<string, Record<string, unknown>>()
   const anonymous: Array<Record<string, unknown>> = []
   const add = (entry: Record<string, unknown>): void => {
@@ -82,14 +98,14 @@ function mergeById(current: unknown, incoming: unknown): Array<Record<string, un
   }
   recordArray(current).forEach(add)
   recordArray(incoming).forEach(add)
-  return [...merged.values(), ...anonymous]
+  return [...merged.values(), ...anonymous].slice(0, maximumEntries)
 }
 
 function stringUnion(current: unknown, incoming: unknown): string[] {
   return [...new Set([
     ...(Array.isArray(current) ? current.filter((entry): entry is string => typeof entry === 'string') : []),
     ...(Array.isArray(incoming) ? incoming.filter((entry): entry is string => typeof entry === 'string') : [])
-  ])]
+  ])].slice(0, 512)
 }
 
 export function mergeOriginPreferences(
@@ -112,13 +128,13 @@ export function mergeOriginPreferences(
     ...current,
     planner: {
       ...currentPlanner,
-      profiles: mergeById(currentPlanner.profiles, incomingPlanner.profiles),
+      profiles: mergeById(currentPlanner.profiles, incomingPlanner.profiles, MAX_PLANNER_PROFILES),
       ignoredRecords: stringUnion(currentPlanner.ignoredRecords, incomingPlanner.ignoredRecords),
       favoriteRecords: stringUnion(currentPlanner.favoriteRecords, incomingPlanner.favoriteRecords)
     },
     notes: {
       ...currentNotes,
-      todos: mergeById(currentNotes.todos, incomingNotes.todos)
+      todos: mergeById(currentNotes.todos, incomingNotes.todos, MAX_PREFERENCE_TODOS)
     }
   }
 }
@@ -163,18 +179,21 @@ export class PreferenceFileStore {
         }
         importedOrigin = true
         await this.publish(envelope, null)
-      } else if (envelope && candidate && !envelope.importedOrigins.includes(origin)) {
+      } else if (envelope && candidate && !envelope.importedOrigins.includes(origin) &&
+        envelope.importedOrigins.length < MAX_IMPORTED_ORIGINS) {
         const previous = envelope
+        const merged = mergeOriginPreferences(previous.preferences, candidate)
+        const boundedMerge = preferenceDocument(JSON.stringify(merged)) ?? previous.preferences
         envelope = {
           ...previous,
           revision: previous.revision + 1,
           updatedAtUtc: new Date().toISOString(),
           importedOrigins: [...previous.importedOrigins, origin],
-          preferences: mergeOriginPreferences(previous.preferences, candidate)
+          preferences: boundedMerge
         }
         importedOrigin = true
         await this.publish(envelope, previous)
-      } else if (envelope && candidate &&
+      } else if (envelope && candidate && envelope.importedOrigins.includes(origin) &&
         preferenceUpdatedAt(candidate) > Date.parse(envelope.updatedAtUtc)) {
         // localStorage is written before its main-process mirror. If that IPC/file write failed,
         // the same origin's strictly newer document is the recovery source on the next launch.
@@ -244,19 +263,19 @@ export class PreferenceFileStore {
 
   private async publish(next: PreferenceEnvelope, previous: PreferenceEnvelope | null): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true })
-    const serialized = JSON.stringify(next, null, 2)
-    if (Buffer.byteLength(serialized, 'utf8') > MAX_PREFERENCE_BYTES) {
+    const serialized = JSON.stringify(next)
+    if (!validEnvelope(next) || Buffer.byteLength(serialized, 'utf8') > MAX_PREFERENCE_ENVELOPE_BYTES) {
       throw new Error('The preference document is outside its safe bounds.')
     }
     if (previous) {
-      await writeFile(this.previousPath, JSON.stringify(previous, null, 2), 'utf8')
+      await writeFile(this.previousPath, JSON.stringify(previous), 'utf8')
       if (durableDigest(previous.preferences) !== durableDigest(next.preferences)) {
         await mkdir(this.backupDirectory, { recursive: true })
         const backupPath = join(
           this.backupDirectory,
           `preferences-${String(previous.revision).padStart(10, '0')}.json`
         )
-        await writeFile(backupPath, JSON.stringify(previous, null, 2), 'utf8')
+        await writeFile(backupPath, JSON.stringify(previous), 'utf8')
       }
     }
     const temporary = `${this.path}.${randomUUID()}.tmp`

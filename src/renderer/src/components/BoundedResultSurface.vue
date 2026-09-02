@@ -171,7 +171,13 @@ function handleItemFocus(event: FocusEvent, entry: { key: BoundedResultKey, item
 function focusKey(key: BoundedResultKey | null): void {
   if (key === null) return
   activeKey.value = key
-  void nextTick(() => itemElements.get(key)?.focus())
+  // Keyboard targets are already mounted in the current bounded page. Focus immediately so
+  // assistive technology and synthetic keyboard gates observe the same deterministic handoff,
+  // then retry after Vue flushes in case the active-key update replaced the element.
+  itemElements.get(key)?.focus()
+  void nextTick(() => {
+    if (document.activeElement !== itemElements.get(key)) itemElements.get(key)?.focus()
+  })
 }
 
 function visualRowKey(intent: 'row-up' | 'row-down'): BoundedResultKey | null {

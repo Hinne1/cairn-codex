@@ -5937,12 +5937,27 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 if (cells.length < 2) throw new Error(label + ' needs at least two cells for keyboard verification.')
                 const first = cells[0]
                 const firstTop = first.getBoundingClientRect().top
-                const expectedDown = cells.find((cell) => cell.getBoundingClientRect().top > firstTop + 1) ?? cells[1]
+                const expectedDown = cells.find((cell) => cell.getBoundingClientRect().top > firstTop + 1) ?? first
                 first.focus()
                 first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
                 await frames()
                 if (document.activeElement !== expectedDown) {
-                  throw new Error(label + ' ArrowDown did not follow the visual grid after semantic row wrapping.')
+                  throw new Error(label + ' ArrowDown did not follow the visual grid after semantic row wrapping: ' + JSON.stringify({
+                    first: { key: first.dataset.resultKey, left: first.getBoundingClientRect().left, top: firstTop },
+                    expected: {
+                      key: expectedDown.dataset.resultKey,
+                      left: expectedDown.getBoundingClientRect().left,
+                      top: expectedDown.getBoundingClientRect().top
+                    },
+                    actual: document.activeElement instanceof HTMLElement
+                      ? {
+                          key: document.activeElement.dataset.resultKey,
+                          className: document.activeElement.className,
+                          left: document.activeElement.getBoundingClientRect().left,
+                          top: document.activeElement.getBoundingClientRect().top
+                        }
+                      : null
+                  }))
                 }
                 expectedDown.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
                 await frames()

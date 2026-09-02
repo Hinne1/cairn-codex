@@ -209,6 +209,10 @@ retains its established delayed tooltip behavior for both pointer and keyboard f
 
 ## Semantic badges and Grim Dawn rarity
 
+Dialog focus, reduced-motion behavior, and the remaining keyboard-audit debt are specified in
+`docs/architecture/accessibility.md`. Workspace-owned dialogs must use the shared modal focus
+controller instead of adding local Tab/Escape/restore implementations.
+
 Compact state labels use `src/renderer/src/components/SemanticBadge.vue` and the variables in
 `src/renderer/src/semantic-tokens.css`. Epic and Legendary accents must come from the shared
 rarity tokens; completion, current ownership, recipes, awakening qualifications, and visual FX

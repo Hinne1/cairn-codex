@@ -6272,10 +6272,31 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                   viewport: { width: window.innerWidth, height: window.innerHeight }
                 }))
               }
-              dialog.querySelector('.advanced-search-close')?.click()
+              const dialogControls = [...dialog.querySelectorAll('button:not([disabled]), select:not([disabled]), input:not([disabled]):not([type="hidden"]), [tabindex]:not([tabindex="-1"])')]
+                .filter((control) => control instanceof HTMLElement && control.offsetParent !== null)
+              const firstDialogControl = dialogControls[0]
+              const lastDialogControl = dialogControls[dialogControls.length - 1]
+              if (!(firstDialogControl instanceof HTMLElement) || !(lastDialogControl instanceof HTMLElement)) {
+                throw new Error('Advanced search did not expose a keyboard focus cycle.')
+              }
+              lastDialogControl.focus()
+              lastDialogControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+              if (document.activeElement !== firstDialogControl) {
+                throw new Error('Tab did not wrap from the last Advanced search control to the first.')
+              }
+              firstDialogControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
+              if (document.activeElement !== lastDialogControl) {
+                throw new Error('Shift+Tab did not wrap from the first Advanced search control to the last.')
+              }
+              advancedTrigger.focus()
+              await waitForFrames()
+              if (!dialog.contains(document.activeElement)) {
+                throw new Error('Advanced search allowed programmatic focus to escape the modal.')
+              }
+              document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
               await waitForFrames()
               if (dialog.open || document.activeElement !== advancedTrigger) {
-                throw new Error('Advanced search did not close and restore focus to its trigger.')
+                throw new Error('Escape did not close Advanced search and restore focus to its trigger.')
               }
               const localScroller = [...document.querySelectorAll('.skill-table-wrap, .planner-table-wrap, .mi-table-wrap')]
                 .find((element) => element instanceof HTMLElement && element.offsetParent !== null)

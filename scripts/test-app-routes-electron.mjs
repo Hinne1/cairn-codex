@@ -63,4 +63,11 @@ runGate('Planner map atlas selection', [
   '--width', '1440', '--height', '1000', '--screenshot-name', 'typed-routes-verify-planner'
 ])
 
-console.log('Typed-route Electron gates passed for Collection, Sets, and Planner map restoration.')
+runGate('Accessible modal focus', [
+  '--electron-source', '--fixture', 'search-help', '--query', 'wendigo',
+  '--category', 'Collection', '--open-search-help', '--verify-responsive-tools',
+  '--assert-no-overflow', '--disable-gpu',
+  '--width', '520', '--height', '900', '--screenshot-name', 'accessible-dialog-focus'
+])
+
+console.log('Typed-route Electron gates passed for Collection, Sets, Planner map restoration, and accessible modal focus.')

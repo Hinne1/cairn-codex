@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import type { GdiaImportResult } from '@shared/contracts'
+import { useModalDialogFocus } from '../modal-focus'
 import { ONBOARDING_STEP_COUNT } from '../onboarding'
 import ItemAssistantImport from './ItemAssistantImport.vue'
 
@@ -23,39 +24,9 @@ const emit = defineEmits<{
 }>()
 
 const dialog = ref<HTMLElement | null>(null)
-const previouslyFocused = document.activeElement instanceof HTMLElement
-  ? document.activeElement
-  : null
+const modalFocus = useModalDialogFocus(dialog, { onEscape: () => emit('skip') })
 
-onMounted(() => void nextTick(() => dialog.value?.focus()))
-onBeforeUnmount(() => void nextTick(() => previouslyFocused?.focus()))
-
-function handleDialogKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    emit('skip')
-    return
-  }
-  if (event.key !== 'Tab' || !dialog.value) return
-  const controls = [...dialog.value.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
-  )].filter((control) => control.offsetParent !== null)
-  if (!controls.length) {
-    event.preventDefault()
-    dialog.value.focus()
-    return
-  }
-  const first = controls[0]!
-  const last = controls[controls.length - 1]!
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.value)) {
-    event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
-}
+onMounted(modalFocus.activate)
 </script>
 
 <template>
@@ -69,7 +40,7 @@ function handleDialogKeydown(event: KeyboardEvent): void {
       aria-modal="true"
       aria-labelledby="onboarding-title"
       aria-describedby="onboarding-description"
-      @keydown="handleDialogKeydown"
+      @keydown="modalFocus.handleKeydown"
     >
       <header class="onboarding-header">
         <div>

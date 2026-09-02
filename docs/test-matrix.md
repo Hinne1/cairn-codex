@@ -98,6 +98,13 @@ backup/restore round trip without touching the user archive or game files.
 The UI benchmark enforces the warm-start budget with
 `node scripts/benchmark-ui.mjs --warm-budget-ms 5000`. Cold or stale-cache indexing is
 measured as a separate scan phase and is not presented as cached startup latency.
+Automated Electron gates opt into a Windows-only test fallback: when the first sandboxed
+renderer exits specifically with `reason=launch-failed`, the harness records the exit details
+and retries the disposable fixture once with Chromium's sandbox disabled. Crashes, OOM exits,
+ordinary exits, signal termination, and timeouts remain failures; signaled parents also trigger
+explicit descendant cleanup, and production windows stay sandboxed. On the
+2026-09-02 local Codex host, exit code 49 was detected without the former two-minute wait and the
+1,440×1,000 and 520×1,000 bounded-grid gates passed on the explicit fallback run.
 
 | Skill Explorer perceivable selection and sorting | `npm run test:skill-explorer-workspace`, renderer typecheck/build, and `npm run test:skill-explorer-workspace:electron` at 1,440×1,000 and 520×1,000 | **Passed 2026-09-02:** Arrow Down/Up keep DOM focus on the editable Skill input while exposing one stable, selected `aria-activedescendant`; filtering preserves each skill's option ID, repeated traversal scrolls the active option into view, and listbox options do not add Tab stops. Pointer and Enter selection close the popup, while Escape closes without changing the selected value or retaining dangling ARIA references. The active sortable column alone exposes `aria-sort`, and its visible direction arrow is hidden from assistive technology. The dedicated Electron gate is part of `npm run verify`. |
 

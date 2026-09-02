@@ -1,6 +1,13 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import {
+  BenchmarkRendererFailure,
+  benchmarkRendererFailure,
+  benchmarkProcessTermination,
+  terminateBenchmarkProcessTree,
+  shouldRetryWithoutSandbox
+} from './benchmark-process.mjs'
 
 function argument(name) {
   const index = process.argv.indexOf(name)
@@ -72,6 +79,7 @@ const simulateWorkspaceError = process.argv.includes('--simulate-workspace-error
 const safeMode = process.argv.includes('--safe-mode')
 const safeModeSuggested = process.argv.includes('--safe-mode-suggested')
 const disableGpu = process.argv.includes('--disable-gpu')
+const allowWindowsSandboxFallback = process.argv.includes('--allow-windows-sandbox-fallback')
 const screenshotName = (argument('--screenshot-name') ?? category ?? 'collection')
   .toLocaleLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -196,75 +204,82 @@ const env = {
   ...(category && category !== 'Collection' ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
   CAIRN_CODEX_PERF_REPORT_PATH: reportPath
 }
-const child = spawn(appPath, [
-  ...(disableGpu ? ['--disable-gpu', '--disable-gpu-sandbox', '--in-process-gpu'] : []),
-  ...(electronSource ? ['.'] : []),
-  `--user-data-dir=${profileRoot}`
-], {
-  env,
-  stdio: ['ignore', 'pipe', 'pipe'],
-  windowsHide: true
-})
-let stdout = ''
-let stderr = ''
-let childError = null
-child.stdout.on('data', (chunk) => { stdout += chunk })
-child.stderr.on('data', (chunk) => { stderr += chunk })
-child.on('error', (error) => { childError = error })
-
-async function terminateChildTree() {
-  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return
-  try {
-    execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
-  } catch {
-    child.kill()
-  }
-  if (child.exitCode !== null || child.signalCode !== null) return
-  const closed = await new Promise((resolveExit) => {
-    const onClose = () => {
-      clearTimeout(timer)
-      resolveExit(true)
-    }
-    const timer = setTimeout(() => {
-      child.off('close', onClose)
-      resolveExit(false)
-    }, 2_000)
-    child.once('close', onClose)
+async function runBenchmarkProcess({ noSandbox = false } = {}) {
+  await rm(reportPath, { force: true })
+  const child = spawn(appPath, [
+    ...(disableGpu ? ['--disable-gpu', '--disable-gpu-sandbox', '--in-process-gpu'] : []),
+    ...(noSandbox ? ['--no-sandbox'] : []),
+    ...(electronSource ? ['.'] : []),
+    `--user-data-dir=${profileRoot}`
+  ], {
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
   })
-  if (!closed && child.exitCode === null && child.signalCode === null) {
-    throw new Error(`Benchmark process tree ${child.pid} did not stop within 2000 ms.`)
+  let stdout = ''
+  let stderr = ''
+  let childError = null
+  child.stdout.on('data', (chunk) => { stdout += chunk })
+  child.stderr.on('data', (chunk) => { stderr += chunk })
+  child.on('error', (error) => { childError = error })
+
+  async function terminateChildTree() {
+    await terminateBenchmarkProcessTree(child)
   }
+
+  let report
+  let executionError = null
+  try {
+    for (let attempt = 0; attempt < (hydrateAllModes ? 480 : 240); attempt += 1) {
+      try {
+        report = JSON.parse(await readFile(reportPath, 'utf8'))
+        break
+      } catch {
+        if (childError) throw childError
+        const rendererFailure = benchmarkRendererFailure(`${stdout}\n${stderr}`)
+        if (rendererFailure) throw new BenchmarkRendererFailure(rendererFailure, stdout, stderr)
+        const termination = benchmarkProcessTermination(child)
+        if (termination) {
+          throw new Error(
+            `Benchmark app terminated before producing a report ` +
+            `(exit code ${termination.exitCode ?? 'none'}, signal ${termination.signalCode ?? 'none'}).\n` +
+            `${stdout}\n${stderr}`
+          )
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 500))
+      }
+    }
+    if (!report) throw new Error(`Benchmark timed out.\n${stdout}\n${stderr}`)
+  } catch (error) {
+    executionError = error
+  } finally {
+    try {
+      await terminateChildTree()
+    } catch (cleanupError) {
+      if (executionError) {
+        throw new AggregateError([executionError, cleanupError], 'Benchmark failed and its process tree could not be cleaned up.')
+      }
+      throw cleanupError
+    }
+  }
+  if (executionError) throw executionError
+  return { report, stdout, stderr, noSandbox }
 }
 
-let report
-let executionError = null
+let initialRendererLaunchFailure = null
+let benchmarkRun
 try {
-  for (let attempt = 0; attempt < (hydrateAllModes ? 480 : 240); attempt += 1) {
-    try {
-      report = JSON.parse(await readFile(reportPath, 'utf8'))
-      break
-    } catch {
-      if (childError) throw childError
-      if (child.exitCode !== null && child.exitCode !== 0) {
-        throw new Error(`Benchmark app exited ${child.exitCode}.\n${stdout}\n${stderr}`)
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 500))
-    }
-  }
-  if (!report) throw new Error(`Benchmark timed out.\n${stdout}\n${stderr}`)
+  benchmarkRun = await runBenchmarkProcess()
 } catch (error) {
-  executionError = error
-} finally {
-  try {
-    await terminateChildTree()
-  } catch (cleanupError) {
-    if (executionError) {
-      throw new AggregateError([executionError, cleanupError], 'Benchmark failed and its process tree could not be cleaned up.')
-    }
-    throw cleanupError
-  }
+  if (!shouldRetryWithoutSandbox(error, allowWindowsSandboxFallback)) throw error
+  initialRendererLaunchFailure = error.details
+  console.warn(
+    '[benchmark] Sandboxed renderer launch failed on this Windows host; ' +
+    'retrying the disposable fixture once with Chromium sandboxing disabled.'
+  )
+  benchmarkRun = await runBenchmarkProcess({ noSandbox: true })
 }
-if (executionError) throw executionError
+const { report } = benchmarkRun
 const itemCount = Number(String(report.renderedState?.results ?? '').replace(/[^0-9]/g, ''))
 const requestedViewport = {
   width: screenshotWidth ? Number(screenshotWidth) : 1440,
@@ -365,6 +380,8 @@ if (warmBudgetMs !== null) {
 }
 console.log(JSON.stringify({
   passed: true,
+  sandboxFallbackUsed: benchmarkRun.noSandbox,
+  initialRendererLaunchFailure,
   source: fixture ? `fixture:${fixture}` : resolve(baseProfile ?? baseDatabase),
   readyMs: report.readyMs,
   startup: report.startup,

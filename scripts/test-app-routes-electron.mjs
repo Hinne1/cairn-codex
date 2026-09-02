@@ -9,7 +9,9 @@ function verifiedRoute(input) {
 }
 
 function runGate(label, args) {
-  const result = spawnSync(process.execPath, [resolve('scripts/benchmark-ui.mjs'), ...args], {
+  const result = spawnSync(process.execPath, [
+    resolve('scripts/benchmark-ui.mjs'), '--allow-windows-sandbox-fallback', ...args
+  ], {
     cwd: resolve('.'),
     env: process.env,
     stdio: 'inherit',

@@ -126,6 +126,7 @@ assert.match(mainSource, /Back did not restore the MI item drawer route/)
 assert.match(mainSource, /Back did not restore the Set item route on page two after a restrictive search/)
 assert.match(mainSource, /Forward did not restore the restrictive Sets search route/)
 assert.match(mainSource, /Materials controls leaked into Collection/)
+assert.match(mainSource, /const viewportTolerance = 1[\s\S]*?gridFocusRect\.top < unobscuredTop\(\) - viewportTolerance[\s\S]*?restoredFocusRect\.top < unobscuredTop\(\) - viewportTolerance/)
 assert.match(benchmarkSource, /--verify-typed-routes/)
 assert.match(benchmarkSource, /--route-hash/)
 

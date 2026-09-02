@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   createPreferenceRepository,
+  MAX_PLANNER_PROFILES,
   PREFERENCE_STORAGE_KEY
 } from '../src/renderer/src/preference-repository.ts'
 
@@ -81,6 +82,40 @@ const plannerMetadata = createPreferenceRepository(plannerMetadataStorage, fixed
 assert.equal(plannerMetadata.value.planner.profiles[0]?.className, 'Death Knight')
 assert.deepEqual(plannerMetadata.value.planner.profiles[0]?.masteries, ['Necromancer', 'Soldier'])
 
+const recoverablePlannerStorage = new MemoryStorage()
+const recoverablePlannerPreferences = JSON.parse(fresh.exportJson())
+recoverablePlannerPreferences.planner.profiles = [{ name: 'Old custom build', skills: ['Field Command'] }]
+recoverablePlannerPreferences.planner.selectedProfileId = 'missing-id'
+recoverablePlannerStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(recoverablePlannerPreferences))
+const recoverablePlanner = createPreferenceRepository(recoverablePlannerStorage, fixedNow, createId)
+assert.equal(recoverablePlanner.value.planner.profiles.length, 1)
+assert.equal(recoverablePlanner.value.planner.profiles[0]?.name, 'Old custom build')
+assert.match(recoverablePlanner.value.planner.profiles[0]?.id ?? '', /^recovered-[0-9a-f]{8}$/)
+assert.equal(recoverablePlanner.value.planner.profiles[0]?.levelCap, 70)
+assert.equal(
+  recoverablePlanner.value.planner.selectedProfileId,
+  recoverablePlanner.value.planner.profiles[0]?.id
+)
+
+const boundedPlannerStorage = new MemoryStorage()
+const boundedPlannerPreferences = JSON.parse(fresh.exportJson())
+boundedPlannerPreferences.planner.profiles = Array.from({ length: MAX_PLANNER_PROFILES + 5 }, (_, index) =>
+  index < 2
+    ? { name: 'Duplicate recovered build', skills: ['Field Command'] }
+    : { id: `bounded-${index}`, name: `Bounded build ${index}`, skills: [] }
+)
+boundedPlannerPreferences.planner.selectedProfileId = 'missing-bounded-id'
+boundedPlannerStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(boundedPlannerPreferences))
+const boundedPlanner = createPreferenceRepository(boundedPlannerStorage, fixedNow, createId)
+assert.equal(boundedPlanner.value.planner.profiles.length, MAX_PLANNER_PROFILES - 1)
+assert.equal(
+  new Set(boundedPlanner.value.planner.profiles.map(({ id }) => id)).size,
+  boundedPlanner.value.planner.profiles.length
+)
+assert.equal(boundedPlanner.value.planner.selectedProfileId, boundedPlanner.value.planner.profiles[0]?.id)
+assert.ok(boundedPlanner.diagnostics.invalidFields.includes('planner.profiles'))
+assert.ok(boundedPlanner.diagnostics.invalidFields.includes('planner.selectedProfileId'))
+
 const corruptStorage = new MemoryStorage()
 const corrupt = JSON.parse(fresh.exportJson())
 corrupt.appearance.zoomFactor = 'huge'
@@ -109,5 +144,7 @@ console.log(JSON.stringify({
   fieldRecovery: recovered.diagnostics.invalidFields,
   nonDestructiveReset: true,
   plannerMetadataRoundTrip: true,
+  recoverablePlannerProfilesPreserved: true,
+  boundedPlannerProfiles: boundedPlanner.value.planner.profiles.length,
   settingsOnlyExport: true
 }, null, 2))

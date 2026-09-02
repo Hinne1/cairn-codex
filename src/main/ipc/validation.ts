@@ -82,6 +82,26 @@ export function validateSerializedPreferences(input: unknown): { serialized: str
   return { serialized: value.serialized }
 }
 
+export function validatePreferenceBootstrap(input: unknown): { origin: string; candidateSerialized: string | null } {
+  const value = objectInput(input, 'Preference migration input is outside its safe bounds.')
+  if (typeof value.origin !== 'string' || value.origin.length > 2048 ||
+      (value.candidateSerialized !== null && typeof value.candidateSerialized !== 'string') ||
+      (typeof value.candidateSerialized === 'string' && value.candidateSerialized.length > 2 * 1024 * 1024)) {
+    throw new Error('Preference migration input is outside its safe bounds.')
+  }
+  let candidateSerialized = value.candidateSerialized as string | null
+  if (value.candidateSerialized !== null) {
+    try {
+      validateSerializedPreferences({ serialized: value.candidateSerialized })
+    } catch {
+      // The main-process file is canonical. A corrupt browser mirror must not prevent
+      // it from loading, and is equivalent to an absent migration candidate.
+      candidateSerialized = null
+    }
+  }
+  return { origin: value.origin, candidateSerialized }
+}
+
 const startupPhases = new Set<StartupPhaseEvent>([
   'cache-hit', 'cache-miss', 'cached-paint', 'interactive',
   'scan-started', 'scan-settled', 'scan-skipped',

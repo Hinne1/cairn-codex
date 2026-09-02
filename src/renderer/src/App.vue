@@ -224,7 +224,17 @@ const safeModeOfferOpen = ref(safeModeSuggested.value && !safeModeActive.value)
 const safeModeBusy = ref(false)
 const safeModeDialog = ref<HTMLElement | null>(null)
 const simulateWorkspaceFailure = startupRecoveryParameters.get('simulateWorkspaceError') === '1'
-const preferenceRepository = createPreferenceRepository(localStorage)
+const preferenceRepository = createPreferenceRepository({
+  getItem: (key) => localStorage.getItem(key),
+  setItem: (key, value) => {
+    localStorage.setItem(key, value)
+    if (key === 'cairn-codex-preferences') {
+      void window.cairnCodex.savePreferences(value).catch((error) => {
+        console.error('Could not persist the durable preference document.', error)
+      })
+    }
+  }
+})
 const initialPreferences = preferenceRepository.value
 const initialOnboardingPreference = {
   ...initialPreferences.onboarding,

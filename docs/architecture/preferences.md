@@ -1,8 +1,17 @@
 # Persisted preferences
 
-Cairn Codex renderer preferences live in one versioned document under the
-`cairn-codex-preferences` browser-storage key. `preference-repository.ts` is the only module
-allowed to interpret older renderer keys or write the canonical document.
+Cairn Codex preferences live in one versioned document at `preferences.json` in the Electron
+user-data directory. The renderer keeps a browser-storage mirror under `cairn-codex-preferences`
+for rollback compatibility, but `preference-repository.ts` and `PreferenceFileStore` are the only
+modules allowed to interpret or publish the canonical document.
+
+The main-process file is deliberately renderer-origin independent. On first launch after this
+migration, the current `file://` or local development origin is imported without deleting its
+legacy browser copy. Each other origin is merged once by stable planner/to-do IDs, then recorded;
+it cannot later resurrect a plan the user deliberately deleted from the canonical document.
+If a browser mirror has a strictly newer document timestamp than the canonical envelope—for
+example, because its preceding file-write IPC failed—it is recovered as the same origin's newest
+complete document on the next launch.
 
 ## Schema and durability
 
@@ -27,14 +36,18 @@ and it never accesses the Codex Archive, saves, stashes, backups, queues, or rec
 
 ## Reads, migration, and diagnostics
 
-Every startup validates the canonical document field by field. Invalid values fall back to a
-bounded safe default while unrelated valid fields survive. Diagnostics contain only the load
+Every startup loads the main-process file before mounting Vue, then validates the canonical
+document field by field. Recoverable planner objects receive bounded defaults instead of being
+silently discarded. Invalid values fall back to a bounded safe default while unrelated valid fields survive. Diagnostics contain only the load
 source, schema version, migration flag, and invalid field paths; they never include preference
 values, paths, character names, profile contents, or to-do text.
 
-When no canonical document exists, the repository checks the historical keys and performs one
-compatibility migration. Legacy keys are intentionally retained for rollback, but are never
-read again after the canonical document has been written.
+Writes use a temporary file and atomic rename. The immediately previous valid envelope is kept,
+and changes to planner/to-do content create up to 12 rotating recovery snapshots. Startup falls
+back through the previous file and newest valid snapshot if the primary file is corrupt or absent.
+
+When no canonical file exists, the repository checks the historical keys and performs one
+compatibility migration. Legacy keys are intentionally retained for rollback and origin imports.
 
 Changes to this schema require:
 

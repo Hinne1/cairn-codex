@@ -1070,7 +1070,7 @@ body.planner-setup-active { overflow: hidden; }
 .planner-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .planner-summary span { display: flex; align-items: baseline; gap: 7px; padding: 13px 15px; border: 1px solid #35434a; border-radius: 6px; color: #7f8b8f; background: #171b1d; font-size: 10px; }
 .planner-summary strong { color: #86bfd4; font: 500 20px Georgia, serif; }
-.planner-table-wrap { max-width: 100%; min-width: 0; max-height: 68vh; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border: 1px solid #39464d; border-radius: 8px; background: rgba(18,21,22,.94); }
+.planner-table-wrap { max-width: 100%; min-width: 0; overflow-x: auto; border: 1px solid #39464d; border-radius: 8px; background: rgba(18,21,22,.94); }
 .planner-table-results .bounded-results-collection { min-width: 1250px; }
 .planner-table-header,
 .planner-table-row { display: grid; grid-template-columns: 60px 270px 230px 430px minmax(260px,1fr); }

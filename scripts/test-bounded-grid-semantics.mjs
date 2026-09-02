@@ -17,6 +17,8 @@ assert.match(component, /:role="usesGridSemantics \? 'row' : itemRole"/)
 assert.match(component, /v-if="usesGridSemantics"[\s\S]*?role="gridcell"/)
 assert.match(component, /getBoundingClientRect\(\)\.top/)
 assert.match(component, /props\.layout === 'grid' && !usesGridSemantics\.value/)
+assert.match(component, /itemElements\.get\(key\)\?\.focus\(\)[\s\S]*?nextTick/)
+assert.match(component, /document\.activeElement !== itemElements\.get\(key\)/)
 
 assert.match(collection, /layout="grid"[\s\S]*?interactive/)
 assert.match(oracle, /layout="grid" navigable/)

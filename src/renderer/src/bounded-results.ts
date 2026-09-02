@@ -37,6 +37,12 @@ export type BoundedNavigationIntent =
 
 export type BoundedSelectionMode = 'none' | 'single' | 'multiple'
 
+export interface BoundedGridPosition {
+  key: BoundedResultKey
+  left: number
+  top: number
+}
+
 function positiveInteger(value: number | undefined, fallback: number): number {
   if (!Number.isFinite(value)) return fallback
   return Math.max(1, Math.trunc(value ?? fallback))
@@ -97,6 +103,30 @@ export function moveBoundedResultKey(
   if (intent === 'row-down') nextIndex = normalizedIndex + rowSize
 
   return keys[Math.min(Math.max(nextIndex, 0), keys.length - 1)] ?? null
+}
+
+export function moveBoundedVisualRowKey(
+  positions: readonly BoundedGridPosition[],
+  current: BoundedResultKey | null,
+  intent: 'row-up' | 'row-down'
+): BoundedResultKey | null {
+  const currentPosition = positions.find(({ key }) => key === current)
+  if (!currentPosition) return null
+  const candidates = positions.filter(({ key, top }) =>
+    key !== current && (intent === 'row-down'
+      ? top > currentPosition.top + 1
+      : top < currentPosition.top - 1))
+  if (!candidates.length) return currentPosition.key
+
+  const nearestTop = intent === 'row-down'
+    ? Math.min(...candidates.map(({ top }) => top))
+    : Math.max(...candidates.map(({ top }) => top))
+  return candidates
+    .filter(({ top }) => Math.abs(top - nearestTop) <= 1)
+    .sort((left, right) =>
+      Math.abs(left.left - currentPosition.left) - Math.abs(right.left - currentPosition.left) ||
+      left.left - right.left
+    )[0]?.key ?? null
 }
 
 export function updateBoundedSelection(

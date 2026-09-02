@@ -6480,6 +6480,124 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_MI_WORKSHOP_WORKSPACE === '1') {
+          interactionTimings.miWorkshopWorkspaceMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const root = document.querySelector('.mi-workshop')
+              const resultRoot = document.querySelector('.mi-table-results')
+              const rows = () => [...document.querySelectorAll('.mi-table-results .bounded-results-item')]
+              const resultCount = () => Number((document.querySelector('.mi-explorer-toolbar .explorer-result-count')?.textContent ?? '').replace(/[^0-9]/g, ''))
+              const selects = () => [...document.querySelectorAll('.mi-explorer-toolbar select')]
+              const setQuery = async (value) => {
+                const input = document.querySelector('.mi-explorer-toolbar .explorer-search input')
+                if (!(input instanceof HTMLInputElement)) throw new Error('MI Workshop search control was not rendered.')
+                input.value = value
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                await wait(175)
+                await frames()
+              }
+              if (!root || !root.querySelector('.tool-header') || !root.querySelector('.explorer-toolbar')) {
+                throw new Error('MI Workshop did not render the shared workspace shell.')
+              }
+              if (!resultRoot || rows().length < 2 || rows().length > 50) {
+                throw new Error('MI Workshop did not mount a bounded non-empty result page.')
+              }
+              const originalTotal = resultCount()
+              const originalFirst = rows()[0]?.textContent?.replace(/\s+/g, ' ').trim()
+              if (!Number.isFinite(originalTotal) || originalTotal < rows().length) throw new Error('MI Workshop result count was invalid.')
+              const first = rows()[0]
+              const second = rows()[1]
+              const affixed = rows().find((row) => row.querySelectorAll('.affix-name.rare, .affix-name.magical').length === 2)
+              if (!(affixed instanceof HTMLElement)) throw new Error('MI Workshop fixture did not expose an affixed copy for tooltip verification.')
+              let nativeFocusEvents = 0
+              affixed.addEventListener('focus', () => { nativeFocusEvents += 1 })
+              affixed.focus()
+              if (document.activeElement !== affixed) throw new Error('An affixed MI Workshop row was not keyboard focusable.')
+              if (nativeFocusEvents === 0) affixed.dispatchEvent(new FocusEvent('focus'))
+              for (let attempt = 0; attempt < 8 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(10)
+              const tooltipName = document.querySelector('.game-tooltip h3')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+              const rowAffixes = [...affixed.querySelectorAll('.affix-name')].map((node) => node.textContent?.trim()).filter(Boolean)
+              // Older imported catalog tags contain a few singular/plural label variants (for
+              // example, "of Spine" versus "of Spines") for the same serialized affix record.
+              const tooltipIncludesAffix = (affix) => tooltipName.includes(affix) ||
+                (affix.endsWith('s') && tooltipName.includes(affix.slice(0, -1)))
+              if (!tooltipName || rowAffixes.some((affix) => !tooltipIncludesAffix(affix))) {
+                throw new Error('MI Workshop keyboard tooltip did not immediately preserve the selected copy affixes: ' + JSON.stringify({ tooltipName, rowAffixes }))
+              }
+              first.focus()
+              first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+              await wait(20)
+              if (document.activeElement !== second) throw new Error('ArrowDown did not move to the next MI Workshop row.')
+              const searchInput = document.querySelector('.mi-explorer-toolbar .explorer-search input')
+              second.dispatchEvent(new FocusEvent('blur'))
+              if (searchInput instanceof HTMLInputElement) searchInput.focus()
+              await wait(120)
+              if (document.querySelector('.game-tooltip')) throw new Error('MI Workshop tooltip did not settle before pointer-delay verification.')
+              const affixedRow = affixed.querySelector('.mi-table-row')
+              if (!(affixedRow instanceof HTMLElement)) throw new Error('MI Workshop row content was unavailable.')
+              affixedRow.dispatchEvent(new MouseEvent('mouseenter', { clientX: 20, clientY: 20 }))
+              if (document.querySelector('.game-tooltip')) throw new Error('MI Workshop pointer hover bypassed the established tooltip delay.')
+              for (let attempt = 0; attempt < 40 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
+              if (!document.querySelector('.game-tooltip')) throw new Error('MI Workshop pointer hover did not use the global tooltip.')
+              affixedRow.dispatchEvent(new MouseEvent('mouseleave'))
+              const [affixSelect, metricSelect, sortSelect, orderSelect] = selects()
+              if (![affixSelect, metricSelect, sortSelect, orderSelect].every((select) => select instanceof HTMLSelectElement)) {
+                throw new Error('MI Workshop typed filter and sort controls were incomplete.')
+              }
+              affixSelect.value = 'double-rare'
+              affixSelect.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              if (rows().length === 0 || rows().some((row) => row.querySelectorAll('.affix-name.rare').length !== 2 || row.querySelector('.affix-name.magical'))) {
+                throw new Error('MI Workshop double-rare filter admitted a non-rare affix pair.')
+              }
+              affixSelect.value = 'all'
+              affixSelect.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              sortSelect.value = 'level'
+              sortSelect.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              orderSelect.value = 'asc'
+              orderSelect.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              const levels = rows().map((row) => Number(row.querySelector('.mi-table-row > [role="gridcell"]:nth-child(2)')?.textContent))
+              if (levels.some((level, index) => index > 0 && level < levels[index - 1])) {
+                throw new Error('MI Workshop required-level sort did not produce ascending results: ' + JSON.stringify({
+                  levels,
+                  sort: sortSelect.value,
+                  order: orderSelect.value
+                }))
+              }
+              const next = resultRoot.querySelector('.bounded-results-footer nav button:last-of-type')
+              if (!(next instanceof HTMLButtonElement) || next.disabled) throw new Error('MI Workshop verification needs a second bounded page.')
+              next.click()
+              await frames()
+              if (rows().length > 50 || rows()[0]?.textContent?.replace(/\s+/g, ' ').trim() === originalFirst) {
+                throw new Error('MI Workshop paging did not replace its bounded rows.')
+              }
+              await setQuery('zz-no-mi-result-zz')
+              if (rows().length !== 0 || !resultRoot.querySelector('.bounded-results-state.is-empty')) {
+                throw new Error('MI Workshop did not render the shared empty state after an impossible search.')
+              }
+              await setQuery('')
+              if (rows().length < 2 || rows().length > 50 || resultCount() !== originalTotal) {
+                throw new Error('MI Workshop search reset did not restore the original bounded result set.')
+              }
+              const pageText = resultRoot.querySelector('.bounded-results-footer nav span')?.textContent ?? 'Page 1'
+              if (!pageText.includes('Page 1')) throw new Error('Editing MI Workshop search did not reset paging to page one.')
+              const scroller = document.querySelector('.mi-table-wrap')
+              if (!(scroller instanceof HTMLElement) || scroller.tabIndex < 0 || scroller.getAttribute('aria-describedby') !== 'mi-table-scroll-help') {
+                throw new Error('MI Workshop comparison table is not a labeled keyboard-focusable local scroller.')
+              }
+              if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) {
+                throw new Error('MI Workshop escaped its local scroller and overflowed the document.')
+              }
+              return performance.now() - started
+            })()
+          `)
+        }
         const scrollTarget = process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET
         if (scrollTarget) {
           await window.webContents.executeJavaScript(`
@@ -6896,8 +7014,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             prefixClass: row.children[2]?.className,
             suffixClass: row.children[3]?.className
           })),
-          miQuery: document.querySelector('.mi-workshop-search input')?.value,
-          miAffixFilter: document.querySelector('.mi-workshop-controls select')?.value,
+          miQuery: document.querySelector('.mi-explorer-toolbar .explorer-search input')?.value,
+          miAffixFilter: document.querySelector('.mi-explorer-toolbar .explorer-toolbar-filters select')?.value,
           drawer: document.querySelector('.item-drawer h2')?.textContent?.trim(),
           tooltip: document.querySelector('.game-tooltip')?.textContent?.trim(),
           tooltipRect: (() => {

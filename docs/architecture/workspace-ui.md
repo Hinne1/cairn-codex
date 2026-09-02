@@ -207,6 +207,17 @@ changes clear selection, query edits preserve selection while resetting page one
 changes clear selection, and Back/Forward restores the complete typed control snapshot. Supplies
 retains its established delayed tooltip behavior for both pointer and keyboard focus.
 
+MI Workshop owns its typed query, affix-quality filter, selected comparison metric, sort, direction,
+page, reserve disclosure, shared toolbar, and complete bounded comparison table in
+`MiWorkshopWorkspace.vue`. `mi-workshop.ts` owns exact base/prefix/suffix grouping, the affix rarity
+index, strict rare-prefix plus rare-suffix filtering, structured base/affix/stat/skill matching,
+metric leadership, and deterministic group sorting. `App.vue` retains one typed Back/Forward
+control snapshot, the shared comparison drawer, and narrow catalog/icon/global-tooltip/item-drawer
+adapters. Keyboard focus opens the affixed copy tooltip immediately; pointer hover keeps the
+established delay. Changing a user-facing query, filter, metric, or sort resets paging, while route
+restoration replaces the complete snapshot without a watcher erasing the restored page. Page-only
+changes update the bounded result window without invalidating the archive grouping projection.
+
 ## Semantic badges and Grim Dawn rarity
 
 Dialog focus, reduced-motion behavior, and the remaining keyboard-audit debt are specified in

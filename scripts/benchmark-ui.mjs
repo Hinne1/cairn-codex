@@ -29,6 +29,7 @@ const expectedMiTotal = argument('--expected-mi-total')
 const expectedMiMounted = argument('--expected-mi-mounted')
 const expectedBoundedTotal = argument('--expected-bounded-total')
 const expectedBoundedMounted = argument('--expected-bounded-mounted')
+const expectedSetCards = argument('--expected-set-cards')
 const warmBudgetMs = argument('--warm-budget-ms')
 const miNativeRestore = process.argv.includes('--mi-native-restore')
 const waitForBackgroundJobs = process.argv.includes('--wait-for-background-jobs')
@@ -57,6 +58,7 @@ const verifyResponsiveTools = process.argv.includes('--verify-responsive-tools')
 const verifyAccessibleModal = process.argv.includes('--verify-accessible-modal')
 const assertNoOverflow = process.argv.includes('--assert-no-overflow')
 const verifyFarmingPaging = process.argv.includes('--verify-farming-paging')
+const verifySetsPaging = process.argv.includes('--verify-sets-paging')
 const verifyOracleWorkspace = process.argv.includes('--verify-oracle-workspace')
 const verifyDismantlingWorkspace = process.argv.includes('--verify-dismantling-workspace')
 const verifySkillExplorerWorkspace = process.argv.includes('--verify-skill-explorer-workspace')
@@ -167,6 +169,7 @@ const env = {
   ...(verifyResponsiveTools ? { CAIRN_CODEX_SCREENSHOT_VERIFY_RESPONSIVE_TOOLS: '1' } : {}),
   ...(verifyAccessibleModal ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ACCESSIBLE_MODAL: '1' } : {}),
   ...(verifyFarmingPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING: '1' } : {}),
+  ...(verifySetsPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SETS_PAGING: '1' } : {}),
   ...(verifyOracleWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ORACLE_WORKSPACE: '1' } : {}),
   ...(verifyDismantlingWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE: '1' } : {}),
   ...(verifySkillExplorerWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SKILL_EXPLORER_WORKSPACE: '1' } : {}),
@@ -326,6 +329,16 @@ if (expectedBoundedMounted !== null) {
     throw new Error(`Bounded mounted-row mismatch: rendered ${rendered}; expected ${expected}.`)
   }
 }
+if (expectedSetCards !== null) {
+  const expected = Number(expectedSetCards)
+  const rendered = report.renderedState?.sets ?? 0
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new Error(`--expected-set-cards must be a non-negative integer; received ${expectedSetCards}.`)
+  }
+  if (rendered !== expected) {
+    throw new Error(`Set mounted-card mismatch: rendered ${rendered}; expected ${expected}.`)
+  }
+}
 if (warmBudgetMs !== null) {
   const budget = Number(warmBudgetMs)
   if (!Number.isFinite(budget) || budget <= 0) {
@@ -374,6 +387,7 @@ console.log(JSON.stringify({
   verifyResponsiveTools,
   assertNoOverflow,
   verifyFarmingPaging,
+  verifySetsPaging,
   verifyOracleWorkspace,
   verifyDismantlingWorkspace,
   verifySkillExplorerWorkspace,

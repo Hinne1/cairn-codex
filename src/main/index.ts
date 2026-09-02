@@ -1746,6 +1746,74 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
       }
     }
   }
+  if (name === 'sets-bounded') {
+    const items = Array.from({ length: 202 }, (_, index) => {
+      const ordinal = String(index + 1).padStart(3, '0')
+      const setName = `Bounded Set ${ordinal}`
+      const setRecord = `records/items/synthetic/bounded_set_${ordinal}.dbr`
+      const rarity = index % 2 === 0 ? 'legendary' as const : 'epic' as const
+      const level = rarity === 'legendary' ? 94 : 50
+      const state = index % 4
+      const visual = index % 7 === 0
+      const setPresentation = {
+        name: setName,
+        description: 'Synthetic detailed set used only for bounded renderer verification.',
+        members: [`${setName} Crown`, `${setName} Guard`],
+        tiers: [{
+          requiredPieces: 2,
+          lines: [{
+            label: 'All Damage', minimum: 80 + index % 21, maximum: 80 + index % 21,
+            unit: '%' as const, tone: 'standard' as const, prefix: '+', suffix: ''
+          }],
+          petLines: [],
+          skillModifiers: visual ? [{
+            kind: 'visual-modifier' as const,
+            heading: 'Synthetic Skill · Visual transformation',
+            lines: [{
+              label: 'Alternate bounded verification effect', minimum: null, maximum: null,
+              unit: '' as const, tone: 'visual' as const, prefix: '', suffix: ''
+            }]
+          }] : [],
+          grantedSkill: null
+        }]
+      }
+      return [
+        createScreenshotSetItem({
+          record: `records/items/synthetic/bounded_${ordinal}_crown.dbr`,
+          name: `${setName} Crown`, rarity, slot: 'head', level, setName, setRecord,
+          availableCount: state === 0 || state === 1 ? 1 : 0,
+          discovered: state === 0 || state === 1,
+          bestRollPercentile: state === 0 || state === 1 ? 70 + index % 25 : undefined,
+          recipeUnlocked: state === 2,
+          setPresentation,
+          visual
+        }),
+        createScreenshotSetItem({
+          record: `records/items/synthetic/bounded_${ordinal}_guard.dbr`,
+          name: `${setName} Guard`, rarity, slot: 'chest', level, setName, setRecord,
+          availableCount: state === 0 ? 1 : 0,
+          discovered: state === 0,
+          bestRollPercentile: state === 0 ? 65 + index % 30 : undefined,
+          availableViaAwakening: state === 2,
+          awakeningSourceAvailableCount: state === 2 ? 1 : 0,
+          awakeningSourceName: state === 2 ? `${setName} Mark` : undefined,
+          setPresentation
+        })
+      ]
+    }).flat()
+    return {
+      ...createScreenshotCollectionFixture('search-help'),
+      items,
+      rarities: (['epic', 'legendary'] as const).map((rarity) => ({
+        rarity,
+        total: items.filter((item) => item.rarity === rarity).length,
+        collected: items.filter((item) => item.rarity === rarity && item.discovered).length,
+        availableCopies: items
+          .filter((item) => item.rarity === rarity)
+          .reduce((total, item) => total + item.availableCount, 0)
+      }))
+    }
+  }
   if (name === 'sets-semantics') {
     const setPresentation = {
       name: 'Veil of the Cairn',
@@ -5558,6 +5626,106 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_SETS_PAGING === '1') {
+          interactionTimings.setsPagingMs = await window.webContents.executeJavaScript(`
+            (async () => {
+              const started = performance.now()
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const root = document.querySelector('.set-results')
+              const cards = () => [...document.querySelectorAll('.set-results .set-card')]
+              const firstRecord = () => cards()[0]?.getAttribute('data-set-record')
+              const pageText = () => root?.querySelector('.bounded-results-footer nav span')?.textContent?.trim() ?? ''
+              const rangeText = () => root?.querySelector('.bounded-results-footer > span')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+              const nextButton = () => root?.querySelector('.bounded-results-footer nav button:last-of-type')
+              const goToSecondPage = async () => {
+                const next = nextButton()
+                if (!(next instanceof HTMLButtonElement) || next.disabled) {
+                  throw new Error('Sets did not expose an enabled next-page control.')
+                }
+                next.click()
+                await frames()
+                if (!pageText().includes('Page 2')) throw new Error('Sets did not advance to page two.')
+              }
+              const changeSelect = async (select, value, label) => {
+                if (!(select instanceof HTMLSelectElement)) throw new Error('Sets ' + label + ' control was not available.')
+                select.value = value
+                select.dispatchEvent(new Event('change', { bubbles: true }))
+                await frames()
+                if (!pageText().includes('Page 1') && !rangeText().startsWith('1–')) {
+                  throw new Error(
+                    'Sets paging did not reset after ' + label + ' changed; page=' + pageText() +
+                    ', range=' + rangeText() + ', cards=' + cards().length + ', value=' + select.value + '.'
+                  )
+                }
+              }
+              if (!root || cards().length !== 50) {
+                throw new Error('The 202-set fixture did not mount exactly 50 set cards on page one.')
+              }
+              const collection = root.querySelector('.bounded-results-collection')
+              const semanticItems = [...root.querySelectorAll('.bounded-results-item')]
+              if (collection?.getAttribute('role') !== 'list' || semanticItems.some((item) => item.getAttribute('role') !== 'listitem')) {
+                throw new Error('Passive Set cards did not retain valid list/listitem semantics inside their visual grid.')
+              }
+              const firstPageRecord = firstRecord()
+              if (!firstPageRecord) throw new Error('Sets did not expose stable set identity.')
+              const next = nextButton()
+              if (!(next instanceof HTMLButtonElement)) throw new Error('Sets paging control was not rendered.')
+              next.focus()
+              if (document.activeElement !== next) throw new Error('The Sets next-page control was not keyboard reachable.')
+              await goToSecondPage()
+              if (cards().length !== 50 || !firstRecord() || firstRecord() === firstPageRecord) {
+                throw new Error('Sets did not replace page one with the next 50 stable set cards.')
+              }
+
+              const sort = document.querySelector('.collection-explorer-toolbar .explorer-toolbar-sort select')
+              await changeSelect(sort, 'name', 'sorting')
+              await goToSecondPage()
+              const filters = document.querySelectorAll('.collection-explorer-toolbar .explorer-toolbar-filters select')
+              await changeSelect(filters[0], 'unstarted', 'progress filter')
+              await changeSelect(filters[0], 'all', 'progress filter restoration')
+              await goToSecondPage()
+              await changeSelect(filters[1], 'epic', 'rarity filter')
+              await changeSelect(filters[1], 'all', 'rarity filter restoration')
+              await goToSecondPage()
+              await changeSelect(filters[2], 'visual', 'feature filter')
+              await changeSelect(filters[2], 'all', 'feature filter restoration')
+
+              const input = document.querySelector('.collection-explorer-toolbar .explorer-search input')
+              if (!(input instanceof HTMLInputElement)) throw new Error('Sets search control was not available.')
+              input.value = 'no-such-bounded-set'
+              input.dispatchEvent(new Event('input', { bubbles: true }))
+              await wait(175)
+              await frames()
+              if (cards().length !== 0 || !root.querySelector('.bounded-results-state.is-empty')) {
+                throw new Error('Sets search did not render the shared zero-result state.')
+              }
+              input.value = ''
+              input.dispatchEvent(new Event('input', { bubbles: true }))
+              await wait(175)
+              await frames()
+              if (cards().length !== 50 || !pageText().includes('Page 1')) {
+                throw new Error('Clearing Sets search did not restore the first bounded page.')
+              }
+
+              const item = root.querySelector('.set-card li > button')
+              if (!(item instanceof HTMLButtonElement)) throw new Error('Set member controls were not retained.')
+              item.focus()
+              item.dispatchEvent(new FocusEvent('focus'))
+              for (let attempt = 0; attempt < 20 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
+              if (!document.querySelector('.game-tooltip')) throw new Error('Set member focus did not retain the global item tooltip.')
+              const expectedItemName = item.querySelector('strong')?.textContent?.trim()
+              item.click()
+              await frames()
+              if (!expectedItemName || document.querySelector('.item-drawer h2')?.textContent?.trim() !== expectedItemName) {
+                throw new Error('Set member activation did not retain the matching item drawer.')
+              }
+              document.querySelector('.drawer-close')?.click()
+              await frames()
+              return performance.now() - started
+            })()
+          `)
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING === '1') {
           interactionTimings.farmingPagingMs = await window.webContents.executeJavaScript(`
             (async () => {
@@ -6719,25 +6887,59 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 const initialSet = assertTypedEntry('sets', false)
                 assertInitialControls(initialSet)
                 if (activeWorkspace() !== 'Sets') throw new Error('Direct Sets deep link did not restore its workspace.')
+                const setsRoot = document.querySelector('.set-results')
+                const currentSetPage = () => setsRoot?.querySelector('.bounded-results-footer nav span')?.textContent?.trim() ?? ''
+                if (!currentSetPage().includes('Page 2')) throw new Error('Direct Sets deep link did not restore page two.')
                 const setItem = document.querySelector('.set-card li button')
                 if (!(setItem instanceof HTMLButtonElement)) throw new Error('Deep-linked Sets route did not render an item link.')
                 setItem.click()
                 await frames()
                 const setItemState = assertTypedEntry('sets', true)
                 if (!document.querySelector('.item-drawer')) throw new Error('Set item link did not open its typed item route.')
-                const backToSet = waitForPopState()
-                window.history.back()
-                await backToSet
+
+                const closeDrawer = document.querySelector('.drawer-close')
+                if (!(closeDrawer instanceof HTMLButtonElement)) throw new Error('Set item drawer did not expose its close action.')
+                closeDrawer.click()
+                await frames()
                 assertTypedEntry('sets', false)
-                if (document.querySelector('.item-drawer')) throw new Error('Back did not close the set item route.')
-                const forwardToSetItem = waitForPopState()
-                window.history.forward()
-                await forwardToSetItem
+                if (!currentSetPage().includes('Page 2')) throw new Error('Closing the Set item drawer did not retain page two.')
+
+                const search = document.querySelector('.collection-explorer-toolbar .explorer-search input')
+                if (!(search instanceof HTMLInputElement)) throw new Error('Sets search was unavailable for route restoration.')
+                search.value = 'no-such-route-restoration-set'
+                search.dispatchEvent(new Event('input', { bubbles: true }))
+                await new Promise((resolve) => setTimeout(resolve, 175))
+                await frames()
+                const restrictedState = assertTypedEntry('sets', false)
+                if (restrictedState.route.controls.page !== 1 || !document.querySelector('.set-results .bounded-results-state.is-empty')) {
+                  throw new Error('Restrictive Sets search did not replace history with its page-one empty state.')
+                }
+
+                const backToSetItem = waitForPopState()
+                window.history.back()
+                await backToSetItem
+                await new Promise((resolve) => setTimeout(resolve, 175))
+                const restoredItem = assertTypedEntry('sets', true)
                 if (
-                  !document.querySelector('.item-drawer') ||
-                  window.history.state.route.itemRecord !== setItemState.route.itemRecord
+                  restoredItem.route.itemRecord !== setItemState.route.itemRecord ||
+                  !currentSetPage().includes('Page 2') ||
+                  !document.querySelector('.item-drawer')
                 ) {
-                  throw new Error('Forward did not restore the set item route.')
+                  throw new Error('Back did not restore the Set item route on page two after a restrictive search.')
+                }
+
+                const forwardToRestrictedSet = waitForPopState()
+                window.history.forward()
+                await forwardToRestrictedSet
+                await new Promise((resolve) => setTimeout(resolve, 175))
+                if (
+                  document.querySelector('.item-drawer') ||
+                  window.history.state.route.itemRecord !== null ||
+                  window.history.state.route.controls.query !== 'no-such-route-restoration-set' ||
+                  window.history.state.route.controls.page !== 1 ||
+                  !document.querySelector('.set-results .bounded-results-state.is-empty')
+                ) {
+                  throw new Error('Forward did not restore the restrictive Sets search route.')
                 }
                 return performance.now() - started
               }

@@ -34,12 +34,12 @@ runGate('Collection and MI Workshop', [
 ])
 
 runGate('Sets and item drawer', [
-  '--electron-source', '--fixture', 'sets-semantics', '--query', ' ',
+  '--electron-source', '--fixture', 'sets-bounded', '--query', '',
   '--route-hash', verifiedRoute({
     version: 1,
     workspace: 'sets',
     controls: {
-      query: ' ', progress: 'all', feature: 'all', sort: 'name', direction: 'desc', page: 1
+      query: '', progress: 'all', feature: 'all', sort: 'name', direction: 'desc', page: 2
     }
   }),
   '--verify-typed-routes', '--assert-no-overflow', '--disable-gpu',

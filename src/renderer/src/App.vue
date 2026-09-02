@@ -1537,7 +1537,12 @@ function restoreAppRoute(route: AppRoute): void {
       collectionControls.value = { ...route.controls }
       break
     case 'sets':
+      if (searchQueryTimer) {
+        clearTimeout(searchQueryTimer)
+        searchQueryTimer = null
+      }
       query.value = route.controls.query
+      searchQuery.value = route.controls.query
       setProgressFilter.value = route.controls.progress
       setFeatureFilter.value = route.controls.feature
       setSortMode.value = route.controls.sort
@@ -6150,13 +6155,24 @@ function formatRollValue(value: number): string {
         <p>Parsing the game database and your transfer stashes.</p>
       </section>
 
-      <section v-else-if="activeView === 'sets'" class="set-grid" aria-label="Item sets">
-        <article
-          v-for="set in visibleSets"
-          :key="set.record"
-          class="set-card"
-          :class="`rarity-${setRarity(set.items)}`"
-        >
+      <BoundedResultSurface
+        v-else-if="activeView === 'sets'"
+        v-model:page="currentPage"
+        class="set-results"
+        :items="visibleSets"
+        :get-key="set => set.record"
+        :page-size="50"
+        empty-title="No sets match these filters"
+        empty-detail="Try changing the current search or set filters."
+        label="Item sets"
+        layout="grid"
+      >
+        <template #item="{ item: set }">
+          <article
+            class="set-card"
+            :class="`rarity-${setRarity(set.items)}`"
+            :data-set-record="set.record"
+          >
           <header>
             <div>
               <div class="set-heading-badges">
@@ -6301,9 +6317,9 @@ function formatRollValue(value: number): string {
               </div>
             </section>
           </div>
-        </article>
-        <div v-if="visibleSets.length === 0" class="no-results">No sets match these filters.</div>
-      </section>
+          </article>
+        </template>
+      </BoundedResultSurface>
 
     </main>
     </WorkspaceErrorBoundary>

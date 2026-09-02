@@ -5722,6 +5722,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             (async () => {
               const started = performance.now()
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+              const waitFor = async (predicate, failure) => {
+                for (let attempt = 0; attempt < 80; attempt += 1) {
+                  if (predicate()) return
+                  await wait(25)
+                }
+                throw new Error(failure)
+              }
               const buttons = [...document.querySelectorAll('.planner-display button')]
               const list = buttons.find((button) => button.textContent?.trim() === 'List')
               const grid = buttons.find((button) => button.textContent?.trim() === 'Grid')
@@ -5737,37 +5745,139 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               const initialRows = [...surface.querySelectorAll('.bounded-results-item')]
               if (initialRows.length !== 50) throw new Error('Planner continuous window started with ' + initialRows.length + ' mounted rows instead of 50.')
+              initialRows[0]?.focus()
               initialRows[0]?.dispatchEvent(new FocusEvent('focus'))
+              await waitFor(() => document.querySelector('.game-tooltip'), 'Focused planner row did not open its tooltip.')
+              if (document.activeElement !== initialRows[0]) throw new Error('The initial planner row did not receive DOM focus.')
+              const tooltip = document.querySelector('.game-tooltip')
+              if (!(tooltip instanceof HTMLElement)) throw new Error('Planner tooltip was not rendered.')
+              const tooltipInlineStyle = tooltip.style.cssText
+              const tooltipScrollTop = tooltip.scrollTop
+              const tooltipScrollProbe = document.createElement('div')
+              tooltipScrollProbe.setAttribute('aria-hidden', 'true')
+              tooltipScrollProbe.style.cssText = 'height:480px;min-height:480px;flex:0 0 480px'
+              tooltip.appendChild(tooltipScrollProbe)
+              tooltip.style.height = '120px'
+              tooltip.style.maxHeight = '120px'
+              tooltip.style.overflowY = 'auto'
               await frames()
+              if (tooltip.scrollHeight <= tooltip.clientHeight) {
+                throw new Error('Planner tooltip scroll verification could not create deterministic overflow.')
+              }
+              tooltip.scrollTop = 0
               const wheel = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true })
-              window.dispatchEvent(wheel)
-              if (wheel.defaultPrevented) throw new Error('A visible planner tooltip still captures ordinary mouse-wheel input.')
+              tooltip.dispatchEvent(wheel)
+              if (wheel.defaultPrevented || tooltip.scrollTop !== 0) {
+                throw new Error('A visible planner tooltip still captures ordinary mouse-wheel input.')
+              }
+              const altWheel = new WheelEvent('wheel', { deltaY: 120, altKey: true, bubbles: true, cancelable: true })
+              tooltip.dispatchEvent(altWheel)
+              if (!altWheel.defaultPrevented || tooltip.scrollTop <= 0) {
+                throw new Error('Alt + mouse wheel did not scroll the overflowing planner tooltip.')
+              }
+              tooltipScrollProbe.remove()
+              tooltip.style.cssText = tooltipInlineStyle
+              tooltip.scrollTop = tooltipScrollTop
 
               const firstText = initialRows[0]?.textContent?.replace(/\\s+/g, ' ').trim()
-              let shifted = false
-              for (let attempt = 0; attempt < 3 && !shifted; attempt += 1) {
-                const next = surface.querySelector('.bounded-results-continuation.is-next button')
-                if (!(next instanceof HTMLButtonElement)) break
-                next.click()
-                await frames()
-                const rows = [...surface.querySelectorAll('.bounded-results-item')]
-                if (rows.length > 100) throw new Error('Planner continuous scrolling mounted ' + rows.length + ' rows; expected at most 100.')
-                shifted = rows[0]?.textContent?.replace(/\\s+/g, ' ').trim() !== firstText
+              const firstBottom = surface.querySelector('.bounded-results-continuation.is-next')
+              if (!(firstBottom instanceof HTMLElement)) throw new Error('Planner continuous-scroll sentinel was not rendered.')
+              firstBottom.scrollIntoView({ block: 'end' })
+              await waitFor(
+                () => surface.querySelectorAll('.bounded-results-item').length > 50,
+                'Scrolling to the planner boundary did not append the second bounded page.'
+              )
+              await frames(); await frames()
+              let rows = [...surface.querySelectorAll('.bounded-results-item')]
+              if (rows.length > 100 || document.activeElement !== initialRows[0]) {
+                throw new Error('The second planner window exceeded its DOM bound or lost focus prematurely.')
               }
-              if (!shifted || !surface.querySelector('.bounded-results-continuation.is-previous button')) {
+              const secondBottom = surface.querySelector('.bounded-results-continuation.is-next')
+              if (!(secondBottom instanceof HTMLElement)) throw new Error('Planner did not expose the next continuous boundary.')
+              secondBottom.scrollIntoView({ block: 'end' })
+              await waitFor(
+                () => surface.querySelector('.bounded-results-item')?.textContent?.replace(/\\s+/g, ' ').trim() !== firstText,
+                'Observer-driven planner scrolling did not advance its bounded two-page window.'
+              )
+              await frames(); await frames()
+              rows = [...surface.querySelectorAll('.bounded-results-item')]
+              const focusedAfterEviction = document.activeElement
+              if (
+                rows.length > 100 ||
+                !(focusedAfterEviction instanceof HTMLElement) ||
+                !focusedAfterEviction.classList.contains('bounded-results-item') ||
+                focusedAfterEviction.textContent?.replace(/\\s+/g, ' ').trim() === firstText ||
+                !surface.querySelector('.bounded-results-continuation.is-previous button')
+              ) {
                 throw new Error('Planner continuous scrolling did not advance its bounded two-page window.')
               }
               const listCount = surface.querySelectorAll('.bounded-results-item').length
+              const focusedKey = focusedAfterEviction.dataset.resultKey
+              const unobscuredTop = () => {
+                const topbar = document.querySelector('.topbar')
+                return topbar instanceof HTMLElement ? Math.max(0, topbar.getBoundingClientRect().bottom) : 0
+              }
               grid.click()
-              await frames()
+              await frames(); await frames()
               const gridCards = document.querySelectorAll('.planner-card-results .planner-card').length
-              if (gridCards !== listCount || !grid.classList.contains('active')) {
-                throw new Error('Planner Grid view did not preserve the continuous item window.')
+              const gridFocus = document.activeElement
+              const gridFocusRect = gridFocus instanceof HTMLElement ? gridFocus.getBoundingClientRect() : null
+              if (
+                gridCards !== listCount ||
+                !grid.classList.contains('active') ||
+                !(gridFocus instanceof HTMLElement) ||
+                gridFocus.dataset.resultKey !== focusedKey ||
+                !gridFocusRect ||
+                gridFocusRect.top < unobscuredTop() ||
+                gridFocusRect.top >= innerHeight
+              ) {
+                throw new Error('Planner Grid view did not preserve the focused visible result and continuous window: ' + JSON.stringify({
+                  gridCards, listCount, active: grid.classList.contains('active'), focusedKey,
+                  gridFocusKey: gridFocus instanceof HTMLElement ? gridFocus.dataset.resultKey : null,
+                  top: gridFocusRect?.top, bottom: gridFocusRect?.bottom, unobscuredTop: unobscuredTop(), innerHeight
+                }))
               }
               list.click()
-              await frames()
-              if (!document.querySelector('.planner-table-results') || !list.classList.contains('active')) {
-                throw new Error('Planner List view did not restore the continuous item window.')
+              await frames(); await frames()
+              const restoredFocus = document.activeElement
+              const restoredFocusRect = restoredFocus instanceof HTMLElement ? restoredFocus.getBoundingClientRect() : null
+              if (
+                !document.querySelector('.planner-table-results') ||
+                !list.classList.contains('active') ||
+                !(restoredFocus instanceof HTMLElement) ||
+                restoredFocus.dataset.resultKey !== focusedKey ||
+                !restoredFocusRect ||
+                restoredFocusRect.top < unobscuredTop() ||
+                restoredFocusRect.top >= innerHeight
+              ) {
+                throw new Error('Planner List view did not restore the focused visible result and continuous window: ' + JSON.stringify({
+                  focusedKey, restoredFocusKey: restoredFocus instanceof HTMLElement ? restoredFocus.dataset.resultKey : null,
+                  top: restoredFocusRect?.top, bottom: restoredFocusRect?.bottom, unobscuredTop: unobscuredTop(), innerHeight
+                }))
+              }
+              const trailingFocus = [...surface.querySelectorAll('.bounded-results-item')].at(-1)
+              if (!(trailingFocus instanceof HTMLElement)) throw new Error('Planner trailing-page focus target was not rendered.')
+              trailingFocus.focus()
+              trailingFocus.dispatchEvent(new FocusEvent('focus'))
+              const trailingKey = trailingFocus.dataset.resultKey
+              if (document.activeElement !== trailingFocus) throw new Error('Planner trailing-page item did not receive focus.')
+              const previousBoundary = surface.querySelector('.bounded-results-continuation.is-previous')
+              if (!(previousBoundary instanceof HTMLElement)) throw new Error('Planner previous-window boundary was not rendered.')
+              previousBoundary.scrollIntoView({ block: 'start' })
+              await waitFor(
+                () => surface.querySelector('.bounded-results-item')?.textContent?.replace(/\\s+/g, ' ').trim() === firstText,
+                'Planner backward restoration did not recover the first result window.'
+              )
+              await frames(); await frames()
+              const backwardFocus = document.activeElement
+              if (
+                surface.querySelectorAll('.bounded-results-item').length > 100 ||
+                !(backwardFocus instanceof HTMLElement) ||
+                !backwardFocus.classList.contains('bounded-results-item') ||
+                backwardFocus.dataset.resultKey === trailingKey ||
+                !surface.contains(backwardFocus)
+              ) {
+                throw new Error('Planner backward restoration exceeded its DOM bound or lost trailing-page focus.')
               }
               return performance.now() - started
             })()

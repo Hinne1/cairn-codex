@@ -91,6 +91,22 @@ runGate('Planner continuous scrolling and views', [
   '--width', '1440', '--height', '1000', '--screenshot-name', 'planner-continuous-results'
 ])
 
+runGate('Planner compact continuous Grid anchoring', [
+  '--electron-source', '--fixture', 'planner', '--query', '',
+  '--route-hash', verifiedRoute({
+    version: 1,
+    workspace: 'planner',
+    controls: {
+      profileId: null, skills: ['Wendigo Totem'], minimumLevel: 1, maximumLevel: 70,
+      query: '', ownership: 'all', showIgnored: false, sort: 'level', direction: 'asc',
+      display: 'list', page: 1, atlasQuery: '', atlasRegion: null, mapScope: 'selected',
+      mapSort: 'items', mapDirection: 'desc'
+    }
+  }),
+  '--verify-planner-scrolling', '--assert-no-overflow', '--disable-gpu',
+  '--width', '520', '--height', '900', '--screenshot-name', 'planner-continuous-results-compact'
+])
+
 runGate('Planner map atlas selection', [
   '--electron-source', '--fixture', 'planner', '--query', 'Wendigo',
   '--route-hash', verifiedRoute({

@@ -73,6 +73,16 @@ assert.match(appSource, /\[Alt \+ Mouse Wheel to Scroll Tooltip\]/u)
 assert.match(surfaceSource, /pagination\?: 'pages' \| 'continuous'/u)
 assert.match(surfaceSource, /continuousEndPage\.value > continuousStartPage\.value/u,
   'Continuous results must discard old pages rather than grow the mounted DOM without a bound.')
+assert.match(surfaceSource, /watch\(\(\) => props\.layout[\s\S]*?continuousLeadingSpace\.value = 0/u,
+  'Continuous results must invalidate layout-specific spacer measurements when List/Grid geometry changes.')
+assert.match(surfaceSource, /focus\(\{ preventScroll: true \}\)/u,
+  'Continuous eviction must restore keyboard focus without undoing its scroll anchor.')
+assert.match(surfaceSource, /function unobscuredViewportTop[\s\S]*?querySelector<HTMLElement>\('\.topbar'\)[\s\S]*?getBoundingClientRect\(\)\.bottom/u,
+  'Continuous results must treat the sticky topbar as an obscured portion of the viewport.')
+assert.match(surfaceSource, /function keepElementInViewport[\s\S]*?rect\.height > availableHeight[\s\S]*?rect\.top - visibleTop[\s\S]*?requestAnimationFrame[\s\S]*?keepElementInViewport\(focusElement\)/u,
+  'Continuous layout changes must keep restored keyboard focus visible after reflow settles without oscillating oversized cards.')
+assert.match(surfaceSource, /:data-result-key="String\(entry\.key\)"/u,
+  'Bounded results must expose stable rendered identity for cross-layout interaction verification.')
 assert.doesNotMatch(styleSource, /\.planner-table-wrap\s*\{[^}]*max-height/iu,
   'The planner list must not create a height-bounded nested vertical scroller.')
 

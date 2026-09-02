@@ -65,6 +65,7 @@ while ((line = Console.ReadLine()) is not null)
             "self-test-live-queue" => HelperResponse.Success(request.Id, LiveGameAdapter.SelfTest()),
             "self-test-dismantling" => HelperResponse.Success(request.Id, DismantlingSimulatorSelfTest.Run()),
             "self-test-acquisition" => HelperResponse.Success(request.Id, AcquisitionResolverSelfTest.Run()),
+            "self-test-item-presentation" => HelperResponse.Success(request.Id, ItemPresentationBuilderSelfTest.Run()),
             "validate-transfer-stash-roundtrip" => ValidateTransferStashRoundTrip(request),
             "validate-ingest-plan" => ValidateIngestPlan(request),
             "plan-ingest-items" => PlanIngestItems(request),

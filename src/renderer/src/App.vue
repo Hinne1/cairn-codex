@@ -91,12 +91,15 @@ import {
 } from './planner-item-matches'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import {
+  compareSetCompletion,
   setCompletionCount,
   setItemBadges,
   setItemDiscovered,
   setItemUnqualified,
   setRarity,
-  setReadiness
+  setReadiness,
+  setRollRating,
+  type SetRollRating
 } from './set-semantics'
 import {
   ONBOARDING_STEP_COUNT,
@@ -185,6 +188,7 @@ interface CollectionSet {
   availableCopies: number
   minimumLevel: number
   maximumLevel: number
+  rollRating: SetRollRating
 }
 
 interface RollTrackerSummary {
@@ -793,13 +797,15 @@ const collectionSets = computed<CollectionSet[]>(() => {
         collected: setItemDiscovered(item) ? 1 : 0,
         availableCopies: item.availableCount,
         minimumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0,
-        maximumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0
+        maximumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0,
+        rollRating: setRollRating([item])
       })
     }
   }
   for (const set of grouped.values()) {
     set.items.sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
     set.collected = setCompletionCount(set.items)
+    set.rollRating = setRollRating(set.items)
   }
   return [...grouped.values()]
 })
@@ -3648,8 +3654,7 @@ function compareSets(left: CollectionSet, right: CollectionSet): number {
   if (setSortMode.value === 'level') {
     comparison = left.minimumLevel - right.minimumLevel || left.maximumLevel - right.maximumLevel
   } else if (setSortMode.value === 'completion') {
-    comparison = left.collected / left.items.length - right.collected / right.items.length
-    if (comparison === 0) comparison = left.collected - right.collected
+    comparison = compareSetCompletion(left.items, right.items)
   } else {
     comparison = left.name.localeCompare(right.name)
   }
@@ -6293,6 +6298,19 @@ function formatRollValue(value: number): string {
                 {{ set.collected }} / {{ set.items.length }} discovered
               </SemanticBadge>
               <span class="set-percentage">{{ setCompletionPercent(set) }}</span>
+              <span
+                class="set-roll-rating"
+                :class="{ unavailable: set.rollRating.average === null }"
+                :title="set.rollRating.average === null
+                  ? 'No physically available set pieces have a trusted roll rating yet.'
+                  : `${set.rollRating.ratedPieces} of ${set.rollRating.availablePieces} available set pieces rated.`"
+              >
+                <template v-if="set.rollRating.average !== null">
+                  ★ {{ set.rollRating.average.toFixed(1) }}% avg roll
+                  <small>{{ set.rollRating.ratedPieces }}/{{ set.rollRating.availablePieces }} rated</small>
+                </template>
+                <template v-else>☆ No rated rolls</template>
+              </span>
             </div>
           </header>
           <div class="set-meter">

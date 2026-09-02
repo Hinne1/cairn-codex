@@ -16,6 +16,12 @@ export interface SetReadiness {
   unqualifiedCount: number
 }
 
+export interface SetRollRating {
+  average: number | null
+  ratedPieces: number
+  availablePieces: number
+}
+
 function isAvailableViaAwakening(item: CollectionItem): boolean {
   return item.availableViaAwakening === true && (item.awakeningSourceAvailableCount ?? 0) > 0
 }
@@ -84,5 +90,44 @@ export function setReadiness(items: readonly CollectionItem[]): SetReadiness {
     label: 'Ready via crafting + awakening',
     tone: 'progress',
     unqualifiedCount: 0
+  }
+}
+
+export function compareSetCompletion(
+  left: readonly CollectionItem[],
+  right: readonly CollectionItem[]
+): number {
+  // Completion sorting has three user-facing bands. Crafting, awakening, and a
+  // mixture of both are all complete qualifications; their implementation path
+  // must not outrank how much of the set has actually been discovered.
+  const readinessRank: Record<SetReadiness['kind'], number> = {
+    stored: 2,
+    crafting: 1,
+    awakening: 1,
+    mixed: 1,
+    missing: 0
+  }
+  const readinessComparison =
+    readinessRank[setReadiness(left).kind] - readinessRank[setReadiness(right).kind]
+  if (readinessComparison !== 0) return readinessComparison
+
+  const leftCollected = setCompletionCount(left)
+  const rightCollected = setCompletionCount(right)
+  return leftCollected / left.length - rightCollected / right.length ||
+    leftCollected - rightCollected
+}
+
+export function setRollRating(items: readonly CollectionItem[]): SetRollRating {
+  const available = items.filter((item) => item.availableCount > 0)
+  const ratings = available
+    .filter((item) => item.analyzedCopyCount > 0)
+    .map((item) => item.bestRollPercentile)
+    .filter((rating): rating is number => rating !== null && Number.isFinite(rating))
+  return {
+    average: ratings.length > 0
+      ? ratings.reduce((total, rating) => total + rating, 0) / ratings.length
+      : null,
+    ratedPieces: ratings.length,
+    availablePieces: available.length
   }
 }

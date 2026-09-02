@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  compareSetCompletion,
   setCompletionCount,
   setItemBadges,
   setItemDiscovered,
   setItemUnqualified,
   setRarity,
-  setReadiness
+  setReadiness,
+  setRollRating
 } from '../src/renderer/src/set-semantics.ts'
 import { withRecipeAvailability } from '../src/shared/recipe-availability.ts'
 
@@ -77,6 +79,44 @@ assert.deepEqual(setReadiness([stored, missing]), {
   kind: 'missing', label: '1 unqualified piece', tone: 'missing', unqualifiedCount: 1
 })
 
+const incompleteHighDiscovery = [
+  item({ discovered: true }),
+  item({ discovered: true }),
+  item({ discovered: true }),
+  missing
+]
+const readyAfterCrafting = [stored, recipe, item({ recipeUnlocked: true }), item({ recipeUnlocked: true })]
+assert(compareSetCompletion(readyAfterCrafting, incompleteHighDiscovery) > 0,
+  'A qualified ready-after-crafting set must rank ahead of a more-discovered incomplete set')
+assert(compareSetCompletion([stored], readyAfterCrafting) > 0,
+  'A set that is ready from storage must rank ahead of a set that still needs crafting')
+const mixedQualified = [
+  item({ discovered: true, recipeUnlocked: true }),
+  item({ availableViaAwakening: true, awakeningSourceAvailableCount: 1 })
+]
+const craftingQualified = [item({ recipeUnlocked: true }), item({ recipeUnlocked: true })]
+assert(compareSetCompletion(mixedQualified, craftingQualified) > 0,
+  'Qualification mechanism must not outrank discovered completion within the ready band')
+assert.equal(
+  Math.sign(compareSetCompletion(readyAfterCrafting, incompleteHighDiscovery)),
+  -Math.sign(compareSetCompletion(incompleteHighDiscovery, readyAfterCrafting)),
+  'Completion comparison must remain deterministic in either direction'
+)
+
+assert.deepEqual(
+  setRollRating([
+    item({ availableCount: 1, bestRollPercentile: 72.5, analyzedCopyCount: 1 }),
+    item({ availableCount: 2, bestRollPercentile: 87.5, analyzedCopyCount: 2 }),
+    item({ availableCount: 1 }),
+    item({ availableCount: 1, bestRollPercentile: 99, analyzedCopyCount: 0 }),
+    item({ bestRollPercentile: 99 })
+  ]),
+  { average: 80, ratedPieces: 2, availablePieces: 4 }
+)
+assert.deepEqual(setRollRating([historical, recipe]), {
+  average: null, ratedPieces: 0, availablePieces: 0
+})
+
 assert.deepEqual(setItemBadges(recipe).map(({ label, tone }) => ({ label, tone })), [
   { label: 'Recipe', tone: 'crafting' }
 ])
@@ -88,6 +128,19 @@ assert.deepEqual(setItemBadges(missing).map(({ label, tone }) => ({ label, tone 
 ])
 
 const tokenSource = readFileSync(new URL('../src/renderer/src/semantic-tokens.css', import.meta.url), 'utf8')
+const appSource = readFileSync(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8')
+const styleSource = readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
+assert.match(appSource, /class="set-roll-rating"/,
+  'Every set card must render its aggregate roll-rating state')
+assert.match(appSource, /set\.rollRating\.ratedPieces.*set\.rollRating\.availablePieces/s,
+  'Set cards must disclose rated and physically available piece counts')
+assert.match(styleSource, /\.set-roll-rating\.unavailable/,
+  'The no-analyzed-roll state must remain visually distinct')
+const rollStatusTokens = [
+  styleSource.match(/\.set-roll-rating small\s*{[^}]*color:\s*var\((--[\w-]+)\)/s)?.[1],
+  styleSource.match(/\.set-roll-rating\.unavailable\s*{[^}]*color:\s*var\((--[\w-]+)\)/s)?.[1]
+]
+assert(rollStatusTokens.every(Boolean), 'Set roll coverage and unavailable states must use semantic color tokens')
 const semanticColors = [...tokenSource.matchAll(/--(?:gd-rarity|semantic)-[\w-]+:\s*(#[0-9a-f]{6})/gi)]
   .map((match) => ({ name: match[0].slice(2, match[0].indexOf(':')), color: match[1] }))
 assert(semanticColors.length >= 10, 'Expected every semantic tone to expose a hex token')
@@ -95,6 +148,14 @@ const tokenByName = new Map(semanticColors.map(({ name, color }) => [name, color
 const rarityCardBackgrounds = ['gd-rarity-epic', 'gd-rarity-legendary'].map((name) =>
   compositeHex(tokenByName.get(name), '#2a2720', 0.09)
 )
+for (const token of rollStatusTokens) {
+  const color = tokenSource.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, 'i'))?.[1]
+  assert(color, `${token} must resolve to a fallback color`)
+  for (const background of rarityCardBackgrounds) {
+    assert(contrastRatio(color, background) >= 4.5,
+      `${token} ${color} must meet 4.5:1 contrast against set-card background ${background}`)
+  }
+}
 for (const { name, color: foreground } of semanticColors) {
   // The first set-card gradient stop mixes 9% rarity color into its base
   // before SemanticBadge adds its own 12% tint. Every badge tone can appear
@@ -140,6 +201,8 @@ console.log(JSON.stringify({
   completionExcludesQualifications: true,
   archiveRecipeProjectionPreservesDiscovery: true,
   readinessKinds: ['stored', 'crafting', 'awakening', 'mixed', 'missing'],
+  readinessSortsBeforeIncompleteSets: true,
+  averageRollRating: true,
   explicitQualificationBadges: true,
   rarityTokens: ['epic', 'legendary'],
   semanticContrast: '>=4.5:1'

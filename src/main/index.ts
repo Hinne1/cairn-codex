@@ -1773,7 +1773,7 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
       createScreenshotSetItem({
         record: 'records/items/synthetic/cairn_hood.dbr', name: 'Cairn Hood', rarity: 'legendary',
         slot: 'head', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',
-        availableCount: 2, discovered: true, setPresentation, visual: true
+        availableCount: 2, discovered: true, bestRollPercentile: 72.5, setPresentation, visual: true
       }),
       createScreenshotSetItem({
         record: 'records/items/synthetic/cairn_mantle.dbr', name: 'Cairn Mantle', rarity: 'legendary',
@@ -1789,12 +1789,12 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
       createScreenshotSetItem({
         record: 'records/items/synthetic/warden_guard.dbr', name: "Warden's Guard", rarity: 'epic',
         slot: 'chest', level: 50, setName: "Warden's Vigil", setRecord: 'records/items/synthetic/warden_set.dbr',
-        availableCount: 1, discovered: true
+        availableCount: 1, discovered: true, bestRollPercentile: 91
       }),
       createScreenshotSetItem({
         record: 'records/items/synthetic/warden_step.dbr', name: "Warden's Step", rarity: 'epic',
         slot: 'feet', level: 50, setName: "Warden's Vigil", setRecord: 'records/items/synthetic/warden_set.dbr',
-        availableCount: 1, discovered: true
+        availableCount: 1, discovered: true, bestRollPercentile: 79
       }),
       createScreenshotSetItem({
         record: 'records/items/synthetic/forgotten_crown.dbr', name: 'Forgotten Crown', rarity: 'legendary',
@@ -2088,6 +2088,7 @@ function createScreenshotSetItem(input: {
   setName: string
   setRecord: string
   availableCount?: number
+  bestRollPercentile?: number
   discovered?: boolean
   recipeUnlocked?: boolean
   availableViaAwakening?: boolean
@@ -2123,8 +2124,8 @@ function createScreenshotSetItem(input: {
       searchText: 'wendigo totem vitality damage alternate crimson spirit effect'
     } : undefined,
     availableCount: input.availableCount ?? 0,
-    bestRollPercentile: null,
-    analyzedCopyCount: 0,
+    bestRollPercentile: input.bestRollPercentile ?? null,
+    analyzedCopyCount: input.bestRollPercentile === undefined ? 0 : 1,
     pinnedInstanceKey: null,
     discovered: input.discovered ?? false,
     recipeUnlocked: input.recipeUnlocked ?? false,
@@ -3663,6 +3664,15 @@ async function runSmokeTest(
       ?.setPresentation
     const brimstone = helperSnapshot.items.find((item) => item.setName === 'Brimstone')
       ?.setPresentation
+    const lightsGuardian = helperSnapshot.items.find((item) => item.setName === "Light's Guardian")
+      ?.setPresentation
+    const lightningNova = lightsGuardian?.tiers
+      .flatMap((tier) => tier.grantedSkill?.linkedSkills ?? [])
+      .find((skill) => skill.name === 'Lightning Nova')
+    const lightningNovaDamage = lightningNova?.lines.find((line) => line.label === 'Lightning Damage')
+    const lightningNovaElectrocute = lightningNova?.lines.find(
+      (line) => line.label === 'Electrocute Damage over 2 Seconds'
+    )
     if (
       !oathbreaker?.tiers.some(
         (tier) => tier.lines.some((line) => line.tone === 'skill' && line.minimum === 3) &&
@@ -3678,9 +3688,12 @@ async function runSmokeTest(
         (tier) =>
           tier.requiredPieces === 2 &&
           tier.lines.some((line) => line.label === 'Fire Damage' && line.minimum === 18)
-      )
+      ) ||
+      lightningNovaDamage?.minimum !== 320 ||
+      lightningNovaDamage.maximum !== 500 ||
+      lightningNovaElectrocute?.minimum !== 600
     ) {
-      throw new Error('Set presentation omitted flat damage, skill bonuses, or granted skills.')
+      throw new Error('Set presentation omitted or misleveled flat damage, skill bonuses, or granted skills.')
     }
     const iceKing = helperSnapshot.items.find((item) => item.setName === "Ice King's Adornments")
       ?.setPresentation

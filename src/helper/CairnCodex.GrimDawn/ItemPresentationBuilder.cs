@@ -617,11 +617,11 @@ internal static partial class ItemPresentationBuilder
         for (var index = 1; index <= 16; index++)
         {
             var path = spawn.Text("skillName" + index);
-            var skillLevel = checked((int)Math.Round(spawn.Number("skillLevel" + index) ?? 1));
+            var skillLevel = RecordInteger(spawn, "skillLevel" + index) ?? 1;
             AddCandidate(path, skillLevel);
         }
-        AddCandidate(spawn.Text("initialSkillName"), 1);
-        AddCandidate(spawn.Text("attackSkillName"), 1);
+        AddCandidate(spawn.Text("initialSkillName"), level);
+        AddCandidate(spawn.Text("attackSkillName"), level);
 
         var linked = new List<ItemGrantedSkillPresentation>();
         foreach (var candidate in candidates)

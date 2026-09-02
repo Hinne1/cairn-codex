@@ -773,8 +773,13 @@ function registerIpcHandlers(
 
   const stopPublishingJobs = jobs.subscribe((job) => {
     for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.webContents.isDestroyed()) {
+      if (window.webContents.isDestroyed() || window.webContents.isCrashed()) continue
+      try {
         window.webContents.send(IPC_CHANNELS.backgroundJobChanged, job)
+      } catch (error) {
+        if (!window.webContents.isDestroyed() && !window.webContents.isCrashed()) {
+          console.warn('[background-jobs] renderer update could not be delivered', error)
+        }
       }
     }
   })
@@ -5833,6 +5838,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 const topbar = document.querySelector('.topbar')
                 return topbar instanceof HTMLElement ? Math.max(0, topbar.getBoundingClientRect().bottom) : 0
               }
+              // Chromium can place adjacent layout edges a fractional pixel apart at some
+              // display scales. Treat a one-pixel overlap as the same visible boundary.
+              const viewportTolerance = 1
               grid.click()
               await frames(); await frames()
               const gridCards = document.querySelectorAll('.planner-card-results .planner-card').length
@@ -5844,8 +5852,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 !(gridFocus instanceof HTMLElement) ||
                 gridFocus.dataset.resultKey !== focusedKey ||
                 !gridFocusRect ||
-                gridFocusRect.top < unobscuredTop() ||
-                gridFocusRect.top >= innerHeight
+                gridFocusRect.top < unobscuredTop() - viewportTolerance ||
+                gridFocusRect.top >= innerHeight + viewportTolerance
               ) {
                 throw new Error('Planner Grid view did not preserve the focused visible result and continuous window: ' + JSON.stringify({
                   gridCards, listCount, active: grid.classList.contains('active'), focusedKey,
@@ -5863,8 +5871,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 !(restoredFocus instanceof HTMLElement) ||
                 restoredFocus.dataset.resultKey !== focusedKey ||
                 !restoredFocusRect ||
-                restoredFocusRect.top < unobscuredTop() ||
-                restoredFocusRect.top >= innerHeight
+                restoredFocusRect.top < unobscuredTop() - viewportTolerance ||
+                restoredFocusRect.top >= innerHeight + viewportTolerance
               ) {
                 throw new Error('Planner List view did not restore the focused visible result and continuous window: ' + JSON.stringify({
                   focusedKey, restoredFocusKey: restoredFocus instanceof HTMLElement ? restoredFocus.dataset.resultKey : null,
@@ -8094,6 +8102,12 @@ app.whenReady().then(async () => {
     diagnostics.error('failure', 'main-process.uncaught-exception', error)
   })
   app.on('render-process-gone', (_event, _webContents, details) => {
+    if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) {
+      console.error('[benchmark-renderer-gone]' + JSON.stringify({
+        reason: details.reason,
+        exitCode: details.exitCode
+      }))
+    }
     if (details.reason === 'clean-exit') return
     rendererProcessFailed = true
     void startupRecovery.markRendererFailure().catch((error) => {

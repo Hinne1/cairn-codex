@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 function runGate(label, width) {
   const result = spawnSync(process.execPath, [
     resolve('scripts/benchmark-ui.mjs'),
+    '--allow-windows-sandbox-fallback',
     '--electron-source',
     '--fixture', 'bounded-grid-a11y',
     '--query', '',

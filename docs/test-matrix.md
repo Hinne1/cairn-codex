@@ -163,3 +163,10 @@ fingerprints: hook SHA-256
 `419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5` and injector SHA-256
 `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`. Exact published
 portable and installer hashes are carried by the release's `.sha256` and manifest assets.
+
+## Sidebar edge and icon regression
+
+The focused workspace shell is exercised at wide and compact widths. The gate requires the
+sidebar to begin at the left viewport edge, every visible destination to use the shared semantic
+SVG family at a legible size, and every icon-only destination to expose its label on hover and
+keyboard focus. The same run verifies density restoration and rejects document-level overflow.

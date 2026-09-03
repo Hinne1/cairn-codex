@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import WorkspaceNavIcon from './WorkspaceNavIcon.vue'
+
 interface WorkspaceDestination {
   id: string
   label: string
@@ -18,22 +21,83 @@ const emit = defineEmits<{
 }>()
 
 const toolIcons: Record<string, string> = {
-  sets: '◆',
-  materials: '◇',
-  skills: '✦',
-  oracle: '☼',
-  planner: '↗',
-  'mi-workshop': '⚒',
-  supplies: '◈',
-  farming: '♜',
-  dismantling: '♢',
-  trivia: '?',
-  todo: '✓'
+  sets: 'sets',
+  materials: 'materials',
+  skills: 'skills',
+  oracle: 'oracle',
+  planner: 'planner',
+  'mi-workshop': 'workshop',
+  supplies: 'supplies',
+  farming: 'farming',
+  dismantling: 'dismantling',
+  trivia: 'trivia',
+  todo: 'todo'
 }
 
 function toolIcon(id: string): string {
-  return toolIcons[id] ?? '•'
+  return toolIcons[id] ?? 'fallback'
 }
+
+interface TooltipTarget {
+  control: HTMLElement
+  label: string
+}
+
+const tooltip = ref<{ label: string; left: number; top: number } | null>(null)
+const hoveredTarget = ref<TooltipTarget | null>(null)
+const focusedTarget = ref<TooltipTarget | null>(null)
+const compactViewport = window.matchMedia('(max-width: 900px)')
+
+function labelsAreHidden(): boolean {
+  return props.collapsed || compactViewport.matches
+}
+
+function syncTooltip(): void {
+  const target = hoveredTarget.value ?? focusedTarget.value
+  if (!target || !labelsAreHidden()) {
+    tooltip.value = null
+    return
+  }
+  const rect = target.control.getBoundingClientRect()
+  tooltip.value = {
+    label: target.control.getAttribute('aria-label') ?? target.label,
+    left: rect.right + 10,
+    top: Math.min(Math.max(rect.top + rect.height / 2, 20), window.innerHeight - 20)
+  }
+}
+
+function showTooltip(event: MouseEvent | FocusEvent, label: string, source: 'hover' | 'focus'): void {
+  const control = event.currentTarget ?? event.target
+  if (!(control instanceof HTMLElement)) return
+  const target = { control, label }
+  if (source === 'hover') hoveredTarget.value = target
+  else focusedTarget.value = target
+  syncTooltip()
+}
+
+function hideTooltip(event: MouseEvent | FocusEvent, source: 'hover' | 'focus'): void {
+  const control = event.currentTarget ?? event.target
+  if (source === 'hover' && hoveredTarget.value?.control === control) hoveredTarget.value = null
+  if (source === 'focus' && focusedTarget.value?.control === control) focusedTarget.value = null
+  syncTooltip()
+}
+
+function clearTooltips(): void {
+  hoveredTarget.value = null
+  focusedTarget.value = null
+  tooltip.value = null
+}
+
+watch(() => props.collapsed, syncTooltip, { flush: 'post' })
+onMounted(() => {
+  window.addEventListener('resize', syncTooltip)
+  compactViewport.addEventListener('change', syncTooltip)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncTooltip)
+  compactViewport.removeEventListener('change', syncTooltip)
+  clearTooltips()
+})
 </script>
 
 <template>
@@ -45,10 +109,13 @@ function toolIcon(id: string): string {
         data-tool-id="collection"
         :aria-current="activeId === 'collection' ? 'page' : undefined"
         aria-label="Collection"
-        :title="collapsed ? 'Collection' : undefined"
+        @mouseenter="showTooltip($event, 'Collection', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Collection', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
         @click="emit('home')"
       >
-        <span class="workspace-nav-icon" aria-hidden="true">⌂</span>
+        <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="collection" /></span>
         <span class="workspace-nav-label">Collection</span>
       </button>
 
@@ -62,10 +129,13 @@ function toolIcon(id: string): string {
           :data-tool-id="tool.id"
           :aria-current="tool.id === activeId ? 'page' : undefined"
           :aria-label="tool.label"
-          :title="collapsed ? tool.label : undefined"
+          @mouseenter="showTooltip($event, tool.label, 'hover')"
+          @mouseleave="hideTooltip($event, 'hover')"
+          @focusin="showTooltip($event, tool.label, 'focus')"
+          @blur="hideTooltip($event, 'focus')"
           @click="emit('select', tool.id)"
         >
-          <span class="workspace-nav-icon" aria-hidden="true">{{ toolIcon(tool.id) }}</span>
+          <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon :name="toolIcon(tool.id)" /></span>
           <span class="workspace-nav-label">{{ tool.label }}</span>
         </button>
       </div>
@@ -76,10 +146,13 @@ function toolIcon(id: string): string {
         type="button"
         class="workspace-nav-item"
         aria-label="Customize visible tools"
-        :title="collapsed ? 'Customize visible tools' : undefined"
+        @mouseenter="showTooltip($event, 'Customize visible tools', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Customize visible tools', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
         @click="emit('customize')"
       >
-        <span class="workspace-nav-icon" aria-hidden="true">⚙</span>
+        <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="settings" /></span>
         <span class="workspace-nav-label">Customize tools</span>
       </button>
       <button
@@ -87,13 +160,26 @@ function toolIcon(id: string): string {
         class="workspace-nav-item workspace-sidebar-toggle"
         :aria-expanded="!collapsed"
         :aria-label="collapsed ? 'Expand workspace navigation' : 'Collapse workspace navigation'"
-        :title="collapsed ? 'Expand navigation' : 'Collapse navigation'"
+        @mouseenter="showTooltip($event, collapsed ? 'Expand navigation' : 'Collapse navigation', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, collapsed ? 'Expand navigation' : 'Collapse navigation', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
         @click="emit('toggle')"
       >
-        <span class="workspace-nav-icon" aria-hidden="true">{{ collapsed ? '›' : '‹' }}</span>
+        <span class="workspace-nav-icon" aria-hidden="true">
+          <WorkspaceNavIcon :name="collapsed ? 'panel-expand' : 'panel-collapse'" />
+        </span>
         <span class="workspace-nav-label">Collapse</span>
       </button>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="tooltip"
+        class="workspace-nav-tooltip"
+        role="tooltip"
+        :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
+      >{{ tooltip.label }}</div>
+    </Teleport>
   </aside>
 </template>
 
@@ -162,9 +248,7 @@ function toolIcon(id: string): string {
   width: 30px;
   height: 30px;
   place-items: center;
-  color: var(--cc-text-secondary);
-  font-family: var(--cc-font-interface);
-  font-size: var(--cc-font-size-lg);
+  color: var(--cc-text-primary);
   line-height: 1;
 }
 .workspace-nav-item[aria-current='page'] .workspace-nav-icon { color: var(--cc-accent-strong); }
@@ -188,7 +272,23 @@ function toolIcon(id: string): string {
   padding-top: var(--cc-space-4);
   border-top: 1px solid var(--cc-border-subtle);
 }
-.workspace-sidebar-toggle .workspace-nav-icon { font-size: var(--cc-font-size-xl); }
+.workspace-nav-tooltip {
+  position: fixed;
+  z-index: 120;
+  max-width: min(260px, calc(100vw - 96px));
+  padding: 7px 10px;
+  border: 1px solid var(--cc-border-emphasis);
+  border-radius: var(--cc-radius-sm);
+  color: var(--cc-text-primary);
+  background: var(--cc-surface-overlay);
+  box-shadow: var(--cc-shadow-popover);
+  font-size: var(--cc-font-size-sm);
+  font-weight: 650;
+  line-height: 1.25;
+  pointer-events: none;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
 
 .workspace-sidebar.collapsed .workspace-nav-item {
   grid-template-columns: 32px;

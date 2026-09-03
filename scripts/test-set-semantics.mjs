@@ -162,11 +162,18 @@ for (const { name, color: foreground } of semanticColors) {
   // on either rarity card, so test the full foreground/background cross-product.
   const backgrounds = ['#11110f', '#2d252a', ...rarityCardBackgrounds]
   for (const background of backgrounds) {
-    const badgeSurface = compositeHex(foreground, background, 0.12)
+    const rarityBadge = name.startsWith('gd-rarity-')
+    const badgeSurface = rarityBadge
+      ? tokenSource.match(/--cc-surface-1:\s*(#[0-9a-f]{6})/i)[1]
+      : compositeHex(foreground, background, 0.12)
     assert(contrastRatio(foreground, badgeSurface) >= 4.5,
       `${name} ${foreground} must meet 4.5:1 contrast against its ${badgeSurface} composited badge surface`)
   }
 }
+
+const badgeSource = readFileSync(new URL('../src/renderer/src/components/SemanticBadge.vue', import.meta.url), 'utf8')
+assert.match(badgeSource, /\.tone-legendary, \.tone-epic\s*\{\s*--badge-surface: var\(--cc-surface-1\);/,
+  'Game-reference rarity hues require a solid contrast-checked badge background')
 
 function compositeHex(foreground, background, alpha) {
   const foregroundChannels = hexChannels(foreground)

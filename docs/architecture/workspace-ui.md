@@ -254,7 +254,8 @@ unification is tracked in #138, with wide/compact mockup review before material 
 Epic and legendary item names share the protected rarity palette
 across cards, research results, tooltips, and copy headings. The supplied game references are epic
 `#338CCE` and legendary `#A638FF`; the latter is lifted to `#B653FF` to retain text contrast on CC's
-surfaces. Research Table and Journey mark unavailable items using a subtle name fade (96%) and
+surfaces. Rarity badges use the solid shared card surface so their small text keeps the same
+contrast over tinted set cards. Research Table and Journey mark unavailable items using a subtle name fade (96%) and
 picture fade (78%). An archived copy, a learned crafting recipe, or an available awakening base
 keeps an item at full strength; history alone does not. Planner crafting respects the plan's SC/HC
 recipe status. Skill modifiers and controls remain at full opacity, and availability labels retain

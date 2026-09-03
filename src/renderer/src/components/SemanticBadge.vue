@@ -40,6 +40,7 @@ withDefaults(defineProps<{
 .semantic-badge.compact { min-height: 18px; padding: 2px var(--cc-space-2); font-size: 7px; }
 .tone-legendary { --badge-color: var(--gd-rarity-legendary); }
 .tone-epic { --badge-color: var(--gd-rarity-epic); }
+.tone-legendary, .tone-epic { --badge-surface: var(--cc-surface-1); }
 .tone-level { --badge-color: var(--semantic-level); }
 .tone-complete { --badge-color: var(--semantic-complete); }
 .tone-progress { --badge-color: var(--semantic-progress); }

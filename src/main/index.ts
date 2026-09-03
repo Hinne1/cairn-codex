@@ -92,7 +92,11 @@ import {
   validateVaultPage,
   validateZoomFactor
 } from './ipc/validation.ts'
-import { registerManagedShutdown, registerPrimaryWindowLifecycle } from './window-lifecycle.ts'
+import {
+  registerManagedShutdown,
+  registerPrimaryWindowLifecycle,
+  registerWindowStatePersistence
+} from './window-lifecycle.ts'
 import { MainOperationCoordinator } from './operation-coordinator.ts'
 import { BackgroundJobService } from './ipc/background-job-service.ts'
 import { BackupService } from './ipc/backup-service.ts'
@@ -5256,14 +5260,21 @@ function visibleWindowBounds(state: PersistedWindowState | null): Electron.Recta
   }
 }
 
-function rememberWindowState(window: BrowserWindow): void {
-  if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) return
+function captureWindowState(window: BrowserWindow): PersistedWindowState | null {
+  if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) return null
   const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds()
-  void writeFile(
-    join(app.getPath('userData'), 'window-state.json'),
-    JSON.stringify({ ...bounds, maximized: window.isMaximized() } satisfies PersistedWindowState)
-  ).catch((error) => console.warn('Could not persist window placement.', error))
+  return { ...bounds, maximized: window.isMaximized() }
 }
+
+async function rememberWindowState(state: PersistedWindowState | null): Promise<void> {
+  if (!state) return
+  await writeFile(
+    join(app.getPath('userData'), 'window-state.json'),
+    JSON.stringify(state)
+  )
+}
+
+let windowStatePersistence: { finalize(): Promise<void> } | null = null
 
 async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void> {
   const screenshotPath = process.env.CAIRN_CODEX_SCREENSHOT_PATH
@@ -5292,16 +5303,12 @@ async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void
   window.setAutoHideMenuBar(true)
   if (savedState?.maximized) window.maximize()
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null
-  const scheduleWindowStateSave = (): void => {
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => rememberWindowState(window), 250)
-  }
-  window.on('resize', scheduleWindowStateSave)
-  window.on('move', scheduleWindowStateSave)
-  window.on('maximize', scheduleWindowStateSave)
-  window.on('unmaximize', scheduleWindowStateSave)
-  window.on('close', () => rememberWindowState(window))
+  windowStatePersistence = registerWindowStatePersistence(
+    window,
+    () => captureWindowState(window),
+    rememberWindowState,
+    (error) => console.warn('Could not persist window placement.', error)
+  )
 
   const revealWindow = (): void => {
     if (screenshotPath || window.isDestroyed()) return
@@ -8430,6 +8437,7 @@ app.whenReady().then(async () => {
     .catch((error) => console.error('[archive-backup] automatic daily backup failed', error))
 
   registerManagedShutdown(app, async () => {
+    await windowStatePersistence?.finalize()
     await flushIpcWrites().catch((error) => {
       console.error('[shutdown] queued archive work failed', error)
     })

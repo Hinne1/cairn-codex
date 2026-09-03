@@ -13,7 +13,11 @@ import {
   validateSpecialRecovery,
   validateVaultPage
 } from '../src/main/ipc/validation.ts'
-import { registerManagedShutdown, registerPrimaryWindowLifecycle } from '../src/main/window-lifecycle.ts'
+import {
+  registerManagedShutdown,
+  registerPrimaryWindowLifecycle,
+  registerWindowStatePersistence
+} from '../src/main/window-lifecycle.ts'
 import { MainOperationCoordinator } from '../src/main/operation-coordinator.ts'
 
 function fakeEvent() {
@@ -215,12 +219,78 @@ assert.equal(createCalls, 1)
 listeners.get('window-all-closed')()
 assert.equal(quitCalls, 1)
 
+const placementListeners = new Map()
+const placementWindow = {
+  on(event, listener) { placementListeners.set(event, listener) }
+}
+let placementWrites = 0
+let releasePlacementWrite
+const placementWriteGate = new Promise((resolve) => { releasePlacementWrite = resolve })
+let placementReadable = true
+let placementState = 'moved-state'
+const persistedPlacements = []
+const placementPersistence = registerWindowStatePersistence(
+  placementWindow,
+  () => {
+    assert.equal(placementReadable, true, 'placement must be captured before the window is destroyed')
+    return placementState
+  },
+  async (state) => {
+    placementWrites += 1
+    persistedPlacements.push(state)
+    if (placementWrites === 1) await placementWriteGate
+  },
+  (error) => { throw error }
+)
+assert.equal(placementListeners.has('move'), false, 'continuous move events must not trigger persistence')
+assert.equal(placementListeners.has('resize'), false, 'continuous resize events must not trigger persistence')
+assert.deepEqual(
+  [...placementListeners.keys()],
+  ['moved', 'resized', 'maximize', 'unmaximize', 'close']
+)
+placementListeners.get('moved')()
+await Promise.resolve()
+assert.equal(placementWrites, 1)
+placementState = 'resized-state'
+placementListeners.get('resized')()
+placementState = 'maximized-state'
+placementListeners.get('maximize')()
+assert.equal(placementWrites, 1, 'events during a write must be coalesced')
+placementState = 'closing-state'
+placementListeners.get('close')()
+placementReadable = false
+releasePlacementWrite()
+await placementPersistence.finalize()
+assert.equal(placementWrites, 2, 'the newest state must be persisted after a concurrent event')
+assert.deepEqual(
+  persistedPlacements,
+  ['moved-state', 'closing-state'],
+  'close must synchronously capture and persist the final readable state'
+)
+
+const shutdownPlacementListeners = new Map()
+let shutdownPlacementReadable = true
+let shutdownPlacementWrites = 0
+const shutdownPlacement = registerWindowStatePersistence(
+  { on(event, listener) { shutdownPlacementListeners.set(event, listener) } },
+  () => {
+    assert.equal(shutdownPlacementReadable, true)
+    return 'before-quit-state'
+  },
+  async (state) => {
+    assert.equal(state, 'before-quit-state')
+    shutdownPlacementWrites += 1
+  },
+  (error) => { throw error }
+)
+
 let shutdownCalls = 0
 let shutdownFailure = null
 let releaseShutdown
 const shutdownGate = new Promise((resolve) => { releaseShutdown = resolve })
 registerManagedShutdown(lifecycleApp, async () => {
   shutdownCalls += 1
+  await shutdownPlacement.finalize()
   await shutdownGate
   throw new Error('simulated flush failure')
 }, (error) => { shutdownFailure = error })
@@ -230,10 +300,16 @@ beforeQuit({ preventDefault: () => { prevented += 1 } })
 beforeQuit({ preventDefault: () => { prevented += 1 } })
 assert.equal(shutdownCalls, 1, 'repeated quit must share one shutdown workflow')
 assert.equal(prevented, 2)
+await Promise.resolve()
+assert.equal(shutdownPlacementWrites, 1, 'before-quit must capture placement before window close')
 releaseShutdown()
 await new Promise((resolve) => setTimeout(resolve, 0))
 assert.match(shutdownFailure.message, /simulated flush failure/)
 assert.equal(quitCalls, 2)
+shutdownPlacementListeners.get('close')()
+shutdownPlacementReadable = false
+await shutdownPlacement.flush()
+assert.equal(shutdownPlacementWrites, 1, 'terminal close must not enqueue work after finalization')
 
 const mainSource = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 assert.equal(mainSource.includes('ipcMain.handle('), false, 'index.ts must not register raw IPC handlers')

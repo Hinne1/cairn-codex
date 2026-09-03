@@ -20,6 +20,86 @@ export interface WindowLifecycleDependencies {
   platform: NodeJS.Platform
 }
 
+export type WindowPlacementEvent = 'moved' | 'resized' | 'maximize' | 'unmaximize' | 'close'
+
+export interface WindowPlacementSource {
+  on(event: WindowPlacementEvent, listener: () => void): void
+}
+
+export interface WindowStatePersistence {
+  flush(): Promise<void>
+  finalize(): Promise<void>
+}
+
+/**
+ * Persists placement only after a native move/resize gesture has completed.
+ * Windows emits `move`/`resize` continuously while the user drags, so doing
+ * timer or filesystem work from those events can make the native gesture
+ * stutter. Requests which arrive during an active write are coalesced into one
+ * final write of the newest window state.
+ */
+export function registerWindowStatePersistence<T>(
+  window: WindowPlacementSource,
+  capture: () => T,
+  persist: (state: T) => Promise<void>,
+  onFailure: (error: unknown) => void
+): WindowStatePersistence {
+  let pending: T | undefined
+  let hasPending = false
+  let active: Promise<void> | null = null
+  let closeObserved = false
+  let sealed = false
+
+  const drain = (): void => {
+    if (active) return
+    active = (async () => {
+      while (hasPending) {
+        const state = pending as T
+        pending = undefined
+        hasPending = false
+        await persist(state)
+      }
+    })()
+      .catch(onFailure)
+      .finally(() => {
+        active = null
+        if (hasPending) drain()
+      })
+  }
+
+  const request = (): void => {
+    if (sealed) return
+    try {
+      pending = capture()
+      hasPending = true
+      drain()
+    } catch (error) {
+      onFailure(error)
+    }
+  }
+
+  for (const event of ['moved', 'resized', 'maximize', 'unmaximize'] as const) {
+    window.on(event, request)
+  }
+  window.on('close', () => {
+    closeObserved = true
+    request()
+  })
+
+  return {
+    async flush(): Promise<void> {
+      while (active) await active
+    },
+    async finalize(): Promise<void> {
+      if (!sealed) {
+        if (!closeObserved) request()
+        sealed = true
+      }
+      while (active) await active
+    }
+  }
+}
+
 export function registerPrimaryWindowLifecycle(
   dependencies: WindowLifecycleDependencies,
   singleInstance: boolean

@@ -77,6 +77,7 @@ export function buildSkillNames(
       if (transformation.skill) names.add(transformation.skill)
     }
     for (const section of item.presentation?.sections ?? []) {
+      for (const parent of section.parentSkills ?? []) names.add(parent)
       if (section.kind === 'skill-modifier' && section.heading) names.add(section.heading)
       for (const line of section.lines) {
         if (line.tone === 'skill' && line.label.startsWith('to ')) names.add(line.label.slice(3))
@@ -104,13 +105,19 @@ export function skillMatchForItem(item: CollectionItem, requestedSkill: string):
   const modifiers = sections
     .filter((section) =>
       section.kind === 'skill-modifier' &&
-      section.heading?.toLocaleLowerCase() === normalizedSkill
+      (section.heading?.toLocaleLowerCase() === normalizedSkill ||
+        section.parentSkills?.some((parent) => parent.toLocaleLowerCase() === normalizedSkill))
     )
-    .flatMap((section) => section.lines)
+    .flatMap((section) => section.lines.map((line) =>
+      section.heading?.toLocaleLowerCase() === normalizedSkill
+        ? line
+        : { ...line, suffix: `${line.suffix} (${section.heading})` }
+    ))
   const visualTransformationLines = sections
     .filter((section) =>
       section.kind === 'visual-modifier' &&
-      skillSectionHeading(section.heading, normalizedSkill)
+      (skillSectionHeading(section.heading, normalizedSkill) ||
+        section.parentSkills?.some((parent) => parent.toLocaleLowerCase() === normalizedSkill))
     )
     .flatMap((section) => section.lines)
   if (amount === 0 && modifiers.length === 0 && visualTransformationLines.length === 0) return null

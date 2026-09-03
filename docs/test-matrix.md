@@ -8,6 +8,7 @@ a supported game installation and records the manual live-transfer results here.
 
 | Scenario | Evidence | Current result |
 | --- | --- | --- |
+| Research completeness and plan-scoped exclusions | Synthetic helper self-test, preference/Planner/search contracts, wide/compact Planner Electron gates | **Passed 2026-09-03:** sparse fifth/higher rank bonuses and seventh/higher modifier slots survive extraction; granted-ability weapon modifiers retain parent context; healing and granted slow/area effects are preserved; Awakened names are qualified without changing stored favorite/ignore keys. Header clicks change both direction and row order. A newly created plan does not inherit another plan's ignored base, and switching back preserves the original exclusions. Historical global ignores remain recoverable, not automatically assigned. |
 | Item-wide Skill FX and research table edge | Skill Explorer model tests, shared research parity checks, wide/compact Skill Explorer and Planner Electron gates | **Passed 2026-09-03:** visual-only skills enter the picker; both tables and Planner Journey retain multiple item FX transformations including skills outside the current selection; FX uses its semantic badge without duplicate ordinary modifiers; the horizontal table reserves no blank right-hand vertical scrollbar gutter. |
 | TypeScript/Vue production build | `npm run build` | Passed 2026-08-30 |
 | Fresh database migration/idempotent reopen | desktop smoke, in-memory database | Passed |

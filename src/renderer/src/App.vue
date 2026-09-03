@@ -26,6 +26,8 @@ import {
 } from './workspaces/skill-explorer'
 import {
   researchAcquisitionFacts,
+  nextResearchSort,
+  researchItemPreferenceKey,
   researchItemTypeLabel,
   researchRarityLabel,
   researchRollFact,
@@ -353,7 +355,14 @@ const plannerQuery = ref('')
 const plannerOwnership = ref<OwnershipFilter>('all')
 const plannerSortMode = ref<PlannerSortMode>('level')
 const plannerSortDirection = ref<SortDirection>('asc')
-const plannerIgnoredRecords = ref<string[]>([...initialPreferences.planner.ignoredRecords])
+const plannerIgnoredRecords = computed<string[]>({
+  get: () => plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)?.ignoredRecords ?? [],
+  set: (records) => {
+    plannerProfiles.value = plannerProfiles.value.map((profile) => profile.id === selectedPlannerProfileId.value
+      ? { ...profile, ignoredRecords: [...records], modifiedAt: new Date().toISOString() }
+      : profile)
+  }
+})
 const plannerFavoriteRecords = ref<string[]>([...initialPreferences.planner.favoriteRecords])
 const plannerShowIgnored = ref(false)
 const oracleControls = ref<StashOracleControls>({
@@ -1461,7 +1470,14 @@ function deletePlannerProfile(): void {
 }
 
 function plannerRecordKey(item: CollectionItem): string {
-  return `${item.rarity}:${item.slot}:${normalizeLoose(item.name)}`
+  return researchItemPreferenceKey(item)
+}
+
+function sortPlannerTable(sort: string): void {
+  if (sort !== 'name' && sort !== 'level' && sort !== 'rarity') return
+  const next = nextResearchSort(plannerSortMode.value, plannerSortDirection.value, sort)
+  plannerSortMode.value = next.sort
+  plannerSortDirection.value = next.direction
 }
 
 function recipeStatus(item: CollectionItem): { label: string; known: boolean | null } | null {
@@ -1818,9 +1834,6 @@ watch(plannerProfiles, (profiles) => {
 watch(selectedPlannerProfileId, (profileId) => {
   preferenceRepository.update('planner', { selectedProfileId: profileId })
 })
-watch(plannerIgnoredRecords, (records) => {
-  preferenceRepository.update('planner', { ignoredRecords: [...records] })
-}, { deep: true })
 watch(plannerFavoriteRecords, (records) => {
   preferenceRepository.update('planner', { favoriteRecords: [...records] })
 }, { deep: true })
@@ -5395,7 +5408,7 @@ function formatRollValue(value: number): string {
             pagination="continuous"
             actions
             :ignored-view="plannerShowIgnored"
-            @sort="plannerSortMode = $event as PlannerSortMode"
+            @sort="sortPlannerTable"
             @activate="openItem"
             @queue-tooltip="queueTooltip"
             @show-tooltip="showTooltip"

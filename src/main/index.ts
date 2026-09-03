@@ -179,7 +179,7 @@ for (const stream of [process.stdout, process.stderr]) {
 // no usable GPU process. Production keeps Electron's normal acceleration path.
 if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) app.disableHardwareAcceleration()
 
-const CATALOG_PRESENTATION_VERSION = 32
+const CATALOG_PRESENTATION_VERSION = 33
 const DOUBLE_RARE_MI_BITMAP = 'character/item_doubleraremonsterinfrequent.tex'
 const ROLL_ANALYSIS_VERSION = 4
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
@@ -1829,7 +1829,10 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
               minimum: null, maximum: null, unit: '' as const,
               tone: 'visual' as const, prefix: '', suffix: ''
             }]
-          })) : [])],
+          })) : []), {
+            kind: 'skill-modifier', heading: 'Fixture Talons', parentSkills: ['Wendigo Totem'],
+            lines: [{ label: 'Weapon Damage', minimum: 30, maximum: null, unit: '%', tone: 'standard', prefix: '', suffix: '' }]
+          }],
           grantedSkill: null,
           searchText: `wendigo totem ${conversionTarget.toLocaleLowerCase()} damage leveling planner synthetic qa`
         }
@@ -2179,7 +2182,10 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
               minimum: null, maximum: null, unit: '' as const,
               tone: 'visual' as const, prefix: '', suffix: ''
             }]
-          }] : [])],
+          }] : []), {
+            kind: 'skill-modifier', heading: 'Fixture Talons', parentSkills: ['Wendigo Totem'],
+            lines: [{ label: 'Weapon Damage', minimum: 30, maximum: null, unit: '%', tone: 'standard', prefix: '', suffix: '' }]
+          }],
           grantedSkill: null,
           searchText: `wendigo totem ${conversionTarget.toLocaleLowerCase()} damage skill recharge alternate crimson spirit effect synthetic qa`
         }
@@ -6104,6 +6110,29 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (resultCount() !== 119 || document.querySelector('.item-drawer')) {
                 throw new Error('Planner ignore did not remove exactly one result without opening the item.')
               }
+              const profileSelect = document.querySelector('#planner-profile-select')
+              const originalProfile = profileSelect.value
+              document.querySelector('.planner-new-plan').click()
+              await frames()
+              ;[...document.querySelectorAll('.planner-setup-dialog [role="radio"]')].find(button => button.textContent.includes('Clone')).click()
+              await frames()
+              for (let step = 0; step < 4; step++) {
+                document.querySelector('.planner-setup-dialog footer button:not(.secondary)').click()
+                await frames()
+              }
+              if (profileSelect.value === originalProfile || resultCount() !== 120) throw new Error("A new plan inherited another plan's ignored base.")
+              const newProfile = profileSelect.value
+              profileSelect.value = originalProfile
+              profileSelect.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              if (resultCount() !== 119) throw new Error("Switching back lost the original plan's ignored base.")
+              profileSelect.value = newProfile
+              profileSelect.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
+              if (resultCount() !== 120) throw new Error('Ignored bases leaked during plan switching.')
+              profileSelect.value = originalProfile
+              profileSelect.dispatchEvent(new Event('change', { bubbles: true }))
+              await frames()
               const listFilter = document.querySelectorAll('.planner-explorer-toolbar .explorer-toolbar-filters select')[1]
               if (!(listFilter instanceof HTMLSelectElement)) throw new Error('Planner ignored-list filter was not available.')
               listFilter.value = 'true'
@@ -6148,6 +6177,18 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               await frames()
               let surface = document.querySelector('.research-item-table')
               if (!(surface instanceof HTMLElement)) throw new Error('Planner table surface was not rendered.')
+              const levelHeader = [...surface.querySelectorAll('[role="columnheader"]')].find(header => header.textContent.trim().startsWith('Level'))
+              const levelSort = levelHeader.querySelector('button')
+              const originalDirection = levelHeader.getAttribute('aria-sort')
+              levelSort.click()
+              await frames()
+              if (levelHeader.getAttribute('aria-sort') === originalDirection) throw new Error('Clicking the active Planner header did not reverse sorting.')
+              const sortedLevels = [...surface.querySelectorAll('.research-level')].map(cell => Number(cell.textContent.trim()))
+              const descending = levelHeader.getAttribute('aria-sort') === 'descending'
+              if (sortedLevels.some((level, index) => index > 0 && (descending ? level > sortedLevels[index - 1] : level < sortedLevels[index - 1]))) throw new Error('Planner header arrow changed without sorting rows.')
+              levelSort.click()
+              await frames()
+              if (!surface.textContent.includes('30% Weapon Damage (Fixture Talons)')) throw new Error("Planner hid its selected skill's granted-ability weapon modifier.")
               if (getComputedStyle(surface).maxHeight !== 'none' || surface.clientHeight <= innerHeight) {
                 throw new Error('Planner table still creates a bottom-bounded vertical viewport.')
               }
@@ -7184,6 +7225,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!modifierColumn || !rows().some((row) => row.querySelector('.research-modifiers')?.textContent?.includes('Alternate crimson spirit effect'))) {
                 throw new Error('Skill Explorer did not render visual transformation data.')
               }
+              if (!root.textContent.includes('30% Weapon Damage (Fixture Talons)')) throw new Error('Skill Explorer hid a granted-ability modifier.')
               const firstItem = rows()[0]?.querySelector('.research-item-identity')
               const firstIcon = firstItem?.querySelector('img')
               const firstItemCell = firstItem?.closest('[role="gridcell"]')

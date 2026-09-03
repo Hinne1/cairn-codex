@@ -86,6 +86,18 @@ migrated.update('appearance', { tooltipBoundaryScroll: 'contain' })
 assert.equal(JSON.parse(migrated.exportJson()).appearance.tooltipBoundaryScroll, 'contain')
 
 const beforeResetPlanner = JSON.stringify(migrated.value.planner)
+const scopedStorage = new MemoryStorage()
+const scoped = createPreferenceRepository(scopedStorage, fixedNow, createId)
+const profileTemplate = scoped.value.planner.profiles[0]
+scoped.update('planner', { profiles: [
+  { ...profileTemplate, id: 'plan-a', ignoredRecords: ['mi:legs:fixture'] },
+  { ...profileTemplate, id: 'plan-b' }
+], selectedProfileId: 'plan-b', ignoredRecords: ['legacy-global-base'] })
+const scopedReload = createPreferenceRepository(scopedStorage, fixedNow, createId)
+assert.deepEqual(scopedReload.value.planner.profiles[0].ignoredRecords, ['mi:legs:fixture'])
+assert.deepEqual(scopedReload.value.planner.profiles[1].ignoredRecords ?? [], [])
+assert.deepEqual(scopedReload.value.planner.ignoredRecords, ['legacy-global-base'], 'Unassigned legacy exclusions remain recoverable')
+assert.equal(isPreferenceDocument(scopedReload.value), true)
 const beforeResetNotes = JSON.stringify(migrated.value.notes)
 const beforeResetSources = JSON.stringify(migrated.value.sources)
 migrated.update('workspace', { miCountingMode: 'tier' })

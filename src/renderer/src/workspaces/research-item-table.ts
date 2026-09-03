@@ -2,6 +2,19 @@ import type { CollectionItem } from '@shared/contracts'
 
 export type ResearchItemTone = 'default' | 'accent' | 'positive' | 'muted' | 'warning'
 
+export function nextResearchSort<T extends string>(active: T, direction: 'asc' | 'desc', selected: T): {
+  sort: T; direction: 'asc' | 'desc'
+} {
+  return { sort: selected, direction: active === selected && direction === 'asc' ? 'desc' : 'asc' }
+}
+
+// Planner ignore/favorite identities predate the visible Awakened qualifier.
+export function researchItemPreferenceKey(item: Pick<CollectionItem, 'record' | 'name' | 'rarity' | 'slot'>): string {
+  const name = item.record.replace(/\\/g, '/').toLocaleLowerCase().includes('/items/awakened/')
+    ? item.name.replace(/^Awakened\s+/i, '') : item.name
+  return `${item.rarity}:${item.slot}:${name.normalize('NFKD').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')}`
+}
+
 export interface ResearchItemFact {
   label?: string
   text: string

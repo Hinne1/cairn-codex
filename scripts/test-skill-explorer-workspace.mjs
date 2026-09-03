@@ -105,6 +105,13 @@ const visualItem = item({
   }
 })
 const archivedMiHigh = item({ record: 'mi-high', name: 'Wendigo Barb', rarity: 'mi', slot: 'weapon', levelRequirement: 94, presentation: rankItem.presentation })
+const grantedAbilityItem = item({ presentation: { sections: [
+  { kind: 'skill-modifier', heading: 'Ice Talons', parentSkills: ['Wereraven'], lines: [line('Weapon Damage', 30)] }
+] } })
+assert.equal(skillMatchForItem(grantedAbilityItem, 'Wereraven').special, '30% Weapon Damage (Ice Talons)')
+assert.equal(skillMatchForItem(grantedAbilityItem, 'Ice Talons').special, '30% Weapon Damage')
+assert.equal(skillMatchForItem(grantedAbilityItem, 'Werewolf'), null)
+assert.deepEqual(buildSkillNames([grantedAbilityItem]), ['Ice Talons', 'Wereraven'])
 assert.deepEqual(buildSkillNames([visualItem], {}), ['Wendigo Totem'])
 const multiFxItem = item({ presentation: { sections: [
   ...visualItem.presentation.sections,

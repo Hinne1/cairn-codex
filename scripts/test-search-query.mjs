@@ -32,6 +32,10 @@ function matches(query, document = item) {
 }
 
 assert(matches('wendigo vitality'))
+const separateDamageWords = { text: 'Frost armor: Cold Damage, Aether Resistance', fields: {} }
+assert(matches('aether damage', separateDamageWords), 'Unquoted search remains AND word matching')
+assert(!matches('"aether damage"', separateDamageWords), 'Quoted damage phrases must not match a resistance and unrelated damage')
+assert(matches('"aether damage"', { text: '25% Aether Damage', fields: {} }))
 assert(matches('skill:wendigo AND "vitality damage"'))
 assert(matches('skill:"wendigo totem" rarity:legendary'))
 assert(matches('slot:amulet OR slot:ring'))

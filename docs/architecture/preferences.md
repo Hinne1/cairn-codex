@@ -27,6 +27,10 @@ Version 1 separates settings by purpose:
 - `planner` and `notes` contain user-authored builds, ignored/favorite records, and to-dos.
   Planner profiles may include a combined class name and its two masteries; older profiles
   without that metadata remain valid and are enriched only when the user creates or edits a plan.
+  Ignored item bases now belong to `planner.profiles[].ignoredRecords`; missing per-plan lists
+  mean no exclusions. Historical `planner.ignoredRecords` remains recoverable but is never
+  assigned to a plan automatically, because the legacy format contains no ownership information.
+  Favorites remain global. Character refresh preserves that plan's exclusions; new plans start empty.
 - `sources` contains operational choices: collection basis, enabled source paths, retrieval
   stash, and live auto-connect.
 - `onboarding` records the current guide version, status, and step.

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   researchAcquisitionFacts,
+  nextResearchSort,
+  researchItemPreferenceKey,
   researchItemTypeLabel,
   researchRollFact,
   researchSkillName
@@ -24,6 +26,10 @@ const sample = {
 }
 
 assert.equal(researchItemTypeLabel(sample), 'Head armor')
+assert.deepEqual(nextResearchSort('level', 'asc', 'level'), { sort: 'level', direction: 'desc' })
+assert.deepEqual(nextResearchSort('level', 'desc', 'level'), { sort: 'level', direction: 'asc' })
+assert.deepEqual(nextResearchSort('level', 'desc', 'name'), { sort: 'name', direction: 'asc' })
+assert.equal(researchItemPreferenceKey({ ...sample, record: 'records/items/awakened/test.dbr', name: 'Awakened Test Visage' }), 'legendary:head:testvisage')
 assert.deepEqual(researchRollFact(sample), {
   label: 'Best roll',
   text: '94.3 percentile',
@@ -51,6 +57,9 @@ assert.match(contract, /export interface ResearchItemTableRow/)
 assert.match(contract, /supports: readonly ResearchItemFact\[\][\s\S]*?modifiers: readonly ResearchItemModifier\[\][\s\S]*?acquisition: readonly ResearchItemFact\[\][\s\S]*?archive: readonly ResearchItemFact\[\]/)
 assert.match(skillWorkspace, /<ResearchItemTable/)
 assert.match(app, /<ResearchItemTable[\s\S]*?<PlannerJourney/)
+assert.match(app, /@sort="sortPlannerTable"/)
+assert.match(app, /get: \(\) => plannerProfiles.value.find\([\s\S]*?\?\.ignoredRecords \?\? \[\]/)
+assert.doesNotMatch(app, /initialPreferences.planner.ignoredRecords/)
 assert.match(app, /tooltip-icon-placeholder[\s\S]*?comparison-icon-placeholder[\s\S]*?copy-icon-placeholder/)
 assert.match(app, />Table<\/button>[\s\S]*?>Journey<\/button>[\s\S]*?>MI sources<\/button>/)
 assert.doesNotMatch(app, /<button[^>]*>Grid<\/button>/)

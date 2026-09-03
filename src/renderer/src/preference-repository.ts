@@ -32,6 +32,7 @@ export interface StoredPlannerProfile {
   masteries?: string[]
   skills: string[]
   excludedSkills: string[]
+  ignoredRecords?: string[]
   minimumLevel: number
   levelCap: number
   source: 'manual' | 'character'
@@ -209,6 +210,7 @@ function validPlannerProfile(value: unknown, fallbackTime: string): StoredPlanne
     ...(masteries ? { masteries } : {}),
     skills: stringArray(profile.skills, 128, 200) ?? [],
     excludedSkills: stringArray(profile.excludedSkills, 128, 200) ?? [],
+    ...(profile.ignoredRecords !== undefined ? { ignoredRecords: stringArray(profile.ignoredRecords) ?? [] } : {}),
     minimumLevel: clampNumber(profile.minimumLevel, 1, 1, 100),
     levelCap: clampNumber(profile.levelCap, 70, 1, 100),
     source: profile.source === 'character' ? 'character' : 'manual',

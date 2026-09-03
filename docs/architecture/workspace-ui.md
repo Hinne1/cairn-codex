@@ -237,6 +237,12 @@ the unobscured viewport after the bounded surface remounts.
 
 The shared row contract distinguishes rank, pet, conversion, special, and visual modifiers so
 future global damage-type presentation can consume semantic data instead of parsing display text.
+Catalog presentation sections carry optional `parentSkills` derived from the game's explicit
+`grantedSkills` relationships. Selecting a shapeshift includes modifiers to its granted abilities,
+with the ability name retained in the effect text. Rank and modifier extraction enumerates actual
+numbered fields, including sparse/high indices. Presentation version 33 refreshes older caches.
+Planner header clicks toggle the active direction and reset new columns to ascending. Exclusions
+are scoped to the selected profile, not inherited from the historical global ignore list.
 
 `ResearchSkillFx.vue` renders all item-level visual transformation sections ahead of ordinary
 modifiers in both the shared table and Journey. FX uses the existing semantic FX badge and named

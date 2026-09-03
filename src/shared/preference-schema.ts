@@ -38,7 +38,7 @@ function stringArray(value: unknown, maximumEntries: number, maximumLength: numb
 function plannerProfile(value: unknown): boolean {
   const profile = record(value)
   if (!profile || !onlyKeys(profile, [
-    'id', 'name', 'className', 'masteries', 'skills', 'excludedSkills', 'minimumLevel',
+    'id', 'name', 'className', 'masteries', 'skills', 'excludedSkills', 'ignoredRecords', 'minimumLevel',
     'levelCap', 'source', 'characterPath', 'characterLevel', 'isHardcore', 'modifiedAt'
   ])) return false
   if (!boundedString(profile.id, 200) || !boundedString(profile.name, 60) ||
@@ -48,6 +48,7 @@ function plannerProfile(value: unknown): boolean {
       !boundedString(profile.modifiedAt, 64)) return false
   if (profile.className !== undefined && !boundedString(profile.className, 80, false)) return false
   if (profile.masteries !== undefined && !stringArray(profile.masteries, 2, 40)) return false
+  if (profile.ignoredRecords !== undefined && !stringArray(profile.ignoredRecords, 512, 4096)) return false
   if (profile.characterPath !== undefined && !boundedString(profile.characterPath, 4096, false)) return false
   if (profile.characterLevel !== undefined && !boundedNumber(profile.characterLevel, 1, 100)) return false
   return profile.isHardcore === undefined || typeof profile.isHardcore === 'boolean'

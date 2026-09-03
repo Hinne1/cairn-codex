@@ -114,6 +114,7 @@ const refreshedCharacter = createCharacterPlannerProfile({
   existing: {
     id: 'character-plan', name: 'Avaa', className: 'Conjurer', masteries: ['Occultist', 'Shaman'],
     skills: ['Summon Briarthorn'], excludedSkills: ['Curse of Frailty'], minimumLevel: 50, levelCap: 94,
+    ignoredRecords: ['mi:legs:fixture'],
     source: 'character', characterPath: character.path, characterLevel: 70, isHardcore: true,
     modifiedAt: '2026-08-31T12:00:00.000Z'
   },
@@ -124,6 +125,8 @@ assert.equal(refreshedCharacter.id, 'character-plan')
 assert.deepEqual(refreshedCharacter.skills, ['Summon Briarthorn'])
 assert.deepEqual(refreshedCharacter.excludedSkills, ['Curse of Frailty'])
 assert.equal(refreshedCharacter.minimumLevel, 50)
+assert.deepEqual(refreshedCharacter.ignoredRecords, ['mi:legs:fixture'])
+assert.deepEqual(clone.ignoredRecords ?? [], [], 'A newly created plan starts with no exclusions')
 
 const guidedCharacter = createCharacterPlannerProfile({
   character,

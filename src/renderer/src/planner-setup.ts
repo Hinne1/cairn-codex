@@ -89,6 +89,7 @@ export function createCharacterPlannerProfile(input: {
     minimumLevel,
     levelCap,
     source: 'character',
+    ...(existing?.ignoredRecords ? { ignoredRecords: [...existing.ignoredRecords] } : {}),
     characterPath: character.path,
     characterLevel: character.level,
     isHardcore: character.isHardcore,

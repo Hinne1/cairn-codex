@@ -15,6 +15,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isCatalogItem(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.record === 'string' && typeof value.name === 'string' &&
+    typeof value.rarity === 'string' && typeof value.itemClass === 'string' &&
+    typeof value.slot === 'string' && isFiniteNumber(value.availableCount)
+}
+
+function isScannedStash(value: unknown): boolean {
+  return isRecord(value) && typeof value.path === 'string' &&
+    typeof value.isHardcore === 'boolean' && isFiniteNumber(value.itemCount) &&
+    typeof value.lastWriteUtc === 'string' && typeof value.sha256 === 'string'
+}
+
+function isObservedItem(value: unknown): boolean {
+  return isRecord(value) && typeof value.sourcePath === 'string' &&
+    typeof value.baseRecord === 'string'
+}
+
+function isAccountStore(value: unknown): boolean {
+  return isRecord(value) && typeof value.path === 'string' &&
+    (value.kind === 'reagents' || value.kind === 'potions') &&
+    typeof value.isHardcore === 'boolean' && isFiniteNumber(value.itemCount) &&
+    typeof value.lastWriteUtc === 'string' && typeof value.sha256 === 'string' &&
+    Array.isArray(value.entries) && value.entries.every((entry) =>
+      isRecord(entry) && typeof entry.record === 'string' && isFiniteNumber(entry.quantity)
+    )
+}
+
+function isCountSummary(value: unknown): boolean {
+  return isRecord(value) && isFiniteNumber(value.total) &&
+    isFiniteNumber(value.collected) && isFiniteNumber(value.availableCopies)
+}
+
 function isSnapshot(value: unknown): value is CollectionSnapshot {
   if (!isRecord(value)) return false
   const snapshot = value as Partial<CollectionSnapshot>
@@ -27,23 +64,35 @@ function isSnapshot(value: unknown): value is CollectionSnapshot {
   )) return false
   if (!discovery.saveLocations.every((location) =>
     isRecord(location) && typeof location.path === 'string' &&
-    typeof location.source === 'string' && Array.isArray(location.transferStashes)
+    typeof location.source === 'string' && Array.isArray(location.transferStashes) &&
+    location.transferStashes.every((stash) => isRecord(stash) && typeof stash.path === 'string')
   )) return false
   return typeof snapshot.catalogPresentationVersion === 'number' &&
     typeof snapshot.scannedAtUtc === 'string' &&
-    Array.isArray(snapshot.contentPacks) &&
-    Array.isArray(snapshot.items) &&
-    Array.isArray(snapshot.plannerItems) &&
-    Array.isArray(snapshot.supplies) &&
-    Array.isArray(snapshot.materials) &&
-    Array.isArray(snapshot.accountStores) &&
-    Array.isArray(snapshot.observedItems) &&
-    Array.isArray(snapshot.scannedStashes) &&
-    Array.isArray(snapshot.warnings) &&
-    Array.isArray(snapshot.rarities) &&
-    isRecord(snapshot.recipeSummary) &&
-    isRecord(snapshot.affixSummary) &&
-    Array.isArray(snapshot.affixes)
+    Array.isArray(snapshot.contentPacks) && snapshot.contentPacks.every((pack) =>
+      isRecord(pack) && typeof pack.id === 'string' &&
+      typeof pack.databasePath === 'string' && typeof pack.tagsPath === 'string'
+    ) &&
+    Array.isArray(snapshot.items) && snapshot.items.every(isCatalogItem) &&
+    Array.isArray(snapshot.plannerItems) && snapshot.plannerItems.every(isCatalogItem) &&
+    Array.isArray(snapshot.supplies) && snapshot.supplies.every(isCatalogItem) &&
+    Array.isArray(snapshot.materials) && snapshot.materials.every(isCatalogItem) &&
+    Array.isArray(snapshot.accountStores) && snapshot.accountStores.every(isAccountStore) &&
+    Array.isArray(snapshot.observedItems) && snapshot.observedItems.every(isObservedItem) &&
+    Array.isArray(snapshot.scannedStashes) && snapshot.scannedStashes.every(isScannedStash) &&
+    Array.isArray(snapshot.warnings) && snapshot.warnings.every((warning) =>
+      isRecord(warning) && typeof warning.path === 'string' && typeof warning.message === 'string'
+    ) &&
+    Array.isArray(snapshot.rarities) && snapshot.rarities.every((summary) =>
+      isCountSummary(summary) && isRecord(summary) && typeof summary.rarity === 'string'
+    ) &&
+    isRecord(snapshot.recipeSummary) && isFiniteNumber(snapshot.recipeSummary.total) &&
+    isFiniteNumber(snapshot.recipeSummary.collected) &&
+    isFiniteNumber(snapshot.recipeSummary.unlockedItems) &&
+    isCountSummary(snapshot.affixSummary) &&
+    Array.isArray(snapshot.affixes) && snapshot.affixes.every((affix) =>
+      isRecord(affix) && typeof affix.key === 'string' && Array.isArray(affix.records)
+    )
 }
 
 function snapshotSha256(snapshot: CollectionSnapshot): string {

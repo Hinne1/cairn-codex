@@ -77,9 +77,10 @@ index or temporarily unavailable save source never makes that durable snapshot
 unreadable: the renderer receives it with `cacheNeedsRefresh` and shows the
 oldest retained source timestamp until a refresh succeeds. Legacy unversioned
 snapshots are accepted once and upgraded on the next successful write; unknown
-versions, failed integrity hashes, and malformed shapes fail closed. Catalog
-presentation-version changes trigger a compatible rescan, but the older
-snapshot remains available to reconcile durable source and recipe knowledge.
+versions, failed integrity hashes, and malformed shapes fail closed. A
+structurally compatible older catalog presentation remains browseable as stale
+data while a compatible rescan is attempted, and remains available to
+reconcile durable source and recipe knowledge afterward.
 
 Refresh reconciliation is source-aware. A prior stash or account store remains
 cached until a new scan positively contains that exact source. Consequently,

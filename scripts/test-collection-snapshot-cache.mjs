@@ -58,6 +58,15 @@ try {
   }), 'utf8')
   assert.equal(await readCollectionSnapshotCache(path), null)
 
+  const malformedItems = { ...snapshot, items: [null] }
+  await writeFile(path, JSON.stringify({
+    version: COLLECTION_SNAPSHOT_CACHE_VERSION,
+    savedAtUtc: '2026-09-03T12:01:00.000Z',
+    snapshotSha256: createHash('sha256').update(JSON.stringify(malformedItems)).digest('hex'),
+    snapshot: malformedItems
+  }), 'utf8')
+  assert.equal(await readCollectionSnapshotCache(path), null)
+
   await writeFile(path, '{corrupted', 'utf8')
   assert.equal(await readCollectionSnapshotCache(path), null)
 } finally {

@@ -379,6 +379,75 @@ function collectionDependencies(overrides = {}) {
   assert.equal(reconciled.cachedDataAsOfUtc, previous.scannedAtUtc)
 }
 
+// A source omitted from an otherwise successfully enumerated same save root was
+// removed, not taken offline, and must not become immortal cached inventory.
+{
+  const root = 'C:/saves'
+  const previous = {
+    ...collectionSnapshot('before-deletion'),
+    discovery: {
+      ...collectionSnapshot('before-deletion').discovery,
+      saveLocations: [{ path: root, source: 'documents', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: `${root}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 1,
+      lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'deleted-stash'
+    }],
+    observedItems: [{ sourcePath: `${root}/transfer.gst`, baseRecord: 'records/deleted.dbr' }],
+    accountStores: [{
+      path: `${root}/reagents.gst`, kind: 'reagents', isHardcore: false, itemCount: 1,
+      lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'deleted-store',
+      entries: [{ record: 'records/deleted-component.dbr', quantity: 1 }]
+    }]
+  }
+  const current = {
+    ...collectionSnapshot('after-deletion'),
+    discovery: {
+      ...collectionSnapshot('after-deletion').discovery,
+      saveLocations: [{ path: root, source: 'documents', transferStashes: [] }]
+    }
+  }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.deepEqual(reconciled.scannedStashes, [])
+  assert.deepEqual(reconciled.observedItems, [])
+  assert.deepEqual(reconciled.accountStores, [])
+  assert.equal(reconciled.cacheNeedsRefresh, false)
+}
+
+// A newly discovered account root replaces a disappeared root of the same kind;
+// quantities from different Steam accounts must never be combined implicitly.
+{
+  const previousRoot = 'D:/Steam/userdata/42/219990/remote/save'
+  const currentRoot = 'D:/Steam/userdata/99/219990/remote/save'
+  const previous = {
+    ...collectionSnapshot('account-42'),
+    discovery: {
+      ...collectionSnapshot('account-42').discovery,
+      saveLocations: [{ path: previousRoot, source: 'steam-cloud', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: `${previousRoot}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 1,
+      lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'account-42'
+    }],
+    observedItems: [{ sourcePath: `${previousRoot}/transfer.gst`, baseRecord: 'records/account-42.dbr' }]
+  }
+  const current = {
+    ...collectionSnapshot('account-99'),
+    discovery: {
+      ...collectionSnapshot('account-99').discovery,
+      saveLocations: [{ path: currentRoot, source: 'steam-cloud', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: `${currentRoot}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 0,
+      lastWriteUtc: '2026-09-01T12:00:00Z', sha256: 'account-99'
+    }]
+  }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.deepEqual(reconciled.scannedStashes.map((stash) => stash.path), [`${currentRoot}/transfer.gst`])
+  assert.deepEqual(reconciled.observedItems, [])
+  assert.equal(reconciled.cacheNeedsRefresh, false)
+}
+
 // If an entire previously known save root is temporarily absent from discovery,
 // its stash and account-store knowledge remains available offline.
 {
@@ -432,7 +501,9 @@ function collectionDependencies(overrides = {}) {
     },
     scanner: { scanInstalledData: async () => current }
   }))
-  assert.equal(await service.getCached({ sourcePaths: [], basis: 'stashes' }), null)
+  const cached = await service.getCached({ sourcePaths: [], basis: 'stashes' })
+  assert.equal(cached.catalogPresentationVersion, 6)
+  assert.equal(cached.cacheNeedsRefresh, true)
   await service.scan({ sourcePaths: [], basis: 'stashes' })
   assert.equal(written.catalogPresentationVersion, 7)
   assert.equal(written.items[0].acquisition.crafting.knownSoftcore, true)

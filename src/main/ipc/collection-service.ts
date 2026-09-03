@@ -118,6 +118,42 @@ function normalizedPath(path: string): string {
   return path.replaceAll('\\', '/').toLocaleLowerCase()
 }
 
+function saveLocationKey(location: CollectionSnapshot['discovery']['saveLocations'][number]): string {
+  return `${location.source}:${normalizedPath(location.path).replace(/\/+$/, '')}`
+}
+
+function sourceSaveLocation(
+  sourcePath: string,
+  snapshot: CollectionSnapshot
+): CollectionSnapshot['discovery']['saveLocations'][number] | null {
+  const path = normalizedPath(sourcePath)
+  return snapshot.discovery.saveLocations
+    .filter((location) => {
+      const root = normalizedPath(location.path).replace(/\/+$/, '')
+      return path === root || path.startsWith(root + '/')
+    })
+    .sort((left, right) => right.path.length - left.path.length)[0] ?? null
+}
+
+function shouldRetainMissingSource(
+  sourcePath: string,
+  current: CollectionSnapshot,
+  previous: CollectionSnapshot,
+  failedPaths: ReadonlySet<string>
+): boolean {
+  if (failedPaths.has(normalizedPath(sourcePath))) return true
+  const priorRoot = sourceSaveLocation(sourcePath, previous)
+  if (!priorRoot) return false
+  const currentRootKeys = new Set(current.discovery.saveLocations.map(saveLocationKey))
+  if (currentRootKeys.has(saveLocationKey(priorRoot))) return false
+
+  const previousRootKeys = new Set(previous.discovery.saveLocations.map(saveLocationKey))
+  const replacementRootAppeared = current.discovery.saveLocations.some((location) =>
+    location.source === priorRoot.source && !previousRootKeys.has(saveLocationKey(location))
+  )
+  return !replacementRootAppeared
+}
+
 function mergeKnownFlag(
   current: boolean | null,
   previous: boolean | null
@@ -169,9 +205,11 @@ export function preserveUnavailableCollectionKnowledge(
 ): CollectionSnapshot {
   if (!previous) return current
 
+  const failedPaths = new Set(current.warnings.map((warning) => normalizedPath(warning.path)))
   const currentStashPaths = new Set(current.scannedStashes.map((stash) => normalizedPath(stash.path)))
   const retainedStashes = previous.scannedStashes.filter(
-    (stash) => !currentStashPaths.has(normalizedPath(stash.path))
+    (stash) => !currentStashPaths.has(normalizedPath(stash.path)) &&
+      shouldRetainMissingSource(stash.path, current, previous, failedPaths)
   )
   const retainedStashPaths = new Set(retainedStashes.map((stash) => normalizedPath(stash.path)))
 
@@ -179,7 +217,8 @@ export function preserveUnavailableCollectionKnowledge(
     `${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`
   ))
   const retainedStores = (previous.accountStores ?? []).filter((store) =>
-    !currentStoreKeys.has(`${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`)
+    !currentStoreKeys.has(`${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`) &&
+      shouldRetainMissingSource(store.path, current, previous, failedPaths)
   )
 
   const mergeCatalog = (
@@ -263,12 +302,14 @@ export class CollectionService {
   async getCached(request: CollectionRequest): Promise<CollectionSnapshot | null> {
     const snapshot = await this.loadLatest()
     if (!snapshot) return null
-    if (snapshot.catalogPresentationVersion !== this.dependencies.catalogPresentationVersion) return null
+    const presentationFresh =
+      snapshot.catalogPresentationVersion === this.dependencies.catalogPresentationVersion
     const [mapIndexFresh, sourcesFresh] = await Promise.all([
       this.dependencies.freshness.isMapIndexFresh(),
       this.dependencies.freshness.areSourcesFresh(snapshot)
     ])
-    const cacheNeedsRefresh = !mapIndexFresh || !sourcesFresh || snapshot.cacheNeedsRefresh === true
+    const cacheNeedsRefresh =
+      !presentationFresh || !mapIndexFresh || !sourcesFresh || snapshot.cacheNeedsRefresh === true
     const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
     return {
       ...(await this.dependencies.projector.present(projected, request.basis)),

@@ -198,13 +198,19 @@ dismantling path is introduced by the extraction.
 
 Skill Explorer owns its complete typed route-control snapshot, subject picker, suggestions,
 structured result search, availability/rarity/slot filters, sort controls, paging, and dense-table
-markup in `SkillExplorerWorkspace.vue`. `skill-explorer.ts` owns deterministic skill indexing,
-direct-rank and modifier matching, damage-conversion projection, lower-tier MI base collapse, and
-row filtering/sorting. `App.vue` supplies the immutable catalog, shared ownership/icon adapters,
+markup in `SkillExplorerWorkspace.vue`. The table starts at required level ascending and presents
+item identity, ranks, damage conversion, special modifiers, and visual transformations as distinct
+columns inside its local horizontal scroller. `skill-explorer.ts` owns deterministic skill indexing,
+direct-rank, modifier, and visual-only matching, damage-conversion projection, lower-tier MI base
+collapse, and row filtering/sorting. `App.vue` supplies the immutable catalog, shared ownership/icon adapters,
 the global immediate-focus and delayed-pointer tooltip adapters, the item-drawer adapter, and the
 same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
+
+The global item tooltip remains viewport-bounded but is directly pointer-accessible. Ordinary wheel
+input scrolls only when targeted at overflowing tooltip content; hovering or focusing the tooltip
+cancels its pending dismissal, while wheel input elsewhere continues to scroll the workspace.
 
 Supplies owns its typed category, compatible-slot, query, transfer-mode, and page controls plus
 its transient keyed selection in `SuppliesWorkspace.vue`. `supplies.ts` owns reusable-unlock

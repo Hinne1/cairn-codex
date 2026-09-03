@@ -2141,9 +2141,21 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
               prefix: '',
               suffix: ''
             }]
-          }],
+          }, ...(index % 4 === 0 ? [{
+            kind: 'visual-modifier' as const,
+            heading: 'Wendigo Totem · Visual transformation',
+            lines: [{
+              label: 'Alternate crimson spirit effect',
+              minimum: null,
+              maximum: null,
+              unit: '' as const,
+              tone: 'visual' as const,
+              prefix: '',
+              suffix: ''
+            }]
+          }] : [])],
           grantedSkill: null,
-          searchText: `wendigo totem ${conversionTarget.toLocaleLowerCase()} damage skill recharge synthetic qa`
+          searchText: `wendigo totem ${conversionTarget.toLocaleLowerCase()} damage skill recharge alternate crimson spirit effect synthetic qa`
         }
       }
     })
@@ -5788,13 +5800,13 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               tooltip.scrollTop = 0
               const wheel = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true })
               tooltip.dispatchEvent(wheel)
-              if (wheel.defaultPrevented || tooltip.scrollTop !== 0) {
-                throw new Error('A visible planner tooltip still captures ordinary mouse-wheel input.')
+              if (!wheel.defaultPrevented || tooltip.scrollTop <= 0) {
+                throw new Error('Ordinary mouse-wheel input did not scroll the overflowing planner tooltip.')
               }
-              const altWheel = new WheelEvent('wheel', { deltaY: 120, altKey: true, bubbles: true, cancelable: true })
-              tooltip.dispatchEvent(altWheel)
-              if (!altWheel.defaultPrevented || tooltip.scrollTop <= 0) {
-                throw new Error('Alt + mouse wheel did not scroll the overflowing planner tooltip.')
+              const pageWheel = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true })
+              window.dispatchEvent(pageWheel)
+              if (pageWheel.defaultPrevented) {
+                throw new Error('A visible planner tooltip captured ordinary wheel input targeted outside it.')
               }
               tooltipScrollProbe.remove()
               tooltip.style.cssText = tooltipInlineStyle
@@ -6754,6 +6766,45 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const originalTotal = resultCount()
               const originalFirst = rows()[0]?.textContent?.replace(/\s+/g, ' ').trim()
               if (!Number.isFinite(originalTotal) || originalTotal < rows().length) throw new Error('Skill Explorer result count was invalid.')
+              const toolbarSelects = [...document.querySelectorAll('.skill-explorer-toolbar select')]
+              const sortSelect = toolbarSelects.at(-2)
+              const directionSelect = toolbarSelects.at(-1)
+              if (!(sortSelect instanceof HTMLSelectElement) || sortSelect.value !== 'level' ||
+                  !(directionSelect instanceof HTMLSelectElement) || directionSelect.value !== 'asc') {
+                throw new Error('Skill Explorer did not start with level ascending sorting.')
+              }
+              const initialLevels = rows().map((row) => Number(row.querySelector('.skill-level')?.textContent?.trim()))
+              if (initialLevels.some((level, index) => !Number.isFinite(level) || (index > 0 && level < initialLevels[index - 1]))) {
+                throw new Error('Skill Explorer rows were not initially ordered by ascending level.')
+              }
+              const initialLevelColumn = [...document.querySelectorAll('.skill-table-header [role="columnheader"]')]
+                .find((column) => column.textContent?.trim().startsWith('Level'))
+              if (initialLevelColumn?.getAttribute('aria-sort') !== 'ascending') {
+                throw new Error('Skill Explorer did not expose its default ascending level sort.')
+              }
+              const visualColumn = [...document.querySelectorAll('.skill-table-header [role="columnheader"]')]
+                .find((column) => column.textContent?.trim() === 'Visual transformation')
+              if (!visualColumn || !rows().some((row) => row.querySelector('.skill-visual')?.textContent?.includes('Alternate crimson spirit effect'))) {
+                throw new Error('Skill Explorer did not render visual transformation data.')
+              }
+              const firstItem = rows()[0]?.querySelector('.skill-item-name')
+              const firstIcon = firstItem?.querySelector('img')
+              const firstItemCell = firstItem?.closest('[role="gridcell"]')
+              const firstLevel = rows()[0]?.querySelector('.skill-level')
+              if (!(firstItem instanceof HTMLElement) || !(firstItemCell instanceof HTMLElement) ||
+                  firstItemCell.getBoundingClientRect().height < 70 ||
+                  (firstIcon instanceof HTMLImageElement && firstIcon.getBoundingClientRect().height < 50) ||
+                  !(firstLevel instanceof HTMLElement) || getComputedStyle(firstLevel).textAlign !== 'center') {
+                throw new Error('Skill Explorer item and level cells did not use the polished table geometry.')
+              }
+              const resultCounter = document.querySelector('.skill-explorer-toolbar .explorer-result-count')
+              if (!(resultCounter instanceof HTMLElement)) throw new Error('Skill Explorer result count was unavailable.')
+              const resultCounterStyle = getComputedStyle(resultCounter)
+              if (window.innerWidth > 1180
+                ? resultCounterStyle.borderLeftStyle === 'none' || resultCounterStyle.textAlign === 'right'
+                : resultCounterStyle.flexDirection !== 'row' || resultCounterStyle.borderTopStyle === 'none') {
+                throw new Error('Skill Explorer result count did not use the balanced wide/compact treatment.')
+              }
               const first = rows()[0]
               const second = rows()[1]
               let nativeFocusEvents = 0
@@ -6770,7 +6821,27 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               // Exercise the same event that a foreground keyboard focus transition produces.
               if (nativeFocusEvents === 0) first.dispatchEvent(new FocusEvent('focus'))
               for (let attempt = 0; attempt < 8 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(10)
-              if (!document.querySelector('.game-tooltip')) throw new Error('Keyboard focus did not immediately use the global Skill Explorer tooltip.')
+              const focusedTooltip = document.querySelector('.game-tooltip')
+              if (!(focusedTooltip instanceof HTMLElement)) throw new Error('Keyboard focus did not immediately use the global Skill Explorer tooltip.')
+              const tooltipInlineStyle = focusedTooltip.style.cssText
+              const tooltipScrollProbe = document.createElement('div')
+              tooltipScrollProbe.setAttribute('aria-hidden', 'true')
+              tooltipScrollProbe.style.cssText = 'height:480px;min-height:480px'
+              focusedTooltip.appendChild(tooltipScrollProbe)
+              focusedTooltip.style.height = '150px'
+              focusedTooltip.style.maxHeight = '150px'
+              focusedTooltip.scrollTop = 0
+              const ordinaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
+              focusedTooltip.dispatchEvent(ordinaryWheel)
+              if (!ordinaryWheel.defaultPrevented || focusedTooltip.scrollTop <= 0) {
+                throw new Error('Ordinary mouse-wheel input did not scroll the overflowing tooltip.')
+              }
+              focusedTooltip.dispatchEvent(new MouseEvent('mouseenter'))
+              await wait(120)
+              if (!document.body.contains(focusedTooltip)) throw new Error('Entering the tooltip did not cancel its pending dismissal.')
+              tooltipScrollProbe.remove()
+              focusedTooltip.style.cssText = tooltipInlineStyle
+              focusedTooltip.scrollTop = 0
               first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
               await wait(20)
               if (document.activeElement !== second) throw new Error('ArrowDown did not move to the next Skill Explorer row.')

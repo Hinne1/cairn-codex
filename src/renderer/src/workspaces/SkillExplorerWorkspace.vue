@@ -171,7 +171,7 @@ function showFocusedTooltip(_key: string | number, row: { item: CollectionItem }
     <ToolHeader
       eyebrow="Build research prototype"
       title="Items for a skill"
-      description="Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, and level requirements."
+      description="Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, visual transformations, and level requirements."
     />
     <div class="skill-picker">
       <div class="skill-combobox" @focusout="handlePickerFocusOut">
@@ -229,8 +229,8 @@ function showFocusedTooltip(_key: string | number, row: { item: CollectionItem }
         <label><span>Slot</span><select v-model="slot" autocomplete="off"><option value="all">All slots</option><option v-for="option in slotOptions" :key="option" :value="option">{{ option }}</option></select></label>
       </template>
       <template #sort>
-        <label><span>Sort by</span><select v-model="sort" autocomplete="off"><option value="amount">Ranks & modifiers</option><option value="item">Item name</option><option value="slot">Slot</option><option value="conversion">Conversion target</option><option value="special">Special modifier</option><option value="level">Required level</option></select></label>
-        <label><span>Order</span><select v-model="direction" autocomplete="off"><option value="desc">Highest first</option><option value="asc">Lowest first</option></select></label>
+        <label><span>Sort by</span><select v-model="sort" autocomplete="off"><option value="level">Required level</option><option value="amount">Ranks & modifiers</option><option value="item">Item name</option><option value="slot">Slot</option><option value="conversion">Conversion target</option><option value="special">Special modifier</option></select></label>
+        <label><span>Order</span><select v-model="direction" autocomplete="off"><option value="asc">Lowest first</option><option value="desc">Highest first</option></select></label>
       </template>
     </ExplorerToolbar>
     <p id="skill-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
@@ -255,23 +255,23 @@ function showFocusedTooltip(_key: string | number, row: { item: CollectionItem }
       <template #header>
         <div class="skill-table-header" role="row">
           <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'item')"><button type="button" @click="changeSort('item')">Item <span v-if="sort === 'item'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
+          <span class="skill-level" role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'level')"><button type="button" @click="changeSort('level')">Level <span v-if="sort === 'level'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
           <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'slot')"><button type="button" @click="changeSort('slot')">Slot <span v-if="sort === 'slot'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'amount')"><button type="button" @click="changeSort('amount')">Ranks <span v-if="sort === 'amount'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'conversion')"><button type="button" @click="changeSort('conversion')">Target <span v-if="sort === 'conversion'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span role="columnheader">Conversion details</span>
+          <span class="skill-ranks" role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'amount')"><button type="button" @click="changeSort('amount')">Ranks <span v-if="sort === 'amount'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
+          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'conversion')"><button type="button" @click="changeSort('conversion')">Damage conversion <span v-if="sort === 'conversion'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
           <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'special')"><button type="button" @click="changeSort('special')">Special modifier <span v-if="sort === 'special'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'level')"><button type="button" @click="changeSort('level')">Level <span v-if="sort === 'level'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
+          <span class="skill-visual" role="columnheader">Visual transformation</span>
         </div>
       </template>
       <template #item="{ item: row }">
         <div class="skill-table-row" @mouseenter="emit('queue-tooltip', row.item, $event)" @mousemove="emit('move-tooltip', $event)" @mouseleave="emit('hide-tooltip')">
-          <span role="gridcell"><span class="skill-item-name"><img v-if="iconUrlForItem(row.item)" :src="iconUrlForItem(row.item)!" alt="" /><span><strong>{{ row.item.name }}</strong><small>{{ row.item.rarity }}<template v-if="ownershipLabelForItem(row.item)"> · {{ ownershipLabelForItem(row.item) }}</template></small></span></span></span>
+          <span role="gridcell"><span class="skill-item-name"><img v-if="iconUrlForItem(row.item)" :src="iconUrlForItem(row.item)!" alt="" /><span><strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong><small>{{ row.item.rarity }}<template v-if="ownershipLabelForItem(row.item)"> · {{ ownershipLabelForItem(row.item) }}</template></small></span></span></span>
+          <span role="gridcell" class="skill-level">{{ row.item.levelRequirement }}</span>
           <span role="gridcell">{{ row.item.slot }}</span>
-          <span role="gridcell" class="skill-amount">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</span>
-          <span role="gridcell" class="skill-conversion-target">{{ row.conversionTarget || '—' }}</span>
-          <span role="gridcell">{{ row.conversionDetails || '—' }}</span>
+          <span role="gridcell" class="skill-amount skill-ranks">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</span>
+          <span role="gridcell"><strong v-if="row.conversionTarget" class="skill-conversion-target">{{ row.conversionTarget }}</strong><small v-if="row.conversionDetails" class="skill-cell-detail">{{ row.conversionDetails }}</small><template v-if="!row.conversionTarget && !row.conversionDetails">—</template></span>
           <span role="gridcell">{{ row.special || '—' }}</span>
-          <span role="gridcell">{{ row.item.levelRequirement }}</span>
+          <span role="gridcell" class="skill-visual">{{ row.visualTransformation || '—' }}</span>
         </div>
       </template>
     </BoundedResultSurface>

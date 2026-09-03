@@ -10,6 +10,7 @@ export interface SkillMatch {
   conversionTarget: string
   conversionDetails: string
   special: string
+  visualTransformation: string
 }
 
 export interface SkillExplorerRow extends SkillMatch {
@@ -89,7 +90,13 @@ export function skillMatchForItem(item: CollectionItem, requestedSkill: string):
       section.heading?.toLocaleLowerCase() === normalizedSkill
     )
     .flatMap((section) => section.lines)
-  if (amount === 0 && modifiers.length === 0) return null
+  const visualTransformationLines = sections
+    .filter((section) =>
+      section.kind === 'visual-modifier' &&
+      skillSectionHeading(section.heading, normalizedSkill)
+    )
+    .flatMap((section) => section.lines)
+  if (amount === 0 && modifiers.length === 0 && visualTransformationLines.length === 0) return null
   const conversionLines = modifiers.filter((line) => isDamageTypeConversion(line.label))
   const globalConversionLines = sections
     .filter((section) => section.kind === 'base')
@@ -112,7 +119,8 @@ export function skillMatchForItem(item: CollectionItem, requestedSkill: string):
     conversionDetails: allConversionLines
       .map(({ scope, line }) => `${scope}: ${formatPresentationLine(line)}`)
       .join('; '),
-    special: specialLines.map(formatPresentationLine).join('; ')
+    special: specialLines.map(formatPresentationLine).join('; '),
+    visualTransformation: visualTransformationLines.map(formatPresentationLine).join('; ')
   }
 }
 
@@ -152,13 +160,14 @@ export function createSkillExplorerRows(
           row.conversionTarget,
           row.conversionDetails,
           row.special,
+          row.visualTransformation,
           presentation
         ].join(' '),
         fields: {
           name: row.item.name,
           skill: [row.skill, presentation],
           damage: [row.conversionTarget, row.conversionDetails, presentation],
-          stat: [row.special, presentation],
+          stat: [row.special, row.visualTransformation, presentation],
           slot: row.item.slot,
           rarity: row.item.rarity,
           level: row.item.levelRequirement,
@@ -181,7 +190,7 @@ export function nextSkillSortControls(
       true
     )
   }
-  const direction = ['item', 'slot', 'conversion', 'special'].includes(sort) ? 'asc' : 'desc'
+  const direction = ['item', 'slot', 'conversion', 'special', 'level'].includes(sort) ? 'asc' : 'desc'
   return updateSkillExplorerControls(controls, { sort, direction }, true)
 }
 
@@ -193,8 +202,8 @@ function compareSkillRows(
 ): number {
   let comparison = 0
   if (sort === 'amount') {
-    const leftHasModifier = left.conversionDetails.length > 0 || left.special.length > 0 ? 1 : 0
-    const rightHasModifier = right.conversionDetails.length > 0 || right.special.length > 0 ? 1 : 0
+    const leftHasModifier = left.conversionDetails.length > 0 || left.special.length > 0 || left.visualTransformation.length > 0 ? 1 : 0
+    const rightHasModifier = right.conversionDetails.length > 0 || right.special.length > 0 || right.visualTransformation.length > 0 ? 1 : 0
     comparison = leftHasModifier - rightHasModifier || left.amount - right.amount
   } else if (sort === 'slot') comparison = left.item.slot.localeCompare(right.item.slot)
   else if (sort === 'conversion') comparison = left.conversionTarget.localeCompare(right.conversionTarget)
@@ -212,6 +221,12 @@ function presentationSearchText(item: CollectionItem): string {
       ...section.lines.map((line) => `${line.prefix} ${line.label} ${line.suffix}`)
     ])
     .join(' ')
+}
+
+function skillSectionHeading(heading: string | null, normalizedSkill: string): boolean {
+  if (!heading) return false
+  const normalizedHeading = heading.toLocaleLowerCase()
+  return normalizedHeading === normalizedSkill || normalizedHeading.startsWith(`${normalizedSkill} ·`)
 }
 
 function formatPresentationLine(line: ItemPresentationLine): string {

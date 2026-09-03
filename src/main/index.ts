@@ -7446,16 +7446,35 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!triggerWheel.defaultPrevented) {
                 throw new Error('Wheel input over the item cell was not routed to its overflowing tooltip.')
               }
-              pointerTooltip.scrollTop = 0
-              pointerTooltip.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true }))
-              const fillWheel = new WheelEvent('wheel', { deltaY: pointerTooltip.scrollHeight, bubbles: true, cancelable: true })
-              firstItemCell.dispatchEvent(fillWheel)
-              const queuedBoundaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
-              firstItemCell.dispatchEvent(queuedBoundaryWheel)
-              if (!fillWheel.defaultPrevented || !queuedBoundaryWheel.defaultPrevented || pointerTooltip.scrollTop >= pointerTooltip.scrollHeight - pointerTooltip.clientHeight - 1) {
-                throw new Error('Burst wheel input handed off before the tooltip visibly reached its boundary.')
+              // Exercise both preferences regardless of the desktop runner's animation setting.
+              const originalMatchMedia = window.matchMedia
+              try {
+                for (const reducedMotion of [false, true]) {
+                  window.matchMedia = (query) => {
+                    const media = originalMatchMedia.call(window, query)
+                    if (query === '(prefers-reduced-motion: reduce)') {
+                      Object.defineProperty(media, 'matches', { value: reducedMotion })
+                    }
+                    return media
+                  }
+                  pointerTooltip.scrollTop = 0
+                  pointerTooltip.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true }))
+                  const fillWheel = new WheelEvent('wheel', { deltaY: pointerTooltip.scrollHeight, bubbles: true, cancelable: true })
+                  firstItemCell.dispatchEvent(fillWheel)
+                  const queuedBoundaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
+                  firstItemCell.dispatchEvent(queuedBoundaryWheel)
+                  const visiblyAtBoundary = pointerTooltip.scrollTop >= pointerTooltip.scrollHeight - pointerTooltip.clientHeight - 1
+                  if (!fillWheel.defaultPrevented || queuedBoundaryWheel.defaultPrevented === reducedMotion || visiblyAtBoundary !== reducedMotion) {
+                    throw new Error('Tooltip burst boundary behavior did not match the motion preference: ' + JSON.stringify({
+                      reducedMotion, fillPrevented: fillWheel.defaultPrevented,
+                      queuedPrevented: queuedBoundaryWheel.defaultPrevented, visiblyAtBoundary
+                    }))
+                  }
+                  await wait(150)
+                }
+              } finally {
+                window.matchMedia = originalMatchMedia
               }
-              await wait(150)
               pointerTooltip.scrollTop = pointerTooltip.scrollHeight
               pointerTooltip.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true }))
               const boundaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })

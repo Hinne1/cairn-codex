@@ -127,6 +127,12 @@ Escape propagation, click isolation and viewport containment are asserted.
 Expanded wide/compact screenshots were inspected. These tests run through the
 route gates in `npm run verify`; no personal profile or game data is used.
 
+Tooltip burst regression (2026-09-04): the isolated Electron gate explicitly tests
+both motion preferences. Animated scrolling retains queued input until the visible
+edge; reduced-motion scrolling reaches the edge immediately and allows the next
+event to return to the page. The fixture restores the original media-query API in
+a `finally` block, independent of the Windows runner's animation setting.
+
 ## Manual live-transfer gates
 
 These require Grim Dawn, deliberate sacrificial items, and human confirmation.

@@ -68,3 +68,23 @@ The UI exposes two projections over the same canonical catalog:
   rows are available copies; retrieved rows remain historical discoveries but
   are no longer available. Consequently an item can leave every Grim Dawn
   stash while remaining both serialized and browsable in Cairn Codex.
+
+## Offline snapshot cache
+
+The main process also keeps the latest complete collection projection in a
+versioned, atomically replaced `collection-snapshot.json` envelope. A stale map
+index or temporarily unavailable save source never makes that durable snapshot
+unreadable: the renderer receives it with `cacheNeedsRefresh` and shows the
+oldest retained source timestamp until a refresh succeeds. Legacy unversioned
+snapshots are accepted once and upgraded on the next successful write; unknown
+versions, failed integrity hashes, and malformed shapes fail closed. A
+structurally compatible older catalog presentation remains browseable as stale
+data while a compatible rescan is attempted, and remains available to
+reconcile durable source and recipe knowledge afterward.
+
+Refresh reconciliation is source-aware. A prior stash or account store remains
+cached until a new scan positively contains that exact source. Consequently,
+mere disappearance never means zero, while a successfully scanned source with
+zero entries does replace the previous quantity. Known blueprint flags are
+monotonic learned-account facts, so a later partial formula view cannot revoke
+a recipe Cairn already observed.

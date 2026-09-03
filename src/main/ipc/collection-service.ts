@@ -114,6 +114,152 @@ export interface CollectionHydrationServiceRequest {
   onProgress?(progress: CollectionHydrationProgress): void
 }
 
+function normalizedPath(path: string): string {
+  return path.replaceAll('\\', '/').toLocaleLowerCase()
+}
+
+function saveLocationKey(location: CollectionSnapshot['discovery']['saveLocations'][number]): string {
+  return `${location.source}:${normalizedPath(location.path).replace(/\/+$/, '')}`
+}
+
+function sourceSaveLocation(
+  sourcePath: string,
+  snapshot: CollectionSnapshot
+): CollectionSnapshot['discovery']['saveLocations'][number] | null {
+  const path = normalizedPath(sourcePath)
+  return snapshot.discovery.saveLocations
+    .filter((location) => {
+      const root = normalizedPath(location.path).replace(/\/+$/, '')
+      return path === root || path.startsWith(root + '/')
+    })
+    .sort((left, right) => right.path.length - left.path.length)[0] ?? null
+}
+
+function shouldRetainMissingSource(
+  sourcePath: string,
+  current: CollectionSnapshot,
+  previous: CollectionSnapshot,
+  failedPaths: ReadonlySet<string>
+): boolean {
+  if (failedPaths.has(normalizedPath(sourcePath))) return true
+  const priorRoot = sourceSaveLocation(sourcePath, previous)
+  if (!priorRoot) return false
+  const currentRootKeys = new Set(current.discovery.saveLocations.map(saveLocationKey))
+  if (currentRootKeys.has(saveLocationKey(priorRoot))) return false
+
+  const previousRootKeys = new Set(previous.discovery.saveLocations.map(saveLocationKey))
+  const replacementRootAppeared = current.discovery.saveLocations.some((location) =>
+    location.source === priorRoot.source && !previousRootKeys.has(saveLocationKey(location))
+  )
+  return !replacementRootAppeared
+}
+
+function recipeKnowledgeCanCarryForward(
+  current: CollectionSnapshot,
+  previous: CollectionSnapshot
+): boolean {
+  if (current.discovery.saveLocations.length === 0) return true
+  const previousRootKeys = new Set(previous.discovery.saveLocations.map(saveLocationKey))
+  return current.discovery.saveLocations.some((location) =>
+    previousRootKeys.has(saveLocationKey(location))
+  )
+}
+
+function mergeKnownFlag(
+  current: boolean | null,
+  previous: boolean | null
+): boolean | null {
+  if (current === true || previous === true) return true
+  if (current === false) return false
+  return previous
+}
+
+function preserveRecipeKnowledge(
+  current: CollectionSnapshot['items'],
+  previous: CollectionSnapshot['items']
+): CollectionSnapshot['items'] {
+  const previousByRecord = new Map(
+    previous.map((item) => [item.record.toLocaleLowerCase(), item])
+  )
+  return current.map((item) => {
+    const priorCrafting = previousByRecord.get(item.record.toLocaleLowerCase())
+      ?.acquisition?.crafting
+    const crafting = item.acquisition?.crafting
+    if (!crafting || !priorCrafting) return item
+    const knownSoftcore = mergeKnownFlag(crafting.knownSoftcore, priorCrafting.knownSoftcore)
+    const knownHardcore = mergeKnownFlag(crafting.knownHardcore, priorCrafting.knownHardcore)
+    if (
+      knownSoftcore === crafting.knownSoftcore &&
+      knownHardcore === crafting.knownHardcore
+    ) return item
+    return {
+      ...item,
+      acquisition: {
+        ...item.acquisition!,
+        crafting: { ...crafting, knownSoftcore, knownHardcore }
+      }
+    }
+  })
+}
+
+/**
+ * Keeps durable knowledge from sources which the latest scan did not positively
+ * read. A successfully scanned empty source is present in the new snapshot and
+ * replaces the old quantity; mere absence never gets interpreted as zero.
+ *
+ * Recipe ownership is learned account knowledge, so a later partial formula
+ * scan cannot revoke a blueprint the app has already observed.
+ */
+export function preserveUnavailableCollectionKnowledge(
+  current: CollectionSnapshot,
+  previous: CollectionSnapshot | null
+): CollectionSnapshot {
+  if (!previous) return current
+
+  const failedPaths = new Set(current.warnings.map((warning) => normalizedPath(warning.path)))
+  const currentStashPaths = new Set(current.scannedStashes.map((stash) => normalizedPath(stash.path)))
+  const retainedStashes = previous.scannedStashes.filter(
+    (stash) => !currentStashPaths.has(normalizedPath(stash.path)) &&
+      shouldRetainMissingSource(stash.path, current, previous, failedPaths)
+  )
+  const retainedStashPaths = new Set(retainedStashes.map((stash) => normalizedPath(stash.path)))
+
+  const currentStoreKeys = new Set((current.accountStores ?? []).map((store) =>
+    `${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`
+  ))
+  const retainedStores = (previous.accountStores ?? []).filter((store) =>
+    !currentStoreKeys.has(`${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`) &&
+      shouldRetainMissingSource(store.path, current, previous, failedPaths)
+  )
+
+  const mergeCatalog = (
+    latest: CollectionSnapshot['items'] | undefined,
+    prior: CollectionSnapshot['items'] | undefined
+  ): CollectionSnapshot['items'] | undefined => {
+    if (!latest) return latest
+    return preserveRecipeKnowledge(latest, prior ?? [])
+  }
+
+  const retainedSourceCount = retainedStashes.length + retainedStores.length
+  const previousAsOfUtc = previous.cachedDataAsOfUtc ?? previous.scannedAtUtc
+  const recipePrevious = recipeKnowledgeCanCarryForward(current, previous) ? previous : null
+  return {
+    ...current,
+    scannedStashes: [...current.scannedStashes, ...retainedStashes],
+    observedItems: [
+      ...current.observedItems,
+      ...previous.observedItems.filter((item) => retainedStashPaths.has(normalizedPath(item.sourcePath)))
+    ],
+    accountStores: [...(current.accountStores ?? []), ...retainedStores],
+    items: preserveRecipeKnowledge(current.items, recipePrevious?.items ?? []),
+    plannerItems: mergeCatalog(current.plannerItems, recipePrevious?.plannerItems),
+    supplies: mergeCatalog(current.supplies, recipePrevious?.supplies),
+    materials: mergeCatalog(current.materials, recipePrevious?.materials),
+    cacheNeedsRefresh: retainedSourceCount > 0,
+    cachedDataAsOfUtc: retainedSourceCount > 0 ? previousAsOfUtc : undefined
+  }
+}
+
 /**
  * Owns collection cache, refresh, rebuild, and bounded hydration orchestration.
  * No dependency knows about Electron; each one represents a concrete low-level
@@ -168,13 +314,21 @@ export class CollectionService {
   async getCached(request: CollectionRequest): Promise<CollectionSnapshot | null> {
     const snapshot = await this.loadLatest()
     if (!snapshot) return null
-    if (!(await this.dependencies.freshness.isMapIndexFresh())) return null
-
-    const cacheNeedsRefresh = !(await this.dependencies.freshness.areSourcesFresh(snapshot))
+    const presentationFresh =
+      snapshot.catalogPresentationVersion === this.dependencies.catalogPresentationVersion
+    const [mapIndexFresh, sourcesFresh] = await Promise.all([
+      this.dependencies.freshness.isMapIndexFresh(),
+      this.dependencies.freshness.areSourcesFresh(snapshot)
+    ])
+    const cacheNeedsRefresh =
+      !presentationFresh || !mapIndexFresh || !sourcesFresh || snapshot.cacheNeedsRefresh === true
     const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
     return {
       ...(await this.dependencies.projector.present(projected, request.basis)),
-      cacheNeedsRefresh
+      cacheNeedsRefresh,
+      cachedDataAsOfUtc: cacheNeedsRefresh
+        ? snapshot.cachedDataAsOfUtc ?? snapshot.scannedAtUtc
+        : undefined
     }
   }
 
@@ -265,8 +419,10 @@ export class CollectionService {
     snapshot: CollectionSnapshot,
     request: CollectionRequest
   ): Promise<CollectionSnapshot> {
+    const previous = await this.loadLatest()
+    const reconciled = preserveUnavailableCollectionKnowledge(snapshot, previous)
     const persisted = {
-      ...this.dependencies.archive.persistSnapshot(snapshot),
+      ...this.dependencies.archive.persistSnapshot(reconciled),
       catalogPresentationVersion: this.dependencies.catalogPresentationVersion
     }
     // Publish the new in-memory snapshot only after the cache write succeeds.

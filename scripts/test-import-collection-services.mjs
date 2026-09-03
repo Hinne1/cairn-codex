@@ -7,7 +7,8 @@ import {
 } from '../src/main/ipc/import-service.ts'
 import {
   ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT,
-  CollectionService
+  CollectionService,
+  preserveUnavailableCollectionKnowledge
 } from '../src/main/ipc/collection-service.ts'
 
 function deferred() {
@@ -22,6 +23,7 @@ function deferred() {
 
 function collectionSnapshot(name = 'fixture') {
   return {
+    catalogPresentationVersion: 7,
     scannedAtUtc: '2026-09-01T12:00:00.000Z',
     discovery: {
       installations: [{
@@ -306,6 +308,227 @@ function collectionDependencies(overrides = {}) {
   const afterFailure = await service.getCached({ sourcePaths: ['old.gst'], basis: 'stashes' })
   assert.equal(afterFailure.fixtureName, 'old-cache')
   assert.equal(presentCalls, 2, 'failed persistence must not present the new scan')
+}
+
+// A stale or temporarily unreadable map index must not hide durable character/account
+// knowledge. The caller receives the cache with an explicit refresh marker.
+{
+  const service = new CollectionService(collectionDependencies({
+    freshness: {
+      isMapIndexFresh: async () => false,
+      areSourcesFresh: async () => true
+    }
+  }))
+  const cached = await service.getCached({ sourcePaths: [], basis: 'stashes' })
+  assert.equal(cached.fixtureName, 'cached')
+  assert.equal(cached.cacheNeedsRefresh, true)
+}
+
+// Explicit read failures retain only the affected source. A successfully read
+// empty source remains empty, rather than resurrecting an old quantity.
+{
+  const failedPath = 'C:/saves/failed.gst'
+  const emptyPath = 'C:/saves/empty.gst'
+  const previous = {
+    ...collectionSnapshot('previous'),
+    discovery: {
+      ...collectionSnapshot('previous').discovery,
+      saveLocations: [{ path: 'C:/saves', source: 'documents', transferStashes: [] }]
+    },
+    scannedStashes: [
+      { path: failedPath, isHardcore: false, modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'failed-old' },
+      { path: emptyPath, isHardcore: false, modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'empty-old' }
+    ],
+    observedItems: [
+      { sourcePath: failedPath, baseRecord: 'records/failed.dbr' },
+      { sourcePath: emptyPath, baseRecord: 'records/empty.dbr' }
+    ],
+    accountStores: [{
+      path: 'C:/saves/reagents.gst', kind: 'reagents', isHardcore: false,
+      itemCount: 2, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'store-old',
+      entries: [{ record: 'records/component.dbr', quantity: 2 }]
+    }]
+  }
+  const current = {
+    ...collectionSnapshot('current'),
+    discovery: {
+      ...collectionSnapshot('current').discovery,
+      saveLocations: [{ path: 'C:/saves', source: 'documents', transferStashes: [] }]
+    },
+    scannedStashes: [
+      { path: emptyPath, isHardcore: false, modLabel: '', itemCount: 0, lastWriteUtc: '2026-09-01T12:00:00Z', sha256: 'empty-new' }
+    ],
+    warnings: [
+      { path: failedPath, message: 'locked' },
+      { path: 'C:/saves/reagents.gst', message: 'locked' }
+    ],
+    accountStores: []
+  }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.deepEqual(
+    reconciled.scannedStashes.map((stash) => [stash.path, stash.itemCount]),
+    [[emptyPath, 0], [failedPath, 1]]
+  )
+  assert.deepEqual(
+    reconciled.observedItems.map((item) => item.baseRecord),
+    ['records/failed.dbr'],
+    'the successfully read empty stash must not retain its previous item'
+  )
+  assert.equal(reconciled.accountStores[0].entries[0].quantity, 2)
+  assert.equal(reconciled.cacheNeedsRefresh, true)
+  assert.equal(reconciled.cachedDataAsOfUtc, previous.scannedAtUtc)
+}
+
+// A source omitted from an otherwise successfully enumerated same save root was
+// removed, not taken offline, and must not become immortal cached inventory.
+{
+  const root = 'C:/saves'
+  const previous = {
+    ...collectionSnapshot('before-deletion'),
+    discovery: {
+      ...collectionSnapshot('before-deletion').discovery,
+      saveLocations: [{ path: root, source: 'documents', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: `${root}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 1,
+      lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'deleted-stash'
+    }],
+    observedItems: [{ sourcePath: `${root}/transfer.gst`, baseRecord: 'records/deleted.dbr' }],
+    accountStores: [{
+      path: `${root}/reagents.gst`, kind: 'reagents', isHardcore: false, itemCount: 1,
+      lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'deleted-store',
+      entries: [{ record: 'records/deleted-component.dbr', quantity: 1 }]
+    }]
+  }
+  const current = {
+    ...collectionSnapshot('after-deletion'),
+    discovery: {
+      ...collectionSnapshot('after-deletion').discovery,
+      saveLocations: [{ path: root, source: 'documents', transferStashes: [] }]
+    }
+  }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.deepEqual(reconciled.scannedStashes, [])
+  assert.deepEqual(reconciled.observedItems, [])
+  assert.deepEqual(reconciled.accountStores, [])
+  assert.equal(reconciled.cacheNeedsRefresh, false)
+}
+
+// A newly discovered account root replaces a disappeared root of the same kind;
+// quantities from different Steam accounts must never be combined implicitly.
+{
+  const previousRoot = 'D:/Steam/userdata/42/219990/remote/save'
+  const currentRoot = 'D:/Steam/userdata/99/219990/remote/save'
+  const previous = {
+    ...collectionSnapshot('account-42'),
+    discovery: {
+      ...collectionSnapshot('account-42').discovery,
+      saveLocations: [{ path: previousRoot, source: 'steam-cloud', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: `${previousRoot}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 1,
+      lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'account-42'
+    }],
+    observedItems: [{ sourcePath: `${previousRoot}/transfer.gst`, baseRecord: 'records/account-42.dbr' }],
+    items: [{
+      record: 'records/account-recipe.dbr',
+      acquisition: { crafting: { blueprintRecords: ['records/account-formula.dbr'], knownSoftcore: true, knownHardcore: false } }
+    }]
+  }
+  const current = {
+    ...collectionSnapshot('account-99'),
+    discovery: {
+      ...collectionSnapshot('account-99').discovery,
+      saveLocations: [{ path: currentRoot, source: 'steam-cloud', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: `${currentRoot}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 0,
+      lastWriteUtc: '2026-09-01T12:00:00Z', sha256: 'account-99'
+    }],
+    items: [{
+      record: 'records/account-recipe.dbr',
+      acquisition: { crafting: { blueprintRecords: ['records/account-formula.dbr'], knownSoftcore: false, knownHardcore: false } }
+    }]
+  }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.deepEqual(reconciled.scannedStashes.map((stash) => stash.path), [`${currentRoot}/transfer.gst`])
+  assert.deepEqual(reconciled.observedItems, [])
+  assert.equal(reconciled.items[0].acquisition.crafting.knownSoftcore, false)
+  assert.equal(reconciled.cacheNeedsRefresh, false)
+}
+
+// If an entire previously known save root is temporarily absent from discovery,
+// its stash and account-store knowledge remains available offline.
+{
+  const previous = {
+    ...collectionSnapshot('online'),
+    discovery: {
+      ...collectionSnapshot('online').discovery,
+      saveLocations: [{ path: 'D:/Steam/userdata/42/219990/remote/save', source: 'steam-cloud', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: 'D:/Steam/userdata/42/219990/remote/save/transfer.gst', isHardcore: false,
+      modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'stash-online'
+    }],
+    observedItems: [{
+      sourcePath: 'D:/Steam/userdata/42/219990/remote/save/transfer.gst',
+      baseRecord: 'records/supply.dbr'
+    }],
+    accountStores: [{
+      path: 'D:/Steam/userdata/42/219990/remote/save/reagents.gst', kind: 'reagents',
+      isHardcore: false, itemCount: 4, lastWriteUtc: '2026-09-01T10:00:00Z',
+      sha256: 'store-online', entries: [{ record: 'records/component.dbr', quantity: 4 }]
+    }]
+  }
+  const offline = collectionSnapshot('offline')
+  const reconciled = preserveUnavailableCollectionKnowledge(offline, previous)
+  assert.equal(reconciled.scannedStashes[0].itemCount, 1)
+  assert.equal(reconciled.observedItems[0].baseRecord, 'records/supply.dbr')
+  assert.equal(reconciled.accountStores[0].entries[0].quantity, 4)
+  assert.equal(reconciled.cacheNeedsRefresh, true)
+  assert.equal(reconciled.cachedDataAsOfUtc, previous.scannedAtUtc)
+}
+
+// A catalog-presentation upgrade cannot render the old snapshot directly, but
+// the subsequent compatible scan still reconciles its durable recipe knowledge.
+{
+  const item = (knownSoftcore) => ({
+    record: 'records/relic.dbr',
+    acquisition: { crafting: { blueprintRecords: ['records/formula.dbr'], knownSoftcore, knownHardcore: false } }
+  })
+  const previous = {
+    ...collectionSnapshot('old-presentation'),
+    catalogPresentationVersion: 6,
+    items: [item(true)]
+  }
+  const current = { ...collectionSnapshot('current-presentation'), items: [item(false)] }
+  let written = null
+  const service = new CollectionService(collectionDependencies({
+    cache: {
+      read: async () => previous,
+      write: async (snapshot) => { written = snapshot }
+    },
+    scanner: { scanInstalledData: async () => current }
+  }))
+  const cached = await service.getCached({ sourcePaths: [], basis: 'stashes' })
+  assert.equal(cached.catalogPresentationVersion, 6)
+  assert.equal(cached.cacheNeedsRefresh, true)
+  await service.scan({ sourcePaths: [], basis: 'stashes' })
+  assert.equal(written.catalogPresentationVersion, 7)
+  assert.equal(written.items[0].acquisition.crafting.knownSoftcore, true)
+}
+
+// Learned recipes are monotonic even when a later scan has only a partial view
+// of the formula files.
+{
+  const item = (knownSoftcore) => ({
+    record: 'records/relic.dbr',
+    acquisition: { crafting: { blueprintRecords: ['records/formula.dbr'], knownSoftcore, knownHardcore: false } }
+  })
+  const previous = { ...collectionSnapshot('previous'), items: [item(true)] }
+  const current = { ...collectionSnapshot('current'), items: [item(false)] }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.equal(reconciled.items[0].acquisition.crafting.knownSoftcore, true)
 }
 
 // Rebuild requests force map regeneration before durable publication.

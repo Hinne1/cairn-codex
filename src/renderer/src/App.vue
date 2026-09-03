@@ -2889,6 +2889,13 @@ function percentage(summary: Pick<CollectionRaritySummary, 'total' | 'collected'
   return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
 }
 
+function cachedCollectionTime(): string {
+  if (!snapshot.value) return ''
+  const asOfUtc = snapshot.value.cachedDataAsOfUtc ?? snapshot.value.scannedAtUtc
+  const scanned = new Date(asOfUtc)
+  return Number.isNaN(scanned.getTime()) ? asOfUtc : scanned.toLocaleString()
+}
+
 function affixPercentage(): string {
   const summary = snapshot.value?.affixSummary
   if (!summary || summary.total === 0) return '0%'
@@ -4786,6 +4793,16 @@ function formatRollValue(value: number): string {
           class="secondary compact"
           @click="cancelActiveBackgroundJob"
         >Cancel safely</button>
+      </section>
+      <section
+        v-if="snapshot?.cacheNeedsRefresh"
+        class="cached-knowledge-banner"
+        aria-label="Cached Grim Dawn data"
+      >
+        <strong>Showing last-known Grim Dawn data</strong>
+        <span>
+          Cached as of {{ cachedCollectionTime() }}. Recipes, supplies, and components remain available while their save sources are offline; refresh when they are available again.
+        </span>
       </section>
       <section v-if="activeView === 'collection'" class="hero">
         <div>

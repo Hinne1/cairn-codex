@@ -29,9 +29,11 @@ assert.equal(migratedRepository.value.appearance.navigationCollapsed, false)
 migratedRepository.update('appearance', { navigationCollapsed: true })
 assert.equal(JSON.parse(migratedStorage.getItem(PREFERENCE_STORAGE_KEY)).appearance.navigationCollapsed, true)
 
-const [app, sidebar, main, modalFocus, benchmark, electronGate] = await Promise.all([
+const [app, sidebar, icons, styles, main, modalFocus, benchmark, electronGate] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/WorkspaceSidebar.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/WorkspaceNavIcon.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8'),
   readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/modal-focus.ts', import.meta.url), 'utf8'),
   readFile(new URL('./benchmark-ui.mjs', import.meta.url), 'utf8'),
@@ -55,8 +57,22 @@ assert.match(sidebar, /:aria-current="tool\.id === activeId \? 'page' : undefine
 assert.match(sidebar, /:aria-label="tool\.label"/)
 assert.match(sidebar, /aria-label="Customize visible tools"/)
 assert.match(sidebar, /:aria-expanded="!collapsed"/)
+assert.match(sidebar, /import WorkspaceNavIcon from '.\/WorkspaceNavIcon\.vue'/)
+assert.match(sidebar, /<WorkspaceNavIcon name="collection"/)
+assert.match(sidebar, /<WorkspaceNavIcon :name="toolIcon\(tool\.id\)"/)
+assert.match(sidebar, /class="workspace-nav-tooltip"/)
+assert.match(sidebar, /@mouseenter="showTooltip/)
+assert.match(sidebar, /@focusin="showTooltip/)
 assert.match(sidebar, /@media \(max-width: 900px\)/)
 assert.match(sidebar, /\.workspace-sidebar-toggle \{ display: none; \}/)
+assert.doesNotMatch(sidebar, /[⌂◆◇✦↗⚒◉♜✓]/)
+
+for (const iconName of ['collection', 'sets', 'planner', 'workshop', 'supplies', 'trivia', 'panel-collapse']) {
+  assert.match(icons, new RegExp(`name === '${iconName}'`), `missing semantic navigation icon: ${iconName}`)
+}
+assert.match(icons, /stroke="currentColor"/)
+assert.match(icons, /\.workspace-nav-svg \{[^}]*width: 22px;[^}]*height: 22px;/)
+assert.match(styles, /\.workspace-layout\.has-sidebar\s*\{[\s\S]*?width:\s*100%;[\s\S]*?margin:\s*0;/)
 
 assert.match(main, /workspace-sidebar \[data-tool-id\]/)
 assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SIDEBAR/)
@@ -74,6 +90,9 @@ console.log(JSON.stringify({
   singleNavigationModel: true,
   selectedToolsShared: true,
   densityDurable: true,
+  edgeFlush: true,
+  semanticIcons: true,
+  collapsedTooltips: true,
   legacyPreferencesCompatible: true,
   fullScreenSystemViews: true
 }, null, 2))

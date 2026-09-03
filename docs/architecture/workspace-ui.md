@@ -21,8 +21,12 @@ Collection and specialist tools share `src/renderer/src/components/WorkspaceSide
 persistent navigation model. Collection is always first; the user's visible tools follow in the
 same configured order used by the dashboard shortcuts. The active route uses
 `aria-current="page"`. The sidebar supports a durable expanded/compact preference and collapses
-to icons at compact viewport widths without changing that preference. Hiding the currently open
-tool returns to Collection; hidden and disabled experimental tools do not remain reachable.
+to icons at compact viewport widths without changing that preference. At wide widths the sidebar
+owns the left application edge; only the content region may be centered or width-capped, so an
+outer display gutter can never appear between the viewport and navigation. Destinations use one
+coherent, high-contrast stroked icon family. When labels are hidden, every destination retains its
+accessible name and exposes that label as a hover and keyboard-focus tooltip. Hiding the currently
+open tool returns to Collection; hidden and disabled experimental tools do not remain reachable.
 
 The Collection dashboard retains its customizable tool cards as descriptive quick access, not as
 a second primary navigation system. It omits a redundant Collection card. Transfers and Settings

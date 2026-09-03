@@ -5527,7 +5527,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           interactionTimings.workspaceSidebarMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
-              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              await frames()
               const sidebar = document.querySelector('.workspace-sidebar')
               const home = sidebar?.querySelector('[data-tool-id="collection"]')
               const active = sidebar?.querySelector('.workspace-nav-tools [aria-current="page"]')
@@ -5538,6 +5539,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               const sidebarRect = sidebar.getBoundingClientRect()
               const activeRect = active.getBoundingClientRect()
+              const navItems = [...sidebar.querySelectorAll('.workspace-nav-item')]
+                .filter((item) => item.getClientRects().length > 0)
+              const activeIconRect = active.querySelector('.workspace-nav-svg')?.getBoundingClientRect()
               const visibleControls = [home, active, customize, toggle]
                 .filter((control) => control.getClientRects().length > 0)
               for (const control of visibleControls) {
@@ -5545,25 +5549,51 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 if (document.activeElement !== control) throw new Error('A workspace sidebar control could not receive keyboard focus.')
               }
               if (
-                sidebarRect.left < 0 || sidebarRect.right > window.innerWidth ||
+                Math.abs(sidebarRect.left) > 1 || sidebarRect.right > window.innerWidth ||
                 activeRect.left < sidebarRect.left - 1 || activeRect.right > sidebarRect.right + 1 ||
                 document.documentElement.scrollWidth > window.innerWidth + 1
               ) {
                 throw new Error('The workspace sidebar is clipped or causing page-level overflow.')
               }
+              if (
+                navItems.some((item) => !item.querySelector('.workspace-nav-svg')) ||
+                !activeIconRect || activeIconRect.width < 20 || activeIconRect.height < 20
+              ) {
+                throw new Error('The workspace sidebar did not render its complete legible icon set.')
+              }
               const activeLabel = active.querySelector('.workspace-nav-label')?.textContent?.trim()
               if (toggle.getClientRects().length > 0) {
                 const beganCollapsed = sidebar.classList.contains('collapsed')
-                toggle.click()
-                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-                if (sidebar.classList.contains('collapsed') === beganCollapsed) {
-                  throw new Error('The workspace sidebar density toggle did not change its state.')
+                if (!beganCollapsed) {
+                  toggle.click()
+                  await frames()
                 }
+                if (!sidebar.classList.contains('collapsed')) throw new Error('The workspace sidebar did not enter compact mode.')
+                active.blur()
+                await frames()
+                active.focus()
+                active.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+                await frames()
+                const tooltip = document.querySelector('.workspace-nav-tooltip')
+                const tooltipRect = tooltip?.getBoundingClientRect()
+                if (
+                  !(tooltip instanceof HTMLElement) || tooltip.textContent?.trim() !== activeLabel ||
+                  !tooltipRect || tooltipRect.left < sidebar.getBoundingClientRect().right - 1
+                ) {
+                  throw new Error('Compact workspace navigation did not expose its focused destination label.')
+                }
+                active.blur()
+                await frames()
                 toggle.click()
-                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+                await frames()
+                if (sidebar.classList.contains('collapsed')) throw new Error('The workspace sidebar did not leave compact mode.')
+                if (beganCollapsed) {
+                  toggle.click()
+                  await frames()
+                }
               }
               customize.click()
-              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              await frames()
               const activeSetting = [...document.querySelectorAll('.tool-settings-options label')]
                 .find((label) => label.querySelector('strong')?.textContent?.trim().startsWith(activeLabel))
                 ?.querySelector('input')
@@ -5571,17 +5601,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 throw new Error('The active specialist was not represented in tool customization.')
               }
               activeSetting.click()
-              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              await frames()
               if (!document.querySelector('.hero') || !document.querySelector('.workspace-sidebar')) {
                 throw new Error('Hiding the active specialist did not return to the Collection dashboard.')
               }
               activeSetting.click()
               document.querySelector('.tool-settings-done')?.click()
-              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              await frames()
               const restoredDestination = [...document.querySelectorAll('.workspace-shortcuts button')]
                 .find((button) => button.querySelector('span')?.textContent?.trim() === activeLabel)
               restoredDestination?.click()
-              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              await frames()
               if (document.querySelector('.workspace-sidebar .workspace-nav-tools [aria-current="page"] .workspace-nav-label')?.textContent?.trim() !== activeLabel) {
                 throw new Error('The restored specialist did not reopen in the focused shell.')
               }

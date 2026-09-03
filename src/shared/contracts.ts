@@ -738,6 +738,7 @@ export interface ItemPresentation {
 }
 
 export interface ItemPresentationSection {
+  parentSkills?: string[] | null
   kind: 'base' | 'pet' | 'skill-modifier' | 'visual-modifier'
   heading: string | null
   lines: ItemPresentationLine[]

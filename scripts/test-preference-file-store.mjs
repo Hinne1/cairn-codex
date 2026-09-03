@@ -21,7 +21,7 @@ function preferences(profiles) {
   return {
     version: 1,
     meta: { profileKind: 'returning', updatedAtUtc: '2026-09-02T08:00:00.000Z' },
-    appearance: { theme: 'cairn', zoomFactor: 1, trackerCollapsed: false, plannerDisplay: 'list' },
+    appearance: { theme: 'cairn', zoomFactor: 1, trackerCollapsed: false, plannerDisplay: 'list', tooltipBoundaryScroll: 'page' },
     workspace: {
       visibleTools: ['sets', 'skills', 'planner'], experimentalToolsEnabled: false,
       showLegacyScanner: false, miCountingMode: 'base'

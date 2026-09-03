@@ -37,7 +37,7 @@ export type MiSortMode = 'metric' | 'level' | 'name' | 'copies'
 export type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `category:${string}` | `item:${string}` | `pet:${string}`
 export type OracleSortMode = 'score' | 'name' | 'class' | 'readiness'
 export type PlannerSortMode = 'level' | 'name' | 'rarity'
-export type PlannerDisplay = 'list' | 'grid' | 'map'
+export type PlannerDisplay = 'table' | 'journey' | 'map'
 export type PlannerMapScope = 'selected' | 'all'
 export type PlannerMapSortMode = 'items' | 'name' | 'level'
 export type MaterialCategory = 'all' | 'component' | 'material' | 'potion-formula'
@@ -199,7 +199,7 @@ const oracleStyles: readonly OracleStyle[] = ['all', 'pets', 'retaliation', 'wea
 const oracleReadiness: ReadonlyArray<'all' | OracleReadiness> = ['all', 'ready', 'near', 'wildcard']
 const oracleSortModes: readonly OracleSortMode[] = ['score', 'name', 'class', 'readiness']
 const plannerSortModes: readonly PlannerSortMode[] = ['level', 'name', 'rarity']
-const plannerDisplays: readonly PlannerDisplay[] = ['list', 'grid', 'map']
+const plannerDisplays: readonly PlannerDisplay[] = ['table', 'journey', 'map']
 const plannerMapScopes: readonly PlannerMapScope[] = ['selected', 'all']
 const plannerMapSortModes: readonly PlannerMapSortMode[] = ['items', 'name', 'level']
 const materialCategories: readonly MaterialCategory[] = ['all', 'component', 'material', 'potion-formula']
@@ -217,6 +217,12 @@ function objectValue(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as UnknownRecord
     : null
+}
+
+function plannerDisplayValue(value: unknown): PlannerDisplay {
+  if (value === 'list') return 'table'
+  if (value === 'grid') return 'journey'
+  return enumValue(value, plannerDisplays, 'table')
 }
 
 function stringValue(value: unknown, fallback = '', maximumLength = 500): string {
@@ -300,7 +306,7 @@ export function parseAppRoute(value: unknown): AppRoute | null {
       minimumLevel: integerValue(controls.minimumLevel, 1, 1, 100), maximumLevel: integerValue(controls.maximumLevel, 70, 1, 100),
       query: stringValue(controls.query), ownership: enumValue(controls.ownership, ownershipFilters, 'all'),
       showIgnored: booleanValue(controls.showIgnored), sort: enumValue(controls.sort, plannerSortModes, 'level'),
-      direction: enumValue(controls.direction, directions, 'asc'), display: enumValue(controls.display, plannerDisplays, 'list'),
+      direction: enumValue(controls.direction, directions, 'asc'), display: plannerDisplayValue(controls.display),
       page: integerValue(controls.page, 1, 1, 100_000), atlasQuery: stringValue(controls.atlasQuery),
       atlasRegion: nullableString(controls.atlasRegion, 300), mapScope: enumValue(controls.mapScope, plannerMapScopes, 'selected'),
       mapSort: enumValue(controls.mapSort, plannerMapSortModes, 'items'), mapDirection: enumValue(controls.mapDirection, directions, 'desc')

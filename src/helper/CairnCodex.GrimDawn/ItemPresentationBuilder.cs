@@ -176,6 +176,7 @@ internal static partial class ItemPresentationBuilder
         var searchParts = new List<string>();
         if (flavorText is not null) searchParts.Add(flavorText);
         searchParts.AddRange(sections.Select(section => section.Heading).OfType<string>());
+        searchParts.AddRange(sections.SelectMany(section => section.ParentSkills ?? []));
         searchParts.AddRange(sections.SelectMany(section => section.Lines).Select(SearchLine));
         if (grantedSkill is not null) AddGrantedSkillSearchParts(grantedSkill, searchParts);
         return new ItemPresentation(
@@ -484,14 +485,14 @@ internal static partial class ItemPresentationBuilder
         List<ItemPresentationLine> lines,
         int level)
     {
-        for (var index = 1; index <= 4; index++)
+        foreach (var index in NumberedFields(record, "augmentSkillName"))
         {
             var path = record.Text("augmentSkillName" + index);
             var value = NumberAt(record, "augmentSkillLevel" + index, level);
             if (path is null || value is not { } amount || Math.Abs(amount) < 0.001) continue;
             lines.Add(Line("to " + ResolveSkillName(path, data), amount, null, tone: "skill", prefix: "+"));
         }
-        for (var index = 1; index <= 3; index++)
+        foreach (var index in NumberedFields(record, "augmentMasteryName"))
         {
             var path = record.Text("augmentMasteryName" + index);
             var value = NumberAt(record, "augmentMasteryLevel" + index, level);
@@ -512,14 +513,14 @@ internal static partial class ItemPresentationBuilder
         ItemPresentationSource data,
         List<ItemPresentationLine> lines)
     {
-        for (var index = 1; index <= 4; index++)
+        foreach (var index in NumberedFields(record, "augmentSkillName"))
         {
             var skillRecord = record.Text("augmentSkillName" + index);
             var level = record.Number("augmentSkillLevel" + index);
             if (skillRecord is null || level is null) continue;
             lines.Add(Line("to " + ResolveSkillName(skillRecord, data), level.Value, null, tone: "skill", prefix: "+"));
         }
-        for (var index = 1; index <= 4; index++)
+        foreach (var index in NumberedFields(record, "augmentMasteryName"))
         {
             var masteryRecord = record.Text("augmentMasteryName" + index);
             var level = record.Number("augmentMasteryLevel" + index);
@@ -581,6 +582,9 @@ internal static partial class ItemPresentationBuilder
         AddSimpleStats(skill, lines, "standard", level);
         AddRetaliation(skill, lines, level);
         AddConversions(skill, lines, level: level);
+        AddHealingAndSlowEffects(skill, lines, level);
+        if (NumberAt(skill, "projectileExplosionRadius", level) is { } explosionRadius && explosionRadius > 0)
+            lines.Add(Line("Target Area", explosionRadius, null, "m"));
         if (includeModifierMechanics)
         {
             AddSkillModifierSpecialStats(skill, lines);
@@ -658,7 +662,7 @@ internal static partial class ItemPresentationBuilder
         ItemPresentationSource data,
         List<ItemPresentationSection> sections)
     {
-        for (var index = 1; index <= 6; index++)
+        foreach (var index in NumberedFields(item, "modifiedSkillName"))
         {
             var modifiedSkill = item.Text("modifiedSkillName" + index);
             var modifierSkill = item.Text("modifierSkillName" + index);
@@ -667,6 +671,8 @@ internal static partial class ItemPresentationBuilder
                 continue;
             var modifierRecord = ResolveSkillModifierRecord(modifier.Record, data);
             var skillName = ResolveSkillName(modifiedSkill, data);
+            var parentSkills = data.GrantedSkillParentPaths(modifiedSkill)
+                .Select(path => ResolveSkillName(path, data)).Distinct().ToArray();
             var lines = new List<ItemPresentationLine>();
             AddFlatDamage(modifierRecord, lines, level: 1);
             AddDurationDamage(modifierRecord, lines, level: 1);
@@ -674,6 +680,7 @@ internal static partial class ItemPresentationBuilder
             AddRetaliation(modifierRecord, lines, level: 1);
             AddConversions(modifierRecord, lines, level: 1);
             AddSkillModifierSpecialStats(modifierRecord, lines);
+            AddHealingAndSlowEffects(modifierRecord, lines, 1);
             AddSkillModifierMechanics(modifierRecord, data, lines);
             AddSkillModifierMechanics(modifier.Record, data, lines);
             var uniqueLines = lines.Distinct().ToArray();
@@ -681,7 +688,7 @@ internal static partial class ItemPresentationBuilder
                 AddOrMergeSection(sections, new ItemPresentationSection(
                     "skill-modifier",
                     skillName,
-                    uniqueLines));
+                    uniqueLines, parentSkills));
 
             var visualLines = new List<ItemPresentationLine>();
             AddSkillModifierVisuals(modifierRecord, data, visualLines);
@@ -691,7 +698,7 @@ internal static partial class ItemPresentationBuilder
                 AddOrMergeSection(sections, new ItemPresentationSection(
                     "visual-modifier",
                     skillName + " · Visual transformation",
-                    uniqueVisualLines));
+                    uniqueVisualLines, parentSkills));
         }
     }
 
@@ -710,9 +717,16 @@ internal static partial class ItemPresentationBuilder
         var existing = sections[existingIndex];
         sections[existingIndex] = existing with
         {
-            Lines = existing.Lines.Concat(section.Lines).Distinct().ToArray()
+            Lines = existing.Lines.Concat(section.Lines).Distinct().ToArray(),
+            ParentSkills = (existing.ParentSkills ?? []).Concat(section.ParentSkills ?? []).Distinct().ToArray()
         };
     }
+
+    private static IEnumerable<int> NumberedFields(ArzRecord record, string prefix) =>
+        record.Values.Keys
+            .Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(key => int.TryParse(key[prefix.Length..], out var index) ? index : 0)
+            .Where(index => index > 0).Distinct().Order();
 
     private static ArzRecord ResolveSkillModifierRecord(
         ArzRecord record,
@@ -1200,13 +1214,50 @@ internal static partial class ItemPresentationBuilder
     [GeneratedRegex(@"selfat([0-9]+)%health", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex HealthThresholdPattern();
 
+    private static void AddHealingAndSlowEffects(ArzRecord record, List<ItemPresentationLine> lines, int level)
+    {
+        if (NumberAt(record, "skillLifeBonusBuffDuration", level) is { } healing && Math.Abs(healing) > 0.001)
+            lines.Add(Line("Health Restored per Second", healing, null));
+        foreach (var (field, label) in new[] {
+            ("offensiveSlowTotalSpeed", "Total Speed"),
+            ("offensiveSlowAttackSpeed", "Attack Speed"),
+            ("offensiveSlowRunSpeed", "Movement Speed"),
+            ("offensiveSlowSpellCastSpeed", "Casting Speed") })
+        {
+            if (NumberAt(record, field + "Min", level) is not { } amount || Math.Abs(amount) < 0.001) continue;
+            var maximum = NumberAt(record, field + "Max", level);
+            var duration = NumberAt(record, field + "DurationMin", level);
+            var suffix = duration is > 0 ? $" for {Format(duration.Value)} {(duration == 1 ? "Second" : "Seconds")}" : "";
+            var chance = NumberAt(record, field + "Chance", level);
+            var prefix = chance is > 0 and < 100 ? $"{Format(chance.Value)}% Chance for " : "";
+            lines.Add(Line("Reduced Target's " + label + suffix, amount,
+                maximum is > 0 && maximum != amount ? maximum : null, "%", prefix: prefix));
+        }
+    }
+
     private sealed record StatLabel(string Label, string Unit = "");
     private readonly record struct NumericRange(double Minimum, double Maximum);
 }
 
 internal sealed record ItemPresentationSource(
     IReadOnlyDictionary<string, string> Tags,
-    IReadOnlyDictionary<string, CatalogSourceRecord> Records);
+    IReadOnlyDictionary<string, CatalogSourceRecord> Records)
+{
+    private IReadOnlyDictionary<string, string[]>? grantedSkillParents;
+
+    public IReadOnlyList<string> GrantedSkillParentPaths(string path)
+    {
+        grantedSkillParents ??= Records.Values
+            .SelectMany(source => (source.Record.Values.GetValueOrDefault("grantedSkills") ?? [])
+                .Where(value => !string.IsNullOrWhiteSpace(value.Text))
+                .Select(value => (Child: value.Text!, Parent: source.Record.Name)))
+            .GroupBy(pair => pair.Child, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Select(pair => pair.Parent).Distinct().ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+        return grantedSkillParents.GetValueOrDefault(path) ?? [];
+    }
+
+}
 
 internal sealed record ItemPresentation(
     string? FlavorText,
@@ -1216,7 +1267,8 @@ internal sealed record ItemPresentation(
 internal sealed record ItemPresentationSection(
     string Kind,
     string? Heading,
-    IReadOnlyList<ItemPresentationLine> Lines);
+    IReadOnlyList<ItemPresentationLine> Lines,
+    IReadOnlyList<string>? ParentSkills = null);
 internal sealed record ItemPresentationLine(
     string Label,
     double? Minimum,

@@ -11,7 +11,8 @@ export const PREFERENCE_SCHEMA_VERSION = 1
 export type PreferenceLoadSource = 'fresh' | 'legacy' | 'stored'
 export type CollectionBasisPreference = 'stashes' | 'archive'
 export type PreferenceTheme = 'cairn'
-export type PlannerDisplayPreference = 'list' | 'grid' | 'map'
+export type PlannerDisplayPreference = 'table' | 'journey' | 'map'
+export type TooltipBoundaryScrollPreference = 'page' | 'contain'
 export type MiCountingPreference = 'base' | 'tier'
 export type SkillScopePreference = 'archive' | 'all'
 export type OracleStylePreference = 'all' | 'pets' | 'retaliation' | 'weapon' | 'caster'
@@ -31,6 +32,7 @@ export interface StoredPlannerProfile {
   masteries?: string[]
   skills: string[]
   excludedSkills: string[]
+  ignoredRecords?: string[]
   minimumLevel: number
   levelCap: number
   source: 'manual' | 'character'
@@ -59,6 +61,7 @@ export interface AppPreferencesV1 {
     trackerCollapsed: boolean
     navigationCollapsed: boolean
     plannerDisplay: PlannerDisplayPreference
+    tooltipBoundaryScroll: TooltipBoundaryScrollPreference
   }
   workspace: {
     visibleTools: WorkspaceToolPreference[]
@@ -207,6 +210,7 @@ function validPlannerProfile(value: unknown, fallbackTime: string): StoredPlanne
     ...(masteries ? { masteries } : {}),
     skills: stringArray(profile.skills, 128, 200) ?? [],
     excludedSkills: stringArray(profile.excludedSkills, 128, 200) ?? [],
+    ...(profile.ignoredRecords !== undefined ? { ignoredRecords: stringArray(profile.ignoredRecords) ?? [] } : {}),
     minimumLevel: clampNumber(profile.minimumLevel, 1, 1, 100),
     levelCap: clampNumber(profile.levelCap, 70, 1, 100),
     source: profile.source === 'character' ? 'character' : 'manual',
@@ -252,7 +256,7 @@ function interfaceDefaults(): Pick<AppPreferencesV1, 'appearance' | 'workspace' 
   return {
     appearance: {
       theme: 'cairn', zoomFactor: 1, trackerCollapsed: false,
-      navigationCollapsed: false, plannerDisplay: 'list'
+      navigationCollapsed: false, plannerDisplay: 'table', tooltipBoundaryScroll: 'page'
     },
     workspace: {
       visibleTools: [...DEFAULT_WORKSPACE_TOOLS], experimentalToolsEnabled: false,
@@ -325,10 +329,13 @@ function legacyPreferences(
         ? legacyBoolean(storage, 'cairn-codex-tracker-collapsed', false)
         : false,
       navigationCollapsed: false,
+      tooltipBoundaryScroll: defaults.appearance.tooltipBoundaryScroll,
       plannerDisplay: storage.getItem('cairn-codex-planner-display') === 'grid' ||
-        storage.getItem('cairn-codex-planner-display') === 'map'
-        ? storage.getItem('cairn-codex-planner-display') as PlannerDisplayPreference
-        : defaults.appearance.plannerDisplay
+        storage.getItem('cairn-codex-planner-display') === 'journey'
+        ? 'journey'
+        : storage.getItem('cairn-codex-planner-display') === 'map'
+          ? 'map'
+          : defaults.appearance.plannerDisplay
     },
     workspace: {
       visibleTools,
@@ -424,9 +431,16 @@ function validateStored(
     result.appearance.zoomFactor = readNumber(source.appearance.zoomFactor, 'appearance.zoomFactor', result.appearance.zoomFactor, 0.7, 1.8)
     result.appearance.trackerCollapsed = readBoolean(source.appearance.trackerCollapsed, 'appearance.trackerCollapsed', result.appearance.trackerCollapsed)
     result.appearance.navigationCollapsed = readBoolean(source.appearance.navigationCollapsed, 'appearance.navigationCollapsed', result.appearance.navigationCollapsed)
-    if (source.appearance.plannerDisplay === 'list' || source.appearance.plannerDisplay === 'grid' || source.appearance.plannerDisplay === 'map') {
+    if (source.appearance.plannerDisplay === 'table' || source.appearance.plannerDisplay === 'journey' || source.appearance.plannerDisplay === 'map') {
       result.appearance.plannerDisplay = source.appearance.plannerDisplay
+    } else if ((source.appearance.plannerDisplay as unknown) === 'list') {
+      result.appearance.plannerDisplay = 'table'
+    } else if ((source.appearance.plannerDisplay as unknown) === 'grid') {
+      result.appearance.plannerDisplay = 'journey'
     } else if (source.appearance.plannerDisplay !== undefined) invalid('appearance.plannerDisplay')
+    if (source.appearance.tooltipBoundaryScroll === 'page' || source.appearance.tooltipBoundaryScroll === 'contain') {
+      result.appearance.tooltipBoundaryScroll = source.appearance.tooltipBoundaryScroll
+    } else if (source.appearance.tooltipBoundaryScroll !== undefined) invalid('appearance.tooltipBoundaryScroll')
   } else invalid('appearance')
   if (source.workspace && typeof source.workspace === 'object') {
     const visibleTools = stringArray(source.workspace.visibleTools)

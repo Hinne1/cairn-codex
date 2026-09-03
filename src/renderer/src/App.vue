@@ -4,7 +4,9 @@ import BoundedResultSurface from './components/BoundedResultSurface.vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import FailureProbe from './components/FailureProbe.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
+import PlannerJourney from './components/PlannerJourney.vue'
 import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
+import ResearchItemTable from './components/ResearchItemTable.vue'
 import RollCategoryProfile from './components/RollCategoryProfile.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
@@ -24,6 +26,17 @@ import {
   type SkillExplorerControls,
   type SkillMatch
 } from './workspaces/skill-explorer'
+import {
+  researchAcquisitionFacts,
+  researchItemIsAvailable,
+  nextResearchSort,
+  researchItemPreferenceKey,
+  researchItemTypeLabel,
+  researchRarityLabel,
+  researchRollFact,
+  researchSkillName,
+  type ResearchItemTableRow
+} from './workspaces/research-item-table'
 import MiWorkshopWorkspace from './workspaces/MiWorkshopWorkspace.vue'
 import {
   buildMiMetricOptions,
@@ -74,7 +87,8 @@ import {
 import {
   createPreferenceRepository,
   type StoredPlannerProfile as PlannerProfile,
-  type StoredTodoItem as TodoItem
+  type StoredTodoItem as TodoItem,
+  type TooltipBoundaryScrollPreference
 } from './preference-repository'
 import { searchGuidance } from './search-guidance'
 import {
@@ -290,6 +304,8 @@ const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
         : 'idle'
 )
 const zoomFactor = ref(initialPreferences.appearance.zoomFactor)
+const tooltipBoundaryScroll = ref<TooltipBoundaryScrollPreference>(initialPreferences.appearance.tooltipBoundaryScroll)
+const failedItemIconUrls = ref(new Set<string>())
 const activeView = ref<ActiveView>('collection')
 const query = ref('')
 const searchQuery = ref('')
@@ -346,7 +362,14 @@ const plannerQuery = ref('')
 const plannerOwnership = ref<OwnershipFilter>('all')
 const plannerSortMode = ref<PlannerSortMode>('level')
 const plannerSortDirection = ref<SortDirection>('asc')
-const plannerIgnoredRecords = ref<string[]>([...initialPreferences.planner.ignoredRecords])
+const plannerIgnoredRecords = computed<string[]>({
+  get: () => plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)?.ignoredRecords ?? [],
+  set: (records) => {
+    plannerProfiles.value = plannerProfiles.value.map((profile) => profile.id === selectedPlannerProfileId.value
+      ? { ...profile, ignoredRecords: [...records], modifiedAt: new Date().toISOString() }
+      : profile)
+  }
+})
 const plannerFavoriteRecords = ref<string[]>([...initialPreferences.planner.favoriteRecords])
 const plannerShowIgnored = ref(false)
 const oracleControls = ref<StashOracleControls>({
@@ -1106,6 +1129,56 @@ const plannerRows = computed(() => plannerCandidateRows.value.filter(({ item }) 
   return plannerShowIgnored.value ? ignored : !ignored
 }))
 
+const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.value.map((row) => {
+  const ownership = plannerOwnershipLabel(row.item)
+  const roll = researchRollFact(row.item)
+  const recipe = recipeStatus(row.item)
+  return {
+    item: row.item,
+    available: researchItemIsAvailable(row.item, archivedRecordSet.value, recipe ? recipe.known === true : row.item.recipeUnlocked === true),
+    itemType: researchItemTypeLabel(row.item),
+    favorite: isPlannerFavorite(row.item),
+    ignored: plannerShowIgnored.value,
+    supports: [
+      ...row.masteryMatches.map((match) => ({
+        label: `All ${researchSkillName(match.mastery)} skills`,
+        text: match.amount > 0 ? `+${match.amount}` : 'Supported',
+        tone: 'accent' as const
+      })),
+      ...row.matches.map((match) => ({
+        label: researchSkillName(match.skill),
+        text: match.amount > 0 ? `+${match.amount}` : 'Modifier',
+        tone: 'accent' as const
+      }))
+    ],
+    modifiers: [
+      ...(row.petBonuses.length ? [{ kind: 'pet' as const, label: 'All pets', text: row.petBonuses.join('; '), tone: 'accent' as const }] : []),
+      ...row.masteryMatches.map((match) => ({ kind: 'rank' as const, label: 'Mastery-wide', text: masteryMatchEffect(match), skill: researchSkillName(match.mastery) })),
+      ...row.matches.flatMap((match) => [
+        ...(match.conversionTarget ? [{ kind: 'conversion' as const, label: 'Converts to', text: match.conversionTarget, tone: 'accent' as const, skill: researchSkillName(match.skill), targetDamageType: match.conversionTarget }] : []),
+        ...(match.conversionDetails ? [{ kind: 'conversion' as const, label: researchSkillName(match.skill), text: match.conversionDetails, skill: researchSkillName(match.skill) }] : []),
+        ...(match.special ? [{ kind: 'special' as const, label: researchSkillName(match.skill), text: match.special, skill: researchSkillName(match.skill) }] : []),
+        ...(!match.conversionDetails && !match.special
+          ? [{ kind: 'rank' as const, label: researchSkillName(match.skill), text: match.amount ? `+${match.amount} ranks` : 'Skill support', skill: researchSkillName(match.skill) }]
+          : []),
+        ...(match.visualTransformation ? [{ kind: 'visual' as const, label: 'Visual', text: match.visualTransformation, tone: 'positive' as const, skill: researchSkillName(match.skill) }] : [])
+      ])
+    ],
+    acquisition: [
+      ...(recipe ? [{
+        label: 'Blueprint',
+        text: recipe.label,
+        tone: recipe.known ? 'positive' as const : recipe.known === false ? 'warning' as const : 'muted' as const
+      }] : []),
+      ...researchAcquisitionFacts(row.item)
+    ],
+    archive: [
+      ...(ownership ? [{ text: ownership, tone: 'positive' as const }] : [{ text: 'Not archived', tone: 'muted' as const }]),
+      ...(roll ? [roll] : [])
+    ]
+  }
+}))
+
 const plannerMiItems = computed(() => {
   const source = plannerMapScope.value === 'selected'
     ? plannerRows.value.map((row) => row.item)
@@ -1417,7 +1490,14 @@ function deletePlannerProfile(): void {
 }
 
 function plannerRecordKey(item: CollectionItem): string {
-  return `${item.rarity}:${item.slot}:${normalizeLoose(item.name)}`
+  return researchItemPreferenceKey(item)
+}
+
+function sortPlannerTable(sort: string): void {
+  if (sort !== 'name' && sort !== 'level' && sort !== 'rarity') return
+  const next = nextResearchSort(plannerSortMode.value, plannerSortDirection.value, sort)
+  plannerSortMode.value = next.sort
+  plannerSortDirection.value = next.direction
 }
 
 function recipeStatus(item: CollectionItem): { label: string; known: boolean | null } | null {
@@ -1457,6 +1537,21 @@ function togglePlannerIgnored(item: CollectionItem): void {
   plannerIgnoredRecords.value = plannerIgnoredRecordSet.value.has(key)
     ? plannerIgnoredRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
     : [...plannerIgnoredRecords.value, key]
+}
+
+function switchPlannerDisplay(display: PlannerDisplay): void {
+  const focused = document.activeElement instanceof HTMLElement
+    ? document.activeElement.dataset.resultKey
+    : undefined
+  plannerDisplay.value = display
+  if (!focused) return
+  void nextTick(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const target = [...document.querySelectorAll<HTMLElement>('[data-result-key]')]
+      .find((element) => element.dataset.resultKey === focused)
+    target?.scrollIntoView({ block: 'center' })
+    target?.focus({ preventScroll: true })
+  })
 }
 
 function currentAppRoute(): AppRoute {
@@ -1730,6 +1825,7 @@ watch(plannerLevelCap, (level) => {
 })
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch(navigationCollapsed, (navigationCollapsed) => preferenceRepository.update('appearance', { navigationCollapsed }))
+watch(tooltipBoundaryScroll, (tooltipBoundaryScroll) => preferenceRepository.update('appearance', { tooltipBoundaryScroll }))
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (restoringAppHistory) return
   plannerPage.value = 1
@@ -1760,9 +1856,6 @@ watch(plannerProfiles, (profiles) => {
 watch(selectedPlannerProfileId, (profileId) => {
   preferenceRepository.update('planner', { selectedProfileId: profileId })
 })
-watch(plannerIgnoredRecords, (records) => {
-  preferenceRepository.update('planner', { ignoredRecords: [...records] })
-}, { deep: true })
 watch(plannerFavoriteRecords, (records) => {
   preferenceRepository.update('planner', { favoriteRecords: [...records] })
 }, { deep: true })
@@ -3634,7 +3727,14 @@ function openSelectedMiInWorkshop(): void {
 }
 
 function itemIconUrl(item: CollectionItem): string | null {
-  return item.iconKey ? `cairn-icon://asset/${item.iconKey}.png` : null
+  if (!item.iconKey) return null
+  const url = `cairn-icon://asset/${item.iconKey}.png`
+  return failedItemIconUrls.value.has(url) ? null : url
+}
+
+function handleItemIconError(item: CollectionItem): void {
+  if (!item.iconKey) return
+  failedItemIconUrls.value = new Set([...failedItemIconUrls.value, `cairn-icon://asset/${item.iconKey}.png`])
 }
 
 function isArchivedItem(item: CollectionItem): boolean {
@@ -3652,7 +3752,7 @@ function plannerOwnershipLabel(item: CollectionItem): string | null {
   }
   if (itemAvailableByAwakeningOnly(item)) return awakeningAvailabilityLabel(item)
   if (item.recipeUnlocked) return 'Recipe learned'
-  if (collectionBasis.value === 'archive' && item.discovered) return 'Archived'
+  if (collectionBasis.value === 'archive' && item.discovered) return 'Previously archived'
   return null
 }
 
@@ -3686,42 +3786,6 @@ function searchErrorMessage(query: CompiledSearchQuery): string | null {
   return query.error.fragment
     ? `${query.error.message} Check “${query.error.fragment}”.`
     : query.error.message
-}
-
-function itemTypeLabel(item: CollectionItem): string {
-  const itemClass = item.itemClass.toLocaleLowerCase()
-  if (itemClass.includes('ranged2h')) return 'Two-handed ranged weapon'
-  if (itemClass.includes('ranged1h')) return 'One-handed ranged weapon'
-  if (itemClass.includes('spear2h')) return 'Two-handed spear'
-  if (itemClass.includes('sword2h')) return 'Two-handed sword'
-  if (itemClass.includes('axe2h')) return 'Two-handed axe'
-  if (itemClass.includes('mace2h') || itemClass.includes('blunt2h')) return 'Two-handed mace'
-  if (itemClass.includes('scepter')) return 'One-handed scepter (caster weapon)'
-  if (itemClass.includes('dagger')) return 'One-handed dagger (caster weapon)'
-  if (itemClass.includes('sword')) return 'One-handed sword'
-  if (itemClass.includes('axe')) return 'One-handed axe'
-  if (itemClass.includes('mace') || itemClass.includes('blunt')) return 'One-handed mace'
-  if (itemClass.includes('melee') && itemClass.includes('2h')) return 'Two-handed melee weapon'
-  if (itemClass.includes('shield')) return 'Shield'
-  if (itemClass.includes('offhand') || itemClass.includes('focus')) return 'Caster off-hand'
-  const labels: Record<string, string> = {
-    head: 'Head armor', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Hands',
-    legs: 'Leg armor', feet: 'Feet', waist: 'Waist', ring: 'Ring', amulet: 'Amulet',
-    medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon',
-    component: 'Component', material: 'Crafting material', 'potion-formula': 'Potion formula',
-    augment: 'Augment', rune: 'Movement rune', writ: 'Faction writ', mandate: 'Faction mandate',
-    warrant: 'Nemesis warrant', merit: 'Difficulty merit'
-  }
-  return labels[item.slot] ?? item.slot
-}
-
-function rarityLabel(item: CollectionItem): string {
-  if (item.rarity === 'mi') return 'Monster Infrequent'
-  if (item.rarity === 'rare') return 'Rare'
-  if (item.rarity === 'faction') return 'Faction Rare'
-  if (item.rarity === 'component') return 'Component'
-  if (item.rarity === 'consumable') return item.slot === 'potion-formula' ? 'Learned formula' : 'Consumable'
-  return item.rarity.charAt(0).toLocaleUpperCase() + item.rarity.slice(1)
 }
 
 function contentPackRank(contentPack: string): number {
@@ -4008,22 +4072,92 @@ function scheduleTooltipHide(): void {
 }
 
 function resetTooltipScroll(): void {
+  tooltipWheelTarget = null
+  cancelTooltipScrollAnimation()
   void nextTick(() => {
     if (tooltipElement.value) tooltipElement.value.scrollTop = 0
   })
 }
 
+let tooltipWheelTarget: number | null = null
+let tooltipScrollFrame: number | null = null
+
+function cancelTooltipScrollAnimation(): void {
+  if (tooltipScrollFrame !== null) cancelAnimationFrame(tooltipScrollFrame)
+  tooltipScrollFrame = null
+}
+
+function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
+  cancelTooltipScrollAnimation()
+  if (preferredScrollBehavior() === 'auto') {
+    tooltip.scrollTop = target
+    return
+  }
+  const initial = tooltip.scrollTop
+  const distance = target - initial
+  const started = performance.now()
+  const tick = (now: number): void => {
+    const progress = Math.min(1, (now - started) / 120)
+    tooltip.scrollTop = initial + distance * (1 - Math.pow(1 - progress, 3))
+    if (progress < 1) tooltipScrollFrame = requestAnimationFrame(tick)
+    else tooltipScrollFrame = null
+  }
+  tooltipScrollFrame = requestAnimationFrame(tick)
+}
+
 function scrollTooltip(event: WheelEvent): void {
-  const tooltip = event.currentTarget
-  if (!(tooltip instanceof HTMLElement) || tooltip.scrollHeight <= tooltip.clientHeight) return
+  if (event.shiftKey || event.ctrlKey || event.metaKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
+  const tooltip = tooltipElement.value
+  if (!tooltip || tooltip.scrollHeight <= tooltip.clientHeight) return
+  const maximumScrollTop = tooltip.scrollHeight - tooltip.clientHeight
+  const boundaryTolerance = 1
+  const directWheel = event.currentTarget === tooltip
+  if (directWheel) {
+    tooltipWheelTarget = null
+    cancelTooltipScrollAnimation()
+  }
+  const actualScrollTop = tooltip.scrollTop
+  const queuedBoundaryPending = !directWheel && tooltipWheelTarget !== null && (
+    (event.deltaY < 0 && tooltipWheelTarget <= boundaryTolerance && actualScrollTop > boundaryTolerance) ||
+    (event.deltaY > 0 && tooltipWheelTarget >= maximumScrollTop - boundaryTolerance && actualScrollTop < maximumScrollTop - boundaryTolerance)
+  )
+  if (queuedBoundaryPending) {
+    event.preventDefault()
+    event.stopPropagation()
+    return
+  }
+  const currentScrollTop = directWheel ? tooltip.scrollTop : (tooltipWheelTarget ?? tooltip.scrollTop)
+  const atBoundary =
+    (event.deltaY < 0 && actualScrollTop <= boundaryTolerance) ||
+    (event.deltaY > 0 && actualScrollTop >= maximumScrollTop - boundaryTolerance)
+  if (atBoundary) {
+    if (tooltipBoundaryScroll.value === 'contain' || directWheel) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    // Chromium does not consistently chain wheel input from this fixed overlay.
+    // Own direct-tooltip handoff to avoid both a stuck page and double scrolling.
+    if (directWheel && tooltipBoundaryScroll.value === 'page') {
+      const pageDelta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? event.deltaY * window.innerHeight : event.deltaY
+      window.scrollBy({ top: pageDelta, behavior: preferredScrollBehavior() })
+    }
+    return
+  }
+  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? event.deltaY * 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? event.deltaY * tooltip.clientHeight
+      : event.deltaY
   const nextScrollTop = Math.max(
     0,
-    Math.min(tooltip.scrollTop + event.deltaY, tooltip.scrollHeight - tooltip.clientHeight)
+    Math.min(currentScrollTop + delta, maximumScrollTop)
   )
-  if (nextScrollTop === tooltip.scrollTop) return
+  if (nextScrollTop === currentScrollTop) return
   event.preventDefault()
   event.stopPropagation()
-  tooltip.scrollTop = nextScrollTop
+  tooltipWheelTarget = nextScrollTop
+  animateTooltipScroll(tooltip, nextScrollTop)
 }
 
 function scrollTooltipFromKeyboard(event: KeyboardEvent): boolean {
@@ -4052,6 +4186,8 @@ function hideTooltip(): void {
   tooltipRecord.value = null
   tooltipCopyAffixes.value = null
   tooltipDetailsHeld.value = false
+  tooltipWheelTarget = null
+  cancelTooltipScrollAnimation()
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -5090,6 +5226,7 @@ function formatRollValue(value: number): string {
       />
 
       <SkillExplorerWorkspace
+        :archived-records="archivedRecordSet"
         v-else-if="activeView === 'skills'"
         v-model:controls="skillExplorerControls"
         :items="plannerCatalogItems"
@@ -5100,6 +5237,7 @@ function formatRollValue(value: number): string {
         @show-tooltip="showTooltip"
         @queue-tooltip="queueTooltip"
         @move-tooltip="moveTooltip"
+        @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
       />
@@ -5131,9 +5269,9 @@ function formatRollValue(value: number): string {
         >
           <template #aside>
             <div class="segmented-control planner-display" aria-label="Planner display">
-              <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">List</button>
-              <button type="button" :class="{ active: plannerDisplay === 'grid' }" @click="plannerDisplay = 'grid'">Grid</button>
-              <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI sources</button>
+              <button type="button" :class="{ active: plannerDisplay === 'table' }" @click="switchPlannerDisplay('table')">Table</button>
+              <button type="button" :class="{ active: plannerDisplay === 'journey' }" @click="switchPlannerDisplay('journey')">Journey</button>
+              <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="switchPlannerDisplay('map')">MI sources</button>
             </div>
           </template>
         </ToolHeader>
@@ -5278,129 +5416,45 @@ function formatRollValue(value: number): string {
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.acquisition?.crafting).length }}</strong> craftable</span>
           </div>
-          <p v-if="plannerDisplay === 'list'" id="planner-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
-          <BoundedResultSurface
+          <ResearchItemTable
+            v-if="plannerDisplay === 'table'"
             v-model:page="plannerPage"
-            :class="['planner-results bounded-tooltip-results', plannerDisplay === 'list' ? 'planner-table-wrap planner-table-results' : 'planner-card-results']"
-            :items="plannerRows"
-            :get-key="row => row.item.record"
-            :page-size="50"
-            pagination="continuous"
-            :layout="plannerDisplay === 'list' ? 'table' : 'grid'"
+            :rows="plannerResearchRows"
+            :icon-url-for-item="itemIconUrl"
+            :sort="plannerSortMode"
+            :direction="plannerSortDirection"
+            :sort-columns="{ item: 'name', level: 'level' }"
             :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
             :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select a mastery or skill, widen the item level range, or restore an ignored base.'"
             label="Leveling Planner item results"
-            :aria-describedby="plannerDisplay === 'list' ? 'planner-table-scroll-help' : undefined"
-            :tabindex="plannerDisplay === 'list' ? 0 : undefined"
-            interactive
-            item-described-by="item-tooltip"
-            @activate="(_key, row) => openItem(row.item)"
-            @item-focus="(_key, row, element) => showTooltip(row.item, element)"
-            @item-blur="scheduleTooltipHide"
-          >
-            <template v-if="plannerDisplay === 'list'" #header>
-              <div class="planner-table-header" role="row">
-                <span role="columnheader">Level</span>
-                <span role="columnheader">Item</span>
-                <span role="columnheader">Supports</span>
-                <span role="columnheader">What it does</span>
-                <span role="columnheader">How to get it</span>
-              </div>
-            </template>
-            <template #item="{ item: row }">
-              <div
-                v-if="plannerDisplay === 'list'"
-                class="planner-table-row"
-                :class="{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }"
-                  @mouseenter="queueTooltip(row.item, $event)"
-                  @mousemove="moveTooltip"
-                  @mouseleave="scheduleTooltipHide"
-              >
-                  <span role="gridcell" class="planner-level">{{ row.item.levelRequirement }}</span>
-                  <span role="gridcell">
-                    <span class="planner-item-cell">
-                      <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-                      <span>
-                        <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
-                        <small class="planner-item-type">{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
-                        <span class="planner-item-actions">
-                          <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
-                          <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore base' }}</button>
-                        </span>
-                        <small>{{ row.item.rarity === 'faction' ? 'Faction rare' : row.item.rarity }} · {{ row.item.slot }}</small>
-                      </span>
-                    </span>
-                  </span>
-                  <span role="gridcell">
-                    <span class="planner-match-skills">
-                      <em v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery`">All {{ match.mastery }} skills<b v-if="match.amount"> +{{ match.amount }}</b></em>
-                      <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
-                    </span>
-                  </span>
-                  <span role="gridcell" class="planner-effects">
-                    <span v-if="row.petBonuses.length" class="planner-pet-bonuses">
-                      <b>All pets</b> {{ row.petBonuses.join('; ') }}
-                    </span>
-                    <span v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery-effect`">
-                      <b>Mastery-wide</b> {{ masteryMatchEffect(match) }}
-                    </span>
-                    <span v-for="match in row.matches" :key="`${match.skill}:effect`">
-                      <b v-if="match.conversionTarget">→ {{ match.conversionTarget }}</b>
-                      {{ [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support') }}
-                    </span>
-                  </span>
-                  <span role="gridcell" class="planner-acquisition">
-                    <span
-                      v-if="recipeStatus(row.item)"
-                      class="recipe-status"
-                      :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }"
-                    >
-                      <b>Blueprint</b> · {{ recipeStatus(row.item)?.label }}
-                    </span>
-                    <span v-for="faction in row.item.acquisition?.factions ?? []" :key="`${faction.kind ?? 'item'}:${faction.vendorRecord}`">
-                      <b>{{ faction.kind === 'blueprint' ? 'Blueprint vendor: ' : '' }}{{ faction.faction }}</b> · {{ faction.reputation }}
-                    </span>
-                    <span v-if="!(row.item.acquisition?.factions?.length)">{{ row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
-                    <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map(locationDisplayName).slice(0, 2).join(', ') }}</small>
-                  </span>
-              </div>
-              <article
-                v-else
-                class="planner-card"
-                :class="[{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }, `rarity-${row.item.rarity}`]"
-                @mouseenter="queueTooltip(row.item, $event)"
-                @mousemove="moveTooltip"
-                @mouseleave="scheduleTooltipHide"
-              >
-                <header>
-                  <span class="planner-card-level">Lv{{ row.item.levelRequirement }}</span>
-                  <span class="planner-card-actions">
-                    <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
-                    <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore' }}</button>
-                  </span>
-                </header>
-                <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-                <div class="planner-card-title">
-                  <strong>{{ row.item.name }}</strong>
-                  <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
-                </div>
-                <div class="planner-match-skills">
-                  <em v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery`">All {{ match.mastery }} skills<b> +{{ match.amount }}</b></em>
-                  <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
-                </div>
-                <p v-if="row.petBonuses.length" class="planner-card-pets"><b>All pets</b> {{ row.petBonuses.join('; ') }}</p>
-                <p class="planner-card-effect">
-                  {{ [...row.masteryMatches.map(masteryMatchEffect), ...row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support'))].join(' · ') }}
-                </p>
-                <footer>
-                  <b v-if="recipeStatus(row.item)" class="recipe-status" :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }">
-                    {{ recipeStatus(row.item)?.label }}
-                  </b>
-                  <span>{{ row.item.acquisition?.factions?.[0]?.kind === 'blueprint' ? `Blueprint: ${row.item.acquisition.factions[0].faction}` : row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
-                </footer>
-              </article>
-            </template>
-          </BoundedResultSurface>
+            pagination="continuous"
+            actions
+            :ignored-view="plannerShowIgnored"
+            @sort="sortPlannerTable"
+            @activate="openItem"
+            @queue-tooltip="queueTooltip"
+            @show-tooltip="showTooltip"
+            @move-tooltip="moveTooltip"
+            @scroll-tooltip="scrollTooltip"
+            @hide-tooltip="scheduleTooltipHide"
+            @favorite="togglePlannerFavorite"
+            @ignore="togglePlannerIgnored"
+          />
+          <PlannerJourney
+            v-else
+            v-model:page="plannerPage"
+            :rows="plannerResearchRows"
+            :icon-url-for-item="itemIconUrl"
+            :ignored-view="plannerShowIgnored"
+            @activate="openItem"
+            @queue-tooltip="queueTooltip"
+            @show-tooltip="showTooltip"
+            @move-tooltip="moveTooltip"
+            @scroll-tooltip="scrollTooltip"
+            @hide-tooltip="scheduleTooltipHide"
+            @favorite="togglePlannerFavorite"
+            @ignore="togglePlannerIgnored"
+          />
         </template>
 
         <template v-else>
@@ -5500,10 +5554,10 @@ function formatRollValue(value: number): string {
                   @mouseleave="scheduleTooltipHide"
                   @click="openItem(item)"
                 >
-                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
+                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" @error="handleItemIconError(item)" />
                   <span>
                     <strong>{{ item.name }}</strong>
-                    <small>Lv{{ item.levelRequirement }} · {{ itemTypeLabel(item) }}</small>
+                    <small>Lv{{ item.levelRequirement }} · {{ researchItemTypeLabel(item) }}</small>
                     <small>{{ item.acquisition?.sources[0] }}</small>
                   </span>
                 </button>
@@ -5589,6 +5643,7 @@ function formatRollValue(value: number): string {
         :game-connection-label="gameConnectionLabel"
         :connection-recommendation="connectionRecommendation"
         :zoom-factor="zoomFactor"
+        :tooltip-boundary-scroll="tooltipBoundaryScroll"
         :experimental-tools-enabled="experimentalToolsEnabled"
         :workspace-tool-definitions="workspaceToolDefinitions"
         :visible-workspace-tool-ids="visibleWorkspaceToolIds"
@@ -5615,6 +5670,7 @@ function formatRollValue(value: number): string {
         @set-auto-live-connect="setAutoLiveConnect"
         @show-connection-diagnostics="showConnectionDiagnostics = true"
         @set-zoom="setZoom"
+        @set-tooltip-boundary-scroll="tooltipBoundaryScroll = $event"
         @show-essential-tools="showEssentialWorkspaceTools"
         @show-all-tools="showAllWorkspaceTools"
         @set-experimental-tools="setExperimentalToolsEnabled"
@@ -5839,7 +5895,7 @@ function formatRollValue(value: number): string {
         ref="tooltipElement"
         id="item-tooltip"
         class="game-tooltip"
-        :class="tooltipItem.rarity"
+        :class="[tooltipItem.rarity, `tooltip-boundary-${tooltipBoundaryScroll}`]"
         :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px`, maxHeight: `${tooltipMaxHeight}px` }"
         role="tooltip"
         @mouseenter="cancelTooltipHide"
@@ -5847,7 +5903,8 @@ function formatRollValue(value: number): string {
         @wheel="scrollTooltip"
       >
         <header class="tooltip-header">
-          <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" />
+          <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" @error="handleItemIconError(tooltipItem)" />
+          <span v-else class="item-icon-placeholder tooltip-icon-placeholder" aria-hidden="true">{{ tooltipItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
           <div>
             <h3>
               <span v-if="tooltipItem.upgradeRecord || tooltipItem.baseVersionRecord" class="awakening-sigil tooltip-awakening-sigil"><i /></span>
@@ -5857,7 +5914,7 @@ function formatRollValue(value: number): string {
             <p v-else-if="tooltipItem.baseVersionRecord" class="awakening-copy">Awakened with Ashes of Awakening.</p>
             <p v-if="itemAvailableByAwakeningOnly(tooltipItem)" class="awakening-availability">{{ awakeningAvailabilityLabel(tooltipItem) }}</p>
             <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
-            <strong>{{ rarityLabel(tooltipItem) }} · {{ itemTypeLabel(tooltipItem) }}</strong>
+            <strong>{{ researchRarityLabel(tooltipItem) }} · {{ researchItemTypeLabel(tooltipItem) }}</strong>
           </div>
         </header>
 
@@ -6084,7 +6141,8 @@ function formatRollValue(value: number): string {
       <aside class="item-drawer comparison-workspace" :aria-label="selectedItem.name + ' copy comparison'">
         <button class="drawer-close" type="button" aria-label="Close comparison" @click="selectedRecord = null">×</button>
         <header class="comparison-heading">
-          <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" />
+          <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" @error="handleItemIconError(selectedItem)" />
+          <span v-else class="item-icon-placeholder comparison-icon-placeholder" aria-hidden="true">{{ selectedItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
           <div>
             <p class="section-label">Copy comparison</p>
             <h2>{{ selectedItem.name }}</h2>
@@ -6168,7 +6226,8 @@ function formatRollValue(value: number): string {
             <header>
               <div class="copy-identity">
                 <div class="copy-item-heading" :class="selectedItem.rarity">
-                  <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" />
+                  <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" @error="handleItemIconError(selectedItem)" />
+                  <span v-else class="item-icon-placeholder copy-icon-placeholder" aria-hidden="true">{{ selectedItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
                   <div>
                     <p>
                       {{ copy.instanceKey === comparisonReferenceCopy?.instanceKey ? 'Reference copy' : `Copy ${index + 1}` }}
@@ -6198,7 +6257,7 @@ function formatRollValue(value: number): string {
                         :class="copyAffixRarity(copy.suffixRecord)"
                       >{{ copyAffixName(copy.suffixRecord, '') }}</span>
                     </h3>
-                    <small>{{ rarityLabel(selectedItem) }} · {{ itemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
+                    <small>{{ researchRarityLabel(selectedItem) }} · {{ researchItemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
                   </div>
                 </div>
                 <div class="copy-roll-profile">

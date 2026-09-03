@@ -11,6 +11,7 @@ import type {
 import ItemAssistantImport from '../components/ItemAssistantImport.vue'
 import ToolHeader from '../components/ToolHeader.vue'
 import type { OnboardingStatus } from '../onboarding'
+import type { TooltipBoundaryScrollPreference } from '../preference-repository'
 import {
   formatSettingsBackupDate,
   formatSettingsBackupSize,
@@ -32,6 +33,7 @@ const props = defineProps<{
   gameConnectionLabel: string
   connectionRecommendation: string
   zoomFactor: number
+  tooltipBoundaryScroll: TooltipBoundaryScrollPreference
   experimentalToolsEnabled: boolean
   workspaceToolDefinitions: readonly WorkspaceToolDefinition[]
   visibleWorkspaceToolIds: readonly WorkspaceToolId[]
@@ -64,6 +66,7 @@ const emit = defineEmits<{
   'set-auto-live-connect': [enabled: boolean]
   'show-connection-diagnostics': []
   'set-zoom': [factor: number]
+  'set-tooltip-boundary-scroll': [mode: TooltipBoundaryScrollPreference]
   'show-essential-tools': []
   'show-all-tools': []
   'set-experimental-tools': [enabled: boolean]
@@ -151,6 +154,29 @@ function workspaceToolSelected(id: WorkspaceToolId): boolean {
           <button type="button" @click="emit('set-zoom', 1)">Reset</button>
         </div>
         <small>Ctrl + mouse wheel works anywhere in CC.</small>
+        <fieldset class="settings-choice-group">
+          <legend>Tooltip edge scrolling</legend>
+          <label class="settings-toggle compact">
+            <input
+              type="radio"
+              name="tooltip-boundary-scroll"
+              value="page"
+              :checked="tooltipBoundaryScroll === 'page'"
+              @change="emit('set-tooltip-boundary-scroll', 'page')"
+            />
+            <span><strong>Continue into the page</strong><small>Recommended. Once an item tooltip reaches its top or bottom, the same wheel direction scrolls the workspace.</small></span>
+          </label>
+          <label class="settings-toggle compact">
+            <input
+              type="radio"
+              name="tooltip-boundary-scroll"
+              value="contain"
+              :checked="tooltipBoundaryScroll === 'contain'"
+              @change="emit('set-tooltip-boundary-scroll', 'contain')"
+            />
+            <span><strong>Keep scrolling in the tooltip</strong><small>At either edge, leave the workspace still until you move the pointer away from the item preview.</small></span>
+          </label>
+        </fieldset>
       </article>
 
       <article class="settings-card workspace-tool-settings">

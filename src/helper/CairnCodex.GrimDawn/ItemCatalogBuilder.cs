@@ -272,6 +272,13 @@ internal static class ItemCatalogBuilder
 
     private static string NormalizeRecord(string record) => record.Replace('\\', '/');
 
+    internal static string QualifyAwakenedName(string record, string name) =>
+        NormalizeRecord(record).StartsWith("records/items/awakened/", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(name) && !name.StartsWith("tag", StringComparison.OrdinalIgnoreCase) &&
+        !name.StartsWith("records/", StringComparison.OrdinalIgnoreCase) &&
+        !name.StartsWith("Awakened ", StringComparison.OrdinalIgnoreCase)
+            ? "Awakened " + name : name;
+
     private static IReadOnlyDictionary<string, string> BuildSkillClassNames(ItemCatalogData data)
     {
         var masteriesByNumber = data.Tags
@@ -521,7 +528,7 @@ internal static class ItemCatalogBuilder
             Resolve(record.Text("itemNameTag") ?? record.Text("description"), tags),
             Resolve(record.Text("itemQualityTag"), tags)
         }.Where(value => !string.IsNullOrWhiteSpace(value));
-        var name = string.Join(' ', nameParts).Trim();
+        var name = QualifyAwakenedName(record.Name, string.Join(' ', nameParts).Trim());
         if (name.Length == 0)
         {
             name = record.Name;
@@ -626,7 +633,7 @@ internal static class ItemCatalogBuilder
             Resolve(record.Text("itemNameTag") ?? record.Text("description"), data.Tags),
             Resolve(record.Text("itemQualityTag"), data.Tags)
         }.Where(value => !string.IsNullOrWhiteSpace(value));
-        var name = string.Join(' ', nameParts).Trim();
+        var name = QualifyAwakenedName(record.Name, string.Join(' ', nameParts).Trim());
         if (name.Length == 0 ||
             name.StartsWith("tag", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("records/", StringComparison.OrdinalIgnoreCase))

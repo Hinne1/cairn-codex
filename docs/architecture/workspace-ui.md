@@ -17,10 +17,14 @@ Collection is the rich home dashboard. Its archive summary, refresh action, comp
 collection-basis controls, and full customizable tool launcher render only on Collection itself.
 They must not be repeated above a specialist tool.
 
-Collection and specialist tools share `src/renderer/src/components/WorkspaceSidebar.vue` as one
-persistent navigation model. Collection is always first; the user's visible tools follow in the
-same configured order used by the dashboard shortcuts. The active route uses
-`aria-current="page"`. The sidebar supports a durable expanded/compact preference and collapses
+Collection, Transfers, and Settings form one stable system-navigation strip in the top bar on every
+route. Collection is the active system destination while its dashboard or any specialist child tool
+is open. Activating it returns to the Collection dashboard; browser-style Back/Forward still restores
+the exact previous typed route. Transfers and Settings retain their focused full-screen treatment.
+
+Collection specialist tools share `src/renderer/src/components/WorkspaceSidebar.vue` as a child-tool
+navigation model. The user's visible tools use the same configured order as the dashboard shortcuts,
+and the active child route uses `aria-current="page"`. The sidebar supports a durable expanded/compact preference and collapses
 to icons at compact viewport widths without changing that preference. At wide widths the sidebar
 owns the left application edge; only the content region may be centered or width-capped, so an
 outer display gutter can never appear between the viewport and navigation. Destinations use one
@@ -29,10 +33,9 @@ accessible name and exposes that label as a hover and keyboard-focus tooltip. Hi
 open tool returns to Collection; hidden and disabled experimental tools do not remain reachable.
 
 The Collection dashboard retains its customizable tool cards as descriptive quick access, not as
-a second primary navigation system. It omits a redundant Collection card. Transfers and Settings
-remain focused system workspaces and render neither sidebar nor dashboard launcher. Their system
-bar exposes Collection as the return destination only while the sidebar is absent; Collection and
-specialist tools do not duplicate that destination in the system bar.
+a second primary navigation system. It omits a redundant Collection card. The sidebar contains only
+child tools and never duplicates the Collection system destination. Transfers and Settings render
+neither the sidebar nor dashboard launcher, but keep the same system destinations in the same order.
 
 ## Semantic foundation
 

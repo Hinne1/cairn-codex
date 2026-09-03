@@ -48,7 +48,14 @@ runGate('Sets and item drawer', [
   '--width', '520', '--height', '900', '--screenshot-name', 'typed-routes-verify-narrow'
 ])
 
-runGate('Settings full-screen workspace and system navigation', [
+runGate('Stable system navigation at wide width', [
+  '--electron-source', '--fixture', 'settings',
+  '--route-hash', verifiedRoute({ version: 1, workspace: 'settings', controls: {} }),
+  '--dismiss-onboarding', '--verify-navigation', '--assert-no-overflow', '--disable-gpu',
+  '--width', '1440', '--height', '1000', '--screenshot-name', 'system-navigation-verify-wide'
+])
+
+runGate('Settings full-screen workspace and compact system navigation', [
   '--electron-source', '--fixture', 'settings',
   '--route-hash', verifiedRoute({ version: 1, workspace: 'settings', controls: {} }),
   '--dismiss-onboarding', '--verify-navigation', '--verify-settings-workspace', '--assert-no-overflow', '--disable-gpu',

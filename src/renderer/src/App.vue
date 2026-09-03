@@ -4496,8 +4496,9 @@ function formatRollValue(value: number): string {
             To-do <span v-if="remainingTodoCount" class="todo-nav-count">{{ remainingTodoCount }}</span>
           </button>
           <button
-            v-if="!collectionSystemDestinationActive"
             type="button"
+            :class="{ active: collectionSystemDestinationActive }"
+            :aria-current="collectionSystemDestinationActive ? 'page' : undefined"
             @click="returnToCollection"
           >
             Collection
@@ -4791,7 +4792,6 @@ function formatRollValue(value: number): string {
         :active-id="activeView"
         :tools="visibleWorkspaceTools"
         :collapsed="navigationCollapsed"
-        @home="returnToCollection"
         @select="openWorkspaceTool"
         @customize="toolSettingsOpen = true"
         @toggle="navigationCollapsed = !navigationCollapsed"

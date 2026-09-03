@@ -251,6 +251,15 @@ Visual-only skills also enter the skill index. The horizontal table scroller doe
 vertical scrollbar gutter, so its final header reaches the rounded right edge. Toolbar composition
 unification is tracked in #138, with wide/compact mockup review before material UI changes.
 
+Epic and legendary item names share the protected rarity palette
+across cards, research results, tooltips, and copy headings. The supplied game references are epic
+`#338CCE` and legendary `#A638FF`; the latter is lifted to `#B653FF` to retain text contrast on CC's
+surfaces. Research Table and Journey mark unavailable items using a subtle name fade (96%) and
+picture fade (78%). An archived copy, a learned crafting recipe, or an available awakening base
+keeps an item at full strength; history alone does not. Planner crafting respects the plan's SC/HC
+recipe status. Skill modifiers and controls remain at full opacity, and availability labels retain
+the distinction between archived, crafting, awakening, and previously archived.
+
 The global item tooltip remains viewport-bounded and preserves its full descendant text as the item
 trigger's accessible description. In research tables, the complete item identity cell is the pointer
 trigger; Journey retains its prominent picture trigger. Direct wheel input over the tooltip and wheel

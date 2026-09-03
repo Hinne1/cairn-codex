@@ -124,8 +124,8 @@
   --cc-tone-ember-glow: color-mix(in srgb, var(--cc-tone-ember-accent), transparent 80%);
 
   /* Grim Dawn gameplay semantics remain distinct from application chrome. */
-  --gd-rarity-epic: #79c2ff;
-  --gd-rarity-legendary: #e099fa;
+  --gd-rarity-epic: #338cce;
+  --gd-rarity-legendary: #b653ff;
   --semantic-level: #d0b574;
   --semantic-complete: #dfbd6a;
   --semantic-progress: #b6c184;

@@ -14,6 +14,17 @@ import {
 } from '../src/renderer/src/semantic-tokens.ts'
 
 const root = resolve('.')
+assert.equal(CAIRN_GAMEPLAY_TOKENS['--gd-rarity-epic'], '#338cce', 'Epic names retain the supplied game-reference blue')
+assert.equal(CAIRN_GAMEPLAY_TOKENS['--gd-rarity-legendary'], '#b653ff', 'Legendary names retain the contrast-adjusted game-reference purple')
+for (const rarity of ['epic', 'legendary']) {
+  const foreground = CAIRN_GAMEPLAY_TOKENS[`--gd-rarity-${rarity}`]
+  const background = CAIRN_THEME_TOKENS['--cc-surface-1']
+  const faded = '#' + [1, 3, 5].map(offset => Math.round(
+    Number.parseInt(foreground.slice(offset, offset + 2), 16) * .96 +
+    Number.parseInt(background.slice(offset, offset + 2), 16) * .04
+  ).toString(16).padStart(2, '0')).join('')
+  assert.ok(contrastRatio(faded, background) >= 4.5, `${rarity} remains readable when unavailable`)
+}
 const rendererRoot = resolve(root, 'src/renderer/src')
 const themePath = resolve(rendererRoot, 'semantic-tokens.css')
 const legacyStylesPath = resolve(rendererRoot, 'styles.css')

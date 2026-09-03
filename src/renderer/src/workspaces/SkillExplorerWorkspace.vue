@@ -16,6 +16,7 @@ import {
 } from './skill-explorer'
 import {
   researchAcquisitionFacts,
+  researchItemIsAvailable,
   researchItemTypeLabel,
   researchRollFact,
   researchSkillName,
@@ -27,6 +28,7 @@ const props = defineProps<{
   items: readonly CollectionItem[]
   skillNames: readonly string[]
   isArchivedItem: (item: CollectionItem) => boolean
+  archivedRecords: ReadonlySet<string>
   iconUrlForItem: (item: CollectionItem) => string | null
   ownershipLabelForItem: (item: CollectionItem) => string | null
 }>()
@@ -72,6 +74,7 @@ const researchRows = computed<ResearchItemTableRow[]>(() => rows.value.map((row)
   const roll = researchRollFact(row.item)
   return {
     item: row.item,
+    available: researchItemIsAvailable(row.item, props.archivedRecords),
     itemType: researchItemTypeLabel(row.item),
     supports: [{
       label: researchSkillName(row.skill),

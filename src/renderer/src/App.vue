@@ -26,6 +26,7 @@ import {
 } from './workspaces/skill-explorer'
 import {
   researchAcquisitionFacts,
+  researchItemIsAvailable,
   nextResearchSort,
   researchItemPreferenceKey,
   researchItemTypeLabel,
@@ -1116,6 +1117,7 @@ const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.v
   const recipe = recipeStatus(row.item)
   return {
     item: row.item,
+    available: researchItemIsAvailable(row.item, archivedRecordSet.value, recipe ? recipe.known === true : row.item.recipeUnlocked === true),
     itemType: researchItemTypeLabel(row.item),
     favorite: isPlannerFavorite(row.item),
     ignored: plannerShowIgnored.value,
@@ -3726,7 +3728,7 @@ function plannerOwnershipLabel(item: CollectionItem): string | null {
   }
   if (itemAvailableByAwakeningOnly(item)) return awakeningAvailabilityLabel(item)
   if (item.recipeUnlocked) return 'Recipe learned'
-  if (collectionBasis.value === 'archive' && item.discovered) return 'Archived'
+  if (collectionBasis.value === 'archive' && item.discovered) return 'Previously archived'
   return null
 }
 
@@ -5212,6 +5214,7 @@ function formatRollValue(value: number): string {
       />
 
       <SkillExplorerWorkspace
+        :archived-records="archivedRecordSet"
         v-else-if="activeView === 'skills'"
         v-model:controls="skillExplorerControls"
         :items="plannerCatalogItems"

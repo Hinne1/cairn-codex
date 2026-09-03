@@ -138,7 +138,7 @@ function scrollTableHorizontally(event: WheelEvent): void {
         </div>
       </template>
       <template #item="{ item: row }">
-        <div class="research-table-row" :class="{ favorite: row.favorite, ignored: row.ignored }">
+        <div class="research-table-row" :class="{ favorite: row.favorite, ignored: row.ignored, 'is-unavailable': !row.available }">
           <span
             role="gridcell"
             class="research-item"

@@ -74,7 +74,7 @@ function handleImageError(item: CollectionItem): void {
       @item-blur="emit('hide-tooltip')"
     >
       <template #item="{ item: row, index }">
-        <article class="planner-journey-row" :class="{ favorite: row.favorite, ignored: row.ignored }">
+        <article class="planner-journey-row" :class="{ favorite: row.favorite, ignored: row.ignored, 'is-unavailable': !row.available }">
           <div class="planner-journey-level" :class="{ milestone: startsMilestone(index, row) }">
             <span v-if="startsMilestone(index, row)">Lv {{ row.item.levelRequirement }}</span>
           </div>

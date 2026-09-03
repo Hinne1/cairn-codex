@@ -1,6 +1,13 @@
 import type { CollectionItem } from '@shared/contracts'
+import { isAvailableViaAwakening } from '../../../shared/collection-availability.ts'
 
 export type ResearchItemTone = 'default' | 'accent' | 'positive' | 'muted' | 'warning'
+
+export function researchItemIsAvailable(item: CollectionItem, archivedRecords: ReadonlySet<string>, recipeKnown = item.recipeUnlocked === true): boolean {
+  return archivedRecords.has(item.record.toLocaleLowerCase()) || recipeKnown ||
+    isAvailableViaAwakening(item) ||
+    Boolean(item.awakeningSourceRecord && archivedRecords.has(item.awakeningSourceRecord.toLocaleLowerCase()))
+}
 
 export function nextResearchSort<T extends string>(active: T, direction: 'asc' | 'desc', selected: T): {
   sort: T; direction: 'asc' | 'desc'
@@ -31,6 +38,7 @@ export interface ResearchItemModifier extends ResearchItemFact {
 
 export interface ResearchItemTableRow {
   item: CollectionItem
+  available: boolean
   itemType: string
   supports: readonly ResearchItemFact[]
   modifiers: readonly ResearchItemModifier[]

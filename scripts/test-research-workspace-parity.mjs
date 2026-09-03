@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   researchAcquisitionFacts,
+  researchItemIsAvailable,
   nextResearchSort,
   researchItemPreferenceKey,
   researchItemTypeLabel,
@@ -26,6 +27,14 @@ const sample = {
 }
 
 assert.equal(researchItemTypeLabel(sample), 'Head armor')
+assert.equal(researchItemIsAvailable(sample, new Set([sample.record])), true)
+assert.equal(researchItemIsAvailable({ ...sample, recipeUnlocked: true }, new Set()), true)
+assert.equal(researchItemIsAvailable({ ...sample, recipeUnlocked: true }, new Set(), false), false, 'Planner recipe availability respects its SC/HC mode')
+assert.equal(researchItemIsAvailable({ ...sample, availableViaAwakening: true, awakeningSourceAvailableCount: 1 }, new Set()), true)
+assert.equal(researchItemIsAvailable({ ...sample, awakeningSourceRecord: 'records/base.dbr' }, new Set(['records/base.dbr'])), true)
+assert.equal(researchItemIsAvailable({ ...sample, discovered: true, availableCount: 0 }, new Set()), false)
+assert.equal(researchItemIsAvailable({ ...sample, availableViaAwakening: true, awakeningSourceAvailableCount: 0 }, new Set()), false)
+assert.equal(researchItemIsAvailable({ ...sample, availableCount: 1 }, new Set()), false, 'A scanned stash copy alone is not an archived copy')
 assert.deepEqual(nextResearchSort('level', 'asc', 'level'), { sort: 'level', direction: 'desc' })
 assert.deepEqual(nextResearchSort('level', 'desc', 'level'), { sort: 'level', direction: 'asc' })
 assert.deepEqual(nextResearchSort('level', 'desc', 'name'), { sort: 'name', direction: 'asc' })
@@ -56,6 +65,8 @@ const packageJson = JSON.parse(packageSource)
 assert.match(contract, /export interface ResearchItemTableRow/)
 assert.match(contract, /supports: readonly ResearchItemFact\[\][\s\S]*?modifiers: readonly ResearchItemModifier\[\][\s\S]*?acquisition: readonly ResearchItemFact\[\][\s\S]*?archive: readonly ResearchItemFact\[\]/)
 assert.match(skillWorkspace, /<ResearchItemTable/)
+assert.match(skillWorkspace, /available: researchItemIsAvailable\(row.item, props.archivedRecords\)/)
+assert.match(app, /available: researchItemIsAvailable\(row.item, archivedRecordSet.value, recipe \? recipe.known === true/)
 assert.match(app, /<ResearchItemTable[\s\S]*?<PlannerJourney/)
 assert.match(app, /@sort="sortPlannerTable"/)
 assert.match(app, /get: \(\) => plannerProfiles.value.find\([\s\S]*?\?\.ignoredRecords \?\? \[\]/)
@@ -74,6 +85,7 @@ assert.match(table, /@item-focus="showFocusedTooltip"/)
 assert.match(table, /overscroll-behavior-y: auto/)
 assert.match(table, /scrollbar-gutter: auto/)
 for (const surface of [table, journey]) {
+  assert.match(surface, /'is-unavailable': !row.available/)
   assert.match(surface, /<ResearchSkillFx :item="row.item"/)
   assert.match(surface, /row.modifiers.filter\(fact => fact.kind !== 'visual'\)/)
 }

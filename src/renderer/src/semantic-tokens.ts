@@ -178,8 +178,8 @@ export const CAIRN_THEME_TOKENS: ThemeTokenValues = {
 }
 
 export const CAIRN_GAMEPLAY_TOKENS: ProtectedGameplayTokenValues = {
-  '--gd-rarity-epic': '#79c2ff',
-  '--gd-rarity-legendary': '#e099fa',
+  '--gd-rarity-epic': '#338cce',
+  '--gd-rarity-legendary': '#b653ff',
   '--semantic-level': '#d0b574',
   '--semantic-complete': '#dfbd6a',
   '--semantic-progress': '#b6c184',

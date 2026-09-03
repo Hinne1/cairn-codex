@@ -1185,9 +1185,13 @@ function registerIpcHandlers(
     projector: {
       projectSources: projectCollectionSources,
       present: (snapshot, basis) => process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
-        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y'
-        ? Promise.resolve({ ...snapshot, basis })
-        : presentCollection(helper, database, snapshot, basis)
+        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'skill-explorer'
+        // Keep synthetic archive availability in this visual fixture; its disposable DB is empty.
+        ? Promise.resolve({ ...snapshot, basis, items: createScreenshotCollectionFixture('skill-explorer').items })
+        : process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
+          process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y'
+          ? Promise.resolve({ ...snapshot, basis })
+          : presentCollection(helper, database, snapshot, basis)
     },
     hydration: {
       hydrateAll: ({ installationPath, batchLimit, onProgress }) =>
@@ -2127,7 +2131,11 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
         levelRequirement: 20 + index % 75,
         itemLevel: 20 + index % 75,
         availableCount: index % 4 === 0 ? 1 : 0,
-        discovered: index % 4 === 0,
+        discovered: index % 4 === 0 || index % 8 === 3,
+        recipeUnlocked: index % 4 === 1,
+        availableViaAwakening: index % 4 === 2,
+        awakeningSourceAvailableCount: index % 4 === 2 ? 1 : 0,
+        awakeningSourceName: index % 4 === 2 ? 'Synthetic Epic Base' : null,
         presentation: {
           flavorText: null,
           sections: [{
@@ -7268,6 +7276,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               for (const rarity of ['epic', 'legendary']) {
                 const name = root.querySelector('.gd-rarity-name.rarity-' + rarity)
                 if (!(name instanceof HTMLElement)) throw new Error('Skill Explorer did not render a ' + rarity + ' item name.')
+                for (const unavailable of [false, true]) {
+                  const row = root.querySelector('.research-table-row' + (unavailable ? '.is-unavailable' : ':not(.is-unavailable)') + ':has(.rarity-' + rarity + ')')
+                  const rowName = row?.querySelector('.gd-rarity-name')
+                  if (!(rowName instanceof HTMLElement)) throw new Error('Missing ' + rarity + ' unavailable=' + unavailable + ' fixture.')
+                  if (Number(getComputedStyle(rowName).opacity) !== (unavailable ? .96 : 1)) throw new Error('Availability did not control the subtle name fade.')
+                  const modifiers = row.querySelector('.research-modifiers')
+                  if (getComputedStyle(row).opacity !== '1' || getComputedStyle(modifiers).opacity !== '1') throw new Error('Unavailable styling faded the row or skill modifiers.')
+                }
                 const colorProbe = document.createElement('span')
                 colorProbe.style.color = 'var(--gd-rarity-' + rarity + ')'
                 document.body.appendChild(colorProbe)
@@ -7278,6 +7294,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 }
               }
               const resultCounter = document.querySelector('.skill-explorer-toolbar .explorer-result-count')
+              for (const availabilityLabel of ['Recipe learned', 'Available by awakening', 'Previously archived']) {
+                const row = [...root.querySelectorAll('.research-table-row')].find(row => row.querySelector('.research-archive')?.textContent.includes(availabilityLabel))
+                if (!row) throw new Error('Missing availability-state fixture: ' + availabilityLabel)
+                if (row.classList.contains('is-unavailable') !== (availabilityLabel === 'Previously archived')) throw new Error('Crafting, awakening, or history received the wrong availability styling: ' + availabilityLabel)
+              }
               if (!(resultCounter instanceof HTMLElement)) throw new Error('Skill Explorer result count was unavailable.')
               const resultCounterStyle = getComputedStyle(resultCounter)
               if (window.innerWidth > 1180

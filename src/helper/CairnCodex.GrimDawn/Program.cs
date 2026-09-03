@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using CairnCodex.GrimDawn;
 using CairnCodex.GrimDawn.Gdia.GameData;
@@ -28,6 +29,7 @@ while ((line = Console.ReadLine()) is not null)
                 protocolVersion = ProtocolVersion,
                 mode = "read-only"
             }),
+            "measure-memory" => MeasureMemory(request),
             "discover-grim-dawn" => HelperResponse.Success(request.Id, GrimDawnDiscovery.Discover()),
             "discover-grim-dawn-at" => HelperResponse.Success(
                 request.Id,
@@ -107,6 +109,29 @@ HelperResponse ScanTransferStash(HelperRequest request)
     var parameters = request.Params?.Deserialize<ScanTransferStashRequest>(jsonOptions)
         ?? throw new JsonException("scan-transfer-stash requires a path parameter.");
     return HelperResponse.Success(request.Id, TransferStashScanner.Scan(parameters.Path));
+}
+
+HelperResponse MeasureMemory(HelperRequest request)
+{
+    var parameters = request.Params?.Deserialize<MeasureMemoryRequest>(jsonOptions)
+        ?? new MeasureMemoryRequest(false);
+    if (parameters.Collect)
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+    using var process = Process.GetCurrentProcess();
+    var gc = GC.GetGCMemoryInfo();
+    return HelperResponse.Success(request.Id, new
+    {
+        processId = Environment.ProcessId,
+        workingSetBytes = process.WorkingSet64,
+        privateBytes = process.PrivateMemorySize64,
+        managedHeapBytes = GC.GetTotalMemory(false),
+        managedCommittedBytes = gc.TotalCommittedBytes,
+        collectionForced = parameters.Collect
+    });
 }
 
 HelperResponse AcknowledgeLiveIncoming(HelperRequest request)
@@ -401,6 +426,7 @@ HelperResponse AnalyzeItemRolls(HelperRequest request)
 }
 
 internal sealed record BuildItemCatalogRequest(string InstallationPath);
+internal sealed record MeasureMemoryRequest(bool Collect);
 internal sealed record SimulateDismantlingRequest(
     string InstallationPath,
     DismantlingInputItem[] Items);

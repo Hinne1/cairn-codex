@@ -324,7 +324,7 @@ internal static class ItemRollAnalyzer
                 .Select(value => value.Number!.Value)
                 .Where(value => Math.Abs(value) > 0.01)
                 .ToArray();
-            var text = pair.Value.LastOrDefault(value => value.Text is not null)?.Text ?? string.Empty;
+            var text = pair.Value.LastOrDefault(value => value.Text is not null).Text ?? string.Empty;
             if (numbers.Length == 0 && text.Length == 0)
             {
                 continue;

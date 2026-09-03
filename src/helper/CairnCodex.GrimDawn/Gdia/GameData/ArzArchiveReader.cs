@@ -82,7 +82,6 @@ internal static class ArzArchiveReader
         ReadOnlySpan<byte> data,
         IReadOnlyList<string> strings)
     {
-        var values = new Dictionary<string, IReadOnlyList<ArzValue>>(StringComparer.Ordinal);
         var accumulated = new Dictionary<string, List<ArzValue>>(StringComparer.Ordinal);
         var offset = 0;
 
@@ -124,12 +123,7 @@ internal static class ArzArchiveReader
             offset += 8 + fieldBytes;
         }
 
-        foreach (var pair in accumulated)
-        {
-            values[pair.Key] = pair.Value;
-        }
-
-        return new ArzRecord(name, type, values);
+        return new ArzRecord(name, type, new ArzFieldMap(accumulated));
     }
 
     private static List<string> ReadStringTable(
@@ -194,14 +188,97 @@ internal sealed record ArzRecord(
     IReadOnlyDictionary<string, IReadOnlyList<ArzValue>> Values)
 {
     public string? Text(string field) =>
-        Values.TryGetValue(field, out var values) ? values.LastOrDefault(value => value.Text is not null)?.Text : null;
+        Values.TryGetValue(field, out var values) ? values.LastOrDefault(value => value.Text is not null).Text : null;
 
     public double? Number(string field) =>
-        Values.TryGetValue(field, out var values) ? values.LastOrDefault(value => value.Number is not null)?.Number : null;
+        Values.TryGetValue(field, out var values) ? values.LastOrDefault(value => value.Number is not null).Number : null;
 }
 
-internal sealed record ArzValue(string? Text, double? Number)
+internal readonly record struct ArzValue(string? Text, double? Number)
 {
     public static ArzValue FromText(string value) => new(value, null);
     public static ArzValue FromNumber(double value) => new(null, value);
+}
+
+/// <summary>
+/// Immutable, allocation-conscious field storage for parsed DBR records.
+/// A Dictionary plus one retained List per field made the expanded game database
+/// several gigabytes larger than the source archives. Parsing still uses those
+/// convenient mutable types, but the long-lived graph is reduced to sorted arrays.
+/// </summary>
+internal sealed class ArzFieldMap : IReadOnlyDictionary<string, IReadOnlyList<ArzValue>>
+{
+    private readonly Entry[] entries;
+
+    public ArzFieldMap(IReadOnlyDictionary<string, List<ArzValue>> fields)
+    {
+        entries = fields
+            .Select(pair => new Entry(pair.Key, pair.Value.ToArray()))
+            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    public int Count => entries.Length;
+
+    public IEnumerable<string> Keys
+    {
+        get
+        {
+            foreach (var entry in entries) yield return entry.Key;
+        }
+    }
+
+    public IEnumerable<IReadOnlyList<ArzValue>> Values
+    {
+        get
+        {
+            foreach (var entry in entries) yield return entry.Values;
+        }
+    }
+
+    public IReadOnlyList<ArzValue> this[string key] =>
+        TryGetValue(key, out var value) ? value : throw new KeyNotFoundException(key);
+
+    public bool ContainsKey(string key) => Find(key) >= 0;
+
+    public bool TryGetValue(string key, out IReadOnlyList<ArzValue> value)
+    {
+        var index = Find(key);
+        if (index >= 0)
+        {
+            value = entries[index].Values;
+            return true;
+        }
+
+        value = Array.Empty<ArzValue>();
+        return false;
+    }
+
+    public IEnumerator<KeyValuePair<string, IReadOnlyList<ArzValue>>> GetEnumerator()
+    {
+        foreach (var entry in entries)
+        {
+            yield return new KeyValuePair<string, IReadOnlyList<ArzValue>>(entry.Key, entry.Values);
+        }
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private int Find(string key)
+    {
+        var low = 0;
+        var high = entries.Length - 1;
+        while (low <= high)
+        {
+            var middle = low + ((high - low) >> 1);
+            var comparison = StringComparer.Ordinal.Compare(entries[middle].Key, key);
+            if (comparison == 0) return middle;
+            if (comparison < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+
+        return -1;
+    }
+
+    private readonly record struct Entry(string Key, ArzValue[] Values);
 }

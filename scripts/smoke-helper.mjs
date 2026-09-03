@@ -18,7 +18,7 @@ const lines = createInterface({ input: child.stdout })
 const pending = new Map()
 let nextId = 1
 
-function request(method) {
+function request(method, params = {}) {
   const id = String(nextId++)
   return new Promise((resolvePromise, reject) => {
     const timeout = setTimeout(() => {
@@ -26,7 +26,7 @@ function request(method) {
       reject(new Error(`Helper timed out while handling ${method}.`))
     }, 30_000)
     pending.set(id, { method, resolvePromise, reject, timeout })
-    child.stdin.write(`${JSON.stringify({ id, method, params: {} })}\n`)
+    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
   })
 }
 
@@ -46,6 +46,17 @@ lines.on('line', (line) => {
 try {
   const health = await request('health')
   if (health.protocolVersion !== 1) throw new Error('Unexpected helper protocol version.')
+
+  const memory = await request('measure-memory', { collect: true })
+  if (
+    memory.processId !== child.pid ||
+    memory.workingSetBytes <= 0 ||
+    memory.privateBytes <= 0 ||
+    memory.managedHeapBytes <= 0 ||
+    memory.managedCommittedBytes <= 0
+  ) {
+    throw new Error(`Helper memory instrumentation returned an invalid process snapshot: ${JSON.stringify(memory)}`)
+  }
 
   const write = await request('self-test-write-transaction')
   if (!write.passed) throw new Error('Verified write transaction self-test failed.')
@@ -104,7 +115,7 @@ try {
     throw new Error('Native adapter fingerprints were not reported correctly.')
   }
 
-  console.log(JSON.stringify({ health, write, dismantling, acquisition, itemPresentation, live }, null, 2))
+  console.log(JSON.stringify({ health, memory, write, dismantling, acquisition, itemPresentation, live }, null, 2))
 } finally {
   child.stdin.end()
   lines.close()

@@ -75,12 +75,28 @@ if (!process.versions.electron) {
   // Electron waits for ESM entry evaluation before emitting ready; do not await
   // whenReady at module scope or the fixture deadlocks before creating a window.
   void app.whenReady().then(async () => {
-    const window = new BrowserWindow({ show: false, width: 1440, height: 1000, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+    // Render into a software bitmap: hosted Windows runners may have no usable
+    // desktop compositor for capturePage(), even though DOM/input checks work.
+    const window = new BrowserWindow({ show: false, width: 1440, height: 1000, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true } })
     window.webContents.on('console-message', (event) => {
       if (event.level === 'error') console.error(event.message)
     })
     const evaluate = (source) => window.webContents.executeJavaScript(source)
     const settle = () => new Promise((resolveSettled) => setTimeout(resolveSettled, 50))
+    const captureFrame = () => new Promise((resolveFrame, reject) => {
+      const onPaint = (_event, _dirtyRect, image) => {
+        clearTimeout(timer)
+        window.webContents.removeListener('paint', onPaint)
+        if (image.isEmpty()) reject(new Error('Roll profile rendered an empty screenshot'))
+        else resolveFrame(image.toPNG())
+      }
+      const timer = setTimeout(() => {
+        window.webContents.removeListener('paint', onPaint)
+        reject(new Error('Roll profile screenshot paint timed out'))
+      }, 5000)
+      window.webContents.on('paint', onPaint)
+      window.webContents.invalidate()
+    })
     const key = async (keyCode) => {
       const windowsVirtualKeyCode = { Enter: 13, Space: 32, Escape: 27, Tab: 9 }[keyCode]
       const event = { key: keyCode === 'Space' ? ' ' : keyCode, code: keyCode, windowsVirtualKeyCode }
@@ -113,7 +129,7 @@ if (!process.versions.electron) {
           assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, 'expanded profiles must fit the viewport')
           await key('Escape')
           assert.equal(await evaluate('window.fixtureEvents.escapes > 0'), true, 'Escape must still reach the containing dialog')
-          await writeFile(join(testRoot, `profile-${id}-${width}.png`), (await window.webContents.capturePage()).toPNG())
+          await writeFile(join(testRoot, `profile-${id}-${width}.png`), await captureFrame())
           await key('Space')
           assert.equal(await evaluate(`document.querySelector('#${id} details').open`), false, 'Space collapses hidden categories')
           await key('Tab')

@@ -108,6 +108,10 @@ import { ArchiveDomainService } from './ipc/archive-service.ts'
 import { LiveTransferDomainService } from './ipc/live-transfer-service.ts'
 import { LiveGameDomainService } from './ipc/live-game-service.ts'
 import { DiagnosticExportService } from './ipc/diagnostic-export-service.ts'
+import {
+  readCollectionSnapshotCache,
+  writeCollectionSnapshotCache
+} from './collection-snapshot-cache.ts'
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -2994,24 +2998,7 @@ async function attachItemIcons(
 }
 
 async function readCollectionCache(path: string): Promise<CollectionSnapshot | null> {
-  try {
-    const parsed = JSON.parse(await readFile(path, 'utf8')) as CollectionSnapshot
-    if (
-      parsed.catalogPresentationVersion !== CATALOG_PRESENTATION_VERSION ||
-      !Array.isArray(parsed.items) ||
-      !Array.isArray(parsed.plannerItems) ||
-      !Array.isArray(parsed.supplies) ||
-      !Array.isArray(parsed.materials) ||
-      !Array.isArray(parsed.accountStores) ||
-      !Array.isArray(parsed.observedItems) ||
-      !Array.isArray(parsed.scannedStashes)
-    ) {
-      return null
-    }
-    return parsed
-  } catch {
-    return null
-  }
+  return readCollectionSnapshotCache(path, CATALOG_PRESENTATION_VERSION)
 }
 
 async function loadMapLocationIndex(
@@ -3173,7 +3160,7 @@ async function writeJsonCache(path: string, value: unknown): Promise<void> {
 }
 
 async function writeCollectionCache(path: string, snapshot: CollectionSnapshot): Promise<void> {
-  await writeJsonCache(path, snapshot)
+  await writeCollectionSnapshotCache(path, snapshot)
 }
 
 function projectCollectionSources(

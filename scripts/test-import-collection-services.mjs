@@ -7,7 +7,8 @@ import {
 } from '../src/main/ipc/import-service.ts'
 import {
   ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT,
-  CollectionService
+  CollectionService,
+  preserveUnavailableCollectionKnowledge
 } from '../src/main/ipc/collection-service.ts'
 
 function deferred() {
@@ -306,6 +307,79 @@ function collectionDependencies(overrides = {}) {
   const afterFailure = await service.getCached({ sourcePaths: ['old.gst'], basis: 'stashes' })
   assert.equal(afterFailure.fixtureName, 'old-cache')
   assert.equal(presentCalls, 2, 'failed persistence must not present the new scan')
+}
+
+// A stale or temporarily unreadable map index must not hide durable character/account
+// knowledge. The caller receives the cache with an explicit refresh marker.
+{
+  const service = new CollectionService(collectionDependencies({
+    freshness: {
+      isMapIndexFresh: async () => false,
+      areSourcesFresh: async () => true
+    }
+  }))
+  const cached = await service.getCached({ sourcePaths: [], basis: 'stashes' })
+  assert.equal(cached.fixtureName, 'cached')
+  assert.equal(cached.cacheNeedsRefresh, true)
+}
+
+// Explicit read failures retain only the affected source. A successfully read
+// empty source remains empty, rather than resurrecting an old quantity.
+{
+  const failedPath = 'C:/saves/failed.gst'
+  const emptyPath = 'C:/saves/empty.gst'
+  const previous = {
+    ...collectionSnapshot('previous'),
+    scannedStashes: [
+      { path: failedPath, isHardcore: false, modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'failed-old' },
+      { path: emptyPath, isHardcore: false, modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'empty-old' }
+    ],
+    observedItems: [
+      { sourcePath: failedPath, baseRecord: 'records/failed.dbr' },
+      { sourcePath: emptyPath, baseRecord: 'records/empty.dbr' }
+    ],
+    accountStores: [{
+      path: 'C:/saves/reagents.gst', kind: 'reagents', isHardcore: false,
+      itemCount: 2, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'store-old',
+      entries: [{ record: 'records/component.dbr', quantity: 2 }]
+    }]
+  }
+  const current = {
+    ...collectionSnapshot('current'),
+    scannedStashes: [
+      { path: emptyPath, isHardcore: false, modLabel: '', itemCount: 0, lastWriteUtc: '2026-09-01T12:00:00Z', sha256: 'empty-new' }
+    ],
+    warnings: [
+      { path: failedPath, message: 'locked' },
+      { path: 'C:/saves/reagents.gst', message: 'locked' }
+    ],
+    accountStores: []
+  }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.deepEqual(
+    reconciled.scannedStashes.map((stash) => [stash.path, stash.itemCount]),
+    [[emptyPath, 0], [failedPath, 1]]
+  )
+  assert.deepEqual(
+    reconciled.observedItems.map((item) => item.baseRecord),
+    ['records/failed.dbr'],
+    'the successfully read empty stash must not retain its previous item'
+  )
+  assert.equal(reconciled.accountStores[0].entries[0].quantity, 2)
+  assert.equal(reconciled.cacheNeedsRefresh, true)
+}
+
+// Learned recipes are monotonic even when a later scan has only a partial view
+// of the formula files.
+{
+  const item = (knownSoftcore) => ({
+    record: 'records/relic.dbr',
+    acquisition: { crafting: { blueprintRecords: ['records/formula.dbr'], knownSoftcore, knownHardcore: false } }
+  })
+  const previous = { ...collectionSnapshot('previous'), items: [item(true)] }
+  const current = { ...collectionSnapshot('current'), items: [item(false)] }
+  const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
+  assert.equal(reconciled.items[0].acquisition.crafting.knownSoftcore, true)
 }
 
 // Rebuild requests force map regeneration before durable publication.

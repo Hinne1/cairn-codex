@@ -114,6 +114,102 @@ export interface CollectionHydrationServiceRequest {
   onProgress?(progress: CollectionHydrationProgress): void
 }
 
+function normalizedPath(path: string): string {
+  return path.replaceAll('\\', '/').toLocaleLowerCase()
+}
+
+function mergeKnownFlag(
+  current: boolean | null,
+  previous: boolean | null
+): boolean | null {
+  if (current === true || previous === true) return true
+  if (current === false) return false
+  return previous
+}
+
+function preserveRecipeKnowledge(
+  current: CollectionSnapshot['items'],
+  previous: CollectionSnapshot['items']
+): CollectionSnapshot['items'] {
+  const previousByRecord = new Map(
+    previous.map((item) => [item.record.toLocaleLowerCase(), item])
+  )
+  return current.map((item) => {
+    const priorCrafting = previousByRecord.get(item.record.toLocaleLowerCase())
+      ?.acquisition?.crafting
+    const crafting = item.acquisition?.crafting
+    if (!crafting || !priorCrafting) return item
+    const knownSoftcore = mergeKnownFlag(crafting.knownSoftcore, priorCrafting.knownSoftcore)
+    const knownHardcore = mergeKnownFlag(crafting.knownHardcore, priorCrafting.knownHardcore)
+    if (
+      knownSoftcore === crafting.knownSoftcore &&
+      knownHardcore === crafting.knownHardcore
+    ) return item
+    return {
+      ...item,
+      acquisition: {
+        ...item.acquisition!,
+        crafting: { ...crafting, knownSoftcore, knownHardcore }
+      }
+    }
+  })
+}
+
+/**
+ * Keeps durable knowledge from sources which the latest scan explicitly failed
+ * to read. A successfully scanned empty source is deliberately not retained:
+ * zero is valid data and must be allowed to replace an older quantity.
+ *
+ * Recipe ownership is learned account knowledge, so a later partial formula
+ * scan cannot revoke a blueprint the app has already observed.
+ */
+export function preserveUnavailableCollectionKnowledge(
+  current: CollectionSnapshot,
+  previous: CollectionSnapshot | null
+): CollectionSnapshot {
+  if (!previous) return current
+
+  const failedPaths = new Set(current.warnings.map((warning) => normalizedPath(warning.path)))
+  const currentStashPaths = new Set(current.scannedStashes.map((stash) => normalizedPath(stash.path)))
+  const retainedStashes = previous.scannedStashes.filter((stash) => {
+    const path = normalizedPath(stash.path)
+    return failedPaths.has(path) && !currentStashPaths.has(path)
+  })
+  const retainedStashPaths = new Set(retainedStashes.map((stash) => normalizedPath(stash.path)))
+
+  const currentStoreKeys = new Set((current.accountStores ?? []).map((store) =>
+    `${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`
+  ))
+  const retainedStores = (previous.accountStores ?? []).filter((store) => {
+    const path = normalizedPath(store.path)
+    const key = `${path}:${store.kind}:${store.isHardcore}`
+    return failedPaths.has(path) && !currentStoreKeys.has(key)
+  })
+
+  const mergeCatalog = (
+    latest: CollectionSnapshot['items'] | undefined,
+    prior: CollectionSnapshot['items'] | undefined
+  ): CollectionSnapshot['items'] | undefined => {
+    if (!latest) return latest
+    return preserveRecipeKnowledge(latest, prior ?? [])
+  }
+
+  return {
+    ...current,
+    scannedStashes: [...current.scannedStashes, ...retainedStashes],
+    observedItems: [
+      ...current.observedItems,
+      ...previous.observedItems.filter((item) => retainedStashPaths.has(normalizedPath(item.sourcePath)))
+    ],
+    accountStores: [...(current.accountStores ?? []), ...retainedStores],
+    items: preserveRecipeKnowledge(current.items, previous.items),
+    plannerItems: mergeCatalog(current.plannerItems, previous.plannerItems),
+    supplies: mergeCatalog(current.supplies, previous.supplies),
+    materials: mergeCatalog(current.materials, previous.materials),
+    cacheNeedsRefresh: retainedStashes.length > 0 || retainedStores.length > 0
+  }
+}
+
 /**
  * Owns collection cache, refresh, rebuild, and bounded hydration orchestration.
  * No dependency knows about Electron; each one represents a concrete low-level
@@ -168,9 +264,11 @@ export class CollectionService {
   async getCached(request: CollectionRequest): Promise<CollectionSnapshot | null> {
     const snapshot = await this.loadLatest()
     if (!snapshot) return null
-    if (!(await this.dependencies.freshness.isMapIndexFresh())) return null
-
-    const cacheNeedsRefresh = !(await this.dependencies.freshness.areSourcesFresh(snapshot))
+    const [mapIndexFresh, sourcesFresh] = await Promise.all([
+      this.dependencies.freshness.isMapIndexFresh(),
+      this.dependencies.freshness.areSourcesFresh(snapshot)
+    ])
+    const cacheNeedsRefresh = !mapIndexFresh || !sourcesFresh || snapshot.cacheNeedsRefresh === true
     const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
     return {
       ...(await this.dependencies.projector.present(projected, request.basis)),
@@ -265,8 +363,10 @@ export class CollectionService {
     snapshot: CollectionSnapshot,
     request: CollectionRequest
   ): Promise<CollectionSnapshot> {
+    const previous = await this.loadLatest()
+    const reconciled = preserveUnavailableCollectionKnowledge(snapshot, previous)
     const persisted = {
-      ...this.dependencies.archive.persistSnapshot(snapshot),
+      ...this.dependencies.archive.persistSnapshot(reconciled),
       catalogPresentationVersion: this.dependencies.catalogPresentationVersion
     }
     // Publish the new in-memory snapshot only after the cache write succeeds.

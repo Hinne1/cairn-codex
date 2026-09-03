@@ -98,6 +98,19 @@ try {
     throw new Error('Item-presentation linked-skill self-test failed.')
   }
 
+  const rollRatings = await request('self-test-roll-ratings')
+  if (
+    !rollRatings.passed ||
+    rollRatings.assertions < 47 ||
+    !rollRatings.dualDamagePassed ||
+    !rollRatings.rangeGroupingPassed ||
+    !rollRatings.petIsolationPassed ||
+    !rollRatings.fallbackPassed ||
+    !rollRatings.combinationRarityPassed
+  ) {
+    throw new Error('Item roll category self-test failed.')
+  }
+
   const live = await request('self-test-live-queue')
   if (
     !live.passed ||
@@ -115,7 +128,7 @@ try {
     throw new Error('Native adapter fingerprints were not reported correctly.')
   }
 
-  console.log(JSON.stringify({ health, memory, write, dismantling, acquisition, itemPresentation, live }, null, 2))
+  console.log(JSON.stringify({ health, memory, write, dismantling, acquisition, itemPresentation, rollRatings, live }, null, 2))
 } finally {
   child.stdin.end()
   lines.close()

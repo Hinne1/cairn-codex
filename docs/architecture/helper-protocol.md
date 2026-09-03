@@ -175,3 +175,41 @@ percentile. Min/max members of one displayed damage range are averaged as one
 stat line before the overall arithmetic mean is calculated. This is an
 auditable auto-best heuristic, not a claim that all stats have equal gameplay
 value; pinned-best remains a separate user choice.
+
+Roll model v9 exposes a compact category profile. Item stat lines are
+classified as offense, retaliation, defense, or utility; pet-bonus lines remain
+isolated in a conditional pet category. Typed ordinary damage produces separate
+offense lanes (for example Fire and Lightning), while retaliation is kept out of
+ordinary offense and scored in its own specialist lane. Universal offense such
+as Offensive Ability and attack speed contributes to every typed lane on that
+template. Elemental offense remains an umbrella lane; when
+Fire, Cold, or Lightning lanes exist, Elemental rolls also contribute to each of
+those lanes because percent Elemental bonuses apply their full value to all
+three, while flat Elemental damage represents an equal three-way split. A
+multi-damage item therefore retains each supported perspective instead of
+guessing the player's build. Unknown future modeled fields fall back to utility
+so a roll can never silently disappear from the profile.
+
+Each variable stat exposes `qualityPercent = clamp(100 * (value - sampledMin) /
+(sampledMax - sampledMin), 0, 100)`, separately from `estimatedPercentile`.
+Fixed/untrusted stats have null quality. Each category's `qualityPercent` is the
+arithmetic mean of these range-quality values, with min/max members normalized
+individually and averaged as one stat group. A category always lies between its
+weakest and strongest included group. All-max rolls receive 100% even for discrete
+stats. For example, equally frequent 7/8/9 values give quality 0/50/100 while a 9
+has percentile rank 83.33. The category's legacy `estimatedPercentile` remains an
+average of marginal ranks for audit compatibility; it is not its displayed quality.
+
+`combinationPercentile` ranks the category quality against averages of the same
+range-quality calculation over the sampled seeds, preserving correlations and
+grouping. `78% (98th)` means 78% average range quality and a 98th-percentile rank
+for that average, not an average marginal percentile. Ranks count samples below the score plus
+half of tied samples (midrank). Their complement is not the fraction that scored
+as high or higher; for example, a maximum shared by 20% of samples ranks at the
+90th percentile, not a 10% chance of matching it. It does not claim that the item suits
+a particular build. For a Monster Infrequent, the comparison population is the
+exact base/prefix/suffix template, so the score rates the values rolled by that
+affix combination rather than whether the affixes themselves are desirable. The legacy
+overall and base/prefix/suffix aggregates remain in the response for storage
+compatibility, but the copy-comparison header presents the category profile
+instead of the overall aggregate.

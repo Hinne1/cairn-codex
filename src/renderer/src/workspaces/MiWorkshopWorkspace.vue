@@ -5,13 +5,14 @@ import { compileSearchQuery } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
+import RollCategoryProfile from '../components/RollCategoryProfile.vue'
 import ToolHeader from '../components/ToolHeader.vue'
+import { rollCategoryScores } from '../roll-rating'
 import { searchGuidance } from '../search-guidance'
 import {
   buildMiMetricOptions,
   createMiWorkshopProjectionControls,
   createMiWorkshopRows,
-  formatPercentile,
   miMetricLabel,
   miMetricResult,
   type MiWorkshopControls,
@@ -36,7 +37,7 @@ const emit = defineEmits<{
   'show-tooltip': [item: CollectionItem, element: HTMLElement, copy: ObservedStashItem]
   'move-tooltip': [event: MouseEvent]
   'hide-tooltip': []
-  'open-item': [item: CollectionItem]
+  'open-item': [item: CollectionItem, referenceInstanceKey?: string]
 }>()
 
 const controls = defineModel<MiWorkshopControls>('controls', { required: true })
@@ -68,6 +69,9 @@ const showReserves = computed({
 const structuredQuery = computed(() => compileSearchQuery(query.value, searchQueryOptions(searchSchemas.miWorkshop)))
 const metricOptions = computed(() => buildMiMetricOptions(props.copies))
 const selectedMetricLabel = computed(() => miMetricLabel(metricOptions.value, metric.value))
+const selectedCategoryKey = computed(() => metric.value.startsWith('category:')
+  ? metric.value.slice('category:'.length)
+  : null)
 const projectionControls = createMiWorkshopProjectionControls(controls)
 const rows = computed(() => createMiWorkshopRows({
   items: props.items,
@@ -103,7 +107,7 @@ defineExpose({ syncNativeControls })
     <ToolHeader
       eyebrow="Monster Infrequent research"
       title="MI Workshop"
-      description="Physical copies retain their exact level tier here regardless of the completion-counting preference. Affix combinations are grouped below, with the strongest rolled copy leading each group."
+      description="Physical copies retain their exact level tier here regardless of the completion-counting preference. Affix combinations are grouped below, with the strongest rolled copy leading each group. Roll quality compares values within that exact base, prefix, and suffix; it does not judge whether the affixes fit a build."
       tone="green"
     >
       <template #aside>
@@ -186,7 +190,7 @@ defineExpose({ syncNativeControls })
       layout="table"
       interactive
       item-described-by="item-tooltip"
-      @activate="(_key, row) => emit('open-item', row.base)"
+      @activate="(_key, row) => emit('open-item', row.base, row.leader.instanceKey)"
       @item-focus="showFocusedTooltip"
       @item-blur="emit('hide-tooltip')"
     >
@@ -218,10 +222,12 @@ defineExpose({ syncNativeControls })
           <span role="gridcell" :class="['affix-name', row.suffixRarity]">{{ row.suffix }}</span>
           <span role="gridcell" class="mi-score-breakdown">
             <span class="mi-selected-score"><small>Selected</small><strong>{{ row.selectedMetric.display }}</strong></span>
-            <span><small>Overall</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.overallEstimatedPercentile) }}</strong></span>
-            <span><small>Base</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.baseEstimatedPercentile) }}</strong></span>
-            <span><small>Prefix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.prefixEstimatedPercentile) }}</strong></span>
-            <span><small>Suffix</small><strong>{{ formatPercentile(row.leader.rollAnalysis?.suffixEstimatedPercentile) }}</strong></span>
+            <RollCategoryProfile
+              :scores="rollCategoryScores(row.leader.rollAnalysis)"
+              :exclude-key="selectedCategoryKey"
+              :max-visible="4"
+              compact
+            />
           </span>
           <span role="gridcell" class="mi-stored-cell">
             <strong>{{ row.copies.length }}</strong>

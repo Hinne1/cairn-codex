@@ -6,14 +6,17 @@ import { compileSearchQuery, type SearchDocument } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
+import { formatCategoryScore, rollCategoryLabel } from '../roll-rating'
 import { searchGuidance } from '../search-guidance'
 import {
+  collectionRollSortOptions,
   collectionCategories,
   createCollectionMaterialsProjectionControls,
   createCollectionMaterialsQueryDebouncer,
   createCollectionMaterialsRows,
   updateCollectionMaterialsControls,
-  type CollectionMaterialsControls
+  type CollectionMaterialsControls,
+  type CollectionRollSummaries
 } from './collection-materials'
 
 const props = defineProps<{
@@ -24,6 +27,7 @@ const props = defineProps<{
   categoryProgress: (category: string) => string
   iconUrlForItem: (item: CollectionItem) => string | null
   bestStoredCopyForItem: (record: string) => VaultListItem | null
+  rollSummaries?: CollectionRollSummaries
   liveReady: boolean
   retrievalBusy: boolean
 }>()
@@ -33,7 +37,7 @@ const emit = defineEmits<{
   'show-tooltip': [item: CollectionItem, element: HTMLElement]
   'move-tooltip': [event: MouseEvent]
   'hide-tooltip': []
-  'open-item': [item: CollectionItem]
+  'open-item': [item: CollectionItem, referenceInstanceKey?: string]
   'retrieve-live': [id: string]
 }>()
 
@@ -55,6 +59,11 @@ const rarity = controlModel('rarity')
 const sort = controlModel('sort')
 const direction = controlModel('direction')
 const page = controlModel('page', false)
+watch([() => props.mode, sort], ([mode, value]) => {
+  if (mode === 'collection' && value.startsWith('roll-') && ownership.value !== 'owned') {
+    ownership.value = 'owned'
+  }
+}, { immediate: true })
 const projectionQuery = ref(query.value)
 const projectionControls = createCollectionMaterialsProjectionControls(controls, projectionQuery)
 const queryDebouncer = createCollectionMaterialsQueryDebouncer((value) => {
@@ -70,11 +79,18 @@ const structuredQuery = computed(() => compileSearchQuery(
   projectionQuery.value,
   searchQueryOptions(props.mode === 'materials' ? searchSchemas.materials : searchSchemas.collection)
 ))
+const selectedRollSort = computed(() => collectionRollSortOptions.find((option) => option.value === sort.value) ?? null)
+const selectedRollLabel = computed(() => {
+  const label = selectedRollSort.value?.label
+  if (!label) return null
+  return label === 'Offense · strongest type' ? 'Offense' : label.replace('Offense · ', '')
+})
 const rows = computed(() => createCollectionMaterialsRows(props.items, projectionControls.value, {
   mode: props.mode,
   query: structuredQuery.value,
   doubleRareMiBaseRecords: props.doubleRareMiBaseRecords,
-  searchDocument: props.searchDocumentForItem
+  searchDocument: props.searchDocumentForItem,
+  rollSummaries: props.rollSummaries
 }))
 const searchError = computed(() => {
   const error = structuredQuery.value.error
@@ -82,10 +98,13 @@ const searchError = computed(() => {
 })
 
 function changeSort(value: CollectionMaterialsControls['sort']): void {
-  const nextDirection = sort.value === value
+  const nextDirection: CollectionMaterialsControls['direction'] = sort.value === value
     ? (direction.value === 'asc' ? 'desc' : 'asc')
     : value === 'name' ? 'asc' : 'desc'
-  controls.value = updateCollectionMaterialsControls(controls.value, { sort: value, direction: nextDirection }, true)
+  const patch = props.mode === 'collection' && value.startsWith('roll-')
+    ? { sort: value, direction: nextDirection, ownership: 'owned' as const }
+    : { sort: value, direction: nextDirection }
+  controls.value = updateCollectionMaterialsControls(controls.value, patch, true)
 }
 
 function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
@@ -105,6 +124,22 @@ function rarityLabel(item: CollectionItem): string {
   if (item.rarity === 'component') return 'Component'
   if (item.rarity === 'consumable') return item.slot === 'potion-formula' ? 'Learned formula' : 'Consumable'
   return item.rarity.charAt(0).toLocaleUpperCase() + item.rarity.slice(1)
+}
+
+function rollSummary(item: CollectionItem) {
+  return props.rollSummaries?.get(item.record.toLocaleLowerCase()) ?? null
+}
+
+function rollSummaryTitle(item: CollectionItem): string {
+  const summary = rollSummary(item)
+  if (!summary) return selectedRollLabel.value
+    ? `No trusted ${selectedRollLabel.value} category roll is available yet.`
+    : 'No trusted category roll is available yet.'
+  const context = sort.value.startsWith('roll-') ? 'Best matching category roll' : 'Strongest category roll'
+  const miCaveat = item.rarity === 'mi'
+    ? ' This rates the variable values on that exact base, prefix, and suffix; it does not rate whether those affixes suit a build.'
+    : ''
+  return `${context} among available copies. First value: average range quality (0% minimum, 100% maximum). Parentheses: percentile of that quality average for this exact item template. Opening the card uses that copy as the reference.${miCaveat}`
 }
 
 function showFocusedTooltip(_key: string | number, item: CollectionItem, element: HTMLElement): void {
@@ -136,7 +171,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
         <label v-else><span>Rarity</span><select v-model="rarity" autocomplete="off"><option value="all">All rarities</option><option value="legendary">Legendary</option><option value="epic">Epic</option><option value="mi">Monster Infrequent</option><option value="double-rare">Double rare MIs</option><option value="rare">Rare items</option><option value="recipe">Craftable from recipe</option></select></label>
       </template>
       <template #sort>
-        <label><span>Sort by</span><select :value="sort" autocomplete="off" @change="changeSort(($event.target as HTMLSelectElement).value as CollectionMaterialsControls['sort'])"><option value="recent">Recently collected</option><option value="completion">Collected status</option><option value="name">Name</option><option value="level">Level</option><option value="roll">Best roll</option></select></label>
+        <label><span>Sort by</span><select :value="sort" autocomplete="off" @change="changeSort(($event.target as HTMLSelectElement).value as CollectionMaterialsControls['sort'])"><option value="recent">Recently collected</option><option value="completion">Collected status</option><option value="name">Name</option><option value="level">Level</option><optgroup v-if="mode === 'collection'" label="Roll quality"><option v-for="option in collectionRollSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option></optgroup></select></label>
         <label><span>Order</span><select v-model="direction" autocomplete="off"><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
       </template>
     </ExplorerToolbar>
@@ -153,7 +188,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
       layout="grid"
       interactive
       item-described-by="item-tooltip"
-      @activate="(_key, item) => emit('open-item', item)"
+      @activate="(_key, item) => emit('open-item', item, rollSummary(item)?.copy.instanceKey)"
       @item-focus="showFocusedTooltip"
       @item-blur="emit('hide-tooltip')"
     >
@@ -177,15 +212,18 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
             <small v-if="item.setName">{{ item.setName }}</small>
           </div>
           <div class="card-result">
-            <strong v-if="mode !== 'materials' && item.bestRollPercentile !== null" class="roll-score">★ {{ item.bestRollPercentile.toFixed(1) }}%</strong>
-            <span v-else-if="mode !== 'materials'" class="roll-score dim">★ —</span>
+            <span v-if="mode !== 'materials' && rollSummary(item)" class="card-roll-score" :title="rollSummaryTitle(item)">
+              <small>{{ rollCategoryLabel(rollSummary(item)!.score) }} roll</small>
+              <strong>{{ formatCategoryScore(rollSummary(item)!.score) }}</strong>
+            </span>
+            <span v-else-if="mode !== 'materials'" class="card-roll-score dim" :title="rollSummaryTitle(item)">{{ selectedRollLabel ?? 'Rolls' }} —</span>
             <strong v-if="item.availableCount > 0">{{ item.availableCount }} {{ mode === 'materials' ? (item.slot === 'potion-formula' ? 'learned' : 'stored') : item.availableCount === 1 ? 'copy' : 'copies' }}</strong>
             <strong v-else-if="itemAvailableByAwakeningOnly(item)" class="awakening-available">{{ awakeningAvailabilityLabel(item) }}</strong>
             <strong v-else-if="item.recipeUnlocked">Recipe unlocked · no stored copy</strong>
             <strong v-else-if="item.discovered">Discovered · no copies</strong>
             <strong v-else>Not found</strong>
           </div>
-          <button v-if="liveReady && bestStoredCopyForItem(item.record)" class="card-live-retrieve" type="button" :disabled="retrievalBusy" title="Return the best stored copy to Grim Dawn" @click.stop="emit('retrieve-live', bestStoredCopyForItem(item.record)!.id)">Retrieve live</button>
+          <button v-if="liveReady && bestStoredCopyForItem(item.record)" class="card-live-retrieve" type="button" :disabled="retrievalBusy" title="Return the pinned, selected-category, or only stored copy to Grim Dawn" @click.stop="emit('retrieve-live', bestStoredCopyForItem(item.record)!.id)">Retrieve live</button>
           <span v-if="item.pinnedInstanceKey" class="pin-indicator">Pinned choice</span>
         </article>
       </template>

@@ -7,6 +7,15 @@ import type {
 } from '@shared/contracts'
 import type { CompiledSearchQuery } from '@shared/search-query'
 import type { AppRoute, MiMetricKey, SortDirection } from '../app-route'
+import {
+  categoryMetricKey,
+  categoryScoreForMetric,
+  formatCategoryScore,
+  rollCategoryLabel,
+  rollStatQuality,
+  formatCombinationPercentile,
+  rollCategoryScores
+} from '../roll-rating.ts'
 
 export type MiWorkshopControls = Extract<AppRoute, { workspace: 'mi-workshop' }>['controls']
 
@@ -97,18 +106,26 @@ export function miFamilyKey(item: CollectionItem): string {
 export function buildMiMetricOptions(copies: readonly ObservedStashItem[]): MiMetricOptions {
   const itemFields = new Set<string>()
   const petFields = new Set<string>()
+  const categories = new Map<string, MiMetricOption>()
   for (const copy of copies) {
     for (const stat of copy.rollAnalysis?.stats ?? []) itemFields.add(stat.field)
     for (const stat of copy.rollAnalysis?.petStats ?? []) petFields.add(stat.field)
+    for (const score of rollCategoryScores(copy.rollAnalysis)) {
+      categories.set(score.key, {
+        key: categoryMetricKey(score),
+        label: `${rollCategoryLabel(score)} roll`
+      })
+    }
   }
   const byLabel = (left: string, right: string) =>
     humanStatName(left).localeCompare(humanStatName(right)) || left.localeCompare(right)
   return {
     quality: [
-      { key: 'overall', label: 'Overall roll quality' },
-      { key: 'base', label: 'Base roll quality' },
-      { key: 'prefix', label: 'Prefix roll quality' },
-      { key: 'suffix', label: 'Suffix roll quality' }
+      { key: 'overall', label: 'All rolls · legacy average' },
+      ...categories.values(),
+      { key: 'base', label: 'Base · legacy percentile average' },
+      { key: 'prefix', label: 'Prefix · legacy percentile average' },
+      { key: 'suffix', label: 'Suffix · legacy percentile average' }
     ],
     item: [...itemFields].sort(byLabel).map((field) => ({
       key: `item:${field}` as MiMetricKey,
@@ -124,7 +141,8 @@ export function buildMiMetricOptions(copies: readonly ObservedStashItem[]): MiMe
 export function miMetricLabel(options: MiMetricOptions, metric: MiMetricKey): string {
   const option = [...options.quality, ...options.item, ...options.pet]
     .find((candidate) => candidate.key === metric)
-  if (!option) return 'Overall roll quality'
+  if (!option) return 'All rolls · legacy average'
+  if (metric.startsWith('category:')) return option.label
   return metric.startsWith('pet:') ? `Pet · ${option.label}` : option.label
 }
 
@@ -217,14 +235,24 @@ export function miMetricResult(copy: ObservedStashItem, metric: MiMetricKey): Mi
     const value = qualityValues[metric]
     return { value, percentile: value, display: formatPercentile(value) }
   }
+  const categoryScore = categoryScoreForMetric(analysis, metric)
+  if (categoryScore) {
+    return {
+      value: categoryScore.qualityPercent ?? null,
+      percentile: categoryScore.combinationPercentile ?? null,
+      display: formatCategoryScore(categoryScore)
+    }
+  }
   const pet = metric.startsWith('pet:')
   const field = metric.slice(metric.indexOf(':') + 1)
   const stat = (pet ? analysis.petStats : analysis.stats)?.find((candidate) => candidate.field === field)
   if (!stat) return { value: null, percentile: null, display: '—' }
+  const quality = rollStatQuality(stat)
+  const rank = formatCombinationPercentile(stat.estimatedPercentile)
   return {
     value: stat.value,
     percentile: stat.estimatedPercentile,
-    display: `${formatRollValue(stat.value)}${stat.estimatedPercentile === null ? '' : ` · ${stat.estimatedPercentile.toFixed(0)}%`}`
+    display: `${formatRollValue(stat.value)}${quality === null ? '' : ` · ${Math.round(quality)}%${rank ? ` (${rank})` : ''}`}`
   }
 }
 

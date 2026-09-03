@@ -154,6 +154,17 @@ function shouldRetainMissingSource(
   return !replacementRootAppeared
 }
 
+function recipeKnowledgeCanCarryForward(
+  current: CollectionSnapshot,
+  previous: CollectionSnapshot
+): boolean {
+  if (current.discovery.saveLocations.length === 0) return true
+  const previousRootKeys = new Set(previous.discovery.saveLocations.map(saveLocationKey))
+  return current.discovery.saveLocations.some((location) =>
+    previousRootKeys.has(saveLocationKey(location))
+  )
+}
+
 function mergeKnownFlag(
   current: boolean | null,
   previous: boolean | null
@@ -231,6 +242,7 @@ export function preserveUnavailableCollectionKnowledge(
 
   const retainedSourceCount = retainedStashes.length + retainedStores.length
   const previousAsOfUtc = previous.cachedDataAsOfUtc ?? previous.scannedAtUtc
+  const recipePrevious = recipeKnowledgeCanCarryForward(current, previous) ? previous : null
   return {
     ...current,
     scannedStashes: [...current.scannedStashes, ...retainedStashes],
@@ -239,10 +251,10 @@ export function preserveUnavailableCollectionKnowledge(
       ...previous.observedItems.filter((item) => retainedStashPaths.has(normalizedPath(item.sourcePath)))
     ],
     accountStores: [...(current.accountStores ?? []), ...retainedStores],
-    items: preserveRecipeKnowledge(current.items, previous.items),
-    plannerItems: mergeCatalog(current.plannerItems, previous.plannerItems),
-    supplies: mergeCatalog(current.supplies, previous.supplies),
-    materials: mergeCatalog(current.materials, previous.materials),
+    items: preserveRecipeKnowledge(current.items, recipePrevious?.items ?? []),
+    plannerItems: mergeCatalog(current.plannerItems, recipePrevious?.plannerItems),
+    supplies: mergeCatalog(current.supplies, recipePrevious?.supplies),
+    materials: mergeCatalog(current.materials, recipePrevious?.materials),
     cacheNeedsRefresh: retainedSourceCount > 0,
     cachedDataAsOfUtc: retainedSourceCount > 0 ? previousAsOfUtc : undefined
   }

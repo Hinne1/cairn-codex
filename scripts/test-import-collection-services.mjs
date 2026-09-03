@@ -429,7 +429,11 @@ function collectionDependencies(overrides = {}) {
       path: `${previousRoot}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 1,
       lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'account-42'
     }],
-    observedItems: [{ sourcePath: `${previousRoot}/transfer.gst`, baseRecord: 'records/account-42.dbr' }]
+    observedItems: [{ sourcePath: `${previousRoot}/transfer.gst`, baseRecord: 'records/account-42.dbr' }],
+    items: [{
+      record: 'records/account-recipe.dbr',
+      acquisition: { crafting: { blueprintRecords: ['records/account-formula.dbr'], knownSoftcore: true, knownHardcore: false } }
+    }]
   }
   const current = {
     ...collectionSnapshot('account-99'),
@@ -440,11 +444,16 @@ function collectionDependencies(overrides = {}) {
     scannedStashes: [{
       path: `${currentRoot}/transfer.gst`, isHardcore: false, modLabel: '', itemCount: 0,
       lastWriteUtc: '2026-09-01T12:00:00Z', sha256: 'account-99'
+    }],
+    items: [{
+      record: 'records/account-recipe.dbr',
+      acquisition: { crafting: { blueprintRecords: ['records/account-formula.dbr'], knownSoftcore: false, knownHardcore: false } }
     }]
   }
   const reconciled = preserveUnavailableCollectionKnowledge(current, previous)
   assert.deepEqual(reconciled.scannedStashes.map((stash) => stash.path), [`${currentRoot}/transfer.gst`])
   assert.deepEqual(reconciled.observedItems, [])
+  assert.equal(reconciled.items[0].acquisition.crafting.knownSoftcore, false)
   assert.equal(reconciled.cacheNeedsRefresh, false)
 }
 

@@ -67,6 +67,21 @@ try {
   }), 'utf8')
   assert.equal(await readCollectionSnapshotCache(path), null)
 
+  const malformedPresentation = {
+    ...snapshot,
+    items: [{
+      record: 'records/item.dbr', name: 'Broken', rarity: 'legendary', itemClass: 'Armor',
+      slot: 'chest', availableCount: 1, presentation: {}
+    }]
+  }
+  await writeFile(path, JSON.stringify({
+    version: COLLECTION_SNAPSHOT_CACHE_VERSION,
+    savedAtUtc: '2026-09-03T12:01:00.000Z',
+    snapshotSha256: createHash('sha256').update(JSON.stringify(malformedPresentation)).digest('hex'),
+    snapshot: malformedPresentation
+  }), 'utf8')
+  assert.equal(await readCollectionSnapshotCache(path), null)
+
   await writeFile(path, '{corrupted', 'utf8')
   assert.equal(await readCollectionSnapshotCache(path), null)
 } finally {

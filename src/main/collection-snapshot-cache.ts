@@ -19,11 +19,73 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function isNullableString(value: unknown): boolean {
+  return value === null || typeof value === 'string'
+}
+
+function isPresentationLine(value: unknown): boolean {
+  return isRecord(value) && typeof value.label === 'string' &&
+    (value.minimum === null || isFiniteNumber(value.minimum)) &&
+    (value.maximum === null || isFiniteNumber(value.maximum)) &&
+    typeof value.unit === 'string' && typeof value.tone === 'string' &&
+    typeof value.prefix === 'string' && typeof value.suffix === 'string'
+}
+
+function isGrantedSkill(value: unknown, depth = 0): boolean {
+  if (!isRecord(value) || depth > 8) return false
+  return typeof value.name === 'string' && isNullableString(value.description) &&
+    isNullableString(value.trigger) && Array.isArray(value.lines) &&
+    value.lines.every(isPresentationLine) && Array.isArray(value.linkedSkills) &&
+    value.linkedSkills.every((skill) => isGrantedSkill(skill, depth + 1))
+}
+
+function isPresentationSection(value: unknown): boolean {
+  return isRecord(value) && typeof value.kind === 'string' &&
+    isNullableString(value.heading) && Array.isArray(value.lines) &&
+    value.lines.every(isPresentationLine)
+}
+
+function isItemPresentation(value: unknown): boolean {
+  return isRecord(value) && isNullableString(value.flavorText) &&
+    Array.isArray(value.sections) && value.sections.every(isPresentationSection) &&
+    (value.grantedSkill === null || isGrantedSkill(value.grantedSkill)) &&
+    typeof value.searchText === 'string'
+}
+
+function isSetPresentation(value: unknown): boolean {
+  return isRecord(value) && typeof value.name === 'string' &&
+    isNullableString(value.description) && Array.isArray(value.members) &&
+    value.members.every((member) => typeof member === 'string') &&
+    Array.isArray(value.tiers) && value.tiers.every((tier) =>
+      isRecord(tier) && isFiniteNumber(tier.requiredPieces) &&
+      Array.isArray(tier.lines) && tier.lines.every(isPresentationLine) &&
+      Array.isArray(tier.petLines) && tier.petLines.every(isPresentationLine) &&
+      Array.isArray(tier.skillModifiers) && tier.skillModifiers.every(isPresentationSection) &&
+      (tier.grantedSkill === null || isGrantedSkill(tier.grantedSkill))
+    )
+}
+
+function isAcquisition(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.sources) ||
+    !value.sources.every((source) => typeof source === 'string')) return false
+  if (value.crafting !== undefined && value.crafting !== null) {
+    const crafting = value.crafting
+    if (!isRecord(crafting) || !Array.isArray(crafting.blueprintRecords) ||
+      !crafting.blueprintRecords.every((record) => typeof record === 'string') ||
+      ![true, false, null].includes(crafting.knownSoftcore as boolean | null) ||
+      ![true, false, null].includes(crafting.knownHardcore as boolean | null)) return false
+  }
+  return true
+}
+
 function isCatalogItem(value: unknown): boolean {
   return isRecord(value) &&
     typeof value.record === 'string' && typeof value.name === 'string' &&
     typeof value.rarity === 'string' && typeof value.itemClass === 'string' &&
-    typeof value.slot === 'string' && isFiniteNumber(value.availableCount)
+    typeof value.slot === 'string' && isFiniteNumber(value.availableCount) &&
+    (value.presentation === undefined || value.presentation === null || isItemPresentation(value.presentation)) &&
+    (value.setPresentation === undefined || value.setPresentation === null || isSetPresentation(value.setPresentation)) &&
+    (value.acquisition === undefined || isAcquisition(value.acquisition))
 }
 
 function isScannedStash(value: unknown): boolean {

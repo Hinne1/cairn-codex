@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -84,6 +84,61 @@ try {
 
   await writeFile(path, '{corrupted', 'utf8')
   assert.equal(await readCollectionSnapshotCache(path), null)
+
+  const rawScannerSnapshot = { ...snapshot }
+  delete rawScannerSnapshot.recipeSummary
+  await writeFile(path, JSON.stringify({
+    version: COLLECTION_SNAPSHOT_CACHE_VERSION,
+    savedAtUtc: '2026-09-03T12:02:00.000Z',
+    snapshotSha256: createHash('sha256').update(JSON.stringify(rawScannerSnapshot)).digest('hex'),
+    snapshot: rawScannerSnapshot
+  }), 'utf8')
+  assert.deepEqual(
+    (await readCollectionSnapshotCache(path))?.recipeSummary,
+    { total: 0, collected: 0, unlockedItems: 0 },
+    'already-persisted raw scanner snapshots must gain safe derived recipe totals'
+  )
+
+  await writeCollectionSnapshotCache(path, rawScannerSnapshot, '2026-09-03T12:02:00.000Z')
+  assert.deepEqual(
+    (await readCollectionSnapshotCache(path))?.recipeSummary,
+    { total: 0, collected: 0, unlockedItems: 0 },
+    'raw scanner snapshots must gain safe derived recipe totals'
+  )
+
+  const replacement = { ...snapshot, scannedAtUtc: '2026-09-03T12:03:00.000Z' }
+  await writeCollectionSnapshotCache(path, replacement)
+  assert.deepEqual(await readCollectionSnapshotCache(path), replacement)
+
+  let attempts = 0
+  const retryReplacement = { ...snapshot, scannedAtUtc: '2026-09-03T12:04:00.000Z' }
+  await writeCollectionSnapshotCache(path, retryReplacement, undefined, {
+    retryDelaysMs: [0, 0],
+    wait: async () => undefined,
+    renameFile: async (source, destination) => {
+      attempts += 1
+      if (attempts < 3) throw Object.assign(new Error('locked'), { code: 'EPERM' })
+      await rename(source, destination)
+    }
+  })
+  assert.equal(attempts, 3)
+  assert.deepEqual(await readCollectionSnapshotCache(path), retryReplacement)
+
+  const preserved = await readFile(path, 'utf8')
+  await assert.rejects(
+    writeCollectionSnapshotCache(path, snapshot, undefined, {
+      retryDelaysMs: [0],
+      wait: async () => undefined,
+      renameFile: async () => { throw Object.assign(new Error('locked'), { code: 'EPERM' }) }
+    }),
+    (error) => error?.code === 'EPERM'
+  )
+  assert.equal(await readFile(path, 'utf8'), preserved, 'failed replacement must preserve the final cache')
+  assert.deepEqual(
+    (await readdir(directory)).filter((name) => name.endsWith('.tmp')),
+    [],
+    'failed replacement must clean up its unique temporary file'
+  )
 } finally {
   await rm(directory, { recursive: true, force: true })
 }

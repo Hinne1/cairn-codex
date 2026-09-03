@@ -1,5 +1,5 @@
-import { readFile, rename, writeFile } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
 import type { CollectionSnapshot } from '../shared/contracts.ts'
 
 export const COLLECTION_SNAPSHOT_CACHE_VERSION = 1
@@ -10,6 +10,20 @@ interface CollectionSnapshotCacheEnvelope {
   snapshotSha256: string
   snapshot: CollectionSnapshot
 }
+
+interface CollectionSnapshotCacheWriteOptions {
+  renameFile?: typeof rename
+  wait?: (milliseconds: number) => Promise<void>
+  retryDelaysMs?: readonly number[]
+}
+
+const EMPTY_RECIPE_SUMMARY = Object.freeze({
+  total: 0,
+  collected: 0,
+  unlockedItems: 0
+})
+
+const WINDOWS_REPLACE_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1_000] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -114,6 +128,11 @@ function isCountSummary(value: unknown): boolean {
     isFiniteNumber(value.collected) && isFiniteNumber(value.availableCopies)
 }
 
+function isRecipeSummary(value: unknown): boolean {
+  return isRecord(value) && isFiniteNumber(value.total) &&
+    isFiniteNumber(value.collected) && isFiniteNumber(value.unlockedItems)
+}
+
 function isSnapshot(value: unknown): value is CollectionSnapshot {
   if (!isRecord(value)) return false
   const snapshot = value as Partial<CollectionSnapshot>
@@ -148,13 +167,16 @@ function isSnapshot(value: unknown): value is CollectionSnapshot {
     Array.isArray(snapshot.rarities) && snapshot.rarities.every((summary) =>
       isCountSummary(summary) && isRecord(summary) && typeof summary.rarity === 'string'
     ) &&
-    isRecord(snapshot.recipeSummary) && isFiniteNumber(snapshot.recipeSummary.total) &&
-    isFiniteNumber(snapshot.recipeSummary.collected) &&
-    isFiniteNumber(snapshot.recipeSummary.unlockedItems) &&
+    (snapshot.recipeSummary === undefined || isRecipeSummary(snapshot.recipeSummary)) &&
     isCountSummary(snapshot.affixSummary) &&
     Array.isArray(snapshot.affixes) && snapshot.affixes.every((affix) =>
       isRecord(affix) && typeof affix.key === 'string' && Array.isArray(affix.records)
     )
+}
+
+function normalizeSnapshot(snapshot: CollectionSnapshot): CollectionSnapshot {
+  if (isRecipeSummary(snapshot.recipeSummary)) return snapshot
+  return { ...snapshot, recipeSummary: { ...EMPTY_RECIPE_SUMMARY } }
 }
 
 function snapshotSha256(snapshot: CollectionSnapshot): string {
@@ -173,12 +195,12 @@ export async function readCollectionSnapshotCache(path: string): Promise<Collect
         !isSnapshot(envelope.snapshot) ||
         snapshotSha256(envelope.snapshot) !== envelope.snapshotSha256
       ) return null
-      return envelope.snapshot
+      return normalizeSnapshot(envelope.snapshot)
     }
 
     // Version 0 stored the snapshot directly. Read it once so existing users do
     // not lose their offline collection; the next successful write upgrades it.
-    return isSnapshot(parsed) ? parsed : null
+    return isSnapshot(parsed) ? normalizeSnapshot(parsed) : null
   } catch {
     return null
   }
@@ -187,15 +209,38 @@ export async function readCollectionSnapshotCache(path: string): Promise<Collect
 export async function writeCollectionSnapshotCache(
   path: string,
   snapshot: CollectionSnapshot,
-  nowUtc = new Date().toISOString()
+  nowUtc = new Date().toISOString(),
+  options: CollectionSnapshotCacheWriteOptions = {}
 ): Promise<void> {
+  const normalized = normalizeSnapshot(snapshot)
   const envelope: CollectionSnapshotCacheEnvelope = {
     version: COLLECTION_SNAPSHOT_CACHE_VERSION,
     savedAtUtc: nowUtc,
-    snapshotSha256: snapshotSha256(snapshot),
-    snapshot
+    snapshotSha256: snapshotSha256(normalized),
+    snapshot: normalized
   }
-  const temporaryPath = path + '.tmp'
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
   await writeFile(temporaryPath, JSON.stringify(envelope), 'utf8')
-  await rename(temporaryPath, path)
+  const renameFile = options.renameFile ?? rename
+  const wait = options.wait ?? ((milliseconds: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+  const retryDelaysMs = options.retryDelaysMs ?? WINDOWS_REPLACE_RETRY_DELAYS_MS
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await renameFile(temporaryPath, path)
+        return
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error
+          ? String(error.code)
+          : ''
+        const delay = retryDelaysMs[attempt]
+        if (!['EACCES', 'EBUSY', 'EPERM'].includes(code) || delay === undefined) throw error
+        await wait(delay)
+      }
+    }
+  } finally {
+    // A failed replacement must leave the last valid final snapshot untouched.
+    await rm(temporaryPath, { force: true }).catch(() => undefined)
+  }
 }

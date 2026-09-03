@@ -606,6 +606,7 @@ export interface TransferStashCandidate {
 export interface CollectionSnapshot {
   catalogPresentationVersion?: number
   cacheNeedsRefresh?: boolean
+  cachedDataAsOfUtc?: string
   rollHydrationPending?: number
   basis?: CollectionBasis
   isHardcore?: boolean

@@ -23,6 +23,7 @@ function deferred() {
 
 function collectionSnapshot(name = 'fixture') {
   return {
+    catalogPresentationVersion: 7,
     scannedAtUtc: '2026-09-01T12:00:00.000Z',
     discovery: {
       installations: [{
@@ -330,6 +331,10 @@ function collectionDependencies(overrides = {}) {
   const emptyPath = 'C:/saves/empty.gst'
   const previous = {
     ...collectionSnapshot('previous'),
+    discovery: {
+      ...collectionSnapshot('previous').discovery,
+      saveLocations: [{ path: 'C:/saves', source: 'documents', transferStashes: [] }]
+    },
     scannedStashes: [
       { path: failedPath, isHardcore: false, modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'failed-old' },
       { path: emptyPath, isHardcore: false, modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'empty-old' }
@@ -346,6 +351,10 @@ function collectionDependencies(overrides = {}) {
   }
   const current = {
     ...collectionSnapshot('current'),
+    discovery: {
+      ...collectionSnapshot('current').discovery,
+      saveLocations: [{ path: 'C:/saves', source: 'documents', transferStashes: [] }]
+    },
     scannedStashes: [
       { path: emptyPath, isHardcore: false, modLabel: '', itemCount: 0, lastWriteUtc: '2026-09-01T12:00:00Z', sha256: 'empty-new' }
     ],
@@ -367,6 +376,66 @@ function collectionDependencies(overrides = {}) {
   )
   assert.equal(reconciled.accountStores[0].entries[0].quantity, 2)
   assert.equal(reconciled.cacheNeedsRefresh, true)
+  assert.equal(reconciled.cachedDataAsOfUtc, previous.scannedAtUtc)
+}
+
+// If an entire previously known save root is temporarily absent from discovery,
+// its stash and account-store knowledge remains available offline.
+{
+  const previous = {
+    ...collectionSnapshot('online'),
+    discovery: {
+      ...collectionSnapshot('online').discovery,
+      saveLocations: [{ path: 'D:/Steam/userdata/42/219990/remote/save', source: 'steam-cloud', transferStashes: [] }]
+    },
+    scannedStashes: [{
+      path: 'D:/Steam/userdata/42/219990/remote/save/transfer.gst', isHardcore: false,
+      modLabel: '', itemCount: 1, lastWriteUtc: '2026-09-01T10:00:00Z', sha256: 'stash-online'
+    }],
+    observedItems: [{
+      sourcePath: 'D:/Steam/userdata/42/219990/remote/save/transfer.gst',
+      baseRecord: 'records/supply.dbr'
+    }],
+    accountStores: [{
+      path: 'D:/Steam/userdata/42/219990/remote/save/reagents.gst', kind: 'reagents',
+      isHardcore: false, itemCount: 4, lastWriteUtc: '2026-09-01T10:00:00Z',
+      sha256: 'store-online', entries: [{ record: 'records/component.dbr', quantity: 4 }]
+    }]
+  }
+  const offline = collectionSnapshot('offline')
+  const reconciled = preserveUnavailableCollectionKnowledge(offline, previous)
+  assert.equal(reconciled.scannedStashes[0].itemCount, 1)
+  assert.equal(reconciled.observedItems[0].baseRecord, 'records/supply.dbr')
+  assert.equal(reconciled.accountStores[0].entries[0].quantity, 4)
+  assert.equal(reconciled.cacheNeedsRefresh, true)
+  assert.equal(reconciled.cachedDataAsOfUtc, previous.scannedAtUtc)
+}
+
+// A catalog-presentation upgrade cannot render the old snapshot directly, but
+// the subsequent compatible scan still reconciles its durable recipe knowledge.
+{
+  const item = (knownSoftcore) => ({
+    record: 'records/relic.dbr',
+    acquisition: { crafting: { blueprintRecords: ['records/formula.dbr'], knownSoftcore, knownHardcore: false } }
+  })
+  const previous = {
+    ...collectionSnapshot('old-presentation'),
+    catalogPresentationVersion: 6,
+    items: [item(true)]
+  }
+  const current = { ...collectionSnapshot('current-presentation'), items: [item(false)] }
+  let written = null
+  const service = new CollectionService(collectionDependencies({
+    cache: {
+      read: async () => previous,
+      write: async (snapshot) => { written = snapshot }
+    },
+    scanner: { scanInstalledData: async () => current }
+  }))
+  assert.equal(await service.getCached({ sourcePaths: [], basis: 'stashes' }), null)
+  await service.scan({ sourcePaths: [], basis: 'stashes' })
+  assert.equal(written.catalogPresentationVersion, 7)
+  assert.equal(written.items[0].acquisition.crafting.knownSoftcore, true)
 }
 
 // Learned recipes are monotonic even when a later scan has only a partial view

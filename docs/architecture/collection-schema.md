@@ -74,13 +74,16 @@ The UI exposes two projections over the same canonical catalog:
 The main process also keeps the latest complete collection projection in a
 versioned, atomically replaced `collection-snapshot.json` envelope. A stale map
 index or temporarily unavailable save source never makes that durable snapshot
-unreadable: the renderer receives it with `cacheNeedsRefresh` and shows its
-`scannedAtUtc` timestamp until a refresh succeeds. Legacy unversioned snapshots
-are accepted once and upgraded on the next successful write; unknown versions
-and malformed JSON fail closed.
+unreadable: the renderer receives it with `cacheNeedsRefresh` and shows the
+oldest retained source timestamp until a refresh succeeds. Legacy unversioned
+snapshots are accepted once and upgraded on the next successful write; unknown
+versions, failed integrity hashes, and malformed shapes fail closed. Catalog
+presentation-version changes trigger a compatible rescan, but the older
+snapshot remains available to reconcile durable source and recipe knowledge.
 
-Refresh reconciliation is source-aware. If a stash or account store reports an
-explicit read warning, its last successfully read evidence is retained. If the
-same source is read successfully with zero entries, zero replaces the previous
-quantity. Known blueprint flags are monotonic learned-account facts, so a later
-partial formula view cannot revoke a recipe Cairn already observed.
+Refresh reconciliation is source-aware. A prior stash or account store remains
+cached until a new scan positively contains that exact source. Consequently,
+mere disappearance never means zero, while a successfully scanned source with
+zero entries does replace the previous quantity. Known blueprint flags are
+monotonic learned-account facts, so a later partial formula view cannot revoke
+a recipe Cairn already observed.

@@ -2998,7 +2998,7 @@ async function attachItemIcons(
 }
 
 async function readCollectionCache(path: string): Promise<CollectionSnapshot | null> {
-  return readCollectionSnapshotCache(path, CATALOG_PRESENTATION_VERSION)
+  return readCollectionSnapshotCache(path)
 }
 
 async function loadMapLocationIndex(

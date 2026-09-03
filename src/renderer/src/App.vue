@@ -2891,8 +2891,9 @@ function percentage(summary: Pick<CollectionRaritySummary, 'total' | 'collected'
 
 function cachedCollectionTime(): string {
   if (!snapshot.value) return ''
-  const scanned = new Date(snapshot.value.scannedAtUtc)
-  return Number.isNaN(scanned.getTime()) ? snapshot.value.scannedAtUtc : scanned.toLocaleString()
+  const asOfUtc = snapshot.value.cachedDataAsOfUtc ?? snapshot.value.scannedAtUtc
+  const scanned = new Date(asOfUtc)
+  return Number.isNaN(scanned.getTime()) ? asOfUtc : scanned.toLocaleString()
 }
 
 function affixPercentage(): string {

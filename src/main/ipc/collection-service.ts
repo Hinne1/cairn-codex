@@ -156,9 +156,9 @@ function preserveRecipeKnowledge(
 }
 
 /**
- * Keeps durable knowledge from sources which the latest scan explicitly failed
- * to read. A successfully scanned empty source is deliberately not retained:
- * zero is valid data and must be allowed to replace an older quantity.
+ * Keeps durable knowledge from sources which the latest scan did not positively
+ * read. A successfully scanned empty source is present in the new snapshot and
+ * replaces the old quantity; mere absence never gets interpreted as zero.
  *
  * Recipe ownership is learned account knowledge, so a later partial formula
  * scan cannot revoke a blueprint the app has already observed.
@@ -169,22 +169,18 @@ export function preserveUnavailableCollectionKnowledge(
 ): CollectionSnapshot {
   if (!previous) return current
 
-  const failedPaths = new Set(current.warnings.map((warning) => normalizedPath(warning.path)))
   const currentStashPaths = new Set(current.scannedStashes.map((stash) => normalizedPath(stash.path)))
-  const retainedStashes = previous.scannedStashes.filter((stash) => {
-    const path = normalizedPath(stash.path)
-    return failedPaths.has(path) && !currentStashPaths.has(path)
-  })
+  const retainedStashes = previous.scannedStashes.filter(
+    (stash) => !currentStashPaths.has(normalizedPath(stash.path))
+  )
   const retainedStashPaths = new Set(retainedStashes.map((stash) => normalizedPath(stash.path)))
 
   const currentStoreKeys = new Set((current.accountStores ?? []).map((store) =>
     `${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`
   ))
-  const retainedStores = (previous.accountStores ?? []).filter((store) => {
-    const path = normalizedPath(store.path)
-    const key = `${path}:${store.kind}:${store.isHardcore}`
-    return failedPaths.has(path) && !currentStoreKeys.has(key)
-  })
+  const retainedStores = (previous.accountStores ?? []).filter((store) =>
+    !currentStoreKeys.has(`${normalizedPath(store.path)}:${store.kind}:${store.isHardcore}`)
+  )
 
   const mergeCatalog = (
     latest: CollectionSnapshot['items'] | undefined,
@@ -194,6 +190,8 @@ export function preserveUnavailableCollectionKnowledge(
     return preserveRecipeKnowledge(latest, prior ?? [])
   }
 
+  const retainedSourceCount = retainedStashes.length + retainedStores.length
+  const previousAsOfUtc = previous.cachedDataAsOfUtc ?? previous.scannedAtUtc
   return {
     ...current,
     scannedStashes: [...current.scannedStashes, ...retainedStashes],
@@ -206,7 +204,8 @@ export function preserveUnavailableCollectionKnowledge(
     plannerItems: mergeCatalog(current.plannerItems, previous.plannerItems),
     supplies: mergeCatalog(current.supplies, previous.supplies),
     materials: mergeCatalog(current.materials, previous.materials),
-    cacheNeedsRefresh: retainedStashes.length > 0 || retainedStores.length > 0
+    cacheNeedsRefresh: retainedSourceCount > 0,
+    cachedDataAsOfUtc: retainedSourceCount > 0 ? previousAsOfUtc : undefined
   }
 }
 
@@ -264,6 +263,7 @@ export class CollectionService {
   async getCached(request: CollectionRequest): Promise<CollectionSnapshot | null> {
     const snapshot = await this.loadLatest()
     if (!snapshot) return null
+    if (snapshot.catalogPresentationVersion !== this.dependencies.catalogPresentationVersion) return null
     const [mapIndexFresh, sourcesFresh] = await Promise.all([
       this.dependencies.freshness.isMapIndexFresh(),
       this.dependencies.freshness.areSourcesFresh(snapshot)
@@ -272,7 +272,10 @@ export class CollectionService {
     const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
     return {
       ...(await this.dependencies.projector.present(projected, request.basis)),
-      cacheNeedsRefresh
+      cacheNeedsRefresh,
+      cachedDataAsOfUtc: cacheNeedsRefresh
+        ? snapshot.cachedDataAsOfUtc ?? snapshot.scannedAtUtc
+        : undefined
     }
   }
 

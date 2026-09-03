@@ -58,6 +58,10 @@ function analysis(overall, base, prefix, suffix, fire, petHealth = null) {
     baseEstimatedPercentile: base,
     prefixEstimatedPercentile: prefix,
     suffixEstimatedPercentile: suffix,
+    categoryScores: [
+      { key: 'offense:fire', category: 'offense', damageType: 'fire', qualityPercent: fire, estimatedPercentile: fire, statCount: 1 },
+      ...(petHealth === null ? [] : [{ key: 'pet', category: 'pet', damageType: null, qualityPercent: petHealth, estimatedPercentile: petHealth, statCount: 1 }])
+    ],
     stats: [{ field: 'offensiveFireModifier', value: fire, rollable: true, observedMinimum: 50, observedMaximum: 100, estimatedPercentile: fire }],
     petStats: petHealth === null ? [] : [{ field: 'characterLifeModifier', value: petHealth, rollable: true, observedMinimum: 10, observedMaximum: 20, estimatedPercentile: petHealth }],
     unmodeledFields: []
@@ -180,7 +184,10 @@ assert.equal(levelRows[0].base.name, 'Leafmane Trophy')
 const options = buildMiMetricOptions(copies)
 assert.equal(miMetricLabel(options, 'item:offensiveFireModifier'), 'Fire damage')
 assert.equal(miMetricLabel(options, 'pet:characterLifeModifier'), 'Pet · Health')
-assert.deepEqual(miMetricResult(rareLow, 'item:offensiveFireModifier'), { value: 90, percentile: 90, display: '90 · 90%' })
+assert.equal(miMetricLabel(options, 'category:offense:fire'), 'Fire roll')
+assert.deepEqual(miMetricResult(rareLow, 'item:offensiveFireModifier'), { value: 90, percentile: 90, display: '90 · 80% (90th)' })
+assert.deepEqual(miMetricResult(rareLow, 'category:offense:fire'), { value: 90, percentile: null, display: '90%' })
+assert.equal(compareCopiesByMiMetric(rareLow, rareHigh, 'category:offense:fire', 'desc') < 0, true)
 assert.equal(compareCopiesByMiMetric(rareLow, rareHigh, 'item:offensiveFireModifier', 'desc') < 0, true)
 assert.equal(miFamilyKey(item({ name: '  BLOODSWORN CODEX  ' })), miFamilyKey(item()))
 
@@ -218,7 +225,8 @@ assert.match(workspace, /const projectionControls = createMiWorkshopProjectionCo
 assert.doesNotMatch(workspace, /controls: controls\.value/)
 assert.match(workspace, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.base, element, row\.leader\)/)
 assert.match(workspace, /emit\('queue-tooltip', row\.base, \$event, row\.leader\)/)
-assert.match(workspace, /emit\('open-item', row\.base\)/)
+assert.match(workspace, /emit\('open-item', row\.base, row\.leader\.instanceKey\)/)
+assert.match(workspace, /does not judge whether the affixes fit a build/)
 assert.doesNotMatch(workspace, /window\.cairnCodex/)
 assert.match(model, /group\.prefixRarity === 'rare' && group\.suffixRarity === 'rare'/)
 assert.match(model, /export function createMiWorkshopRows/)

@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { computed, ref } from 'vue'
 import { compileSearchQuery } from '../src/shared/search-query.ts'
 import {
+  buildCollectionRollSummaries,
+  collectionRollFocusForSort,
   collectionCategories,
   createCollectionMaterialsProjectionControls,
   createCollectionMaterialsQueryDebouncer,
@@ -28,9 +30,10 @@ const document = (candidate) => ({
   text: `${candidate.name} ${candidate.rarity} ${candidate.slot}`,
   fields: { name: candidate.name, rarity: candidate.rarity, slot: candidate.slot, owned: candidate.availableCount > 0 }
 })
-const options = (mode, query = '') => ({
+const options = (mode, query = '', rollSummaries) => ({
   mode, query: compileSearchQuery(query), searchDocument: document,
-  doubleRareMiBaseRecords: new Set(['records/items/double-rare.dbr'])
+  doubleRareMiBaseRecords: new Set(['records/items/double-rare.dbr']),
+  rollSummaries
 })
 
 assert.deepEqual(updateCollectionMaterialsControls(baseControls, { query: 'helm' }), { ...baseControls, query: 'helm', page: 1 })
@@ -38,6 +41,42 @@ assert.deepEqual(updateCollectionMaterialsControls(baseControls, { page: 5 }, fa
 assert.equal(collectionCategories.length, 12)
 assert.equal(matchesCollectionCategory(item(), 'Head'), true)
 assert.equal(matchesCollectionCategory(item(), 'Weapons'), false)
+assert.equal(collectionRollFocusForSort('recent'), null)
+assert.equal(collectionRollFocusForSort('roll-fire'), 'fire')
+assert.equal(collectionRollFocusForSort('roll-retaliation'), 'retaliation')
+
+const rollCopies = [
+  {
+    baseRecord: 'records/items/roll-a.dbr', instanceKey: 'roll-a-1',
+    rollAnalysis: { trusted: true, categoryScores: [
+      { key: 'offense:fire', category: 'offense', damageType: 'fire', qualityPercent: 70, estimatedPercentile: 70, combinationPercentile: 92, statCount: 3 },
+      { key: 'retaliation', category: 'retaliation', damageType: null, qualityPercent: 91, estimatedPercentile: 91, combinationPercentile: 97, statCount: 2 },
+      { key: 'defense', category: 'defense', damageType: null, qualityPercent: 84, estimatedPercentile: 84, combinationPercentile: 96, statCount: 2 }
+    ] }
+  },
+  {
+    baseRecord: 'records/items/roll-a.dbr', instanceKey: 'roll-a-2',
+    rollAnalysis: { trusted: true, categoryScores: [
+      { key: 'offense:fire', category: 'offense', damageType: 'fire', qualityPercent: 88, estimatedPercentile: 88, combinationPercentile: 98, statCount: 3 }
+    ] }
+  },
+  {
+    baseRecord: 'records/items/roll-b.dbr', instanceKey: 'roll-b-1',
+    rollAnalysis: { trusted: true, categoryScores: [
+      { key: 'offense:fire', category: 'offense', damageType: 'fire', qualityPercent: 81, estimatedPercentile: 81, combinationPercentile: 99, statCount: 3 }
+    ] }
+  }
+]
+const fireRollSummaries = buildCollectionRollSummaries(rollCopies, 'fire')
+const conflictingScores = structuredClone(rollCopies)
+conflictingScores[0].rollAnalysis.categoryScores[0].qualityPercent = 100
+assert.equal(buildCollectionRollSummaries(conflictingScores, 'fire').get('records/items/roll-a.dbr').copy.instanceKey, 'roll-a-1',
+  'range quality must choose the leader even when the marginal percentile favors another copy')
+assert.equal(buildCollectionRollSummaries([{ ...rollCopies[0], rollAnalysis: { trusted: true, categoryScores: [{ key: 'offense:fire', category: 'offense', damageType: 'fire', estimatedPercentile: 99 }] } }], 'fire').size, 0,
+  'pre-v9 category caches must await recalculation')
+assert.equal(fireRollSummaries.get('records/items/roll-a.dbr')?.score.estimatedPercentile, 88)
+assert.equal(buildCollectionRollSummaries(rollCopies, 'retaliation').get('records/items/roll-a.dbr')?.score.estimatedPercentile, 91)
+assert.equal(buildCollectionRollSummaries(rollCopies, null).get('records/items/roll-a.dbr')?.score.key, 'retaliation')
 
 const committedQueries = []
 const queryDebouncer = createCollectionMaterialsQueryDebouncer((value) => committedQueries.push(value), 15)
@@ -60,7 +99,41 @@ const catalog = [
   item({ record: 'records/items/recipe.dbr', name: 'Crafted Blade', slot: 'weapon', acquisition: { crafting: { blacksmith: 'Test' } } })
 ]
 
+const rollCatalog = [
+  item({ record: 'records/items/roll-a.dbr', name: 'Roll A', availableCount: 2, discovered: true }),
+  item({ record: 'records/items/roll-b.dbr', name: 'Roll B', availableCount: 1, discovered: true }),
+  item({ record: 'records/items/roll-unscored.dbr', name: 'Roll Unscored', availableCount: 1, discovered: true }),
+  item({ record: 'records/items/roll-missing.dbr', name: 'Roll Missing', availableCount: 0 })
+]
+assert.deepEqual(
+  createCollectionMaterialsRows(
+    rollCatalog,
+    { ...baseControls, sort: 'roll-fire', direction: 'desc' },
+    options('collection', '', fireRollSummaries)
+  ).map((entry) => entry.name),
+  ['Roll A', 'Roll B', 'Roll Unscored', 'Roll Missing']
+)
+
 const reactiveControls = ref({ ...baseControls })
+for (const direction of ['asc', 'desc']) {
+  const rows = createCollectionMaterialsRows(
+    rollCatalog, { ...baseControls, sort: 'roll-fire', direction }, options('collection', '', fireRollSummaries)
+  )
+  assert.deepEqual(rows.map((entry) => entry.name), [
+    ...(direction === 'asc' ? ['Roll B', 'Roll A'] : ['Roll A', 'Roll B']),
+    'Roll Unscored', 'Roll Missing'
+  ], 'missing category scores must stay last, with owned unscored copies before missing items')
+  const zeroScores = new Map(fireRollSummaries)
+  zeroScores.set('records/items/roll-b.dbr', {
+    ...zeroScores.get('records/items/roll-b.dbr'), score: { qualityPercent: 0, estimatedPercentile: 0, combinationPercentile: 0 }
+  })
+  const zeroRows = createCollectionMaterialsRows(
+    rollCatalog, { ...baseControls, sort: 'roll-fire', direction, ownership: 'owned' }, options('collection', '', zeroScores)
+  )
+  assert.deepEqual(zeroRows.map((entry) => entry.name), [
+    ...(direction === 'asc' ? ['Roll B', 'Roll A'] : ['Roll A', 'Roll B']), 'Roll Unscored'
+  ], 'a genuine zero is rated, not unavailable')
+}
 const projectedQuery = ref(baseControls.query)
 const reactiveProjectionControls = createCollectionMaterialsProjectionControls(reactiveControls, projectedQuery)
 let reactiveProjectionExecutions = 0
@@ -159,7 +232,16 @@ assert.match(workspace, /createCollectionMaterialsProjectionControls\(controls, 
 assert.match(workspace, /<ExplorerToolbar[\s\S]*?<BoundedResultSurface/)
 assert.match(workspace, /:page-size="48"/)
 assert.match(workspace, /rarity === 'double-rare'|value="double-rare"/)
+assert.match(workspace, /collectionRollSortOptions/)
+assert.match(workspace, /rollSummaries: props\.rollSummaries/)
+assert.match(workspace, /value\.startsWith\('roll-'\)[\s\S]*?ownership: 'owned'/)
+assert.match(workspace, /watch\(\[\(\) => props\.mode, sort\][\s\S]*?ownership\.value = 'owned'[\s\S]*?immediate: true/)
+assert.match(workspace, /formatCategoryScore\(rollSummary\(item\)!\.score\)/)
+assert.match(workspace, /rollSummary\(item\)\?\.copy\.instanceKey/)
+assert.doesNotMatch(workspace, /item\.bestRollPercentile/)
 assert.match(model, /options\.mode === 'materials'/)
 assert.match(model, /doubleRareMiBaseRecords/)
+assert.match(model, /buildCollectionRollSummaries/)
+assert.match(model, /controls\.sort\.startsWith\('roll-'\)/)
 
 console.log(`Collection/materials workspace checks passed. 50k projection: ${projectionMs.toFixed(1)} ms.`)

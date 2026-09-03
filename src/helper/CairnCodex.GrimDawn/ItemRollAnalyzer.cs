@@ -95,6 +95,7 @@ internal static class ItemRollAnalyzer
         var basePercentile = SourcePercentile(stats, baseStats, petStats, basePetStats);
         var prefixPercentile = SourcePercentile(stats, prefixStats, petStats, prefixPetStats);
         var suffixPercentile = SourcePercentile(stats, suffixStats, petStats, suffixPetStats);
+        var categoryScores = ScoreCategories(stats, petStats, distribution?.CategoryAverageQualities);
         var unmodeledFields = result.UnmodeledFields
             .Concat((petResult?.UnmodeledFields ?? []).Select(field => $"pet:{field}"))
             .ToArray();
@@ -111,6 +112,7 @@ internal static class ItemRollAnalyzer
             basePercentile,
             prefixPercentile,
             suffixPercentile,
+            categoryScores,
             stats,
             petStats,
             unmodeledFields,
@@ -144,11 +146,44 @@ internal static class ItemRollAnalyzer
     }
 
     private static IEnumerable<double> ScoreGroups(IReadOnlyList<RolledStat> stats)
+        => ScoreGroupValues(stats).Select(group => group.Percentile);
+
+    private static IEnumerable<RollScoreGroup> ScoreGroupValues(IReadOnlyList<RolledStat> stats)
     {
-        var scored = stats.Where(stat => stat.EstimatedPercentile.HasValue).ToArray();
+        var scored = stats.Where(stat => stat.EstimatedPercentile.HasValue && stat.QualityPercent.HasValue).ToArray();
+        var scoredFields = scored.Select(stat => stat.Field).ToHashSet(StringComparer.Ordinal);
         return scored
-            .GroupBy(stat => GetScoreGroup(stat.Field, scored), StringComparer.Ordinal)
-            .Select(group => group.Average(stat => stat.EstimatedPercentile!.Value));
+            .GroupBy(stat => GetScoreGroup(stat.Field, scoredFields), StringComparer.Ordinal)
+            .Select(group => new RollScoreGroup(
+                group.Key,
+                group.Average(stat => stat.EstimatedPercentile!.Value),
+                group.Average(stat => stat.QualityPercent!.Value)));
+    }
+
+    internal static IReadOnlyList<RollCategoryScore> ScoreCategories(
+        IReadOnlyList<RolledStat> stats,
+        IReadOnlyList<RolledStat> petStats,
+        IReadOnlyDictionary<string, double[]>? categoryAverageQualities = null)
+    {
+        return CategoryDefinitions(
+                ScoreGroupValues(stats).ToArray(),
+                ScoreGroupValues(petStats).ToArray(),
+                group => group.Field)
+            .Select(definition =>
+            {
+                var average = definition.Groups.Average(group => group.QualityPercent);
+                double[]? samples = null;
+                categoryAverageQualities?.TryGetValue(definition.Key, out samples);
+                return new RollCategoryScore(
+                    definition.Key,
+                    definition.Category,
+                    definition.DamageType,
+                    definition.Groups.Average(group => group.Percentile),
+                    definition.Groups.Count,
+                    ScorePercentile(average, samples),
+                    average);
+            })
+            .ToArray();
     }
 
     private static RollDistribution BuildDistribution(
@@ -201,7 +236,185 @@ internal static class ItemRollAnalyzer
             }
         }
 
-        return new RollDistribution(ToSortedSamples(values), ToSortedSamples(petValues));
+        var sortedValues = ToSortedSamples(values);
+        var sortedPetValues = ToSortedSamples(petValues);
+        return new RollDistribution(
+            sortedValues,
+            sortedPetValues,
+            BuildCategoryAverageQualities(values, petValues, sortedValues, sortedPetValues));
+    }
+
+    internal static IReadOnlyDictionary<string, double[]> BuildCategoryAverageQualities(
+        IReadOnlyDictionary<string, List<double>> values,
+        IReadOnlyDictionary<string, List<double>> petValues,
+        IReadOnlyDictionary<string, double[]> sortedValues,
+        IReadOnlyDictionary<string, double[]> sortedPetValues)
+    {
+        if (values.Values.Any(samples => samples.Count != PercentileSampleSize) ||
+            petValues.Values.Any(samples => samples.Count != PercentileSampleSize))
+        {
+            return new Dictionary<string, double[]>(StringComparer.Ordinal);
+        }
+
+        return CategoryDefinitions(
+                ToScoreGroupSamples(values, sortedValues),
+                ToScoreGroupSamples(petValues, sortedPetValues),
+                group => group.Field)
+            .ToDictionary(
+                definition => definition.Key,
+                definition =>
+                {
+                    var samples = new double[PercentileSampleSize];
+                    for (var index = 0; index < samples.Length; index++)
+                    {
+                        samples[index] = definition.Groups.Average(group => group.Qualities[index]);
+                    }
+                    Array.Sort(samples);
+                    return samples;
+                },
+                StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyList<RollScoreGroupSamples> ToScoreGroupSamples(
+        IReadOnlyDictionary<string, List<double>> values,
+        IReadOnlyDictionary<string, double[]> sortedValues)
+    {
+        var scoredFields = sortedValues
+            .Where(pair => pair.Value.Length > 0 && Math.Abs(pair.Value[^1] - pair.Value[0]) >= 0.0000001)
+            .Select(pair => pair.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        return values
+            .Where(pair => scoredFields.Contains(pair.Key))
+            .GroupBy(pair => GetScoreGroup(pair.Key, scoredFields), StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var fieldSamples = group
+                    .Select(pair => ToQualitySamples(pair.Value, sortedValues[pair.Key]))
+                    .ToArray();
+                var groupedSamples = new double[PercentileSampleSize];
+                for (var index = 0; index < groupedSamples.Length; index++)
+                {
+                    groupedSamples[index] = fieldSamples.Average(samples => samples[index]);
+                }
+                return new RollScoreGroupSamples(group.Key, groupedSamples);
+            })
+            .ToArray();
+    }
+
+    private static double[] ToQualitySamples(IReadOnlyList<double> values, double[] sortedValues)
+    {
+        var qualities = new double[values.Count];
+        for (var index = 0; index < values.Count; index++)
+        {
+            qualities[index] = RangeQuality(values[index], sortedValues[0], sortedValues[^1])!.Value;
+        }
+        return qualities;
+    }
+
+    private static IReadOnlyList<RollCategoryDefinition<T>> CategoryDefinitions<T>(
+        IReadOnlyList<T> itemGroups,
+        IReadOnlyList<T> petGroups,
+        Func<T, string> field)
+    {
+        var categorized = itemGroups
+            .Select(group => new CategorizedRollGroup<T>(
+                group,
+                RollCategoryClassifier.Classify(field(group))))
+            .ToArray();
+        var universalOffense = categorized
+            .Where(group => group.Category.Category == "offense" && group.Category.DamageType is null)
+            .Select(group => group.Group)
+            .ToArray();
+        var elementalOffense = categorized
+            .Where(group => group.Category.Category == "offense" && group.Category.DamageType == "elemental")
+            .Select(group => group.Group)
+            .ToArray();
+        var damageFamilies = categorized
+            .Where(group => group.Category.Category == "offense" &&
+                group.Category.DamageType is not null and not "elemental")
+            .GroupBy(group => group.Category.DamageType!, StringComparer.Ordinal)
+            .OrderBy(group => RollCategoryClassifier.DamageTypeOrder(group.Key))
+            .ThenBy(group => group.Key, StringComparer.Ordinal)
+            .ToArray();
+        var definitions = new List<RollCategoryDefinition<T>>();
+
+        if (damageFamilies.Length == 0)
+        {
+            if (elementalOffense.Length > 0)
+            {
+                AddCategoryDefinition(
+                    definitions,
+                    "offense:elemental",
+                    "offense",
+                    "elemental",
+                    universalOffense.Concat(elementalOffense));
+            }
+            else
+            {
+                AddCategoryDefinition(definitions, "offense", "offense", null, universalOffense);
+            }
+        }
+        else
+        {
+            foreach (var family in damageFamilies)
+            {
+                var familyGroups = universalOffense.Concat(family.Select(group => group.Group));
+                if (family.Key is "fire" or "cold" or "lightning")
+                {
+                    familyGroups = familyGroups.Concat(elementalOffense);
+                }
+                AddCategoryDefinition(
+                    definitions,
+                    $"offense:{family.Key}",
+                    "offense",
+                    family.Key,
+                    familyGroups);
+            }
+            if (elementalOffense.Length > 0)
+            {
+                AddCategoryDefinition(
+                    definitions,
+                    "offense:elemental",
+                    "offense",
+                    "elemental",
+                    universalOffense.Concat(elementalOffense));
+            }
+        }
+
+        AddCategoryDefinition(
+            definitions,
+            "retaliation",
+            "retaliation",
+            null,
+            categorized.Where(group => group.Category.Category == "retaliation").Select(group => group.Group));
+        AddCategoryDefinition(
+            definitions,
+            "defense",
+            "defense",
+            null,
+            categorized.Where(group => group.Category.Category == "defense").Select(group => group.Group));
+        AddCategoryDefinition(
+            definitions,
+            "utility",
+            "utility",
+            null,
+            categorized.Where(group => group.Category.Category == "utility").Select(group => group.Group));
+        AddCategoryDefinition(definitions, "pet", "pet", null, petGroups);
+        return definitions;
+    }
+
+    private static void AddCategoryDefinition<T>(
+        ICollection<RollCategoryDefinition<T>> definitions,
+        string key,
+        string category,
+        string? damageType,
+        IEnumerable<T> candidates)
+    {
+        var groups = candidates.ToArray();
+        if (groups.Length > 0)
+        {
+            definitions.Add(new RollCategoryDefinition<T>(key, category, damageType, groups));
+        }
     }
 
     private static void AddSamples(
@@ -231,7 +444,7 @@ internal static class ItemRollAnalyzer
             },
             StringComparer.Ordinal);
 
-    private static RolledStat Score(
+    internal static RolledStat Score(
         string field,
         double value,
         IReadOnlyDictionary<string, double[]>? distribution)
@@ -250,26 +463,39 @@ internal static class ItemRollAnalyzer
             return new RolledStat(field, value, false, minimum, maximum, null);
         }
 
+        var percentile = ScorePercentile(value, samples);
+        return new RolledStat(field, value, true, minimum, maximum, percentile, RangeQuality(value, minimum, maximum));
+    }
+
+    internal static double? RangeQuality(double value, double minimum, double maximum)
+    {
+        if (!double.IsFinite(value) || !double.IsFinite(minimum) || !double.IsFinite(maximum) ||
+            maximum - minimum < 0.0000001) return null;
+        return Math.Clamp(100.0 * (value - minimum) / (maximum - minimum), 0, 100);
+    }
+
+    private static double? ScorePercentile(double value, double[]? samples)
+    {
+        if (samples is null || samples.Length == 0) return null;
         var lower = Array.BinarySearch(samples, value);
         if (lower < 0) lower = ~lower;
         else while (lower > 0 && samples[lower - 1] == value) lower--;
         var upper = lower;
         while (upper < samples.Length && samples[upper] == value) upper++;
-        var percentile = 100.0 * (lower + (upper - lower) * 0.5) / samples.Length;
-        return new RolledStat(field, value, true, minimum, maximum, percentile);
+        return 100.0 * (lower + (upper - lower) * 0.5) / samples.Length;
     }
 
-    private static string GetScoreGroup(string field, IReadOnlyList<RolledStat> scored)
+    private static string GetScoreGroup(string field, IReadOnlySet<string> scoredFields)
     {
         if (field.EndsWith("Min", StringComparison.Ordinal))
         {
             var root = field[..^3];
-            if (scored.Any(stat => stat.Field == root + "Max")) return root;
+            if (scoredFields.Contains(root + "Max")) return root;
         }
         if (field.EndsWith("Max", StringComparison.Ordinal))
         {
             var root = field[..^3];
-            if (scored.Any(stat => stat.Field == root + "Min")) return root;
+            if (scoredFields.Contains(root + "Min")) return root;
         }
         return field;
     }
@@ -344,7 +570,8 @@ internal readonly record struct RollTemplateKey(
 
 internal sealed record RollDistribution(
     IReadOnlyDictionary<string, double[]> Values,
-    IReadOnlyDictionary<string, double[]> PetValues);
+    IReadOnlyDictionary<string, double[]> PetValues,
+    IReadOnlyDictionary<string, double[]> CategoryAverageQualities);
 
 internal sealed record AnalyzeItemRollsRequest(
     string InstallationPath,
@@ -373,11 +600,12 @@ internal sealed record ItemRollAnalysis(
     double? BaseEstimatedPercentile,
     double? PrefixEstimatedPercentile,
     double? SuffixEstimatedPercentile,
+    IReadOnlyList<RollCategoryScore> CategoryScores,
     IReadOnlyList<RolledStat> Stats,
     IReadOnlyList<RolledStat> PetStats,
     IReadOnlyList<string> UnmodeledFields,
     IReadOnlyList<RolledProcLine> ProcLines,
-    int ModelVersion = 4)
+    int ModelVersion = 9)
 {
     public static ItemRollAnalysis Unsupported(ItemRollInput item, string reason) =>
         new(
@@ -396,6 +624,7 @@ internal sealed record ItemRollAnalysis(
             [],
             [],
             [],
+            [],
             []);
 }
 
@@ -405,7 +634,31 @@ internal sealed record RolledStat(
     bool Rollable,
     double? ObservedMinimum,
     double? ObservedMaximum,
-    double? EstimatedPercentile);
+    double? EstimatedPercentile,
+    double? QualityPercent = null);
+
+internal readonly record struct RollScoreGroup(string Field, double Percentile, double QualityPercent);
+
+internal sealed record RollScoreGroupSamples(string Field, double[] Qualities);
+
+internal readonly record struct RollCategoryIdentity(string Category, string? DamageType);
+
+internal readonly record struct CategorizedRollGroup<T>(T Group, RollCategoryIdentity Category);
+
+internal sealed record RollCategoryDefinition<T>(
+    string Key,
+    string Category,
+    string? DamageType,
+    IReadOnlyList<T> Groups);
+
+internal sealed record RollCategoryScore(
+    string Key,
+    string Category,
+    string? DamageType,
+    double EstimatedPercentile,
+    int StatCount,
+    double? CombinationPercentile,
+    double QualityPercent);
 
 internal sealed record RolledProcLine(
     string Field,

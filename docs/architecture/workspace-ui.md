@@ -256,6 +256,16 @@ restoration replaces the appropriate snapshot, while user edits reset only that 
 Raw query edits enter typed route history immediately, while the expensive catalog projection uses
 a workspace-owned 120 ms debounce and cancels pending work on unmount.
 
+Category roll sorts keep unrated items after rated items in either direction;
+among unrated entries, collected items precede missing items. An exact reference
+copy selected by a scored card is retained in the bounded, optional
+`AppHistoryEntry.referenceInstanceKey` session-history field, not in shareable
+route hashes. Old entries default to no explicit reference, and unavailable
+copies fall back to the saved pin or the normal copy order. Explicit reference
+changes replace the current history entry. Category profiles expose overflow
+scores through a native keyboard-operable `details`/`summary` disclosure rather
+than hover-only text.
+
 Settings is a focused system workspace rather than a searchable explorer. `SettingsWorkspace.vue`
 owns its fourteen configuration cards, Item Assistant entry point, tool-visibility form, archive
 scope presentation, MI counting controls, backup/support presentation, and all control labeling.

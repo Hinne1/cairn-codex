@@ -50,6 +50,22 @@ Catalog tiles receive the best trusted score and analyzed-copy count from the
 current snapshot; lifetime discovery remains independent of current
 availability and roll scoring.
 
+Roll model v9 extends the JSON audit payload with grouped offense-by-damage,
+specialist retaliation, defense, utility, and conditional pet scores. Elemental
+rolls feed Fire, Cold, and Lightning lanes when those lanes exist. Each category stores both the
+average range-normalized `qualityPercent` (0% minimum, 100% maximum) and that average's percentile rank
+among sampled combinations for the same item template. Old rows remain valid
+JSON, but the background hydrator treats every earlier model version as stale
+and re-analyzes it in bounded batches. Catalog tiles, copy comparison, and MI
+Workshop consume the category profile; activating a catalog score opens the
+physical copy that produced it. MI labels explicitly note that exact-template
+roll quality does not judge affix suitability. The legacy overall value remains
+stored for backward-compatible audit payloads and explicitly labeled legacy metrics.
+Per-stat and category marginal percentile fields are retained separately; they
+must never be displayed as range quality. Old category scores without
+`qualityPercent` are withheld until rehydrated. Old trusted per-stat values can be
+normalized safely from their retained sampled extrema without relabeling a rank.
+
 Schema version 4 adds a location-independent SHA-256 fingerprint to observed
 copies and a `pinned_best` table keyed by canonical catalog record. The
 fingerprint covers serialized item identity and roll fields but excludes stash

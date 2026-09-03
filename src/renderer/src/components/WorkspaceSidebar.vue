@@ -38,30 +38,58 @@ function toolIcon(id: string): string {
   return toolIcons[id] ?? 'fallback'
 }
 
+interface TooltipTarget {
+  control: HTMLElement
+  label: string
+}
+
 const tooltip = ref<{ label: string; left: number; top: number } | null>(null)
+const hoveredTarget = ref<TooltipTarget | null>(null)
+const focusedTarget = ref<TooltipTarget | null>(null)
 
 function labelsAreHidden(): boolean {
   return props.collapsed || window.matchMedia('(max-width: 900px)').matches
 }
 
-function showTooltip(event: MouseEvent | FocusEvent, label: string): void {
-  const control = event.currentTarget ?? event.target
-  if (!(control instanceof HTMLElement)) return
-  if (!labelsAreHidden()) return
-  const rect = control.getBoundingClientRect()
+function syncTooltip(): void {
+  const target = hoveredTarget.value ?? focusedTarget.value
+  if (!target || !labelsAreHidden()) {
+    tooltip.value = null
+    return
+  }
+  const rect = target.control.getBoundingClientRect()
   tooltip.value = {
-    label,
+    label: target.label,
     left: rect.right + 10,
     top: Math.min(Math.max(rect.top + rect.height / 2, 20), window.innerHeight - 20)
   }
 }
 
-function hideTooltip(): void {
+function showTooltip(event: MouseEvent | FocusEvent, label: string, source: 'hover' | 'focus'): void {
+  const control = event.currentTarget ?? event.target
+  if (!(control instanceof HTMLElement)) return
+  if (!labelsAreHidden()) return
+  const target = { control, label }
+  if (source === 'hover') hoveredTarget.value = target
+  else focusedTarget.value = target
+  syncTooltip()
+}
+
+function hideTooltip(event: MouseEvent | FocusEvent, source: 'hover' | 'focus'): void {
+  const control = event.currentTarget ?? event.target
+  if (source === 'hover' && hoveredTarget.value?.control === control) hoveredTarget.value = null
+  if (source === 'focus' && focusedTarget.value?.control === control) focusedTarget.value = null
+  syncTooltip()
+}
+
+function clearTooltips(): void {
+  hoveredTarget.value = null
+  focusedTarget.value = null
   tooltip.value = null
 }
 
-onMounted(() => window.addEventListener('resize', hideTooltip))
-onBeforeUnmount(() => window.removeEventListener('resize', hideTooltip))
+onMounted(() => window.addEventListener('resize', clearTooltips))
+onBeforeUnmount(() => window.removeEventListener('resize', clearTooltips))
 </script>
 
 <template>
@@ -73,11 +101,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', hideTooltip))
         data-tool-id="collection"
         :aria-current="activeId === 'collection' ? 'page' : undefined"
         aria-label="Collection"
-        :title="collapsed ? 'Collection' : undefined"
-        @mouseenter="showTooltip($event, 'Collection')"
-        @mouseleave="hideTooltip"
-        @focusin="showTooltip($event, 'Collection')"
-        @blur="hideTooltip"
+        @mouseenter="showTooltip($event, 'Collection', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Collection', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
         @click="emit('home')"
       >
         <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="collection" /></span>
@@ -94,11 +121,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', hideTooltip))
           :data-tool-id="tool.id"
           :aria-current="tool.id === activeId ? 'page' : undefined"
           :aria-label="tool.label"
-          :title="collapsed ? tool.label : undefined"
-          @mouseenter="showTooltip($event, tool.label)"
-          @mouseleave="hideTooltip"
-          @focusin="showTooltip($event, tool.label)"
-          @blur="hideTooltip"
+          @mouseenter="showTooltip($event, tool.label, 'hover')"
+          @mouseleave="hideTooltip($event, 'hover')"
+          @focusin="showTooltip($event, tool.label, 'focus')"
+          @blur="hideTooltip($event, 'focus')"
           @click="emit('select', tool.id)"
         >
           <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon :name="toolIcon(tool.id)" /></span>
@@ -112,11 +138,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', hideTooltip))
         type="button"
         class="workspace-nav-item"
         aria-label="Customize visible tools"
-        :title="collapsed ? 'Customize visible tools' : undefined"
-        @mouseenter="showTooltip($event, 'Customize visible tools')"
-        @mouseleave="hideTooltip"
-        @focusin="showTooltip($event, 'Customize visible tools')"
-        @blur="hideTooltip"
+        @mouseenter="showTooltip($event, 'Customize visible tools', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Customize visible tools', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
         @click="emit('customize')"
       >
         <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="settings" /></span>
@@ -127,11 +152,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', hideTooltip))
         class="workspace-nav-item workspace-sidebar-toggle"
         :aria-expanded="!collapsed"
         :aria-label="collapsed ? 'Expand workspace navigation' : 'Collapse workspace navigation'"
-        :title="collapsed ? 'Expand navigation' : 'Collapse navigation'"
-        @mouseenter="showTooltip($event, collapsed ? 'Expand navigation' : 'Collapse navigation')"
-        @mouseleave="hideTooltip"
-        @focusin="showTooltip($event, collapsed ? 'Expand navigation' : 'Collapse navigation')"
-        @blur="hideTooltip"
+        @mouseenter="showTooltip($event, collapsed ? 'Expand navigation' : 'Collapse navigation', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, collapsed ? 'Expand navigation' : 'Collapse navigation', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
         @click="emit('toggle')"
       >
         <span class="workspace-nav-icon" aria-hidden="true">

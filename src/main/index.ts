@@ -5562,35 +5562,53 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 throw new Error('The workspace sidebar did not render its complete legible icon set.')
               }
               const activeLabel = active.querySelector('.workspace-nav-label')?.textContent?.trim()
-              if (toggle.getClientRects().length > 0) {
-                const beganCollapsed = sidebar.classList.contains('collapsed')
-                if (!beganCollapsed) {
-                  toggle.click()
-                  await frames()
-                }
-                if (!sidebar.classList.contains('collapsed')) throw new Error('The workspace sidebar did not enter compact mode.')
-                active.blur()
+              const activeLabelElement = active.querySelector('.workspace-nav-label')
+              const toggleVisible = toggle.getClientRects().length > 0
+              const beganCollapsed = sidebar.classList.contains('collapsed')
+              if (toggleVisible && !beganCollapsed) {
+                toggle.click()
                 await frames()
-                active.focus()
-                active.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
-                await frames()
+              }
+              if (!(activeLabelElement instanceof HTMLElement) || getComputedStyle(activeLabelElement).display !== 'none') {
+                throw new Error('The workspace sidebar did not reach an icon-only state for label verification.')
+              }
+              const assertActiveTooltip = (context) => {
                 const tooltip = document.querySelector('.workspace-nav-tooltip')
                 const tooltipRect = tooltip?.getBoundingClientRect()
                 if (
                   !(tooltip instanceof HTMLElement) || tooltip.textContent?.trim() !== activeLabel ||
                   !tooltipRect || tooltipRect.left < sidebar.getBoundingClientRect().right - 1
                 ) {
-                  throw new Error('Compact workspace navigation did not expose its focused destination label.')
+                  throw new Error('Compact workspace navigation lost its destination label during ' + context + '.')
                 }
-                active.blur()
-                await frames()
+              }
+              active.blur()
+              active.dispatchEvent(new FocusEvent('blur'))
+              await frames()
+              active.focus()
+              active.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+              await frames()
+              assertActiveTooltip('keyboard focus')
+              active.dispatchEvent(new MouseEvent('mouseenter'))
+              active.blur()
+              active.dispatchEvent(new FocusEvent('blur'))
+              await frames()
+              assertActiveTooltip('pointer hover after focus left')
+              active.focus()
+              active.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+              active.dispatchEvent(new MouseEvent('mouseleave'))
+              await frames()
+              assertActiveTooltip('keyboard focus after pointer left')
+              active.blur()
+              active.dispatchEvent(new FocusEvent('blur'))
+              await frames()
+              if (document.querySelector('.workspace-nav-tooltip')) {
+                throw new Error('Compact workspace navigation retained a tooltip after hover and focus both left.')
+              }
+              if (toggleVisible && !beganCollapsed) {
                 toggle.click()
                 await frames()
                 if (sidebar.classList.contains('collapsed')) throw new Error('The workspace sidebar did not leave compact mode.')
-                if (beganCollapsed) {
-                  toggle.click()
-                  await frames()
-                }
               }
               customize.click()
               await frames()

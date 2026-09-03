@@ -11,10 +11,14 @@ const props = defineProps<{
   activeId: string
   tools: WorkspaceDestination[]
   collapsed: boolean
+  toolsEnabled: boolean
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
+  home: []
+  transfers: []
+  settings: []
   customize: []
   toggle: []
 }>()
@@ -100,8 +104,23 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside class="workspace-sidebar" :class="{ collapsed }" aria-label="Workspace">
-    <nav aria-label="Collection workspace tools">
+  <aside class="workspace-sidebar" :class="{ collapsed }" aria-label="Application navigation">
+    <nav aria-label="Destinations">
+      <button
+        type="button"
+        class="workspace-nav-item workspace-nav-home"
+        data-destination-id="collection"
+        :aria-current="activeId === 'collection' ? 'page' : undefined"
+        aria-label="Collection"
+        @mouseenter="showTooltip($event, 'Collection', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Collection', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
+        @click="emit('home')"
+      >
+        <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="collection" /></span>
+        <span class="workspace-nav-label">Collection</span>
+      </button>
       <p class="workspace-nav-group-label">Your tools</p>
       <div class="workspace-nav-tools">
         <button
@@ -110,6 +129,7 @@ onBeforeUnmount(() => {
           type="button"
           class="workspace-nav-item"
           :data-tool-id="tool.id"
+          :disabled="!toolsEnabled"
           :aria-current="tool.id === activeId ? 'page' : undefined"
           :aria-label="tool.label"
           @mouseenter="showTooltip($event, tool.label, 'hover')"
@@ -125,6 +145,36 @@ onBeforeUnmount(() => {
     </nav>
 
     <div class="workspace-sidebar-actions">
+      <button
+        type="button"
+        class="workspace-nav-item"
+        data-destination-id="vault"
+        :aria-current="activeId === 'vault' ? 'page' : undefined"
+        aria-label="Transfers"
+        @mouseenter="showTooltip($event, 'Transfers', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Transfers', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
+        @click="emit('transfers')"
+      >
+        <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="transfers" /></span>
+        <span class="workspace-nav-label">Transfers</span>
+      </button>
+      <button
+        type="button"
+        class="workspace-nav-item"
+        data-destination-id="settings"
+        :aria-current="activeId === 'settings' ? 'page' : undefined"
+        aria-label="Settings"
+        @mouseenter="showTooltip($event, 'Settings', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Settings', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
+        @click="emit('settings')"
+      >
+        <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="settings" /></span>
+        <span class="workspace-nav-label">Settings</span>
+      </button>
       <button
         type="button"
         class="workspace-nav-item"
@@ -211,6 +261,8 @@ onBeforeUnmount(() => {
 }
 
 .workspace-nav-item:hover { color: var(--cc-text-primary); background: var(--cc-surface-2); }
+.workspace-nav-item:disabled { color: var(--cc-text-subtle); cursor: default; opacity: .48; }
+.workspace-nav-item:disabled:hover { background: transparent; }
 .workspace-nav-item:focus-visible { outline: 2px solid var(--cc-focus); outline-offset: 1px; }
 .workspace-nav-item[aria-current='page'] {
   border-color: var(--cc-accent-border);
@@ -254,6 +306,12 @@ onBeforeUnmount(() => {
 .workspace-sidebar-actions {
   padding-top: var(--cc-space-4);
   border-top: 1px solid var(--cc-border-subtle);
+}
+.workspace-sidebar-actions [aria-label='Customize visible tools'] {
+  margin-top: var(--cc-space-2);
+  border-top: 1px solid var(--cc-border-subtle);
+  border-radius: 0 0 var(--cc-radius-sm) var(--cc-radius-sm);
+  padding-top: var(--cc-space-2);
 }
 .workspace-nav-tooltip {
   position: fixed;

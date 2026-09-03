@@ -64,6 +64,9 @@ defineProps<{ name: string }>()
       <path d="M4 6h8M16 6h4M4 12h3M11 12h9M4 18h10M18 18h2" />
       <circle cx="14" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="16" cy="18" r="2" />
     </template>
+    <template v-else-if="name === 'transfers'">
+      <path d="M4 7h13M14 4l3 3-3 3M20 17H7M10 14l-3 3 3 3" />
+    </template>
     <template v-else-if="name === 'panel-collapse' || name === 'panel-expand'">
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <path d="M8 3v18" />

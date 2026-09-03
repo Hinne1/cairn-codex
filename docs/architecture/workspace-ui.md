@@ -14,28 +14,31 @@ must not branch on `data-theme`; they continue to consume the same semantic role
 ## Workspace shell
 
 Collection is the rich home dashboard. Its archive summary, refresh action, completion trackers,
-collection-basis controls, and full customizable tool launcher render only on Collection itself.
-They must not be repeated above a specialist tool.
+and collection-basis controls render only on Collection itself. They must not be repeated above a
+specialist tool, and Collection must not add a second card-based tool launcher beside the application
+navigation.
 
-Collection, Transfers, and Settings form one stable system-navigation strip in the top bar on every
-route. Collection is the active system destination while its dashboard or any specialist child tool
-is open. Activating it returns to the Collection dashboard; browser-style Back/Forward still restores
-the exact previous typed route. Transfers and Settings retain their focused full-screen treatment.
+`src/renderer/src/components/WorkspaceSidebar.vue` is the one primary navigation surface on every
+route. Collection is first, the user's configured tools follow in their persisted order, and Transfers
+and Settings are anchored with the sidebar actions. The active route uses `aria-current="page"`.
+Transfers and Settings use the same content canvas as other routes: they never remove, resize, or
+replace the sidebar. Browser-style Back/Forward still restores the exact previous typed route.
 
-Collection specialist tools share `src/renderer/src/components/WorkspaceSidebar.vue` as a child-tool
-navigation model. The user's visible tools use the same configured order as the dashboard shortcuts,
-and the active child route uses `aria-current="page"`. The sidebar supports a durable expanded/compact preference and collapses
-to icons at compact viewport widths without changing that preference. At wide widths the sidebar
-owns the left application edge; only the content region may be centered or width-capped, so an
-outer display gutter can never appear between the viewport and navigation. Destinations use one
-coherent, high-contrast stroked icon family. When labels are hidden, every destination retains its
-accessible name and exposes that label as a hover and keyboard-focus tooltip. Hiding the currently
-open tool returns to Collection; hidden and disabled experimental tools do not remain reachable.
+The sidebar supports a durable expanded/compact preference and collapses to icons at compact viewport
+widths without changing that preference. Routes never change the stored or rendered navigation density.
+At wide widths the sidebar owns the left application edge; only the content region may be centered or
+width-capped, so an outer display gutter can never appear between the viewport and navigation.
+Destinations use one coherent, high-contrast stroked icon family. When labels are hidden, every
+destination retains its accessible name and exposes that label as a hover and keyboard-focus tooltip.
+Hiding the currently open tool returns to Collection; hidden and disabled experimental tools do not
+remain reachable. The sidebar itself stays available if collection data is unavailable so Collection,
+Transfers, Settings, customization, and recovery navigation remain predictable.
 
-The Collection dashboard retains its customizable tool cards as descriptive quick access, not as
-a second primary navigation system. It omits a redundant Collection card. The sidebar contains only
-child tools and never duplicates the Collection system destination. Transfers and Settings render
-neither the sidebar nor dashboard launcher, but keep the same system destinations in the same order.
+The top bar contains identity, history, and live status rather than a second navigation strip. The
+Cairn Codex mark and name occupy the upper left and expose link semantics that return to Collection.
+Back/Forward remain visually secondary beside the brand. Active-character and game-connection status
+occupy the upper right. At the narrowest width the character text may collapse while its status and
+accessible details remain available.
 
 ## Semantic foundation
 
@@ -290,8 +293,8 @@ piece being discovered. Surfaces must name those qualifications explicitly.
 
 ## Adding a workspace
 
-1. Register the route once in `workspaceToolDefinitions`; the shared sidebar and Collection
-   shortcuts must derive their visible destinations from the same preference.
+1. Register the route once in `workspaceToolDefinitions`; the shared sidebar derives its visible
+   destinations from that single preference source.
 2. Use `ToolHeader` for the workspace heading.
 3. Use `ExplorerToolbar` if the result set is searchable or filterable.
 4. Keep query, filters, sorting, and result count reactive from the same source of truth.

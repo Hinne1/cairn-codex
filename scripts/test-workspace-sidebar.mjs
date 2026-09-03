@@ -41,21 +41,27 @@ const [app, sidebar, icons, styles, main, modalFocus, benchmark, electronGate, s
   readFile(new URL('./test-app-routes-electron.mjs', import.meta.url), 'utf8')
 ])
 
-assert.match(app, /<WorkspaceSidebar[\s\S]*?v-if="snapshot && collectionSystemDestinationActive"/)
+assert.match(app, /class="workspace-layout has-sidebar"[\s\S]*?<WorkspaceSidebar/)
 assert.match(app, /:tools="visibleWorkspaceTools"/)
 assert.match(app, /:collapsed="navigationCollapsed"/)
+assert.match(app, /:tools-enabled="Boolean\(snapshot\)"/)
+assert.match(app, /@home="returnToCollection"/)
+assert.match(app, /@transfers="activeView = 'vault'"/)
+assert.match(app, /@settings="activeView = 'settings'"/)
 assert.match(app, /@toggle="navigationCollapsed = !navigationCollapsed"/)
 assert.doesNotMatch(app, /WorkspaceSwitcher|specialistWorkspaceActive/)
-assert.match(app, /:class="\{ active: collectionSystemDestinationActive \}"[\s\S]*?:aria-current="collectionSystemDestinationActive \? 'page' : undefined"[\s\S]*?@click="returnToCollection"[\s\S]*?>\s*Collection/)
-assert.doesNotMatch(app, /v-if="!collectionSystemDestinationActive"/)
-assert.match(app, /class="workspace-shortcuts" aria-label="Tool shortcuts"/)
-assert.doesNotMatch(app, /class="workspace-shortcuts"[\s\S]*?<span>Collection<\/span><small>Items and copies<\/small>/)
+assert.match(app, /class="brand-lockup"[\s\S]*?href="#collection"[\s\S]*?aria-label="Collection home"[\s\S]*?@click\.prevent="returnToCollection"/)
+assert.match(app, /<img :src="cairnCodexLogo" alt="" \/>/)
+assert.doesNotMatch(app, /collectionSystemDestinationActive|class="system-nav"|class="workspace-shortcuts"|workspace-launcher-heading/)
+assert.match(app, /<WorkspaceSidebar[\s\S]*?<WorkspaceErrorBoundary[\s\S]*?<main>/)
 
-assert.match(sidebar, /<nav aria-label="Collection workspace tools">/)
-assert.doesNotMatch(sidebar, /data-tool-id="collection"/)
-assert.doesNotMatch(sidebar, /emit\('home'\)/)
+assert.match(sidebar, /<aside class="workspace-sidebar"[\s\S]*?aria-label="Application navigation">/)
+assert.match(sidebar, /data-destination-id="collection"[\s\S]*?:aria-current="activeId === 'collection' \? 'page' : undefined"[\s\S]*?emit\('home'\)/)
+assert.match(sidebar, /data-destination-id="vault"[\s\S]*?:aria-current="activeId === 'vault' \? 'page' : undefined"[\s\S]*?emit\('transfers'\)/)
+assert.match(sidebar, /data-destination-id="settings"[\s\S]*?:aria-current="activeId === 'settings' \? 'page' : undefined"[\s\S]*?emit\('settings'\)/)
 assert.match(sidebar, /:aria-current="tool\.id === activeId \? 'page' : undefined"/)
 assert.match(sidebar, /:aria-label="tool\.label"/)
+assert.match(sidebar, /:disabled="!toolsEnabled"/)
 assert.match(sidebar, /aria-label="Customize visible tools"/)
 assert.match(sidebar, /:aria-expanded="!collapsed"/)
 assert.match(sidebar, /import WorkspaceNavIcon from '.\/WorkspaceNavIcon\.vue'/)
@@ -71,34 +77,34 @@ assert.match(sidebar, /@media \(max-width: 900px\)/)
 assert.match(sidebar, /\.workspace-sidebar-toggle \{ display: none; \}/)
 assert.doesNotMatch(sidebar, /[⌂◆◇✦↗⚒◉♜✓]/)
 
-for (const iconName of ['sets', 'planner', 'workshop', 'supplies', 'trivia', 'panel-collapse']) {
+for (const iconName of ['collection', 'sets', 'planner', 'workshop', 'supplies', 'trivia', 'transfers', 'settings', 'panel-collapse']) {
   assert.match(icons, new RegExp(`name === '${iconName}'`), `missing semantic navigation icon: ${iconName}`)
 }
 assert.match(icons, /stroke="currentColor"/)
 assert.match(icons, /\.workspace-nav-svg \{[^}]*width: 22px;[^}]*height: 22px;/)
 assert.match(styles, /\.workspace-layout\.has-sidebar\s*\{[\s\S]*?width:\s*100%;[\s\S]*?margin:\s*0;/)
 
-assert.match(main, /workspace-sidebar \[data-tool-id\]/)
+assert.match(main, /workspace-sidebar \[data-destination-id\]/)
 assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SIDEBAR/)
 assert.doesNotMatch(main, /workspace-switcher|workspace-tool-rail/)
 assert.match(main, /openCollectionWorkspace[\s\S]*?!collection\.isConnected[\s\S]*?collection\.click\(\)/)
-assert.match(main, /Collection system destination was not stable on the dashboard\./)
-assert.match(main, /Specialist workspace lost its Collection system destination\./)
+assert.match(main, /Collection destination was not stable on the dashboard\./)
+assert.match(main, /Specialist workspace lost its persistent application navigation\./)
 assert.match(modalFocus, /\.workspace-sidebar button:not\(\[disabled\]\)/)
 assert.match(benchmark, /--verify-workspace-sidebar/)
 assert.match(electronGate, /normal[\s\S]*?--verify-workspace-sidebar/)
 assert.match(electronGate, /compact 202-set paging[\s\S]*?--verify-workspace-sidebar/)
-assert.match(systemNavigationGate, /Stable system navigation at wide width[\s\S]*?--verify-navigation[\s\S]*?'1440'/)
-assert.match(systemNavigationGate, /compact system navigation[\s\S]*?--verify-navigation[\s\S]*?'520'/)
+assert.match(systemNavigationGate, /Persistent application navigation at wide width[\s\S]*?--verify-navigation[\s\S]*?'1440'/)
+assert.match(systemNavigationGate, /compact persistent navigation[\s\S]*?--verify-navigation[\s\S]*?'520'/)
 
 console.log(JSON.stringify({
   passed: true,
-  stableSystemNavigation: true,
+  singlePersistentNavigation: true,
   selectedToolsShared: true,
   densityDurable: true,
   edgeFlush: true,
   semanticIcons: true,
   collapsedTooltips: true,
   legacyPreferencesCompatible: true,
-  fullScreenSystemViews: true
+  stableSystemWorkspaceGeometry: true
 }, null, 2))

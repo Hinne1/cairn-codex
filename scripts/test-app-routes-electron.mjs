@@ -48,14 +48,14 @@ runGate('Sets and item drawer', [
   '--width', '520', '--height', '900', '--screenshot-name', 'typed-routes-verify-narrow'
 ])
 
-runGate('Stable system navigation at wide width', [
+runGate('Persistent application navigation at wide width', [
   '--electron-source', '--fixture', 'settings',
   '--route-hash', verifiedRoute({ version: 1, workspace: 'settings', controls: {} }),
   '--dismiss-onboarding', '--verify-navigation', '--assert-no-overflow', '--disable-gpu',
-  '--width', '1440', '--height', '1000', '--screenshot-name', 'system-navigation-verify-wide'
+  '--width', '1440', '--height', '1000', '--screenshot-name', 'application-navigation-verify-wide'
 ])
 
-runGate('Settings full-screen workspace and compact system navigation', [
+runGate('Settings workspace and compact persistent navigation', [
   '--electron-source', '--fixture', 'settings',
   '--route-hash', verifiedRoute({ version: 1, workspace: 'settings', controls: {} }),
   '--dismiss-onboarding', '--verify-navigation', '--verify-settings-workspace', '--assert-no-overflow', '--disable-gpu',
@@ -157,4 +157,4 @@ runGate('Accessible modal focus', [
   '--width', '520', '--height', '900', '--screenshot-name', 'accessible-dialog-focus'
 ])
 
-console.log('Electron route gates passed for Collection, Sets, Settings/system navigation, Planner continuous List/Grid scrolling and map restoration, and native/custom accessible modal focus.')
+console.log('Electron route gates passed for Collection, Sets, persistent application navigation, Planner continuous List/Grid scrolling and map restoration, and native/custom accessible modal focus.')

@@ -5396,7 +5396,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
       if (scanError) throw new Error('Renderer collection scan failed: ' + scanError)
       const ready = await window.webContents.executeJavaScript(
         `(Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
-          Boolean(document.querySelector('.catalog-grid, .catalog-results, .set-grid, .workspace-sidebar, .settings-workspace, .vault-workspace'))) &&
+          Boolean(document.querySelector([
+            '.catalog-grid', '.catalog-results', '.set-results', '.settings-workspace', '.vault-workspace',
+            '.leveling-planner', '.mi-workshop', '.collection-materials-workspace', '.skill-explorer',
+            '.supplies-workspace', '.farming-workspace', '.stash-oracle', '.dismantling-workspace'
+          ].join(', ')))) &&
          (!document.querySelector('.primary-action')?.disabled ||
           Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
           Boolean(document.querySelector('.background-scan'))) &&
@@ -5496,14 +5500,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const button = (selector, label) => [...document.querySelectorAll(selector)]
                 .find((candidate) => candidate.textContent?.trim() === label)
-              button('.system-nav button', 'Settings')?.click()
+              button('.workspace-sidebar [data-destination-id]', 'Settings')?.click()
               await frames()
               const experimental = document.querySelector('.experimental-tools-toggle input')
               if (experimental instanceof HTMLInputElement && !experimental.checked) experimental.click()
               await frames()
               button('.workspace-tool-presets button', 'Show all')?.click()
               await frames()
-              const collection = button('.system-nav button', 'Collection')
+              const collection = button('.workspace-sidebar [data-destination-id]', 'Collection')
               collection?.click()
               await frames()
               return Boolean(collection)
@@ -5519,7 +5523,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               await new Promise((resolve) => setTimeout(resolve, 100))
               document.querySelector('.onboarding-skip')?.click()
               await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              const destination = [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id], .category-tabs button, .system-nav button')]
+              const destination = [...document.querySelectorAll('.workspace-sidebar [data-tool-id], .workspace-sidebar [data-destination-id], .category-tabs button')]
                 .find((button) =>
                   (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent ?? button.textContent)?.trim() === ${JSON.stringify(category)})
               destination?.click()
@@ -5538,13 +5542,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               await frames()
               const sidebar = document.querySelector('.workspace-sidebar')
-              const home = sidebar?.querySelector('[data-tool-id="collection"]')
-              const collection = [...document.querySelectorAll('.system-nav button')]
-                .find((button) => button.textContent?.trim() === 'Collection')
+              const collection = sidebar?.querySelector('[data-destination-id="collection"]')
               const active = sidebar?.querySelector('.workspace-nav-tools [aria-current="page"]')
+              const transfers = sidebar?.querySelector('[data-destination-id="vault"]')
+              const settings = sidebar?.querySelector('[data-destination-id="settings"]')
               const customize = sidebar?.querySelector('[aria-label="Customize visible tools"]')
               const toggle = sidebar?.querySelector('.workspace-sidebar-toggle')
-              if (!sidebar || home || !(collection instanceof HTMLButtonElement) || collection.getAttribute('aria-current') !== 'page' || !active || !customize || !toggle) {
+              if (!sidebar || !(collection instanceof HTMLButtonElement) || !(transfers instanceof HTMLButtonElement) ||
+                  !(settings instanceof HTMLButtonElement) || !active || !customize || !toggle) {
                 throw new Error('The workspace sidebar did not render all required controls.')
               }
               const sidebarRect = sidebar.getBoundingClientRect()
@@ -5552,7 +5557,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const navItems = [...sidebar.querySelectorAll('.workspace-nav-item')]
                 .filter((item) => item.getClientRects().length > 0)
               const activeIconRect = active.querySelector('.workspace-nav-svg')?.getBoundingClientRect()
-              const visibleControls = [collection, active, customize, toggle]
+              const visibleControls = [collection, active, transfers, settings, customize, toggle]
                 .filter((control) => control.getClientRects().length > 0)
               for (const control of visibleControls) {
                 control.focus()
@@ -5664,16 +5669,15 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (
                 !document.querySelector('.hero') ||
                 !document.querySelector('.workspace-sidebar') ||
-                collection.getAttribute('aria-current') !== 'page' ||
-                document.querySelector('.workspace-sidebar [data-tool-id="collection"]')
+                collection.getAttribute('aria-current') !== 'page'
               ) {
                 throw new Error('Hiding the active specialist did not return to the Collection dashboard.')
               }
               activeSetting.click()
               document.querySelector('.tool-settings-done')?.click()
               await frames()
-              const restoredDestination = [...document.querySelectorAll('.workspace-shortcuts button')]
-                .find((button) => button.querySelector('span')?.textContent?.trim() === activeLabel)
+              const restoredDestination = [...document.querySelectorAll('.workspace-sidebar [data-tool-id]')]
+                .find((button) => button.querySelector('.workspace-nav-label')?.textContent?.trim() === activeLabel)
               restoredDestination?.click()
               await frames()
               if (document.querySelector('.workspace-sidebar .workspace-nav-tools [aria-current="page"] .workspace-nav-label')?.textContent?.trim() !== activeLabel) {
@@ -5712,8 +5716,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const started = performance.now()
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const workspace = document.querySelector('.vault-workspace')
-              if (!workspace || document.querySelector('.workspace-sidebar')) {
-                throw new Error('Transfers must render as a focused system workspace without the workspace sidebar.')
+              if (!workspace || document.querySelector('.workspace-sidebar [data-destination-id="vault"]')?.getAttribute('aria-current') !== 'page') {
+                throw new Error('Transfers lost the persistent application navigation or active destination.')
               }
               const sectionButtons = [...workspace.querySelectorAll('.transfer-section-tabs button')]
               if (sectionButtons.length !== 3) throw new Error('Transfers did not retain its three section controls.')
@@ -6018,8 +6022,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             (async () => {
               const started = performance.now()
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
-                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent ?? button.textContent)?.trim() === label)
+              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-sidebar [data-tool-id]')]
+                .find((button) => button.querySelector('.workspace-nav-label')?.textContent?.trim() === label)
               const openWorkspace = async (label) => {
                 const button = workspaceButton(label)
                 if (!(button instanceof HTMLButtonElement)) throw new Error(label + ' workspace control was not available.')
@@ -6480,10 +6484,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               rows()[0]?.dispatchEvent(new FocusEvent('blur'))
               searchInput.focus()
               await wait(100)
-              const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
-                .find((button) => button.textContent?.trim() === label)
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
-                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent)?.trim() === label)
+              const navigationButton = (label) => [...document.querySelectorAll('.workspace-sidebar [data-destination-id], .workspace-sidebar [data-tool-id]')]
+                .find((button) => button.querySelector('.workspace-nav-label')?.textContent?.trim() === label)
               const waitForPopState = () => new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(new Error('Supplies mode verification did not emit popstate.')), 1500)
                 window.addEventListener('popstate', () => {
@@ -6495,7 +6497,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!(initialLiveSupply instanceof HTMLButtonElement)) throw new Error('Live Supplies mode was unavailable to history verification.')
               initialLiveSupply.click()
               await frames()
-              const transfers = systemButton('Transfers')
+              const transfers = navigationButton('Transfers')
               if (!(transfers instanceof HTMLButtonElement)) throw new Error('Transfers navigation was unavailable to Supplies mode verification.')
               transfers.click()
               await frames()
@@ -6532,11 +6534,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!document.querySelector('.transfer-mode-tabs button:last-child.active')) {
                 throw new Error('Forward did not restore the offline Transfers mode.')
               }
-              const collection = systemButton('Collection')
+              const collection = navigationButton('Collection')
               if (!(collection instanceof HTMLButtonElement)) throw new Error('Collection navigation was unavailable to Supplies mode verification.')
               collection.click()
               await frames()
-              const supplies = workspaceButton('Supplies')
+              const supplies = navigationButton('Supplies')
               if (!(supplies instanceof HTMLButtonElement)) throw new Error('Supplies navigation was unavailable after Transfers restoration.')
               supplies.click()
               await frames()
@@ -6645,12 +6647,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               await frames()
               if (!document.querySelector('.planner-new-plan')) {
-                const collection = [...document.querySelectorAll('.system-nav button')]
-                  .find((button) => button.textContent?.trim() === 'Collection')
+                const collection = [...document.querySelectorAll('.workspace-sidebar [data-destination-id]')]
+                  .find((button) => button.querySelector('.workspace-nav-label')?.textContent?.trim() === 'Collection')
                 collection?.click()
                 await frames()
-                const planner = [...document.querySelectorAll('.workspace-shortcuts button')]
-                  .find((button) => button.querySelector('span')?.textContent?.trim() === 'Leveling Planner')
+                const planner = [...document.querySelectorAll('.workspace-sidebar [data-tool-id]')]
+                  .find((button) => button.querySelector('.workspace-nav-label')?.textContent?.trim() === 'Leveling Planner')
                 planner?.click()
                 await frames()
               }
@@ -7567,19 +7569,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                   requestAnimationFrame(() => requestAnimationFrame(resolve))
                 }, { once: true })
               })
-              const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
-                .find((button) => button.textContent?.trim() === label)
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
-                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent)?.trim() === label)
+              const navigationButton = (label) => [...document.querySelectorAll('.workspace-sidebar [data-destination-id], .workspace-sidebar [data-tool-id]')]
+                .find((button) => button.querySelector('.workspace-nav-label')?.textContent?.trim() === label)
+              const workspaceButton = navigationButton
               const openCollectionWorkspace = async () => {
-                const collection = systemButton('Collection')
+                const collection = navigationButton('Collection')
                 if (!(collection instanceof HTMLButtonElement) || !collection.isConnected) {
-                  throw new Error('Stable Collection system route was unavailable.')
+                  throw new Error('Stable Collection application route was unavailable.')
                 }
                 collection.click()
                 await frames()
               }
-              const currentSystemView = () => document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim()
               const activeWorkspace = () => document.querySelector('.workspace-sidebar [aria-current="page"] .workspace-nav-label')?.textContent?.trim()
               const expectedInitialControls = ${JSON.stringify(expectedRouteControls)}
               const assertInitialControls = (state) => {
@@ -7694,7 +7694,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               const initial = assertTypedEntry('collection', false)
               assertInitialControls(initial)
-              if (currentSystemView() !== 'Collection' || activeWorkspace() !== undefined || typeof initial.route.controls.query !== 'string') {
+              if (activeWorkspace() !== 'Collection' || typeof initial.route.controls.query !== 'string') {
                 throw new Error('Direct Collection deep link did not restore its workspace and query.')
               }
               const card = document.querySelector('.catalog-results .bounded-results-item[tabindex]')
@@ -7842,73 +7842,81 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           interactionTimings.navigationMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
-              const systemButton = (label) => [...document.querySelectorAll('.system-nav button')]
-                .find((button) => button.textContent?.trim() === label)
-              const workspaceButton = (label) => [...document.querySelectorAll('.workspace-shortcuts button, .workspace-sidebar [data-tool-id]')]
-                .find((button) => (button.querySelector('.workspace-nav-label')?.textContent ?? button.querySelector('span')?.textContent)?.trim() === label)
-              const currentSystemView = () => document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim()
+              const navigationButton = (label) => [...document.querySelectorAll('.workspace-sidebar [data-destination-id], .workspace-sidebar [data-tool-id]')]
+                .find((button) => button.querySelector('.workspace-nav-label')?.textContent?.trim() === label)
+              const workspaceButton = navigationButton
               const activeWorkspace = () => document.querySelector('.workspace-sidebar [aria-current="page"] .workspace-nav-label')?.textContent?.trim()
+              const sidebar = document.querySelector('.workspace-sidebar')
+              if (!(sidebar instanceof HTMLElement)) throw new Error('Persistent application navigation was not rendered.')
+              const initialSidebarRect = sidebar.getBoundingClientRect()
+              const assertStableSidebarGeometry = () => {
+                const current = document.querySelector('.workspace-sidebar')
+                const rect = current?.getBoundingClientRect()
+                if (!(current instanceof HTMLElement) || !rect ||
+                    Math.abs(rect.left - initialSidebarRect.left) > 1 ||
+                    Math.abs(rect.width - initialSidebarRect.width) > 1) {
+                  throw new Error('Application navigation moved or changed width across routes.')
+                }
+              }
               const assertSettings = () => {
                 if (
-                  currentSystemView() !== 'Settings' ||
+                  activeWorkspace() !== 'Settings' ||
                   !document.querySelector('.settings-workspace') ||
-                  document.querySelector('.workspace-sidebar') ||
-                  !systemButton('Collection')
+                  !navigationButton('Collection')
                 ) {
                   throw new Error('Settings destination and content were not restored together.')
                 }
+                assertStableSidebarGeometry()
               }
               const assertTransfers = () => {
                 if (
-                  currentSystemView() !== 'Transfers' ||
+                  activeWorkspace() !== 'Transfers' ||
                   !document.querySelector('.vault-workspace') ||
-                  document.querySelector('.workspace-sidebar') ||
-                  !systemButton('Collection')
+                  !navigationButton('Collection')
                 ) {
                   throw new Error('Transfers destination and content were not restored together.')
                 }
+                assertStableSidebarGeometry()
               }
               const assertCollection = () => {
                 if (
-                  currentSystemView() !== 'Collection' ||
-                  activeWorkspace() !== undefined ||
-                  !document.querySelector('.workspace-sidebar') ||
+                  activeWorkspace() !== 'Collection' ||
                   !document.querySelector('.category-tabs') ||
-                  !systemButton('Collection') ||
-                  document.querySelector('.workspace-sidebar [data-tool-id="collection"]')
+                  !navigationButton('Collection') ||
+                  document.querySelector('.workspace-shortcuts, .workspace-launcher-heading')
                 ) {
-                  throw new Error('Collection system destination was not stable on the dashboard.')
+                  throw new Error('Collection destination was not stable on the dashboard.')
                 }
+                assertStableSidebarGeometry()
               }
               const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const waitForPopState = () => new Promise((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error('System navigation did not emit popstate.')), 1500)
+                const timer = setTimeout(() => reject(new Error('Application navigation did not emit popstate.')), 1500)
                 window.addEventListener('popstate', () => {
                   clearTimeout(timer)
                   requestAnimationFrame(() => requestAnimationFrame(resolve))
                 }, { once: true })
               })
               assertSettings()
-              const collection = systemButton('Collection')
+              const collection = navigationButton('Collection')
               if (!collection) throw new Error('Persistent Collection navigation was not rendered.')
-              const systemNav = document.querySelector('.system-nav')
-              const navButtons = [...(systemNav?.querySelectorAll('button') ?? [])]
-              const navLabels = navButtons.map((button) => button.textContent?.trim())
-              if (navLabels.join('|') !== 'Collection|Transfers|Settings') {
-                throw new Error('System navigation order was not deterministic: ' + navLabels.join('|') + '.')
+              const destinationButtons = [...sidebar.querySelectorAll('[data-destination-id]')]
+              const destinationIds = destinationButtons.map((button) => button.getAttribute('data-destination-id'))
+              if (destinationIds.join('|') !== 'collection|vault|settings') {
+                throw new Error('Application destination order was not deterministic: ' + destinationIds.join('|') + '.')
               }
-              const navRect = systemNav?.getBoundingClientRect()
+              const navRect = sidebar.getBoundingClientRect()
               if (
-                !navRect ||
                 navRect.left < 0 || navRect.right > window.innerWidth ||
                 navRect.top < 0 || navRect.bottom > window.innerHeight ||
                 navRect.width <= 0 || navRect.height <= 0 ||
-                (systemNav?.scrollWidth ?? 1) > (systemNav?.clientWidth ?? 0) ||
-                (systemNav?.scrollHeight ?? 1) > (systemNav?.clientHeight ?? 0) ||
+                sidebar.scrollWidth > sidebar.clientWidth ||
                 document.documentElement.scrollWidth > window.innerWidth
               ) {
-                throw new Error('Persistent system navigation is clipped or overflowing.')
+                throw new Error('Persistent application navigation is clipped or overflowing.')
               }
+              const navButtons = [...sidebar.querySelectorAll('button:not([disabled])')]
+                .filter((button) => button.getClientRects().length > 0)
               for (const button of navButtons) {
                 const rect = button.getBoundingClientRect()
                 const style = getComputedStyle(button)
@@ -7946,24 +7954,28 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               collection.click()
               await waitForFrames()
               assertCollection()
-              const transfers = systemButton('Transfers')
-              if (!(transfers instanceof HTMLButtonElement)) throw new Error('Transfers system destination was unavailable.')
+              const brandHome = document.querySelector('.brand-lockup[href="#collection"]')
+              if (!(brandHome instanceof HTMLAnchorElement) || brandHome.getAttribute('aria-label') !== 'Collection home') {
+                throw new Error('The app brand did not expose conventional Collection-home link semantics.')
+              }
+              const transfers = navigationButton('Transfers')
+              if (!(transfers instanceof HTMLButtonElement)) throw new Error('Transfers application destination was unavailable.')
               transfers.focus()
               if (document.activeElement !== transfers) throw new Error('Transfers could not receive keyboard focus.')
               transfers.click()
               await waitForFrames()
               assertTransfers()
-              systemButton('Collection')?.click()
+              brandHome.click()
               await waitForFrames()
               assertCollection()
-              const settings = systemButton('Settings')
-              if (!(settings instanceof HTMLButtonElement)) throw new Error('Settings system destination was unavailable.')
+              const settings = navigationButton('Settings')
+              if (!(settings instanceof HTMLButtonElement)) throw new Error('Settings application destination was unavailable.')
               settings.focus()
               if (document.activeElement !== settings) throw new Error('Settings could not receive keyboard focus.')
               settings.click()
               await waitForFrames()
               assertSettings()
-              systemButton('Collection')?.click()
+              navigationButton('Collection')?.click()
               await waitForFrames()
               assertCollection()
               const sets = workspaceButton('Sets')
@@ -7971,14 +7983,15 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               sets.click()
               await waitForFrames()
               if (
-                currentSystemView() !== 'Collection' ||
                 activeWorkspace() !== 'Sets' ||
                 document.querySelector('.category-tabs') ||
-                !systemButton('Collection') ||
-                document.querySelector('.workspace-sidebar [data-tool-id="collection"]')
+                !navigationButton('Collection') ||
+                !navigationButton('Transfers') ||
+                !navigationButton('Settings')
               ) {
-                throw new Error('Specialist workspace lost its Collection system destination.')
+                throw new Error('Specialist workspace lost its persistent application navigation.')
               }
+              assertStableSidebarGeometry()
               const backToCollection = waitForPopState()
               window.history.back()
               await backToCollection
@@ -8008,8 +8021,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const preferences = () => JSON.parse(localStorage.getItem('cairn-codex-preferences') || '{}')
               const expectedSafeMode = ${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_EXPECT_SAFE_SETTINGS === '1')}
               if (expectedSafeMode) {
-                const settingsButton = [...document.querySelectorAll('.system-nav button')]
-                  .find((button) => button.textContent?.trim() === 'Settings')
+                const settingsButton = document.querySelector('.workspace-sidebar [data-destination-id="settings"]')
                 if (!(settingsButton instanceof HTMLButtonElement)) {
                   throw new Error('Safe-mode Settings navigation control was not rendered.')
                 }
@@ -8017,8 +8029,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 await frames()
               }
               const workspace = document.querySelector('.settings-workspace')
-              if (!workspace || document.querySelector('.workspace-sidebar')) {
-                throw new Error('Settings must render as a focused system workspace without the workspace sidebar.')
+              if (!workspace || document.querySelector('.workspace-sidebar [data-destination-id="settings"]')?.getAttribute('aria-current') !== 'page') {
+                throw new Error('Settings lost the persistent application navigation or active destination.')
               }
               if (workspace.querySelectorAll('.settings-card').length !== 14) {
                 throw new Error('Settings extraction did not retain all fourteen cards.')
@@ -8186,8 +8198,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           scrollX: window.scrollX,
           scrollY: window.scrollY,
           scrollTargetFound: Boolean(document.querySelector(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_SCROLL_TARGET ?? 'body')})),
-          activeWorkspace: document.querySelector('.workspace-sidebar [aria-current="page"] .workspace-nav-label')?.textContent?.trim() ??
-            document.querySelector('.system-nav button[aria-current="page"]')?.textContent?.trim(),
+          activeWorkspace: document.querySelector('.workspace-sidebar [aria-current="page"] .workspace-nav-label')?.textContent?.trim(),
           documentWidth: document.documentElement.scrollWidth,
           horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
           overflowingElements: [...document.querySelectorAll('body *')]

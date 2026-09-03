@@ -8,6 +8,7 @@ import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
+import cairnCodexLogo from '../../../build/icon.svg?url'
 import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
 import type { CollectionFarmingControls } from './workspaces/collection-farming'
 import DismantlingWorkspace from './workspaces/DismantlingWorkspace.vue'
@@ -284,9 +285,6 @@ const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
 )
 const zoomFactor = ref(initialPreferences.appearance.zoomFactor)
 const activeView = ref<ActiveView>('collection')
-const collectionSystemDestinationActive = computed(() =>
-  activeView.value !== 'vault' && activeView.value !== 'settings'
-)
 const query = ref('')
 const searchQuery = ref('')
 const rarityFilter = ref<RarityFilter>('all')
@@ -4464,13 +4462,23 @@ function formatRollValue(value: number): string {
     :data-startup-interactive-ms="startupPhaseStatus?.interactiveMs ?? ''"
   >
     <header class="topbar">
-      <div class="brand-lockup">
+      <div class="topbar-left">
+        <a
+          class="brand-lockup"
+          href="#collection"
+          aria-label="Collection home"
+          @click.prevent="returnToCollection"
+        >
+          <img :src="cairnCodexLogo" alt="" />
+          <span>
+            <p class="eyebrow">Grim Dawn collection atlas</p>
+            <h1>Cairn Codex</h1>
+          </span>
+        </a>
         <nav class="history-nav" aria-label="View history">
           <button type="button" aria-label="Go back" title="Back (Alt+Left)" :disabled="!canNavigateBack" @click="navigateAppHistory('back')">←</button>
           <button type="button" aria-label="Go forward" title="Forward (Alt+Right)" :disabled="!canNavigateForward" @click="navigateAppHistory('forward')">→</button>
         </nav>
-        <p class="eyebrow">Grim Dawn collection atlas</p>
-        <h1>Cairn Codex</h1>
       </div>
       <div class="topbar-actions">
         <div class="active-character" :class="{ muted: !activeCharacter }">
@@ -4491,35 +4499,6 @@ function formatRollValue(value: number): string {
             @click="showConnectionDiagnostics = !showConnectionDiagnostics"
           ><span aria-hidden="true" /></button>
         </div>
-        <nav class="system-nav" aria-label="Cairn Codex system views">
-          <button v-if="false" type="button" :aria-expanded="todoOpen" @click="openTodos">
-            To-do <span v-if="remainingTodoCount" class="todo-nav-count">{{ remainingTodoCount }}</span>
-          </button>
-          <button
-            type="button"
-            :class="{ active: collectionSystemDestinationActive }"
-            :aria-current="collectionSystemDestinationActive ? 'page' : undefined"
-            @click="returnToCollection"
-          >
-            Collection
-          </button>
-          <button
-            type="button"
-            :class="{ active: activeView === 'vault' }"
-            :aria-current="activeView === 'vault' ? 'page' : undefined"
-            @click="activeView = 'vault'"
-          >
-            Transfers
-          </button>
-          <button
-            type="button"
-            :class="{ active: activeView === 'settings' }"
-            :aria-current="activeView === 'settings' ? 'page' : undefined"
-            @click="activeView = 'settings'"
-          >
-            Settings
-          </button>
-        </nav>
         <div class="connection-control">
           <button
             v-if="false"
@@ -4771,6 +4750,22 @@ function formatRollValue(value: number): string {
       </section>
     </div>
 
+    <div
+      class="workspace-layout has-sidebar"
+      :class="{ 'navigation-collapsed': navigationCollapsed }"
+    >
+      <WorkspaceSidebar
+        :active-id="activeView"
+        :tools="visibleWorkspaceTools"
+        :collapsed="navigationCollapsed"
+        :tools-enabled="Boolean(snapshot)"
+        @home="returnToCollection"
+        @transfers="activeView = 'vault'"
+        @settings="activeView = 'settings'"
+        @select="openWorkspaceTool"
+        @customize="toolSettingsOpen = true"
+        @toggle="navigationCollapsed = !navigationCollapsed"
+      />
     <WorkspaceErrorBoundary
       :key="activeView"
       :workspace="activeView"
@@ -4780,22 +4775,6 @@ function formatRollValue(value: number): string {
       @export-diagnostics="exportDiagnostics"
     >
     <FailureProbe v-if="simulateWorkspaceFailure" />
-    <div
-      class="workspace-layout"
-      :class="{
-        'has-sidebar': snapshot && collectionSystemDestinationActive,
-        'navigation-collapsed': navigationCollapsed
-      }"
-    >
-      <WorkspaceSidebar
-        v-if="snapshot && collectionSystemDestinationActive"
-        :active-id="activeView"
-        :tools="visibleWorkspaceTools"
-        :collapsed="navigationCollapsed"
-        @select="openWorkspaceTool"
-        @customize="toolSettingsOpen = true"
-        @toggle="navigationCollapsed = !navigationCollapsed"
-      />
     <main>
       <section v-if="appInitializing || activeBackgroundJob" class="background-scan" aria-live="polite">
         <span class="scan-spinner" aria-hidden="true" />
@@ -5022,46 +5001,6 @@ function formatRollValue(value: number): string {
           <small>A live inventory of physical copies currently present in the selected Grim Dawn stash files.</small>
         </button>
       </section>
-      <header v-if="snapshot && activeView === 'collection'" class="workspace-launcher-heading">
-        <div><p class="section-label">Tools</p><small>Keep this workspace as focused—or as gloriously cluttered—as you like.</small></div>
-        <button type="button" @click="toolSettingsOpen = true">Customize tools</button>
-      </header>
-      <nav v-if="snapshot && activeView === 'collection'" class="workspace-shortcuts" aria-label="Tool shortcuts">
-        <button v-if="workspaceToolVisible('sets')" type="button" @click="activeView = 'sets'">
-          <span>Sets</span><small>{{ setSummary.collected }} / {{ setSummary.total }} complete</small>
-        </button>
-        <button v-if="workspaceToolVisible('materials')" type="button" @click="openMaterials()">
-          <span>Components & Consumables</span><small>{{ componentSummary.collected + consumableSummary.collected }} discovered</small>
-        </button>
-        <button v-if="workspaceToolVisible('skills')" type="button" @click="activeView = 'skills'">
-          <span>Skill Explorer</span><small>Browse item skill modifiers</small>
-        </button>
-        <button v-if="workspaceToolVisible('oracle')" type="button" @click="openStashOracle">
-          <span>Stash Oracle</span><small>Build ideas from your archive</small>
-        </button>
-        <button v-if="workspaceToolVisible('planner')" type="button" @click="activeView = 'planner'">
-          <span>Leveling Planner</span><small>{{ plannerSkills.length }} skills · Lv{{ plannerMinimumLevel }}–{{ plannerLevelCap }}</small>
-        </button>
-        <button v-if="workspaceToolVisible('mi-workshop')" type="button" @click="activeView = 'mi-workshop'">
-          <span>MI Workshop</span><small>Compare bases, affixes, and rolls</small>
-        </button>
-        <button v-if="workspaceToolVisible('supplies')" type="button" @click="openSupplies">
-          <span>Supplies</span><small>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }} reusable unlocks</small>
-        </button>
-        <button v-if="workspaceToolVisible('farming')" type="button" @click="activeView = 'farming'">
-          <span>Collection Farming</span><small>Ranked drop-source routes</small>
-        </button>
-        <button v-if="workspaceToolVisible('dismantling')" type="button" @click="activeView = 'dismantling'">
-          <span>Dismantling Lab</span><small>Read-only Inventor simulator</small>
-        </button>
-        <button v-if="workspaceToolVisible('trivia')" type="button" :aria-expanded="triviaOpen" @click="openTrivia">
-          <span>Collection Trivia</span><small>Archive records and curiosities</small>
-        </button>
-        <button v-if="workspaceToolVisible('todo')" type="button" :aria-expanded="todoOpen" @click="openTodos">
-          <span>To-do</span><small>{{ remainingTodoCount }} remaining</small>
-        </button>
-      </nav>
-
       <ExplorerToolbar
         v-if="snapshot && activeView === 'sets'"
         class="collection-explorer-toolbar"
@@ -5879,8 +5818,8 @@ function formatRollValue(value: number): string {
         </template>
       </BoundedResultSurface>
     </main>
-    </div>
     </WorkspaceErrorBoundary>
+    </div>
 
     <Teleport to="body">
       <aside

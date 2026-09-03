@@ -71,6 +71,10 @@ assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?even
   'Overflowing tooltips must scroll with an ordinary wheel while the tooltip itself is targeted.')
 assert.match(appSource, /@mouseenter="cancelTooltipHide"[\s\S]*?@mouseleave="scheduleTooltipHide"[\s\S]*?@wheel="scrollTooltip"/u,
   'Pointer users must be able to enter and scroll the tooltip without dismissing it.')
+assert.match(appSource, /function scrollTooltipFromKeyboard\(event: KeyboardEvent\)[\s\S]*?PageDown[\s\S]*?PageUp[\s\S]*?aria-describedby[\s\S]*?item-tooltip/u,
+  'Focused item triggers must expose direct keyboard scrolling for overflowing tooltip details.')
+assert.doesNotMatch(appSource, /id="item-tooltip"[\s\S]{0,400}:aria-label=/u,
+  'The tooltip must retain its descendant text as the accessible description of item triggers.')
 assert.doesNotMatch(appSource, /Alt \+ Mouse Wheel to Scroll Tooltip/u)
 assert.match(styleSource, /\.game-tooltip[\s\S]*?pointer-events: auto;[\s\S]*?scrollbar-width: thin;/u)
 assert.match(surfaceSource, /pagination\?: 'pages' \| 'continuous'/u)

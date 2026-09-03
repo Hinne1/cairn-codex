@@ -208,9 +208,10 @@ same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
 
-The global item tooltip remains viewport-bounded but is directly pointer-accessible. Ordinary wheel
-input scrolls only when targeted at overflowing tooltip content; hovering or focusing the tooltip
-cancels its pending dismissal, while wheel input elsewhere continues to scroll the workspace.
+The global item tooltip remains viewport-bounded and preserves its full descendant text as the item
+trigger's accessible description. Ordinary wheel input scrolls only when targeted at overflowing
+tooltip content; keyboard users use Page Up/Down while the describing item retains focus. Hovering
+the tooltip cancels pending dismissal, while wheel input elsewhere continues to scroll the workspace.
 
 Supplies owns its typed category, compatible-slot, query, transfer-mode, and page controls plus
 its transient keyed selection in `SuppliesWorkspace.vue`. `supplies.ts` owns reusable-unlock

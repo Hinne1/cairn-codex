@@ -561,7 +561,6 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
   scrollbar-color: var(--cc-border-emphasis) var(--cc-canvas-deep);
   scrollbar-width: thin;
 }
-.game-tooltip:focus-visible { outline: 2px solid var(--cc-focus); outline-offset: 2px; }
 .game-tooltip::-webkit-scrollbar { width: 9px; }
 .game-tooltip::-webkit-scrollbar-track { background: var(--cc-canvas-deep); }
 .game-tooltip::-webkit-scrollbar-thumb { border: 2px solid var(--cc-canvas-deep); border-radius: var(--cc-radius-pill); background: var(--cc-border-emphasis); }

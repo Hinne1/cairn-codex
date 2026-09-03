@@ -6831,6 +6831,15 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               focusedTooltip.style.height = '150px'
               focusedTooltip.style.maxHeight = '150px'
               focusedTooltip.scrollTop = 0
+              if (focusedTooltip.hasAttribute('aria-label')) {
+                throw new Error('The item tooltip replaced its detailed accessible description with a generic label.')
+              }
+              const keyboardScroll = new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true })
+              first.dispatchEvent(keyboardScroll)
+              if (!keyboardScroll.defaultPrevented || focusedTooltip.scrollTop <= 0 || document.activeElement !== first) {
+                throw new Error('Page Down did not scroll the overflowing tooltip while retaining focus on its item row.')
+              }
+              focusedTooltip.scrollTop = 0
               const ordinaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
               focusedTooltip.dispatchEvent(ordinaryWheel)
               if (!ordinaryWheel.defaultPrevented || focusedTooltip.scrollTop <= 0) {

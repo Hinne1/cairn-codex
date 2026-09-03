@@ -317,8 +317,8 @@ const skillExplorerControls = ref<SkillExplorerControls>({
   scope: initialPreferences.search.skillScope,
   rarity: 'all',
   slot: 'all',
-  sort: 'amount',
-  direction: 'desc',
+  sort: 'level',
+  direction: 'asc',
   page: 1
 })
 const plannerProfiles = ref<PlannerProfile[]>(structuredClone(initialPreferences.planner.profiles))
@@ -2676,18 +2676,6 @@ async function exportPreferences(): Promise<void> {
 }
 
 function handleZoomWheel(event: WheelEvent): void {
-  const tooltip = tooltipElement.value
-  if (event.altKey && !event.ctrlKey && tooltipRecord.value && tooltip && tooltip.scrollHeight > tooltip.clientHeight) {
-    const nextScrollTop = Math.max(
-      0,
-      Math.min(tooltip.scrollTop + event.deltaY, tooltip.scrollHeight - tooltip.clientHeight)
-    )
-    if (nextScrollTop !== tooltip.scrollTop) {
-      event.preventDefault()
-      tooltip.scrollTop = nextScrollTop
-      return
-    }
-  }
   if (!event.ctrlKey) return
   event.preventDefault()
   void setZoom(zoomFactor.value + (event.deltaY < 0 ? 0.1 : -0.1))
@@ -4003,6 +3991,39 @@ function resetTooltipScroll(): void {
   })
 }
 
+function scrollTooltip(event: WheelEvent): void {
+  const tooltip = event.currentTarget
+  if (!(tooltip instanceof HTMLElement) || tooltip.scrollHeight <= tooltip.clientHeight) return
+  const nextScrollTop = Math.max(
+    0,
+    Math.min(tooltip.scrollTop + event.deltaY, tooltip.scrollHeight - tooltip.clientHeight)
+  )
+  if (nextScrollTop === tooltip.scrollTop) return
+  event.preventDefault()
+  event.stopPropagation()
+  tooltip.scrollTop = nextScrollTop
+}
+
+function scrollTooltipFromKeyboard(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false
+  if (event.key !== 'PageDown' && event.key !== 'PageUp') return false
+  const target = event.target
+  const tooltip = tooltipElement.value
+  if (!(target instanceof HTMLElement) || !tooltip || tooltip.scrollHeight <= tooltip.clientHeight) return false
+  const describedBy = (target.getAttribute('aria-describedby') ?? '').split(/\s+/)
+  if (!describedBy.includes('item-tooltip')) return false
+  const direction = event.key === 'PageDown' ? 1 : -1
+  const nextScrollTop = Math.max(
+    0,
+    Math.min(tooltip.scrollTop + direction * Math.max(40, tooltip.clientHeight * 0.8), tooltip.scrollHeight - tooltip.clientHeight)
+  )
+  if (nextScrollTop === tooltip.scrollTop) return false
+  event.preventDefault()
+  event.stopPropagation()
+  tooltip.scrollTop = nextScrollTop
+  return true
+}
+
 function hideTooltip(): void {
   cancelTooltip()
   cancelTooltipHide()
@@ -4019,6 +4040,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 function handleEscape(event: KeyboardEvent): void {
+  if (scrollTooltipFromKeyboard(event)) return
   if (event.altKey && event.key === 'ArrowLeft') {
     event.preventDefault()
     navigateAppHistory('back')
@@ -5869,6 +5891,9 @@ function formatRollValue(value: number): string {
         :class="tooltipItem.rarity"
         :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px`, maxHeight: `${tooltipMaxHeight}px` }"
         role="tooltip"
+        @mouseenter="cancelTooltipHide"
+        @mouseleave="scheduleTooltipHide"
+        @wheel="scrollTooltip"
       >
         <header class="tooltip-header">
           <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" />
@@ -6096,7 +6121,7 @@ function formatRollValue(value: number): string {
           <span>Item Level: {{ tooltipItem.itemLevel }}</span>
           <em v-if="tooltipItem.contentPack !== 'base'">{{ tooltipItem.contentPack.toUpperCase() }}</em>
           <small class="tooltip-controls">
-            <span v-if="tooltipElement && tooltipElement.scrollHeight > tooltipElement.clientHeight">[Alt + Mouse Wheel to Scroll Tooltip]</span>
+            <span v-if="tooltipElement && tooltipElement.scrollHeight > tooltipElement.clientHeight">[Hover and scroll, or use Page Up/Down while the item is focused]</span>
             <span v-if="itemVersionCounterpart(tooltipItem)">[V to View {{ tooltipItem.upgradeRecord ? 'Awakened' : 'Original' }} Version]</span>
             <span v-if="tooltipHasMore(tooltipItem)">[Hold Ctrl to Show Full Drop Details]</span>
           </small>

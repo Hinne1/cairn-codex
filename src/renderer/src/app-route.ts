@@ -277,8 +277,8 @@ export function parseAppRoute(value: unknown): AppRoute | null {
     case 'skills': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       skill: stringValue(controls.skill, 'Wendigo Totem', 160), query: stringValue(controls.query),
       scope: enumValue(controls.scope, skillScopes, 'archive'), rarity: enumValue(controls.rarity, skillRarities, 'all'),
-      slot: stringValue(controls.slot, 'all', 80), sort: enumValue(controls.sort, skillSorts, 'amount'),
-      direction: enumValue(controls.direction, directions, 'desc'), page: integerValue(controls.page, 1, 1, 100_000)
+      slot: stringValue(controls.slot, 'all', 80), sort: enumValue(controls.sort, skillSorts, 'level'),
+      direction: enumValue(controls.direction, directions, 'asc'), page: integerValue(controls.page, 1, 1, 100_000)
     } }
     case 'planner': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       profileId: nullableString(controls.profileId, 160), skills: stringArray(controls.skills),

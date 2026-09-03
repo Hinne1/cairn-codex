@@ -67,9 +67,16 @@ assert.match(appSource, /pagination="continuous"[\s\S]*?label="Leveling Planner 
   'The planner must use continuous bounded results instead of explicit page navigation.')
 assert.match(appSource, />List<\/button>[\s\S]*?>Grid<\/button>/u,
   'The planner display switcher must expose clear List and Grid choices.')
-assert.match(appSource, /event\.altKey && !event\.ctrlKey[\s\S]*?tooltip\.scrollHeight > tooltip\.clientHeight/u,
-  'Tooltip wheel scrolling must require Alt so ordinary wheel input reaches the planner page.')
-assert.match(appSource, /\[Alt \+ Mouse Wheel to Scroll Tooltip\]/u)
+assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.preventDefault\(\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/u,
+  'Overflowing tooltips must scroll with an ordinary wheel while the tooltip itself is targeted.')
+assert.match(appSource, /@mouseenter="cancelTooltipHide"[\s\S]*?@mouseleave="scheduleTooltipHide"[\s\S]*?@wheel="scrollTooltip"/u,
+  'Pointer users must be able to enter and scroll the tooltip without dismissing it.')
+assert.match(appSource, /function scrollTooltipFromKeyboard\(event: KeyboardEvent\)[\s\S]*?PageDown[\s\S]*?PageUp[\s\S]*?aria-describedby[\s\S]*?item-tooltip/u,
+  'Focused item triggers must expose direct keyboard scrolling for overflowing tooltip details.')
+assert.doesNotMatch(appSource, /id="item-tooltip"[\s\S]{0,400}:aria-label=/u,
+  'The tooltip must retain its descendant text as the accessible description of item triggers.')
+assert.doesNotMatch(appSource, /Alt \+ Mouse Wheel to Scroll Tooltip/u)
+assert.match(styleSource, /\.game-tooltip[\s\S]*?pointer-events: auto;[\s\S]*?scrollbar-width: thin;/u)
 assert.match(surfaceSource, /pagination\?: 'pages' \| 'continuous'/u)
 assert.match(surfaceSource, /continuousEndPage\.value > continuousStartPage\.value/u,
   'Continuous results must discard old pages rather than grow the mounted DOM without a bound.')

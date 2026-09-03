@@ -62,3 +62,9 @@ column; visual direction glyphs are decorative. Skill Explorer is the reference 
 `npm run test:skill-explorer-workspace:electron` verifies focus ownership, long-list scrolling,
 keyboard and pointer selection, Escape behavior, unique option IDs, and sort state against the
 rendered DOM at wide and compact widths. The focused gate is part of `npm run verify`.
+
+Viewport-bounded item tooltips keep focus on the describing item so assistive technology retains the
+full item-detail description. Pointer users can enter the tooltip and wheel its visible scrollbar;
+keyboard users can use Page Up/Down while the item stays focused. Contained overscroll keeps ordinary
+wheel input available elsewhere on the page, and leaving both the source item and tooltip dismisses it
+after the shared grace period.

@@ -39,6 +39,12 @@ assert.deepEqual(nextSkillSortControls({ ...controls, sort: 'amount' }, 'amount'
   direction: 'asc',
   page: 1
 })
+assert.deepEqual(nextSkillSortControls({ ...controls, sort: 'amount' }, 'level'), {
+  ...controls,
+  sort: 'level',
+  direction: 'asc',
+  page: 1
+})
 assert.equal(nextSkillSuggestionIndex(7, 10, 'next', false), 0)
 assert.equal(nextSkillSuggestionIndex(7, 10, 'previous', false), 9)
 assert.equal(nextSkillSuggestionIndex(9, 10, 'next', true), 0)
@@ -85,10 +91,22 @@ const modifierItem = item({
     ]
   }
 })
+const visualItem = item({
+  record: 'visual',
+  name: 'Wendigo Visage',
+  levelRequirement: 65,
+  presentation: {
+    sections: [{
+      kind: 'visual-modifier',
+      heading: 'Wendigo Totem · Visual transformation',
+      lines: [line('Alternate crimson spirit effect', null, 'visual')]
+    }]
+  }
+})
 const archivedMiHigh = item({ record: 'mi-high', name: 'Wendigo Barb', rarity: 'mi', slot: 'weapon', levelRequirement: 94, presentation: rankItem.presentation })
 const archivedMiLow = item({ record: 'mi-low', name: 'Wendigo Barb', rarity: 'mi', slot: 'weapon', levelRequirement: 70, presentation: rankItem.presentation })
 const unrelated = item({ record: 'other', name: 'Other', presentation: { sections: [] } })
-const items = [rankItem, modifierItem, archivedMiHigh, archivedMiLow, unrelated]
+const items = [rankItem, modifierItem, visualItem, archivedMiHigh, archivedMiLow, unrelated]
 
 assert.deepEqual(buildSkillNames(items, { 'Bloody Pox': 'Occultist' }), ['Bloody Pox', 'Wendigo Totem'])
 assert.deepEqual(skillMatchForItem(rankItem, 'wendigo totem'), {
@@ -96,14 +114,24 @@ assert.deepEqual(skillMatchForItem(rankItem, 'wendigo totem'), {
   amount: 3,
   conversionTarget: '',
   conversionDetails: '',
-  special: ''
+  special: '',
+  visualTransformation: ''
 })
 assert.deepEqual(skillMatchForItem(modifierItem, 'Wendigo Totem'), {
   skill: 'Wendigo Totem',
   amount: 0,
   conversionTarget: 'Vitality',
   conversionDetails: 'Skill: 50% Fire Damage converted to Vitality Damage; Global: 100% Physical Damage converted to Vitality Damage',
-  special: '-2% Skill Recharge'
+  special: '-2% Skill Recharge',
+  visualTransformation: ''
+})
+assert.deepEqual(skillMatchForItem(visualItem, 'Wendigo Totem'), {
+  skill: 'Wendigo Totem',
+  amount: 0,
+  conversionTarget: '',
+  conversionDetails: '',
+  special: '',
+  visualTransformation: 'Alternate crimson spirit effect'
 })
 assert.equal(skillMatchForItem(unrelated, 'Wendigo Totem'), null)
 
@@ -112,7 +140,7 @@ const allRows = createSkillExplorerRows(items, controls, {
   isArchivedItem: (candidate) => archived.has(candidate.record),
   query: compileSearchQuery('')
 })
-assert.deepEqual(allRows.map((row) => row.item.record), ['modifier', 'rank', 'mi-low'])
+assert.deepEqual(allRows.map((row) => row.item.record), ['visual', 'modifier', 'rank', 'mi-low'])
 assert.equal(allRows.some((row) => row.item.record === 'mi-high'), false)
 
 const filteredRows = createSkillExplorerRows(items, {
@@ -132,6 +160,12 @@ const archiveRows = createSkillExplorerRows(items, { ...controls, scope: 'archiv
   query: compileSearchQuery('')
 })
 assert.deepEqual(archiveRows.map((row) => row.item.record), ['rank', 'mi-low'])
+
+const defaultRows = createSkillExplorerRows(items, { ...controls, sort: 'level', direction: 'asc' }, {
+  isArchivedItem: (candidate) => archived.has(candidate.record),
+  query: compileSearchQuery('')
+})
+assert.deepEqual(defaultRows.map((row) => row.item.levelRequirement), [65, 70, 82, 94])
 
 const [app, workspace, model, packageSource] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
@@ -160,6 +194,10 @@ assert.match(workspace, /@mousedown\.prevent[\s\S]*?@click="selectSkill\(skill\)
 assert.match(workspace, /function revealActiveSuggestion[\s\S]*?listbox\.scrollTop/)
 assert.match(workspace, /role="columnheader" :aria-sort="skillSortAriaValue\(sort, direction, 'level'\)"/)
 assert.match(workspace, /v-if="sort === 'level'" aria-hidden="true"/)
+assert.match(workspace, /Visual transformation[\s\S]*?row\.visualTransformation \|\| '—'/)
+assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>\(\{[\s\S]*?sort: 'level',[\s\S]*?direction: 'asc'/)
+assert.match(app, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/)
+assert.match(app, /@mouseenter="cancelTooltipHide"[\s\S]*?@wheel="scrollTooltip"/)
 assert.match(app, /<SkillExplorerWorkspace[\s\S]*?@show-tooltip="showTooltip"/)
 assert.doesNotMatch(workspace, /window\.cairnCodex/)
 assert.match(model, /export function createSkillExplorerRows/)

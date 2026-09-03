@@ -78,6 +78,15 @@ assert.equal(suppliesRoute.controls.mode, 'offline')
 assert.equal(suppliesRoute.controls.page, 7)
 assert.deepEqual(parseAppRouteHash(appRouteHash(suppliesRoute)), suppliesRoute)
 
+const defaultSkillRoute = parseAppRoute({
+  version: 1,
+  workspace: 'skills',
+  controls: {}
+})
+assert.ok(defaultSkillRoute)
+assert.equal(defaultSkillRoute.controls.sort, 'level')
+assert.equal(defaultSkillRoute.controls.direction, 'asc')
+
 const historyEntry = createAppHistoryEntry(7, plannerRoute)
 assert.deepEqual(parseAppHistoryEntry(historyEntry), historyEntry)
 assert.equal(parseAppHistoryEntry({ ...historyEntry, routeVersion: 2 }), null)

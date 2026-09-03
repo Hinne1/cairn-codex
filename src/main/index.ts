@@ -5565,40 +5565,71 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const activeLabelElement = active.querySelector('.workspace-nav-label')
               const toggleVisible = toggle.getClientRects().length > 0
               const beganCollapsed = sidebar.classList.contains('collapsed')
-              if (toggleVisible && !beganCollapsed) {
-                toggle.click()
-                await frames()
-              }
-              if (!(activeLabelElement instanceof HTMLElement) || getComputedStyle(activeLabelElement).display !== 'none') {
-                throw new Error('The workspace sidebar did not reach an icon-only state for label verification.')
-              }
-              const assertActiveTooltip = (context) => {
+              const assertControlTooltip = (control, context) => {
                 const tooltip = document.querySelector('.workspace-nav-tooltip')
                 const tooltipRect = tooltip?.getBoundingClientRect()
                 if (
-                  !(tooltip instanceof HTMLElement) || tooltip.textContent?.trim() !== activeLabel ||
+                  !(tooltip instanceof HTMLElement) || tooltip.textContent?.trim() !== control.getAttribute('aria-label') ||
                   !tooltipRect || tooltipRect.left < sidebar.getBoundingClientRect().right - 1
                 ) {
                   throw new Error('Compact workspace navigation lost its destination label during ' + context + '.')
                 }
               }
+              if (toggleVisible) {
+                toggle.focus()
+                toggle.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+                toggle.dispatchEvent(new MouseEvent('mouseenter'))
+                await frames()
+                if (beganCollapsed) assertControlTooltip(toggle, 'initial compact toggle focus')
+                else if (document.querySelector('.workspace-nav-tooltip')) {
+                  throw new Error('Expanded workspace navigation exposed a redundant tooltip.')
+                }
+                if (beganCollapsed) {
+                  toggle.click()
+                  await frames()
+                  if (document.querySelector('.workspace-nav-tooltip')) {
+                    throw new Error('Expanding workspace navigation retained its compact tooltip.')
+                  }
+                  toggle.click()
+                  await frames()
+                } else {
+                  toggle.click()
+                  await frames()
+                  assertControlTooltip(toggle, 'collapse with retained hover and focus')
+                  toggle.click()
+                  await frames()
+                  if (document.querySelector('.workspace-nav-tooltip')) {
+                    throw new Error('Re-expanding workspace navigation retained its compact tooltip.')
+                  }
+                  toggle.click()
+                  await frames()
+                }
+                assertControlTooltip(toggle, 'return to compact navigation')
+                toggle.dispatchEvent(new MouseEvent('mouseleave'))
+                toggle.blur()
+                toggle.dispatchEvent(new FocusEvent('blur'))
+                await frames()
+              }
+              if (!(activeLabelElement instanceof HTMLElement) || getComputedStyle(activeLabelElement).display !== 'none') {
+                throw new Error('The workspace sidebar did not reach an icon-only state for label verification.')
+              }
               active.blur()
               active.dispatchEvent(new FocusEvent('blur'))
               await frames()
               active.focus()
               active.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
               await frames()
-              assertActiveTooltip('keyboard focus')
+              assertControlTooltip(active, 'keyboard focus')
               active.dispatchEvent(new MouseEvent('mouseenter'))
               active.blur()
               active.dispatchEvent(new FocusEvent('blur'))
               await frames()
-              assertActiveTooltip('pointer hover after focus left')
+              assertControlTooltip(active, 'pointer hover after focus left')
               active.focus()
               active.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
               active.dispatchEvent(new MouseEvent('mouseleave'))
               await frames()
-              assertActiveTooltip('keyboard focus after pointer left')
+              assertControlTooltip(active, 'keyboard focus after pointer left')
               active.blur()
               active.dispatchEvent(new FocusEvent('blur'))
               await frames()

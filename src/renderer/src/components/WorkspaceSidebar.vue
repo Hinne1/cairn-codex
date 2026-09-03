@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import WorkspaceNavIcon from './WorkspaceNavIcon.vue'
 
 interface WorkspaceDestination {
@@ -46,9 +46,10 @@ interface TooltipTarget {
 const tooltip = ref<{ label: string; left: number; top: number } | null>(null)
 const hoveredTarget = ref<TooltipTarget | null>(null)
 const focusedTarget = ref<TooltipTarget | null>(null)
+const compactViewport = window.matchMedia('(max-width: 900px)')
 
 function labelsAreHidden(): boolean {
-  return props.collapsed || window.matchMedia('(max-width: 900px)').matches
+  return props.collapsed || compactViewport.matches
 }
 
 function syncTooltip(): void {
@@ -59,7 +60,7 @@ function syncTooltip(): void {
   }
   const rect = target.control.getBoundingClientRect()
   tooltip.value = {
-    label: target.label,
+    label: target.control.getAttribute('aria-label') ?? target.label,
     left: rect.right + 10,
     top: Math.min(Math.max(rect.top + rect.height / 2, 20), window.innerHeight - 20)
   }
@@ -68,7 +69,6 @@ function syncTooltip(): void {
 function showTooltip(event: MouseEvent | FocusEvent, label: string, source: 'hover' | 'focus'): void {
   const control = event.currentTarget ?? event.target
   if (!(control instanceof HTMLElement)) return
-  if (!labelsAreHidden()) return
   const target = { control, label }
   if (source === 'hover') hoveredTarget.value = target
   else focusedTarget.value = target
@@ -88,8 +88,16 @@ function clearTooltips(): void {
   tooltip.value = null
 }
 
-onMounted(() => window.addEventListener('resize', clearTooltips))
-onBeforeUnmount(() => window.removeEventListener('resize', clearTooltips))
+watch(() => props.collapsed, syncTooltip, { flush: 'post' })
+onMounted(() => {
+  window.addEventListener('resize', syncTooltip)
+  compactViewport.addEventListener('change', syncTooltip)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncTooltip)
+  compactViewport.removeEventListener('change', syncTooltip)
+  clearTooltips()
+})
 </script>
 
 <template>

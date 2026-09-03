@@ -65,7 +65,7 @@ export const glossaryEntries: readonly GlossaryEntry[] = [{
         'Other Collection sorts show the strongest available category as a compact summary. The label tells you which category won; it is not a whole-item rating.',
         'Roll sorting compares average quality first, then combination percentile to break ties. Unrated entries stay after rated ones in either direction. “All items” still includes missing items and recipe-only entries; they have no stored-copy roll score.',
         'Opening a scored card uses the exact copy behind its badge as the comparison reference. This is a viewing choice, not an automatic saved pin. “Save this reference” or “Use as reference” explicitly saves your choice; “Clear saved reference” removes the pin. Back/Forward restores the viewed copy when it is still available.',
-        'MI Workshop groups exact affix combinations and lets you choose a category or an individual stat. Its selected metric and direction determine the group’s leading copy. Legacy overall/base/prefix/suffix metrics are still labeled as percentile averages; they are not the new range-quality score.'
+        'MI Workshop groups exact affix combinations and lets you choose a category or an individual stat. The highest-scoring copy for the selected metric always leads its group. Sort direction changes the order of groups, not which copy leads each group. Legacy overall/base/prefix/suffix metrics remain percentile averages; they are not the new range-quality score.'
       ]
     },
     {

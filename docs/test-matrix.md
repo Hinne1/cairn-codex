@@ -9,6 +9,7 @@ a supported game installation and records the manual live-transfer results here.
 | Scenario | Evidence | Current result |
 | --- | --- | --- |
 | TypeScript/Vue production build | `npm run build` | Passed 2026-08-30 |
+| Glossary and contextual item-roll help | `npm run test:glossary`, production build, and `npm run test:glossary:electron` with generated empty/populated profiles at 1,440×1,000 and 520×1,000 | **Passed 2026-09-03:** permanent data-independent navigation, bounded entry routes, heading focus, keyboard disclosures, visible focus, quality/midrank examples checked against production functions, and exact external-source allowlisting. Collection and comparison help restore filters and the exact reference copy; MI help restores its complete route even after closing a comparison drawer. Back/Forward, compact navigation labels, and expanded 7/8/9 tables passed without horizontal overflow; overview/detail captures were visually checked at both widths. Existing generated projections completed in 29.6 ms for 50,000 Collection items and 79.7 ms for 20,000 MI copies, retaining the shared 48-card/50-row mount caps. No personal archive, save, or live game was used. |
 | Fresh database migration/idempotent reopen | desktop smoke, in-memory database | Passed |
 | Atomic replacement, backup, rollback | helper write self-test in a unique temporary directory | Passed |
 | Stale source hash | helper write self-test | Rejected without changing source |

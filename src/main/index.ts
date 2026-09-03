@@ -3,6 +3,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { arch, platform, release } from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron'
+import { isGlossarySourceUrl } from '../shared/glossary-sources'
 import {
   IPC_CHANNELS,
   type ArchiveBackupEntry,
@@ -1184,8 +1185,11 @@ function registerIpcHandlers(
     archive: { persistSnapshot: (snapshot) => database.persistSnapshot(snapshot) },
     projector: {
       projectSources: projectCollectionSources,
+      // Interaction fixtures own their synthetic copies; do not replace them
+      // with the deliberately empty archive in the disposable profile.
       present: (snapshot, basis) => process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
-        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y'
+        (process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y' ||
+          process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_GLOSSARY === '1')
         ? Promise.resolve({ ...snapshot, basis })
         : presentCollection(helper, database, snapshot, basis)
     },
@@ -5349,6 +5353,12 @@ async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void
     }
   })
   window.setMenuBarVisibility(false)
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    // Only the fixed glossary references may leave the app. Never create a
+    // privileged child window or accept arbitrary external protocols/URLs.
+    if (isGlossarySourceUrl(url)) void shell.openExternal(url).catch(() => undefined)
+    return { action: 'deny' }
+  })
   window.setAutoHideMenuBar(true)
   if (savedState?.maximized) window.maximize()
 
@@ -5446,7 +5456,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           Boolean(document.querySelector([
             '.catalog-grid', '.catalog-results', '.set-results', '.settings-workspace', '.vault-workspace',
             '.leveling-planner', '.mi-workshop', '.collection-materials-workspace', '.skill-explorer',
-            '.supplies-workspace', '.farming-workspace', '.stash-oracle', '.dismantling-workspace'
+            '.supplies-workspace', '.farming-workspace', '.stash-oracle', '.dismantling-workspace', '.glossary-workspace'
           ].join(', ')))) &&
          (!document.querySelector('.primary-action')?.disabled ||
           Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
@@ -7949,7 +7959,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!collection) throw new Error('Persistent Collection navigation was not rendered.')
               const destinationButtons = [...sidebar.querySelectorAll('[data-destination-id]')]
               const destinationIds = destinationButtons.map((button) => button.getAttribute('data-destination-id'))
-              if (destinationIds.join('|') !== 'collection|vault|settings') {
+              if (destinationIds.join('|') !== 'collection|glossary|vault|settings') {
                 throw new Error('Application destination order was not deterministic: ' + destinationIds.join('|') + '.')
               }
               const navRect = sidebar.getBoundingClientRect()
@@ -8198,6 +8208,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
           await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_GLOSSARY === '1') {
+          const { verifyGlossary } = await import('./glossary-verification')
+          await verifyGlossary(window.webContents)
         }
         const renderedState = await window.webContents.executeJavaScript(`({
           heading: document.querySelector('.hero h2')?.textContent,

@@ -36,7 +36,7 @@ export function validateBackgroundJobId(input: unknown): { id: string } {
 
 const workspaces = new Set([
   'collection', 'sets', 'materials', 'skills', 'planner', 'oracle', 'mi-workshop',
-  'supplies', 'farming', 'dismantling', 'vault', 'settings'
+  'supplies', 'farming', 'dismantling', 'vault', 'settings', 'glossary'
 ])
 
 export function validateNavigation(input: unknown): { view: string } {

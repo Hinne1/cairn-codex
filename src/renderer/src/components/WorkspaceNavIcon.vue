@@ -60,6 +60,9 @@ defineProps<{ name: string }>()
       <rect x="4" y="3" width="16" height="18" rx="2" />
       <path d="m8 9 1.5 1.5L12 8M14 9h3M8 15l1.5 1.5L12 14M14 15h3" />
     </template>
+    <template v-else-if="name === 'glossary'">
+      <path d="M12 5C9 3 6 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1zM12 5v15M6 8h3M15 8h3M6 12h3M15 12h3" />
+    </template>
     <template v-else-if="name === 'settings'">
       <path d="M4 6h8M16 6h4M4 12h3M11 12h9M4 18h10M18 18h2" />
       <circle cx="14" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="16" cy="18" r="2" />

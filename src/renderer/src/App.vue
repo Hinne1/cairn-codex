@@ -48,6 +48,8 @@ import {
   type MaterialsControls
 } from './workspaces/collection-materials'
 import SettingsWorkspace from './workspaces/SettingsWorkspace.vue'
+import GlossaryWorkspace from './workspaces/GlossaryWorkspace.vue'
+import { glossaryEntry } from './workspaces/glossary'
 import {
   defaultWorkspaceToolIds,
   essentialWorkspaceToolIds,
@@ -291,6 +293,7 @@ const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
 )
 const zoomFactor = ref(initialPreferences.appearance.zoomFactor)
 const activeView = ref<ActiveView>('collection')
+const glossaryEntryId = ref(glossaryEntry(null).id)
 const query = ref('')
 const searchQuery = ref('')
 const rarityFilter = ref<RarityFilter>('all')
@@ -1505,6 +1508,7 @@ function currentAppRoute(): AppRoute {
       vaultDirection: vaultSortDirection.value, vaultPage: vaultPage.value, quarantinePage: vaultQuarantinePage.value
     } }
     case 'settings': return { version: 1, workspace: 'settings', itemRecord, controls: {} }
+    case 'glossary': return { version: 1, workspace: 'glossary', itemRecord: null, controls: { entry: glossaryEntryId.value } }
   }
 }
 
@@ -1604,6 +1608,7 @@ function restoreAppRoute(route: AppRoute, referenceInstanceKey: string | null = 
       vaultQuarantinePage.value = route.controls.quarantinePage
       break
     case 'settings': break
+    case 'glossary': glossaryEntryId.value = route.controls.entry; break
   }
   void nextTick(() => {
     if (route.workspace === 'mi-workshop') miWorkshopWorkspace.value?.syncNativeControls()
@@ -1689,7 +1694,7 @@ watch(
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
 })
-watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId], () => {
+watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId, glossaryEntryId], () => {
   if (!appHistoryReady || restoringAppHistory) return
   appHistoryIndex += 1
   appHistoryMaximum = appHistoryIndex
@@ -2543,6 +2548,16 @@ function setWorkspaceToolVisible(id: WorkspaceToolId, visible: boolean): void {
     ? [...new Set([...visibleWorkspaceToolIds.value, id])]
     : visibleWorkspaceToolIds.value.filter((candidate) => candidate !== id)
   if (!visible && activeView.value === id) returnToCollection()
+}
+
+function openGlossary(entryId = 'item-rolls'): void {
+  hideTooltip()
+  // Queue the route push before clearing the session-only reference, whose
+  // replace watcher must update the new entry rather than overwrite the source.
+  activeView.value = 'glossary'
+  selectedRecord.value = null
+  selectedReferenceInstanceKey.value = null
+  glossaryEntryId.value = glossaryEntry(entryId).id
 }
 
 function openWorkspaceTool(id: string): void {
@@ -4773,6 +4788,7 @@ function formatRollValue(value: number): string {
         @home="returnToCollection"
         @transfers="activeView = 'vault'"
         @settings="activeView = 'settings'"
+        @glossary="openGlossary()"
         @select="openWorkspaceTool"
         @customize="toolSettingsOpen = true"
         @toggle="navigationCollapsed = !navigationCollapsed"
@@ -5087,6 +5103,7 @@ function formatRollValue(value: number): string {
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
         @retrieve-live="retrieveArchivedCopyLive"
+        @open-roll-help="openGlossary()"
       />
 
       <SkillExplorerWorkspace
@@ -5524,6 +5541,7 @@ function formatRollValue(value: number): string {
         :collected="rarity('mi')?.collected ?? 0"
         :counting-mode="miCountingMode"
         :affixes-discovered="snapshot?.affixSummary.collected ?? 0"
+        @open-roll-help="openGlossary()"
         :session="miWorkshopSession"
         :icon-url-for-item="itemIconUrl"
         @queue-tooltip="queueTooltip"
@@ -5575,6 +5593,12 @@ function formatRollValue(value: number): string {
         @queue-tooltip="queueTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
+      />
+
+      <GlossaryWorkspace
+        v-else-if="activeView === 'glossary'"
+        :entry-id="glossaryEntryId"
+        @select-entry="openGlossary"
       />
 
       <SettingsWorkspace
@@ -6092,6 +6116,7 @@ function formatRollValue(value: number): string {
               One copy is the reference. Every other copy shows its exact value and quality deltas against it.
               Saving a reference also remembers that copy as your preferred roll.
             </p>
+            <button type="button" class="roll-help-link" @click="openGlossary()">How item rolls are rated → Glossary</button>
           </div>
           <div class="comparison-count">
             <strong>{{ selectedCopies.length }}</strong>

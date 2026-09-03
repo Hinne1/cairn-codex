@@ -13,7 +13,7 @@ import {
 
 const workspaces = [
   'collection', 'sets', 'materials', 'skills', 'planner', 'oracle', 'mi-workshop',
-  'supplies', 'farming', 'dismantling', 'vault', 'settings'
+  'supplies', 'farming', 'dismantling', 'vault', 'settings', 'glossary'
 ]
 
 for (const workspace of workspaces) {

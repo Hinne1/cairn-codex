@@ -33,6 +33,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'open-roll-help': []
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement]
   'show-tooltip': [item: CollectionItem, element: HTMLElement]
   'move-tooltip': [event: MouseEvent]
@@ -176,6 +177,10 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
       </template>
     </ExplorerToolbar>
 
+    <p v-if="mode === 'collection'" class="roll-help-note">
+      Quality is not build suitability.
+      <button type="button" class="roll-help-link" @click="emit('open-roll-help')">How item rolls are rated → Glossary</button>
+    </p>
     <BoundedResultSurface
       v-model:page="page"
       class="catalog-results bounded-tooltip-results"

@@ -14,7 +14,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  home: []
   select: [id: string]
   customize: []
   toggle: []
@@ -102,23 +101,7 @@ onBeforeUnmount(() => {
 
 <template>
   <aside class="workspace-sidebar" :class="{ collapsed }" aria-label="Workspace">
-    <nav aria-label="Collection and tools">
-      <button
-        type="button"
-        class="workspace-nav-item collection-destination"
-        data-tool-id="collection"
-        :aria-current="activeId === 'collection' ? 'page' : undefined"
-        aria-label="Collection"
-        @mouseenter="showTooltip($event, 'Collection', 'hover')"
-        @mouseleave="hideTooltip($event, 'hover')"
-        @focusin="showTooltip($event, 'Collection', 'focus')"
-        @blur="hideTooltip($event, 'focus')"
-        @click="emit('home')"
-      >
-        <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="collection" /></span>
-        <span class="workspace-nav-label">Collection</span>
-      </button>
-
+    <nav aria-label="Collection workspace tools">
       <p class="workspace-nav-group-label">Your tools</p>
       <div class="workspace-nav-tools">
         <button
@@ -261,7 +244,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .workspace-nav-group-label {
-  margin: var(--cc-space-5) var(--cc-space-3) var(--cc-space-2);
+  margin: var(--cc-space-2) var(--cc-space-3);
   color: var(--cc-text-subtle);
   font-size: var(--cc-font-size-xs);
   font-weight: 700;

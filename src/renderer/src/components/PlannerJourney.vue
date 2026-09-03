@@ -19,6 +19,7 @@ const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent]
   'show-tooltip': [item: CollectionItem, element: HTMLElement]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   favorite: [item: CollectionItem]
   ignore: [item: CollectionItem]
@@ -68,12 +69,13 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
               @mouseenter="emit('queue-tooltip', row.item, $event)"
               @mousemove="emit('move-tooltip', $event)"
               @mouseleave="emit('hide-tooltip')"
+              @wheel="emit('scroll-tooltip', $event)"
             >
               <img v-if="iconUrlForItem(row.item)" :src="iconUrlForItem(row.item)!" alt="" />
               <small v-else class="planner-journey-placeholder" aria-hidden="true">{{ row.item.slot.slice(0, 2).toLocaleUpperCase() }}</small>
             </span>
             <span class="planner-journey-copy">
-              <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
+              <strong :class="['gd-rarity-name', `rarity-${row.item.rarity}`]">{{ row.item.name }}</strong>
               <small>{{ row.itemType }} · {{ row.item.slot }}</small>
               <span class="planner-journey-facts">
                 <em v-for="(fact, factIndex) in row.supports" :key="`${fact.text}:${factIndex}`">{{ fact.label }} {{ fact.text }}</em>

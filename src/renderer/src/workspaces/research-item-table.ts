@@ -28,6 +28,17 @@ export type ResearchItemTableColumn =
   | 'acquisition'
   | 'archive'
 
+const lowercaseSkillWords = new Set(['a', 'an', 'and', 'of', 'the', 'to'])
+
+export function researchSkillName(skill: string): string {
+  const words = skill.trim().split(/\s+/)
+  return words.map((word, index) => {
+    if (!word || word !== word.toLocaleLowerCase()) return word
+    if (index > 0 && lowercaseSkillWords.has(word)) return word
+    return word.charAt(0).toLocaleUpperCase() + word.slice(1)
+  }).join(' ')
+}
+
 export function researchItemTypeLabel(item: CollectionItem): string {
   const itemClass = item.itemClass.toLocaleLowerCase()
   if (itemClass.includes('ranged2h')) return 'Two-handed ranged weapon'

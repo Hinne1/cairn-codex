@@ -36,6 +36,7 @@ const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent]
   'show-tooltip': [item: CollectionItem, element: HTMLElement]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   favorite: [item: CollectionItem]
   ignore: [item: CollectionItem]
@@ -46,7 +47,7 @@ const columns: readonly { key: ResearchItemTableColumn, label: string }[] = [
   { key: 'level', label: 'Level' },
   { key: 'slot', label: 'Slot' },
   { key: 'supports', label: 'Supports' },
-  { key: 'evidence', label: 'Match evidence' },
+  { key: 'evidence', label: 'Skill modifiers' },
   { key: 'acquisition', label: 'Acquisition' },
   { key: 'archive', label: 'Archive / roll' }
 ]
@@ -64,7 +65,7 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
 <template>
   <div class="research-table-region">
     <p :id="`${label.replace(/[^a-z0-9]+/gi, '-').toLocaleLowerCase()}-scroll-help`" class="dense-table-scroll-hint">
-      Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field. Item previews open only from the item picture.
+      Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field. Item previews open from the item cell.
     </p>
     <BoundedResultSurface
       :page="page"
@@ -109,19 +110,21 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
       </template>
       <template #item="{ item: row }">
         <div class="research-table-row" :class="{ favorite: row.favorite, ignored: row.ignored }">
-          <span role="gridcell" class="research-item">
+          <span
+            role="gridcell"
+            class="research-item"
+            @mouseenter="emit('queue-tooltip', row.item, $event)"
+            @mousemove="emit('move-tooltip', $event)"
+            @mouseleave="emit('hide-tooltip')"
+            @wheel="emit('scroll-tooltip', $event)"
+          >
             <span class="research-item-identity">
-              <span
-                class="research-item-picture"
-                @mouseenter="emit('queue-tooltip', row.item, $event)"
-                @mousemove="emit('move-tooltip', $event)"
-                @mouseleave="emit('hide-tooltip')"
-              >
+              <span class="research-item-picture">
                 <img v-if="iconUrlForItem(row.item)" :src="iconUrlForItem(row.item)!" alt="" />
                 <small v-else class="research-item-placeholder" aria-hidden="true">{{ row.item.slot.slice(0, 2).toLocaleUpperCase() }}</small>
               </span>
               <span class="research-item-copy">
-                <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
+                <strong :class="['gd-rarity-name', `rarity-${row.item.rarity}`]">{{ row.item.name }}</strong>
                 <small>{{ row.itemType }}</small>
                 <span v-if="actions" class="research-item-actions">
                   <button
@@ -173,7 +176,8 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
   max-width: 100%;
   min-width: 0;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
   scrollbar-gutter: stable;
   border: 1px solid var(--cc-tone-border);
   border-radius: var(--cc-radius-lg);
@@ -248,7 +252,7 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
   background: var(--cc-surface-1);
   cursor: help;
 }
-.research-item-picture:hover { border-color: var(--cc-tone-accent); box-shadow: var(--cc-shadow-focus); }
+.research-item:hover .research-item-picture { border-color: var(--cc-tone-accent); box-shadow: var(--cc-shadow-focus); }
 .research-item-picture img { max-width: 58px; max-height: 58px; object-fit: contain; }
 .research-item-placeholder { color: var(--cc-tone-accent); font: 600 var(--cc-font-size-xl) var(--cc-font-display); letter-spacing: var(--cc-letter-label); }
 .research-item-copy { display: grid; min-width: 0; gap: var(--cc-space-1); }

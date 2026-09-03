@@ -1011,6 +1011,11 @@ body.onboarding-active { overflow: hidden; }
 .skill-item-name .rarity-faction { color: var(--cc-tone-green-accent); }
 .skill-item-name .rarity-epic { color: var(--gd-rarity-epic); }
 .skill-item-name .rarity-legendary { color: var(--gd-rarity-legendary); }
+.gd-rarity-name.rarity-mi,
+.gd-rarity-name.rarity-rare,
+.gd-rarity-name.rarity-faction { color: var(--cc-tone-green-accent); }
+.gd-rarity-name.rarity-epic { color: var(--gd-rarity-epic); }
+.gd-rarity-name.rarity-legendary { color: var(--gd-rarity-legendary); }
 .skill-item-name small { color: #726a5d; font-size: 9px; text-transform: capitalize; }
 .skill-amount { color: #e2bd65 !important; font-weight: 700; }
 .skill-empty { padding: 40px !important; color: var(--cc-text-subtle) !important; text-align: center; }

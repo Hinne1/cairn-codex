@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import {
   researchAcquisitionFacts,
   researchItemTypeLabel,
-  researchRollFact
+  researchRollFact,
+  researchSkillName
 } from '../src/renderer/src/workspaces/research-item-table.ts'
 import { parseAppRoute } from '../src/renderer/src/app-route.ts'
 
@@ -32,6 +33,9 @@ assert.deepEqual(researchAcquisitionFacts(sample), [
   { text: 'Random drop' },
   { label: 'Area', text: 'Ugdenbog', tone: 'muted' }
 ])
+assert.equal(researchSkillName('wendigo totem'), 'Wendigo Totem')
+assert.equal(researchSkillName('curse of frailty'), 'Curse of Frailty')
+assert.equal(researchSkillName("Olexra's Flash Freeze"), "Olexra's Flash Freeze")
 
 const [app, skillWorkspace, table, journey, contract, packageSource] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
@@ -50,12 +54,15 @@ assert.match(app, /<ResearchItemTable[\s\S]*?<PlannerJourney/)
 assert.match(app, />Table<\/button>[\s\S]*?>Journey<\/button>[\s\S]*?>MI sources<\/button>/)
 assert.doesNotMatch(app, /<button[^>]*>Grid<\/button>/)
 
-assert.match(table, /\{ key: 'item', label: 'Item' \}[\s\S]*?\{ key: 'archive', label: 'Archive \/ roll' \}/)
+assert.match(table, /\{ key: 'item', label: 'Item' \}[\s\S]*?\{ key: 'evidence', label: 'Skill modifiers' \}[\s\S]*?\{ key: 'archive', label: 'Archive \/ roll' \}/)
 assert.match(table, /:items="rows"[\s\S]*?:page-size="50"/)
-assert.match(table, /class="research-item-picture"[\s\S]*?@mouseenter="emit\('queue-tooltip', row\.item, \$event\)"[\s\S]*?@mouseleave="emit\('hide-tooltip'\)"/)
+assert.match(table, /class="research-item"[\s\S]*?@mouseenter="emit\('queue-tooltip', row\.item, \$event\)"[\s\S]*?@mouseleave="emit\('hide-tooltip'\)"[\s\S]*?@wheel="emit\('scroll-tooltip', \$event\)"/)
 assert.doesNotMatch(table, /class="research-table-row"[^>]*@mouse(?:enter|move|leave)/)
 assert.doesNotMatch(table, /class="research-item-picture"[^>]*tabindex/)
+assert.doesNotMatch(table, /class="research-item-picture"[^>]*@mouseenter/)
 assert.match(table, /@item-focus="showFocusedTooltip"/)
+assert.match(table, /overscroll-behavior-y: auto/)
+assert.match(table, /\['gd-rarity-name', `rarity-\$\{row\.item\.rarity\}`\]/)
 assert.match(table, /@media \(max-width: 700px\)[\s\S]*?position: sticky/)
 
 assert.match(journey, /aria-label="Level-ordered build journey"/)
@@ -68,4 +75,4 @@ assert.equal(parseAppRoute({ version: 1, workspace: 'planner', controls: { displ
 assert.equal(parseAppRoute({ version: 1, workspace: 'planner', controls: { display: 'grid' } })?.controls.display, 'journey')
 assert.match(packageJson.scripts.verify, /test:research-workspace-parity/)
 
-console.log('Research workspace parity passed: one typed table contract, semantic Planner views, picture-only pointer tooltip triggers, keyboard descriptions, bounded results, and compact sticky identity columns.')
+console.log('Research workspace parity passed: one typed table contract, semantic Planner views, item-cell pointer tooltip triggers, keyboard descriptions, bounded results, and compact sticky identity columns.')

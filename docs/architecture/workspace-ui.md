@@ -217,7 +217,7 @@ structured result search, availability/rarity/slot filters, sort controls, and p
 `SkillExplorerWorkspace.vue`. It projects its domain evidence into the shared
 `ResearchItemTableRow` contract and renders `ResearchItemTable.vue`, the same comparison surface as
 Leveling Planner. The table starts at required level ascending and presents item identity, level,
-slot, support, match evidence, acquisition, and archive/roll context inside its local horizontal
+slot, support, skill modifiers, acquisition, and archive/roll context inside its local horizontal
 scroller. `skill-explorer.ts` owns deterministic skill indexing,
 direct-rank, modifier, and visual-only matching, damage-conversion projection, lower-tier MI base
 collapse, and row filtering/sorting. `App.vue` supplies the immutable catalog, shared ownership/icon adapters,
@@ -236,9 +236,11 @@ Journey respectively. Switching Table/Journey preserves the focused result and b
 the unobscured viewport after the bounded surface remounts.
 
 The global item tooltip remains viewport-bounded and preserves its full descendant text as the item
-trigger's accessible description. Ordinary wheel input scrolls only when targeted at overflowing
-tooltip content; keyboard users use Page Up/Down while the describing item retains focus. Hovering
-the tooltip cancels pending dismissal, while wheel input elsewhere continues to scroll the workspace.
+trigger's accessible description. In research tables, the complete item identity cell is the pointer
+trigger; Journey retains its prominent picture trigger. Ordinary wheel input over either the trigger
+or tooltip scrolls overflowing tooltip content, then returns to workspace scrolling at its boundary.
+Keyboard users use Page Up/Down while the describing item retains focus. Hovering the tooltip cancels
+pending dismissal, and horizontal table containment never blocks vertical workspace scrolling.
 
 Supplies owns its typed category, compatible-slot, query, transfer-mode, and page controls plus
 its transient keyed selection in `SuppliesWorkspace.vue`. `supplies.ts` owns reusable-unlock

@@ -6867,7 +6867,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 throw new Error('Skill Explorer did not expose its default ascending level sort.')
               }
               const evidenceColumn = [...document.querySelectorAll('.skill-explorer .research-table-header [role="columnheader"]')]
-                .find((column) => column.textContent?.trim().startsWith('Match evidence'))
+                .find((column) => column.textContent?.trim().startsWith('Skill modifiers'))
               if (!evidenceColumn || !rows().some((row) => row.querySelector('.research-evidence')?.textContent?.includes('Alternate crimson spirit effect'))) {
                 throw new Error('Skill Explorer did not render visual transformation data.')
               }
@@ -6880,6 +6880,21 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                   (firstIcon instanceof HTMLImageElement && firstIcon.getBoundingClientRect().height < 50) ||
                   !(firstLevel instanceof HTMLElement) || getComputedStyle(firstLevel).textAlign !== 'center') {
                 throw new Error('Skill Explorer item and level cells did not use the polished table geometry.')
+              }
+              if (getComputedStyle(root).overscrollBehaviorY !== 'auto') {
+                throw new Error('Skill Explorer table blocks vertical wheel chaining to the workspace.')
+              }
+              for (const rarity of ['epic', 'legendary']) {
+                const name = root.querySelector('.gd-rarity-name.rarity-' + rarity)
+                if (!(name instanceof HTMLElement)) throw new Error('Skill Explorer did not render a ' + rarity + ' item name.')
+                const colorProbe = document.createElement('span')
+                colorProbe.style.color = 'var(--gd-rarity-' + rarity + ')'
+                document.body.appendChild(colorProbe)
+                const expectedColor = getComputedStyle(colorProbe).color
+                colorProbe.remove()
+                if (getComputedStyle(name).color !== expectedColor) {
+                  throw new Error('Skill Explorer did not apply the semantic ' + rarity + ' name color.')
+                }
               }
               const resultCounter = document.querySelector('.skill-explorer-toolbar .explorer-result-count')
               if (!(resultCounter instanceof HTMLElement)) throw new Error('Skill Explorer result count was unavailable.')
@@ -6953,17 +6968,48 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (document.querySelector('.game-tooltip')) {
                 throw new Error('Skill Explorer opened an item tooltip from ordinary table content instead of the picture.')
               }
-              const firstPicture = firstRow.querySelector('.research-item-picture')
-              if (!(firstPicture instanceof HTMLElement)) throw new Error('Skill Explorer item picture was unavailable.')
-              const pictureRect = firstPicture.getBoundingClientRect()
-              firstPicture.dispatchEvent(new MouseEvent('mouseenter', {
+              const itemRect = firstItemCell.getBoundingClientRect()
+              firstItemCell.dispatchEvent(new MouseEvent('mouseenter', {
                 bubbles: true,
-                clientX: pictureRect.left + pictureRect.width / 2,
-                clientY: pictureRect.top + pictureRect.height / 2
+                clientX: itemRect.right - 12,
+                clientY: itemRect.top + itemRect.height / 2
               }))
               for (let attempt = 0; attempt < 40 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
-              if (!document.querySelector('.game-tooltip')) throw new Error('Skill Explorer picture did not use the global item tooltip.')
-              firstPicture.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+              const pointerTooltip = document.querySelector('.game-tooltip')
+              if (!(pointerTooltip instanceof HTMLElement)) throw new Error('Skill Explorer item cell did not use the global item tooltip.')
+              const pointerScrollProbe = document.createElement('div')
+              pointerScrollProbe.setAttribute('aria-hidden', 'true')
+              pointerScrollProbe.style.cssText = 'height:480px;min-height:480px'
+              pointerTooltip.appendChild(pointerScrollProbe)
+              pointerTooltip.style.height = '150px'
+              pointerTooltip.style.maxHeight = '150px'
+              pointerTooltip.scrollTop = 0
+              const triggerWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
+              firstItemCell.dispatchEvent(triggerWheel)
+              if (!triggerWheel.defaultPrevented || pointerTooltip.scrollTop <= 0) {
+                throw new Error('Wheel input over the item cell did not scroll its overflowing tooltip.')
+              }
+              pointerTooltip.scrollTop = pointerTooltip.scrollHeight
+              const boundaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
+              firstItemCell.dispatchEvent(boundaryWheel)
+              if (boundaryWheel.defaultPrevented) {
+                throw new Error('The item cell retained wheel input at the tooltip boundary instead of returning it to the workspace: ' + JSON.stringify({
+                  scrollTop: pointerTooltip.scrollTop,
+                  maximumScrollTop: pointerTooltip.scrollHeight - pointerTooltip.clientHeight
+                }))
+              }
+              const tableWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
+              firstLevel.dispatchEvent(tableWheel)
+              if (tableWheel.defaultPrevented) {
+                throw new Error('Ordinary table content captured vertical workspace scrolling.')
+              }
+              const horizontalWheel = new WheelEvent('wheel', { deltaY: 90, shiftKey: true, bubbles: true, cancelable: true })
+              firstItemCell.dispatchEvent(horizontalWheel)
+              if (horizontalWheel.defaultPrevented) {
+                throw new Error('The tooltip captured Shift+wheel instead of leaving it available for horizontal table scrolling.')
+              }
+              pointerScrollProbe.remove()
+              firstItemCell.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
               const levelSort = [...document.querySelectorAll('.skill-explorer .research-table-header button')]
                 .find((button) => button.textContent?.trim().startsWith('Level'))
               if (!(levelSort instanceof HTMLButtonElement)) throw new Error('Skill Explorer level sort was unavailable.')

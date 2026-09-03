@@ -29,6 +29,7 @@ import {
   researchItemTypeLabel,
   researchRarityLabel,
   researchRollFact,
+  researchSkillName,
   type ResearchItemTableRow
 } from './workspaces/research-item-table'
 import MiWorkshopWorkspace from './workspaces/MiWorkshopWorkspace.vue'
@@ -1108,12 +1109,12 @@ const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.v
     ignored: plannerShowIgnored.value,
     supports: [
       ...row.masteryMatches.map((match) => ({
-        label: `All ${match.mastery} skills`,
+        label: `All ${researchSkillName(match.mastery)} skills`,
         text: match.amount > 0 ? `+${match.amount}` : 'Supported',
         tone: 'accent' as const
       })),
       ...row.matches.map((match) => ({
-        label: match.skill,
+        label: researchSkillName(match.skill),
         text: match.amount > 0 ? `+${match.amount}` : 'Modifier',
         tone: 'accent' as const
       }))
@@ -1124,8 +1125,8 @@ const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.v
       ...row.matches.flatMap((match) => [
         ...(match.conversionTarget ? [{ label: 'Converts to', text: match.conversionTarget, tone: 'accent' as const }] : []),
         ...([match.conversionDetails, match.special].filter(Boolean).length
-          ? [{ label: match.skill, text: [match.conversionDetails, match.special].filter(Boolean).join('; ') }]
-          : [{ label: match.skill, text: match.amount ? `+${match.amount} ranks` : 'Skill support' }]),
+          ? [{ label: researchSkillName(match.skill), text: [match.conversionDetails, match.special].filter(Boolean).join('; ') }]
+          : [{ label: researchSkillName(match.skill), text: match.amount ? `+${match.amount} ranks` : 'Skill support' }]),
         ...(match.visualTransformation ? [{ label: 'Visual', text: match.visualTransformation, tone: 'positive' as const }] : [])
       ])
     ],
@@ -4025,11 +4026,18 @@ function resetTooltipScroll(): void {
 }
 
 function scrollTooltip(event: WheelEvent): void {
-  const tooltip = event.currentTarget
-  if (!(tooltip instanceof HTMLElement) || tooltip.scrollHeight <= tooltip.clientHeight) return
+  if (event.shiftKey || event.ctrlKey || event.metaKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
+  const tooltip = tooltipElement.value
+  if (!tooltip || tooltip.scrollHeight <= tooltip.clientHeight) return
+  const maximumScrollTop = tooltip.scrollHeight - tooltip.clientHeight
+  const boundaryTolerance = 1
+  if (
+    (event.deltaY < 0 && tooltip.scrollTop <= boundaryTolerance) ||
+    (event.deltaY > 0 && tooltip.scrollTop >= maximumScrollTop - boundaryTolerance)
+  ) return
   const nextScrollTop = Math.max(
     0,
-    Math.min(tooltip.scrollTop + event.deltaY, tooltip.scrollHeight - tooltip.clientHeight)
+    Math.min(tooltip.scrollTop + event.deltaY, maximumScrollTop)
   )
   if (nextScrollTop === tooltip.scrollTop) return
   event.preventDefault()
@@ -5123,6 +5131,7 @@ function formatRollValue(value: number): string {
         @show-tooltip="showTooltip"
         @queue-tooltip="queueTooltip"
         @move-tooltip="moveTooltip"
+        @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
       />
@@ -5320,6 +5329,7 @@ function formatRollValue(value: number): string {
             @queue-tooltip="queueTooltip"
             @show-tooltip="showTooltip"
             @move-tooltip="moveTooltip"
+            @scroll-tooltip="scrollTooltip"
             @hide-tooltip="scheduleTooltipHide"
             @favorite="togglePlannerFavorite"
             @ignore="togglePlannerIgnored"
@@ -5334,6 +5344,7 @@ function formatRollValue(value: number): string {
             @queue-tooltip="queueTooltip"
             @show-tooltip="showTooltip"
             @move-tooltip="moveTooltip"
+            @scroll-tooltip="scrollTooltip"
             @hide-tooltip="scheduleTooltipHide"
             @favorite="togglePlannerFavorite"
             @ignore="togglePlannerIgnored"

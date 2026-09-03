@@ -18,6 +18,7 @@ import {
   researchAcquisitionFacts,
   researchItemTypeLabel,
   researchRollFact,
+  researchSkillName,
   type ResearchItemTableColumn,
   type ResearchItemTableRow
 } from './research-item-table'
@@ -34,6 +35,7 @@ const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement]
   'show-tooltip': [item: CollectionItem, element: HTMLElement]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem]
 }>()
@@ -72,7 +74,7 @@ const researchRows = computed<ResearchItemTableRow[]>(() => rows.value.map((row)
     item: row.item,
     itemType: researchItemTypeLabel(row.item),
     supports: [{
-      label: row.skill,
+      label: researchSkillName(row.skill),
       text: row.amount > 0 ? `+${row.amount}` : 'Modifier',
       tone: 'accent'
     }],
@@ -155,7 +157,7 @@ function handlePickerInput(): void {
 }
 
 function selectSkill(skill: string): void {
-  selectedSkill.value = skill
+  selectedSkill.value = researchSkillName(skill)
   pickerOpen.value = false
 }
 
@@ -241,7 +243,7 @@ function changeSort(next: string): void {
             @mouseenter="pickerIndex = index"
             @mousedown.prevent
             @click="selectSkill(skill)"
-          >{{ skill }}</button>
+          >{{ researchSkillName(skill) }}</button>
           <small v-if="suggestions.length === 0">No indexed skill matches that text.</small>
         </span>
       </div>
@@ -281,6 +283,7 @@ function changeSort(next: string): void {
       @queue-tooltip="(item, event) => emit('queue-tooltip', item, event)"
       @show-tooltip="(item, element) => emit('show-tooltip', item, element)"
       @move-tooltip="emit('move-tooltip', $event)"
+      @scroll-tooltip="emit('scroll-tooltip', $event)"
       @hide-tooltip="emit('hide-tooltip')"
     />
   </section>

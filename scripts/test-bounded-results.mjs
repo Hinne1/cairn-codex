@@ -74,7 +74,7 @@ assert.match(plannerJourneySource, /pagination="continuous"[\s\S]*?label="Leveli
 assert.match(appSource, />Table<\/button>[\s\S]*?>Journey<\/button>/u,
   'The planner display switcher must expose clear Table and Journey choices.')
 assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.preventDefault\(\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/u,
-  'Overflowing tooltips must scroll with an ordinary wheel while the tooltip itself is targeted.')
+  'Overflowing tooltips must scroll with an ordinary wheel from either the tooltip or its item trigger.')
 assert.match(appSource, /@mouseenter="cancelTooltipHide"[\s\S]*?@mouseleave="scheduleTooltipHide"[\s\S]*?@wheel="scrollTooltip"/u,
   'Pointer users must be able to enter and scroll the tooltip without dismissing it.')
 assert.match(appSource, /function scrollTooltipFromKeyboard\(event: KeyboardEvent\)[\s\S]*?PageDown[\s\S]*?PageUp[\s\S]*?aria-describedby[\s\S]*?item-tooltip/u,
@@ -98,5 +98,9 @@ assert.match(surfaceSource, /:data-result-key="String\(entry\.key\)"/u,
   'Bounded results must expose stable rendered identity for cross-layout interaction verification.')
 assert.doesNotMatch(styleSource, /\.planner-table-wrap\s*\{[^}]*max-height/iu,
   'The planner list must not create a height-bounded nested vertical scroller.')
+assert.match(researchTableSource, /overscroll-behavior-x: contain;[\s\S]*?overscroll-behavior-y: auto;/u,
+  'Wide research tables must preserve horizontal containment without blocking vertical page scrolling.')
+assert.match(researchTableSource, /class="research-item"[\s\S]*?@wheel="emit\('scroll-tooltip', \$event\)"/u,
+  'The complete item identity cell must route wheel input to an overflowing tooltip.')
 
 console.log('Bounded result contract passed for 20k and 50k generated collections; mounted entries remained capped at 50.')

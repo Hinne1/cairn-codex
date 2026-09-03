@@ -4105,9 +4105,16 @@ function scrollTooltip(event: WheelEvent): void {
     (event.deltaY < 0 && actualScrollTop <= boundaryTolerance) ||
     (event.deltaY > 0 && actualScrollTop >= maximumScrollTop - boundaryTolerance)
   if (atBoundary) {
-    if (tooltipBoundaryScroll.value === 'contain') {
+    if (tooltipBoundaryScroll.value === 'contain' || directWheel) {
       event.preventDefault()
       event.stopPropagation()
+    }
+    // Chromium does not consistently chain wheel input from this fixed overlay.
+    // Own direct-tooltip handoff to avoid both a stuck page and double scrolling.
+    if (directWheel && tooltipBoundaryScroll.value === 'page') {
+      const pageDelta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? event.deltaY * window.innerHeight : event.deltaY
+      window.scrollBy({ top: pageDelta, behavior: preferredScrollBehavior() })
     }
     return
   }

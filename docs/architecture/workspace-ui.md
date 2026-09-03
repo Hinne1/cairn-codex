@@ -257,6 +257,9 @@ trigger; Journey retains its prominent picture trigger. Direct wheel input over 
 input over its item trigger use the same short, reduced-motion-aware scrolling path. The Settings
 preference determines whether input at a tooltip boundary continues into the
 workspace (the default) or stays contained until the pointer leaves the preview.
+Direct wheel input at a tooltip edge explicitly scrolls the page in continuation mode; it must not
+depend on Chromium chaining from a fixed overlay. Item-trigger edge input keeps ordinary native
+page scrolling. Both paths retain containment when selected.
 Keyboard users use Page Up/Down while the describing item retains focus. Hovering the tooltip cancels
 pending dismissal, and horizontal table containment never blocks vertical workspace scrolling.
 

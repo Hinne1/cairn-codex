@@ -5468,6 +5468,9 @@ async function verifyNativeSkillExplorerWheelInput(window: BrowserWindow): Promi
       const tooltip = document.querySelector('.game-tooltip')
       if (!(tooltip instanceof HTMLElement)) throw new Error('Tooltip disappeared before the native boundary-handoff check.')
       tooltip.scrollTop = tooltip.scrollHeight
+      tooltip.addEventListener('wheel', (event) => {
+        tooltip.dataset.boundaryWheel = JSON.stringify({ delta: event.deltaY, top: tooltip.scrollTop, maximum: tooltip.scrollHeight - tooltip.clientHeight, prevented: event.defaultPrevented })
+      }, { once: true })
       const maximumPageScroll = document.documentElement.scrollHeight - window.innerHeight
       if (window.scrollY >= maximumPageScroll - 10) window.scrollTo(0, Math.max(0, maximumPageScroll - 300))
       return window.scrollY
@@ -5477,7 +5480,30 @@ async function verifyNativeSkillExplorerWheelInput(window: BrowserWindow): Promi
   window.webContents.sendInputEvent({ type: 'mouseWheel', x: tooltipPoint.x, y: tooltipPoint.y, deltaY: -120, wheelTicksY: -1, canScroll: true })
   await new Promise((resolve) => setTimeout(resolve, 120))
   const boundaryPageScroll = await window.webContents.executeJavaScript(`window.scrollY`) as number
-  if (boundaryPageScroll <= boundaryState) throw new Error('Real tooltip-boundary wheel input did not continue into the workspace in the default mode.')
+  if (boundaryPageScroll <= boundaryState) {
+    const boundaryDiagnostic = await window.webContents.executeJavaScript(`(() => {
+      const tooltip = document.querySelector('.game-tooltip')
+      return { before: ${boundaryState}, after: window.scrollY, pageMaximum: document.documentElement.scrollHeight - innerHeight,
+        pointTarget: document.elementFromPoint(${tooltipPoint.x}, ${tooltipPoint.y})?.className,
+        wheel: tooltip?.dataset.boundaryWheel, top: tooltip?.scrollTop, height: tooltip?.clientHeight, scrollHeight: tooltip?.scrollHeight,
+        rect: tooltip?.getBoundingClientRect().toJSON() }
+    })()`)
+    throw new Error('Real tooltip-boundary wheel input did not continue into the workspace in the default mode: ' + JSON.stringify(boundaryDiagnostic))
+  }
+
+  stage = 'tooltip top boundary handoff'
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const topBoundaryState = await window.webContents.executeJavaScript(`(() => {
+    const tooltip = document.querySelector('.game-tooltip')
+    if (!(tooltip instanceof HTMLElement)) throw new Error('Tooltip disappeared before the top-boundary check.')
+    tooltip.scrollTop = 0
+    if (window.scrollY < 120) throw new Error('Top-boundary check requires upward page scroll room.')
+    return window.scrollY
+  })()`) as number
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: tooltipPoint.x, y: tooltipPoint.y, deltaY: 120, wheelTicksY: 1, canScroll: true })
+  await new Promise((resolve) => setTimeout(resolve, 180))
+  const topBoundaryPageScroll = await window.webContents.executeJavaScript('window.scrollY') as number
+  if (topBoundaryPageScroll >= topBoundaryState) throw new Error('Real tooltip-top wheel input did not scroll the workspace upward in page mode.')
 
   stage = 'ordinary and horizontal table scroll'
   const tablePoint = await window.webContents.executeJavaScript(`

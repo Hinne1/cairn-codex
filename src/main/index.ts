@@ -1821,7 +1821,15 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
               prefix: '',
               suffix: ''
             }]
-          }],
+          }, ...(index % 4 === 0 ? ['Wendigo Totem', 'Storm Totem'].map((skill, fxIndex) => ({
+            kind: 'visual-modifier' as const,
+            heading: `${skill} · Visual transformation`,
+            lines: [{
+              label: fxIndex === 0 ? 'Alternate crimson spirit effect' : 'Alternate azure storm effect',
+              minimum: null, maximum: null, unit: '' as const,
+              tone: 'visual' as const, prefix: '', suffix: ''
+            }]
+          })) : [])],
           grantedSkill: null,
           searchText: `wendigo totem ${conversionTarget.toLocaleLowerCase()} damage leveling planner synthetic qa`
         }
@@ -2162,6 +2170,14 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
               tone: 'visual' as const,
               prefix: '',
               suffix: ''
+            }]
+          }, {
+            kind: 'visual-modifier' as const,
+            heading: 'Storm Totem · Visual transformation',
+            lines: [{
+              label: 'Alternate azure storm effect',
+              minimum: null, maximum: null, unit: '' as const,
+              tone: 'visual' as const, prefix: '', suffix: ''
             }]
           }] : [])],
           grantedSkill: null,
@@ -6136,6 +6152,13 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 throw new Error('Planner table still creates a bottom-bounded vertical viewport.')
               }
               const initialRows = [...surface.querySelectorAll('.bounded-results-item')]
+              const tableStyle = getComputedStyle(surface)
+              const gutter = surface.offsetWidth - surface.clientWidth - parseFloat(tableStyle.borderLeftWidth) - parseFloat(tableStyle.borderRightWidth)
+              if (gutter > 1) throw new Error('Planner table reserves a blank right-hand scrollbar gutter: ' + gutter)
+              const fx = surface.querySelector('.research-skill-fx')
+              if (!fx?.querySelector('.tone-fx') || !fx.textContent.includes('Alternate crimson spirit effect') || !fx.textContent.includes('Alternate azure storm effect')) {
+                throw new Error('Planner table did not render all item-wide Skill FX transformations.')
+              }
               if (initialRows.length !== 50) throw new Error('Planner continuous window started with ' + initialRows.length + ' mounted rows instead of 50.')
               initialRows[0]?.focus()
               initialRows[0]?.dispatchEvent(new FocusEvent('focus'))
@@ -6216,6 +6239,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               grid.click()
               await frames(); await frames()
               const gridCards = document.querySelectorAll('.planner-journey-results .bounded-results-item').length
+              const journeyFx = document.querySelector('.planner-journey-results .research-skill-fx')
+              if (!journeyFx?.textContent.includes('Alternate crimson spirit effect') || !journeyFx.textContent.includes('Alternate azure storm effect')) {
+                throw new Error('Planner Journey dropped item-wide Skill FX transformations behind its first modifier.')
+              }
               const gridFocus = document.activeElement
               const gridFocusRect = gridFocus instanceof HTMLElement ? gridFocus.getBoundingClientRect() : null
               if (
@@ -7147,6 +7174,13 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               const modifierColumn = [...document.querySelectorAll('.skill-explorer .research-table-header [role="columnheader"]')]
                 .find((column) => column.textContent?.trim().startsWith('Skill modifiers'))
+              const tableStyle = getComputedStyle(root)
+              const gutter = root.offsetWidth - root.clientWidth - parseFloat(tableStyle.borderLeftWidth) - parseFloat(tableStyle.borderRightWidth)
+              if (gutter > 1) throw new Error('Skill Explorer table reserves a blank right-hand scrollbar gutter: ' + gutter)
+              const fx = root.querySelector('.research-skill-fx')
+              if (!fx?.querySelector('.tone-fx') || !fx.textContent.includes('Alternate crimson spirit effect') || !fx.textContent.includes('Alternate azure storm effect')) {
+                throw new Error('Skill Explorer did not render all item-wide Skill FX transformations.')
+              }
               if (!modifierColumn || !rows().some((row) => row.querySelector('.research-modifiers')?.textContent?.includes('Alternate crimson spirit effect'))) {
                 throw new Error('Skill Explorer did not render visual transformation data.')
               }

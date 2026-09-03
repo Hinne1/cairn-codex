@@ -8,6 +8,7 @@ a supported game installation and records the manual live-transfer results here.
 
 | Scenario | Evidence | Current result |
 | --- | --- | --- |
+| Item-wide Skill FX and research table edge | Skill Explorer model tests, shared research parity checks, wide/compact Skill Explorer and Planner Electron gates | **Passed 2026-09-03:** visual-only skills enter the picker; both tables and Planner Journey retain multiple item FX transformations including skills outside the current selection; FX uses its semantic badge without duplicate ordinary modifiers; the horizontal table reserves no blank right-hand vertical scrollbar gutter. |
 | TypeScript/Vue production build | `npm run build` | Passed 2026-08-30 |
 | Fresh database migration/idempotent reopen | desktop smoke, in-memory database | Passed |
 | Atomic replacement, backup, rollback | helper write self-test in a unique temporary directory | Passed |

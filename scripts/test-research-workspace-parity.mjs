@@ -63,6 +63,11 @@ assert.doesNotMatch(table, /class="research-item-picture"[^>]*tabindex/)
 assert.doesNotMatch(table, /class="research-item-picture"[^>]*@mouseenter/)
 assert.match(table, /@item-focus="showFocusedTooltip"/)
 assert.match(table, /overscroll-behavior-y: auto/)
+assert.match(table, /scrollbar-gutter: auto/)
+for (const surface of [table, journey]) {
+  assert.match(surface, /<ResearchSkillFx :item="row.item"/)
+  assert.match(surface, /row.modifiers.filter\(fact => fact.kind !== 'visual'\)/)
+}
 assert.match(table, /function scrollTableHorizontally[\s\S]*?table\.scrollLeft = nextScrollLeft[\s\S]*?@wheel\.shift="scrollTableHorizontally"/)
 assert.match(table, /\['gd-rarity-name', `rarity-\$\{row\.item\.rarity\}`\]/)
 assert.match(table, /@media \(max-width: 700px\)[\s\S]*?position: sticky/)

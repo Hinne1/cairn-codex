@@ -238,6 +238,13 @@ the unobscured viewport after the bounded surface remounts.
 The shared row contract distinguishes rank, pet, conversion, special, and visual modifiers so
 future global damage-type presentation can consume semantic data instead of parsing display text.
 
+`ResearchSkillFx.vue` renders all item-level visual transformation sections ahead of ordinary
+modifiers in both the shared table and Journey. FX uses the existing semantic FX badge and named
+skills; it is not limited to the currently selected skill or Journey's first ordinary modifier.
+Visual-only skills also enter the skill index. The horizontal table scroller does not reserve a
+vertical scrollbar gutter, so its final header reaches the rounded right edge. Toolbar composition
+unification is tracked in #138, with wide/compact mockup review before material UI changes.
+
 The global item tooltip remains viewport-bounded and preserves its full descendant text as the item
 trigger's accessible description. In research tables, the complete item identity cell is the pointer
 trigger; Journey retains its prominent picture trigger. Direct wheel input over the tooltip and wheel

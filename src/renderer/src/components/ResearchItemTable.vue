@@ -2,6 +2,8 @@
 import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
+import ResearchSkillFx from './ResearchSkillFx.vue'
+import { itemSkillVisualTransformations } from '../workspaces/skill-explorer'
 import type {
   ResearchItemTableColumn,
   ResearchItemTableRow
@@ -174,10 +176,11 @@ function scrollTableHorizontally(event: WheelEvent): void {
             <small v-if="row.supports.length === 0">—</small>
           </span>
           <span role="gridcell" class="research-modifiers">
-            <span v-for="(fact, index) in row.modifiers" :key="`${fact.kind}:${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'" :data-modifier-kind="fact.kind">
+            <ResearchSkillFx :item="row.item" />
+            <span v-for="(fact, index) in row.modifiers.filter(fact => fact.kind !== 'visual')" :key="`${fact.kind}:${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'" :data-modifier-kind="fact.kind">
               <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}{{ fact.text }}
             </span>
-            <small v-if="row.modifiers.length === 0">—</small>
+            <small v-if="row.modifiers.length === 0 && itemSkillVisualTransformations(row.item).length === 0">—</small>
           </span>
           <span role="gridcell" class="research-acquisition">
             <span v-for="(fact, index) in row.acquisition" :key="`${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'">
@@ -205,7 +208,7 @@ function scrollTableHorizontally(event: WheelEvent): void {
   overflow: auto;
   overscroll-behavior-x: contain;
   overscroll-behavior-y: auto;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
   border: 1px solid var(--cc-tone-border);
   border-radius: var(--cc-radius-lg);
   background: var(--cc-tone-surface);

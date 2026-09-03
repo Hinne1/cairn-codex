@@ -4,6 +4,7 @@ import { compileSearchQuery } from '../src/shared/search-query.ts'
 import {
   buildSkillNames,
   createSkillExplorerRows,
+  itemSkillVisualTransformations,
   nextSkillSuggestionIndex,
   nextSkillSortControls,
   skillSortAriaValue,
@@ -104,6 +105,20 @@ const visualItem = item({
   }
 })
 const archivedMiHigh = item({ record: 'mi-high', name: 'Wendigo Barb', rarity: 'mi', slot: 'weapon', levelRequirement: 94, presentation: rankItem.presentation })
+assert.deepEqual(buildSkillNames([visualItem], {}), ['Wendigo Totem'])
+const multiFxItem = item({ presentation: { sections: [
+  ...visualItem.presentation.sections,
+  { kind: 'visual-modifier', heading: 'Storm Totem · Visual transformation', lines: [line('Alternate azure storm effect', null, 'visual')] }
+] } })
+assert.deepEqual(itemSkillVisualTransformations(multiFxItem), [
+  { skill: 'Wendigo Totem', text: 'Alternate crimson spirit effect' },
+  { skill: 'Storm Totem', text: 'Alternate azure storm effect' }
+])
+assert.equal(skillMatchForItem(multiFxItem, 'Wendigo Totem').visualTransformation, 'Alternate crimson spirit effect')
+assert.deepEqual(itemSkillVisualTransformations(item({ presentation: null })), [])
+assert.deepEqual(itemSkillVisualTransformations(item({ presentation: { sections: [
+  { kind: 'visual-modifier', heading: 'Storm Totem · visual transformation', lines: [] }
+] } })), [{ skill: 'Storm Totem', text: 'Alternate skill visuals' }])
 const archivedMiLow = item({ record: 'mi-low', name: 'Wendigo Barb', rarity: 'mi', slot: 'weapon', levelRequirement: 70, presentation: rankItem.presentation })
 const unrelated = item({ record: 'other', name: 'Other', presentation: { sections: [] } })
 const items = [rankItem, modifierItem, visualItem, archivedMiHigh, archivedMiLow, unrelated]

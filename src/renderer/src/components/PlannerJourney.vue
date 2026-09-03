@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
+import ResearchSkillFx from './ResearchSkillFx.vue'
 import type { ResearchItemTableRow } from '../workspaces/research-item-table'
 
 const props = withDefaults(defineProps<{
@@ -92,8 +93,9 @@ function handleImageError(item: CollectionItem): void {
               <strong :class="['gd-rarity-name', `rarity-${row.item.rarity}`]">{{ row.item.name }}</strong>
               <small>{{ row.itemType }} · {{ row.item.slot }}</small>
               <span class="planner-journey-facts">
+                <ResearchSkillFx :item="row.item" />
                 <em v-for="(fact, factIndex) in row.supports" :key="`${fact.text}:${factIndex}`">{{ fact.label }} {{ fact.text }}</em>
-                <span v-if="row.modifiers[0]"><b>{{ row.modifiers[0].label }}</b> {{ row.modifiers[0].text }}</span>
+                <span v-for="fact in row.modifiers.filter(fact => fact.kind !== 'visual').slice(0, 1)" :key="fact.text"><b>{{ fact.label }}</b> {{ fact.text }}</span>
                 <span v-if="row.acquisition[0]"><b>{{ row.acquisition[0].label }}</b>{{ row.acquisition[0].label ? ' · ' : '' }}{{ row.acquisition[0].text }}</span>
               </span>
             </span>

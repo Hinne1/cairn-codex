@@ -17,6 +17,20 @@ export interface SkillExplorerRow extends SkillMatch {
   item: CollectionItem
 }
 
+export interface SkillVisualTransformation {
+  skill: string
+  text: string
+}
+
+export function itemSkillVisualTransformations(item: CollectionItem): SkillVisualTransformation[] {
+  return (item.presentation?.sections ?? [])
+    .filter((section) => section.kind === 'visual-modifier')
+    .map((section) => ({
+      skill: section.heading?.replace(/\s*·\s*Visual transformation\s*$/i, '').trim() ?? '',
+      text: section.lines.map(formatPresentationLine).join('; ') || 'Alternate skill visuals'
+    }))
+}
+
 export interface SkillExplorerViewOptions {
   isArchivedItem: (item: CollectionItem) => boolean
   query: Pick<CompiledSearchQuery, 'matches'>
@@ -59,6 +73,9 @@ export function buildSkillNames(
 ): string[] {
   const names = new Set<string>(Object.keys(skillMasteries))
   for (const item of items) {
+    for (const transformation of itemSkillVisualTransformations(item)) {
+      if (transformation.skill) names.add(transformation.skill)
+    }
     for (const section of item.presentation?.sections ?? []) {
       if (section.kind === 'skill-modifier' && section.heading) names.add(section.heading)
       for (const line of section.lines) {

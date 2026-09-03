@@ -73,8 +73,10 @@ assert.match(plannerJourneySource, /pagination="continuous"[\s\S]*?label="Leveli
   'The Planner journey must use continuous bounded results instead of explicit page navigation.')
 assert.match(appSource, />Table<\/button>[\s\S]*?>Journey<\/button>/u,
   'The planner display switcher must expose clear Table and Journey choices.')
-assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.preventDefault\(\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/u,
-  'Overflowing tooltips must scroll with an ordinary wheel from either the tooltip or its item trigger.')
+assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.currentTarget === tooltip[\s\S]*?tooltipBoundaryScroll\.value === 'contain'[\s\S]*?animateTooltipScroll/u,
+  'Tooltips and item triggers must share smooth wheel routing while honoring edge containment.')
+assert.match(surfaceSource, /function handleKeydown[\s\S]*?event\.target !== event\.currentTarget[\s\S]*?event\.key === 'Enter'/u,
+  'Nested row controls must retain native keyboard activation instead of activating the result row.')
 assert.match(appSource, /@mouseenter="cancelTooltipHide"[\s\S]*?@mouseleave="scheduleTooltipHide"[\s\S]*?@wheel="scrollTooltip"/u,
   'Pointer users must be able to enter and scroll the tooltip without dismissing it.')
 assert.match(appSource, /function scrollTooltipFromKeyboard\(event: KeyboardEvent\)[\s\S]*?PageDown[\s\S]*?PageUp[\s\S]*?aria-describedby[\s\S]*?item-tooltip/u,

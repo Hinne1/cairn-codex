@@ -78,11 +78,18 @@ const researchRows = computed<ResearchItemTableRow[]>(() => rows.value.map((row)
       text: row.amount > 0 ? `+${row.amount}` : 'Modifier',
       tone: 'accent'
     }],
-    evidence: [
-      ...(row.conversionTarget ? [{ label: 'Converts to', text: row.conversionTarget, tone: 'accent' as const }] : []),
-      ...(row.conversionDetails ? [{ text: row.conversionDetails }] : []),
-      ...(row.special ? [{ label: 'Modifier', text: row.special }] : []),
-      ...(row.visualTransformation ? [{ label: 'Visual', text: row.visualTransformation, tone: 'positive' as const }] : [])
+    modifiers: [
+      ...(row.conversionTarget ? [{
+        kind: 'conversion' as const,
+        label: 'Converts to',
+        text: row.conversionTarget,
+        tone: 'accent' as const,
+        skill: researchSkillName(row.skill),
+        targetDamageType: row.conversionTarget
+      }] : []),
+      ...(row.conversionDetails ? [{ kind: 'conversion' as const, text: row.conversionDetails, skill: researchSkillName(row.skill) }] : []),
+      ...(row.special ? [{ kind: 'special' as const, label: 'Modifier', text: row.special, skill: researchSkillName(row.skill) }] : []),
+      ...(row.visualTransformation ? [{ kind: 'visual' as const, label: 'Visual', text: row.visualTransformation, tone: 'positive' as const, skill: researchSkillName(row.skill) }] : [])
     ],
     acquisition: researchAcquisitionFacts(row.item),
     archive: [
@@ -96,7 +103,7 @@ const tableSortColumns = computed<Partial<Record<ResearchItemTableColumn, string
   level: 'level',
   slot: 'slot',
   supports: 'amount',
-  evidence: sort.value === 'conversion' ? 'conversion' : 'special'
+  modifiers: sort.value === 'conversion' ? 'conversion' : 'special'
 }))
 const slotOptions = computed(() => [...new Set(props.items.map((item) => item.slot).filter(Boolean))]
   .sort((left, right) => left.localeCompare(right)))

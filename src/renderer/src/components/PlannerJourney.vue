@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
 import type { ResearchItemTableRow } from '../workspaces/research-item-table'
@@ -31,6 +32,19 @@ function startsMilestone(index: number, row: ResearchItemTableRow): boolean {
 
 function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, element: HTMLElement): void {
   emit('show-tooltip', row.item, element)
+}
+
+const failedIconUrls = ref(new Set<string>())
+
+function itemImageUrl(item: CollectionItem): string | null {
+  const url = props.iconUrlForItem(item)
+  return url && !failedIconUrls.value.has(url) ? url : null
+}
+
+function handleImageError(item: CollectionItem): void {
+  const url = props.iconUrlForItem(item)
+  if (!url) return
+  failedIconUrls.value = new Set([...failedIconUrls.value, url])
 }
 </script>
 
@@ -71,7 +85,7 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
               @mouseleave="emit('hide-tooltip')"
               @wheel="emit('scroll-tooltip', $event)"
             >
-              <img v-if="iconUrlForItem(row.item)" :src="iconUrlForItem(row.item)!" alt="" />
+              <img v-if="itemImageUrl(row.item)" :src="itemImageUrl(row.item)!" alt="" @error="handleImageError(row.item)" />
               <small v-else class="planner-journey-placeholder" aria-hidden="true">{{ row.item.slot.slice(0, 2).toLocaleUpperCase() }}</small>
             </span>
             <span class="planner-journey-copy">
@@ -79,7 +93,7 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
               <small>{{ row.itemType }} · {{ row.item.slot }}</small>
               <span class="planner-journey-facts">
                 <em v-for="(fact, factIndex) in row.supports" :key="`${fact.text}:${factIndex}`">{{ fact.label }} {{ fact.text }}</em>
-                <span v-if="row.evidence[0]"><b>{{ row.evidence[0].label }}</b> {{ row.evidence[0].text }}</span>
+                <span v-if="row.modifiers[0]"><b>{{ row.modifiers[0].label }}</b> {{ row.modifiers[0].text }}</span>
                 <span v-if="row.acquisition[0]"><b>{{ row.acquisition[0].label }}</b>{{ row.acquisition[0].label ? ' · ' : '' }}{{ row.acquisition[0].text }}</span>
               </span>
             </span>

@@ -20,12 +20,14 @@ const seedStorage = new MemoryStorage()
 const seedRepository = createPreferenceRepository(seedStorage, fixedNow, createId)
 const legacyV1Document = JSON.parse(seedRepository.exportJson())
 delete legacyV1Document.appearance.navigationCollapsed
+delete legacyV1Document.appearance.tooltipBoundaryScroll
 assert.equal(isPreferenceDocument(legacyV1Document), true, 'existing v1 preference documents must remain readable')
 
 const migratedStorage = new MemoryStorage()
 migratedStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(legacyV1Document))
 const migratedRepository = createPreferenceRepository(migratedStorage, fixedNow, createId)
 assert.equal(migratedRepository.value.appearance.navigationCollapsed, false)
+assert.equal(migratedRepository.value.appearance.tooltipBoundaryScroll, 'page')
 migratedRepository.update('appearance', { navigationCollapsed: true })
 assert.equal(JSON.parse(migratedStorage.getItem(PREFERENCE_STORAGE_KEY)).appearance.navigationCollapsed, true)
 

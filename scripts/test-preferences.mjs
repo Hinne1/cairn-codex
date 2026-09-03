@@ -22,6 +22,7 @@ const fresh = createPreferenceRepository(freshStorage, fixedNow, createId)
 assert.equal(fresh.diagnostics.source, 'fresh')
 assert.equal(fresh.value.meta.profileKind, 'fresh')
 assert.equal(fresh.value.workspace.experimentalToolsEnabled, false)
+assert.equal(fresh.value.appearance.tooltipBoundaryScroll, 'page')
 assert.equal(fresh.value.onboarding.status, 'in-progress')
 
 const legacyStorage = new MemoryStorage()
@@ -79,6 +80,10 @@ assert.equal(migrated.value.notes.todos[0]?.text, 'Farm the set')
 assert.equal(migrated.value.sources.collectionBasis, 'stashes')
 assert.deepEqual(migrated.value.sources.archivePaths, ['archive-a'])
 assert.equal(migrated.value.onboarding.status, 'completed')
+assert.equal(migrated.value.appearance.tooltipBoundaryScroll, 'page')
+
+migrated.update('appearance', { tooltipBoundaryScroll: 'contain' })
+assert.equal(JSON.parse(migrated.exportJson()).appearance.tooltipBoundaryScroll, 'contain')
 
 const beforeResetPlanner = JSON.stringify(migrated.value.planner)
 const beforeResetNotes = JSON.stringify(migrated.value.notes)
@@ -141,6 +146,7 @@ const corruptStorage = new MemoryStorage()
 const corrupt = JSON.parse(fresh.exportJson())
 corrupt.meta.updatedAtUtc = '2025-01-02T03:04:05.000Z'
 corrupt.appearance.zoomFactor = 'huge'
+corrupt.appearance.tooltipBoundaryScroll = 'somewhere'
 corrupt.workspace.visibleTools = 'everything'
 corrupt.search.oracleMinimumLevel = null
 corrupt.notes.todos = [{ id: 'invalid' }]
@@ -195,6 +201,8 @@ assert.ok(recovered.diagnostics.invalidFields.includes('workspace.visibleTools')
 assert.ok(recovered.diagnostics.invalidFields.includes('search.oracleMinimumLevel'))
 assert.ok(recovered.diagnostics.invalidFields.includes('notes.todos'))
 assert.equal(recovered.value.appearance.zoomFactor, 1)
+assert.equal(recovered.value.appearance.tooltipBoundaryScroll, 'page')
+assert.ok(recovered.diagnostics.invalidFields.includes('appearance.tooltipBoundaryScroll'))
 assert.deepEqual(recovered.value.notes.todos, [])
 
 const exported = JSON.parse(migrated.exportJson())

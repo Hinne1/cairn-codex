@@ -8,11 +8,19 @@ export interface ResearchItemFact {
   tone?: ResearchItemTone
 }
 
+export type ResearchItemModifierKind = 'conversion' | 'pet' | 'rank' | 'special' | 'visual'
+
+export interface ResearchItemModifier extends ResearchItemFact {
+  kind: ResearchItemModifierKind
+  skill?: string
+  targetDamageType?: string
+}
+
 export interface ResearchItemTableRow {
   item: CollectionItem
   itemType: string
   supports: readonly ResearchItemFact[]
-  evidence: readonly ResearchItemFact[]
+  modifiers: readonly ResearchItemModifier[]
   acquisition: readonly ResearchItemFact[]
   archive: readonly ResearchItemFact[]
   favorite?: boolean
@@ -24,7 +32,7 @@ export type ResearchItemTableColumn =
   | 'level'
   | 'slot'
   | 'supports'
-  | 'evidence'
+  | 'modifiers'
   | 'acquisition'
   | 'archive'
 

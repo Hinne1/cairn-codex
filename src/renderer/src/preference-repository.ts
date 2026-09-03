@@ -12,6 +12,7 @@ export type PreferenceLoadSource = 'fresh' | 'legacy' | 'stored'
 export type CollectionBasisPreference = 'stashes' | 'archive'
 export type PreferenceTheme = 'cairn'
 export type PlannerDisplayPreference = 'table' | 'journey' | 'map'
+export type TooltipBoundaryScrollPreference = 'page' | 'contain'
 export type MiCountingPreference = 'base' | 'tier'
 export type SkillScopePreference = 'archive' | 'all'
 export type OracleStylePreference = 'all' | 'pets' | 'retaliation' | 'weapon' | 'caster'
@@ -59,6 +60,7 @@ export interface AppPreferencesV1 {
     trackerCollapsed: boolean
     navigationCollapsed: boolean
     plannerDisplay: PlannerDisplayPreference
+    tooltipBoundaryScroll: TooltipBoundaryScrollPreference
   }
   workspace: {
     visibleTools: WorkspaceToolPreference[]
@@ -252,7 +254,7 @@ function interfaceDefaults(): Pick<AppPreferencesV1, 'appearance' | 'workspace' 
   return {
     appearance: {
       theme: 'cairn', zoomFactor: 1, trackerCollapsed: false,
-      navigationCollapsed: false, plannerDisplay: 'table'
+      navigationCollapsed: false, plannerDisplay: 'table', tooltipBoundaryScroll: 'page'
     },
     workspace: {
       visibleTools: [...DEFAULT_WORKSPACE_TOOLS], experimentalToolsEnabled: false,
@@ -325,6 +327,7 @@ function legacyPreferences(
         ? legacyBoolean(storage, 'cairn-codex-tracker-collapsed', false)
         : false,
       navigationCollapsed: false,
+      tooltipBoundaryScroll: defaults.appearance.tooltipBoundaryScroll,
       plannerDisplay: storage.getItem('cairn-codex-planner-display') === 'grid' ||
         storage.getItem('cairn-codex-planner-display') === 'journey'
         ? 'journey'
@@ -433,6 +436,9 @@ function validateStored(
     } else if ((source.appearance.plannerDisplay as unknown) === 'grid') {
       result.appearance.plannerDisplay = 'journey'
     } else if (source.appearance.plannerDisplay !== undefined) invalid('appearance.plannerDisplay')
+    if (source.appearance.tooltipBoundaryScroll === 'page' || source.appearance.tooltipBoundaryScroll === 'contain') {
+      result.appearance.tooltipBoundaryScroll = source.appearance.tooltipBoundaryScroll
+    } else if (source.appearance.tooltipBoundaryScroll !== undefined) invalid('appearance.tooltipBoundaryScroll')
   } else invalid('appearance')
   if (source.workspace && typeof source.workspace === 'object') {
     const visibleTools = stringArray(source.workspace.visibleTools)

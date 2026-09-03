@@ -5353,6 +5353,256 @@ async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void
   }
 }
 
+async function verifyNativeSkillExplorerWheelInput(window: BrowserWindow): Promise<void> {
+  let stage = 'locate item cell'
+  try {
+  window.show()
+  window.focus()
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const itemPoint = await window.webContents.executeJavaScript(`
+    (async () => {
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+      const cell = document.querySelector('.skill-explorer .research-table-row .research-item')
+      const table = document.querySelector('.skill-explorer .research-item-table')
+      if (!(cell instanceof HTMLElement) || !(table instanceof HTMLElement)) {
+        throw new Error('Native wheel verification could not find the Skill Explorer table.')
+      }
+      cell.scrollIntoView({ block: 'center' })
+      table.scrollLeft = 0
+      await wait(80)
+      const rect = cell.getBoundingClientRect()
+      return { x: Math.round(rect.left + Math.min(24, rect.width / 2)), y: Math.round(rect.top + rect.height / 2) }
+    })()
+  `) as { x: number, y: number }
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: itemPoint.x, y: itemPoint.y })
+  await new Promise((resolve) => setTimeout(resolve, 260))
+  const nativePointerOpenedTooltip = await window.webContents.executeJavaScript(`Boolean(document.querySelector('.game-tooltip'))`) as boolean
+  if (!nativePointerOpenedTooltip) {
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const cell = document.querySelector('.skill-explorer .research-table-row .research-item')
+        if (!(cell instanceof HTMLElement)) return
+        const rect = cell.getBoundingClientRect()
+        cell.dispatchEvent(new MouseEvent('mouseenter', {
+          bubbles: true,
+          clientX: rect.left + Math.min(24, rect.width / 2),
+          clientY: rect.top + rect.height / 2
+        }))
+      })()
+    `)
+    await new Promise((resolve) => setTimeout(resolve, 260))
+  }
+  stage = 'prepare tooltip overflow'
+  const tooltipPoint = await window.webContents.executeJavaScript(`
+    (() => {
+      const tooltip = document.querySelector('.game-tooltip')
+      if (!(tooltip instanceof HTMLElement)) return { error: 'Item cell did not open its tooltip.' }
+      const probe = document.createElement('div')
+      probe.className = 'native-wheel-probe'
+      probe.setAttribute('aria-hidden', 'true')
+      probe.style.cssText = 'height:640px;min-height:640px'
+      tooltip.appendChild(probe)
+      tooltip.style.height = '150px'
+      tooltip.style.maxHeight = '150px'
+      tooltip.scrollTop = 0
+      tooltip.addEventListener('wheel', (event) => {
+        tooltip.dataset.nativeWheelDelta = String(event.deltaY)
+      }, { once: true })
+      const rect = tooltip.getBoundingClientRect()
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + Math.min(60, rect.height / 2)) }
+    })()
+  `) as { x?: number, y?: number, error?: string }
+  if (tooltipPoint.error || tooltipPoint.x === undefined || tooltipPoint.y === undefined) {
+    throw new Error(tooltipPoint.error ?? 'Tooltip point was invalid.')
+  }
+  stage = 'native tooltip scroll'
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: tooltipPoint.x, y: tooltipPoint.y })
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: tooltipPoint.x, y: tooltipPoint.y, deltaY: -120, wheelTicksY: -1, canScroll: true })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const nativeTooltipState = await window.webContents.executeJavaScript(`
+    (() => {
+      const tooltip = document.querySelector('.game-tooltip')
+      return tooltip instanceof HTMLElement
+        ? { scrollTop: tooltip.scrollTop, delta: tooltip.dataset.nativeWheelDelta ?? null, scrollHeight: tooltip.scrollHeight, clientHeight: tooltip.clientHeight }
+        : null
+    })()
+  `) as { scrollTop: number, delta: string | null, scrollHeight: number, clientHeight: number } | null
+  if (!nativeTooltipState || nativeTooltipState.scrollTop <= 0) {
+    throw new Error(`Real mouse-wheel input did not natively scroll the overflowing tooltip: ${JSON.stringify(nativeTooltipState)}`)
+  }
+
+  stage = 'proxied item-cell scroll'
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: itemPoint.x, y: itemPoint.y })
+  await new Promise((resolve) => setTimeout(resolve, 220))
+  await window.webContents.executeJavaScript(`(() => { const tooltip = document.querySelector('.game-tooltip'); if (tooltip instanceof HTMLElement) tooltip.scrollTop = 0 })()`)
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: itemPoint.x, y: itemPoint.y, deltaY: -120, wheelTicksY: -1, canScroll: true })
+  await new Promise((resolve) => setTimeout(resolve, 180))
+  const proxiedTooltipScroll = await window.webContents.executeJavaScript(`document.querySelector('.game-tooltip')?.scrollTop ?? 0`) as number
+  if (proxiedTooltipScroll <= 0) throw new Error('Real mouse-wheel input over the item cell did not smoothly proxy into its tooltip.')
+
+  stage = 'tooltip boundary handoff'
+  const boundaryState = await window.webContents.executeJavaScript(`
+    (() => {
+      const tooltip = document.querySelector('.game-tooltip')
+      if (!(tooltip instanceof HTMLElement)) throw new Error('Tooltip disappeared before the native boundary-handoff check.')
+      tooltip.scrollTop = tooltip.scrollHeight
+      const maximumPageScroll = document.documentElement.scrollHeight - window.innerHeight
+      if (window.scrollY >= maximumPageScroll - 10) window.scrollTo(0, Math.max(0, maximumPageScroll - 300))
+      return window.scrollY
+    })()
+  `) as number
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: tooltipPoint.x, y: tooltipPoint.y })
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: tooltipPoint.x, y: tooltipPoint.y, deltaY: -120, wheelTicksY: -1, canScroll: true })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const boundaryPageScroll = await window.webContents.executeJavaScript(`window.scrollY`) as number
+  if (boundaryPageScroll <= boundaryState) throw new Error('Real tooltip-boundary wheel input did not continue into the workspace in the default mode.')
+
+  stage = 'ordinary and horizontal table scroll'
+  const tablePoint = await window.webContents.executeJavaScript(`
+    (async () => {
+      const level = document.querySelector('.skill-explorer .research-table-row .research-level')
+      const table = document.querySelector('.skill-explorer .research-item-table')
+      if (!(level instanceof HTMLElement) || !(table instanceof HTMLElement)) throw new Error('Native table wheel verification lost its targets.')
+      level.scrollIntoView({ block: 'center' })
+      table.scrollLeft = 0
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      const rect = level.getBoundingClientRect()
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
+    })()
+  `) as { x: number, y: number }
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: tablePoint.x, y: tablePoint.y })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const pageBeforeTableWheel = await window.webContents.executeJavaScript(`window.scrollY`) as number
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: tablePoint.x, y: tablePoint.y, deltaY: -120, wheelTicksY: -1, canScroll: true })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const pageAfterTableWheel = await window.webContents.executeJavaScript(`window.scrollY`) as number
+  if (pageAfterTableWheel <= pageBeforeTableWheel) throw new Error('Real wheel input over an ordinary table cell did not scroll the workspace.')
+  const horizontalPoint = await window.webContents.executeJavaScript(`
+    (async () => {
+      const level = document.querySelector('.skill-explorer .research-table-row .research-level')
+      const table = document.querySelector('.skill-explorer .research-item-table')
+      if (!(level instanceof HTMLElement) || !(table instanceof HTMLElement)) throw new Error('Horizontal wheel verification lost its table target.')
+      level.scrollIntoView({ block: 'center' })
+      table.scrollLeft = Math.min(100, table.scrollWidth - table.clientWidth)
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      const rect = level.getBoundingClientRect()
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2), scrollLeft: table.scrollLeft }
+    })()
+  `) as { x: number, y: number, scrollLeft: number }
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: horizontalPoint.x, y: horizontalPoint.y })
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: horizontalPoint.x, y: horizontalPoint.y, deltaY: -120, wheelTicksY: -1, canScroll: true, modifiers: ['shift'] })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const horizontalScroll = await window.webContents.executeJavaScript(`document.querySelector('.skill-explorer .research-item-table')?.scrollLeft ?? 0`) as number
+  if (horizontalScroll === horizontalPoint.scrollLeft) throw new Error('Real horizontal wheel input did not scroll the dense table.')
+  await window.webContents.executeJavaScript(`
+    (() => {
+      document.querySelector('.native-wheel-probe')?.remove()
+      const table = document.querySelector('.skill-explorer .research-item-table')
+      if (table instanceof HTMLElement) table.scrollLeft = 0
+    })()
+  `)
+
+  stage = 'enable contained tooltip scrolling'
+  await window.webContents.executeJavaScript(`
+    (async () => {
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+      const settings = document.querySelector('[data-destination-id="settings"]')
+      if (!(settings instanceof HTMLButtonElement)) throw new Error('Could not open Settings for contained tooltip verification.')
+      settings.click()
+      for (let attempt = 0; attempt < 50 && !document.querySelector('.settings-workspace'); attempt += 1) await wait(20)
+      const contained = document.querySelector('input[name="tooltip-boundary-scroll"][value="contain"]')
+      if (!(contained instanceof HTMLInputElement)) throw new Error('Contained tooltip setting was unavailable.')
+      contained.click()
+      await wait(40)
+      if (!contained.checked) throw new Error('Contained tooltip setting did not become active.')
+      window.history.back()
+      for (let attempt = 0; attempt < 50 && !document.querySelector('.skill-explorer .research-table-row .research-item'); attempt += 1) await wait(20)
+    })()
+  `)
+
+  stage = 'prepare contained tooltip overflow'
+  const containedItemPoint = await window.webContents.executeJavaScript(`
+    (async () => {
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+      const cell = document.querySelector('.skill-explorer .research-table-row .research-item')
+      if (!(cell instanceof HTMLElement)) throw new Error('Skill Explorer did not return after enabling contained tooltip scrolling.')
+      cell.scrollIntoView({ block: 'center' })
+      await wait(60)
+      const rect = cell.getBoundingClientRect()
+      return { x: Math.round(rect.left + Math.min(24, rect.width / 2)), y: Math.round(rect.top + rect.height / 2) }
+    })()
+  `) as { x: number, y: number }
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: containedItemPoint.x, y: containedItemPoint.y })
+  await new Promise((resolve) => setTimeout(resolve, 260))
+  const containedTooltipPoint = await window.webContents.executeJavaScript(`
+    (() => {
+      const tooltip = document.querySelector('.game-tooltip')
+      if (!(tooltip instanceof HTMLElement)) throw new Error('Contained-mode item hover did not open its tooltip.')
+      const probe = document.createElement('div')
+      probe.className = 'native-wheel-probe'
+      probe.setAttribute('aria-hidden', 'true')
+      probe.style.cssText = 'height:640px;min-height:640px'
+      tooltip.appendChild(probe)
+      tooltip.style.height = '150px'
+      tooltip.style.maxHeight = '150px'
+      tooltip.scrollTop = tooltip.scrollHeight
+      const maximumPageScroll = document.documentElement.scrollHeight - window.innerHeight
+      window.scrollTo(0, Math.min(Math.max(120, window.scrollY), Math.max(0, maximumPageScroll - 120)))
+      const rect = tooltip.getBoundingClientRect()
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + Math.min(60, rect.height / 2)), pageScroll: window.scrollY }
+    })()
+  `) as { x: number, y: number, pageScroll: number }
+
+  stage = 'contained direct-tooltip boundary'
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: containedTooltipPoint.x, y: containedTooltipPoint.y })
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: containedTooltipPoint.x, y: containedTooltipPoint.y, deltaY: -120, wheelTicksY: -1, canScroll: true })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const pageAfterContainedTooltipWheel = await window.webContents.executeJavaScript(`window.scrollY`) as number
+  if (pageAfterContainedTooltipWheel !== containedTooltipPoint.pageScroll) {
+    throw new Error('Contained-mode wheel input escaped from the tooltip boundary into the workspace.')
+  }
+
+  stage = 'contained item-cell boundary'
+  window.webContents.sendInputEvent({ type: 'mouseMove', x: containedItemPoint.x, y: containedItemPoint.y })
+  await new Promise((resolve) => setTimeout(resolve, 220))
+  const containedItemBoundaryState = await window.webContents.executeJavaScript(`
+    (() => {
+      const tooltip = document.querySelector('.game-tooltip')
+      if (!(tooltip instanceof HTMLElement)) throw new Error('Contained-mode tooltip disappeared before the item-cell boundary check.')
+      tooltip.scrollTop = 0
+      return window.scrollY
+    })()
+  `) as number
+  window.webContents.sendInputEvent({ type: 'mouseWheel', x: containedItemPoint.x, y: containedItemPoint.y, deltaY: 120, wheelTicksY: 1, canScroll: true })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const pageAfterContainedItemWheel = await window.webContents.executeJavaScript(`window.scrollY`) as number
+  if (pageAfterContainedItemWheel !== containedItemBoundaryState) {
+    throw new Error('Contained-mode wheel input escaped from the item cell at the tooltip boundary.')
+  }
+
+  stage = 'restore page tooltip scrolling'
+  await window.webContents.executeJavaScript(`
+    (async () => {
+      const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+      document.querySelector('.native-wheel-probe')?.remove()
+      const settings = document.querySelector('[data-destination-id="settings"]')
+      if (!(settings instanceof HTMLButtonElement)) throw new Error('Could not reopen Settings after contained tooltip verification.')
+      settings.click()
+      for (let attempt = 0; attempt < 50 && !document.querySelector('.settings-workspace'); attempt += 1) await wait(20)
+      const page = document.querySelector('input[name="tooltip-boundary-scroll"][value="page"]')
+      if (!(page instanceof HTMLInputElement)) throw new Error('Page tooltip setting was unavailable.')
+      page.click()
+      await wait(40)
+      if (!page.checked) throw new Error('Page tooltip setting did not become active again.')
+      window.history.back()
+      for (let attempt = 0; attempt < 50 && !document.querySelector('.skill-explorer .research-table-row .research-item'); attempt += 1) await wait(20)
+    })()
+  `)
+  } catch (error) {
+    throw new Error(`Native Skill Explorer wheel verification failed during ${stage}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 async function captureWindowWhenReady(window: BrowserWindow, path: string): Promise<void> {
   const captureStartedAt = Date.now()
   const interactionTimings: Record<string, number> = {}
@@ -5789,6 +6039,31 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           `)
         }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_PLANNER_ACTIONS === '1') {
+          const keyboardFavoriteState = await window.webContents.executeJavaScript(`
+            (async () => {
+              const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              const favorite = document.querySelector('.leveling-planner .research-item-actions button, .leveling-planner .planner-journey-actions button')
+              if (!(favorite instanceof HTMLButtonElement)) throw new Error('Planner keyboard verification could not find the favorite control.')
+              favorite.focus()
+              if (document.activeElement !== favorite) throw new Error('Planner favorite control did not accept keyboard focus.')
+              const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+              favorite.dispatchEvent(enter)
+              if (enter.defaultPrevented) throw new Error('Planner row intercepted Enter from its nested favorite control.')
+              favorite.click()
+              await frames()
+              const state = {
+                active: favorite.classList.contains('active'),
+                drawer: Boolean(document.querySelector('.item-drawer')),
+                focused: document.activeElement === favorite
+              }
+              favorite.click()
+              await frames()
+              return { ...state, cleared: !favorite.classList.contains('active') }
+            })()
+          `) as { active: boolean, drawer: boolean, focused: boolean, cleared: boolean }
+          if (!keyboardFavoriteState.active || keyboardFavoriteState.drawer || !keyboardFavoriteState.cleared) {
+            throw new Error(`Planner nested favorite keyboard contract failed: ${JSON.stringify(keyboardFavoriteState)}`)
+          }
           interactionTimings.plannerActionsMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
@@ -5884,6 +6159,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               tooltip.scrollTop = 0
               const wheel = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true })
               tooltip.dispatchEvent(wheel)
+              await frames()
               if (!wheel.defaultPrevented || tooltip.scrollTop <= 0) {
                 throw new Error('Ordinary mouse-wheel input did not scroll the overflowing planner tooltip.')
               }
@@ -6827,6 +7103,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           `)
         }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_SKILL_EXPLORER_WORKSPACE === '1') {
+          window.show()
+          window.focus()
+          await new Promise((resolve) => setTimeout(resolve, 80))
           interactionTimings.skillExplorerWorkspaceMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
@@ -6866,9 +7145,9 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (initialLevelColumn?.getAttribute('aria-sort') !== 'ascending') {
                 throw new Error('Skill Explorer did not expose its default ascending level sort.')
               }
-              const evidenceColumn = [...document.querySelectorAll('.skill-explorer .research-table-header [role="columnheader"]')]
+              const modifierColumn = [...document.querySelectorAll('.skill-explorer .research-table-header [role="columnheader"]')]
                 .find((column) => column.textContent?.trim().startsWith('Skill modifiers'))
-              if (!evidenceColumn || !rows().some((row) => row.querySelector('.research-evidence')?.textContent?.includes('Alternate crimson spirit effect'))) {
+              if (!modifierColumn || !rows().some((row) => row.querySelector('.research-modifiers')?.textContent?.includes('Alternate crimson spirit effect'))) {
                 throw new Error('Skill Explorer did not render visual transformation data.')
               }
               const firstItem = rows()[0]?.querySelector('.research-item-identity')
@@ -6941,8 +7220,15 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               focusedTooltip.scrollTop = 0
               const ordinaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
               focusedTooltip.dispatchEvent(ordinaryWheel)
+              await wait(150)
               if (!ordinaryWheel.defaultPrevented || focusedTooltip.scrollTop <= 0) {
-                throw new Error('Ordinary mouse-wheel input did not scroll the overflowing tooltip.')
+                throw new Error('Direct tooltip wheel input did not use the smooth tooltip scroll path: ' + JSON.stringify({
+                  defaultPrevented: ordinaryWheel.defaultPrevented,
+                  scrollTop: focusedTooltip.scrollTop,
+                  scrollHeight: focusedTooltip.scrollHeight,
+                  clientHeight: focusedTooltip.clientHeight,
+                  classes: focusedTooltip.className
+                }))
               }
               focusedTooltip.dispatchEvent(new MouseEvent('mouseenter'))
               await wait(120)
@@ -6986,10 +7272,22 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               pointerTooltip.scrollTop = 0
               const triggerWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
               firstItemCell.dispatchEvent(triggerWheel)
-              if (!triggerWheel.defaultPrevented || pointerTooltip.scrollTop <= 0) {
-                throw new Error('Wheel input over the item cell did not scroll its overflowing tooltip.')
+              await wait(150)
+              if (!triggerWheel.defaultPrevented) {
+                throw new Error('Wheel input over the item cell was not routed to its overflowing tooltip.')
               }
+              pointerTooltip.scrollTop = 0
+              pointerTooltip.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true }))
+              const fillWheel = new WheelEvent('wheel', { deltaY: pointerTooltip.scrollHeight, bubbles: true, cancelable: true })
+              firstItemCell.dispatchEvent(fillWheel)
+              const queuedBoundaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
+              firstItemCell.dispatchEvent(queuedBoundaryWheel)
+              if (!fillWheel.defaultPrevented || !queuedBoundaryWheel.defaultPrevented || pointerTooltip.scrollTop >= pointerTooltip.scrollHeight - pointerTooltip.clientHeight - 1) {
+                throw new Error('Burst wheel input handed off before the tooltip visibly reached its boundary.')
+              }
+              await wait(150)
               pointerTooltip.scrollTop = pointerTooltip.scrollHeight
+              pointerTooltip.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true }))
               const boundaryWheel = new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true })
               firstItemCell.dispatchEvent(boundaryWheel)
               if (boundaryWheel.defaultPrevented) {
@@ -7004,9 +7302,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 throw new Error('Ordinary table content captured vertical workspace scrolling.')
               }
               const horizontalWheel = new WheelEvent('wheel', { deltaY: 90, shiftKey: true, bubbles: true, cancelable: true })
+              const horizontalScrollBefore = root.scrollLeft
               firstItemCell.dispatchEvent(horizontalWheel)
-              if (horizontalWheel.defaultPrevented) {
-                throw new Error('The tooltip captured Shift+wheel instead of leaving it available for horizontal table scrolling.')
+              if (!horizontalWheel.defaultPrevented || root.scrollLeft === horizontalScrollBefore) {
+                throw new Error('Shift+wheel did not use the research table horizontal-scroll path.')
               }
               pointerScrollProbe.remove()
               firstItemCell.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
@@ -7152,7 +7451,14 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const keyboardOption = keyboardOptionId ? document.getElementById(keyboardOptionId) : null
               const reopenedOptions = [...document.querySelectorAll('.skill-suggestions [role="option"]')]
               if (!(keyboardOption instanceof HTMLButtonElement) || keyboardOption !== reopenedOptions.at(-1)) {
-                throw new Error('Arrow Up did not open the Skill picker on its final option.')
+                throw new Error('Arrow Up did not open the Skill picker on its final option: ' + JSON.stringify({
+                  activeId: keyboardOptionId,
+                  activeText: keyboardOption?.textContent?.trim() ?? null,
+                  finalId: reopenedOptions.at(-1)?.id ?? null,
+                  finalText: reopenedOptions.at(-1)?.textContent?.trim() ?? null,
+                  optionCount: reopenedOptions.length,
+                  value: picker.value
+                }))
               }
               const selectedSkill = keyboardOption.textContent?.trim()
               picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
@@ -7176,6 +7482,22 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               return performance.now() - started
             })()
           `)
+          if (skillQuery) {
+            await window.webContents.executeJavaScript(`
+              (async () => {
+                const input = document.querySelector('.skill-combobox input')
+                if (!(input instanceof HTMLInputElement)) return
+                input.value = ${JSON.stringify(skillQuery)}
+                input.dispatchEvent(new Event('input', { bubbles: true }))
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+                if (${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_SKILL_SELECT_FIRST === '1')}) {
+                  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+                  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+                }
+              })()
+            `)
+          }
+          await verifyNativeSkillExplorerWheelInput(window)
         }
         const query = process.env.CAIRN_CODEX_SCREENSHOT_QUERY
         if (query) {
@@ -8141,6 +8463,22 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               await frames()
               if (!tierMode.checked || preferences().workspace?.miCountingMode !== 'tier') {
                 throw new Error('MI counting v-model did not update the persisted parent ref.')
+              }
+
+              const containedTooltipScroll = workspace.querySelector('input[name="tooltip-boundary-scroll"][value="contain"]')
+              const pageTooltipScroll = workspace.querySelector('input[name="tooltip-boundary-scroll"][value="page"]')
+              if (!(containedTooltipScroll instanceof HTMLInputElement) || !(pageTooltipScroll instanceof HTMLInputElement)) {
+                throw new Error('Tooltip edge scrolling choices were not rendered.')
+              }
+              containedTooltipScroll.click()
+              await frames()
+              if (!containedTooltipScroll.checked || preferences().appearance?.tooltipBoundaryScroll !== 'contain') {
+                throw new Error('Contained tooltip-edge scrolling did not persist through Settings.')
+              }
+              pageTooltipScroll.click()
+              await frames()
+              if (!pageTooltipScroll.checked || preferences().appearance?.tooltipBoundaryScroll !== 'page') {
+                throw new Error('Page tooltip-edge scrolling did not persist through Settings.')
               }
 
               const stashTarget = workspace.querySelector('.retrieval-settings select')

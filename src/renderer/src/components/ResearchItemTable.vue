@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
 import type {
@@ -47,10 +48,23 @@ const columns: readonly { key: ResearchItemTableColumn, label: string }[] = [
   { key: 'level', label: 'Level' },
   { key: 'slot', label: 'Slot' },
   { key: 'supports', label: 'Supports' },
-  { key: 'evidence', label: 'Skill modifiers' },
+  { key: 'modifiers', label: 'Skill modifiers' },
   { key: 'acquisition', label: 'Acquisition' },
   { key: 'archive', label: 'Archive / roll' }
 ]
+
+const failedIconUrls = ref(new Set<string>())
+
+function itemImageUrl(item: CollectionItem): string | null {
+  const url = props.iconUrlForItem(item)
+  return url && !failedIconUrls.value.has(url) ? url : null
+}
+
+function handleImageError(item: CollectionItem): void {
+  const url = props.iconUrlForItem(item)
+  if (!url) return
+  failedIconUrls.value = new Set([...failedIconUrls.value, url])
+}
 
 function ariaSort(column: ResearchItemTableColumn): 'ascending' | 'descending' | undefined {
   if (!props.sort || props.sortColumns[column] !== props.sort) return undefined
@@ -59,6 +73,18 @@ function ariaSort(column: ResearchItemTableColumn): 'ascending' | 'descending' |
 
 function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, element: HTMLElement): void {
   emit('show-tooltip', row.item, element)
+}
+
+function scrollTableHorizontally(event: WheelEvent): void {
+  if (!event.shiftKey || event.ctrlKey || event.metaKey) return
+  const table = event.currentTarget
+  if (!(table instanceof HTMLElement)) return
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  const nextScrollLeft = Math.max(0, Math.min(table.scrollLeft + delta, table.scrollWidth - table.clientWidth))
+  if (nextScrollLeft === table.scrollLeft) return
+  event.preventDefault()
+  event.stopPropagation()
+  table.scrollLeft = nextScrollLeft
 }
 </script>
 
@@ -86,6 +112,7 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
       @activate="(_key, row) => emit('activate', row.item)"
       @item-focus="showFocusedTooltip"
       @item-blur="emit('hide-tooltip')"
+      @wheel.shift="scrollTableHorizontally"
     >
       <template #header>
         <div class="research-table-header" role="row">
@@ -120,7 +147,7 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
           >
             <span class="research-item-identity">
               <span class="research-item-picture">
-                <img v-if="iconUrlForItem(row.item)" :src="iconUrlForItem(row.item)!" alt="" />
+                <img v-if="itemImageUrl(row.item)" :src="itemImageUrl(row.item)!" alt="" @error="handleImageError(row.item)" />
                 <small v-else class="research-item-placeholder" aria-hidden="true">{{ row.item.slot.slice(0, 2).toLocaleUpperCase() }}</small>
               </span>
               <span class="research-item-copy">
@@ -146,11 +173,11 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
             </em>
             <small v-if="row.supports.length === 0">—</small>
           </span>
-          <span role="gridcell" class="research-evidence">
-            <span v-for="(fact, index) in row.evidence" :key="`${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'">
+          <span role="gridcell" class="research-modifiers">
+            <span v-for="(fact, index) in row.modifiers" :key="`${fact.kind}:${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'" :data-modifier-kind="fact.kind">
               <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}{{ fact.text }}
             </span>
-            <small v-if="row.evidence.length === 0">—</small>
+            <small v-if="row.modifiers.length === 0">—</small>
           </span>
           <span role="gridcell" class="research-acquisition">
             <span v-for="(fact, index) in row.acquisition" :key="`${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'">
@@ -190,9 +217,6 @@ function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, el
   grid-template-columns: 310px 72px 110px 220px minmax(320px, 1fr) 260px 190px;
 }
 .research-table-header {
-  position: sticky;
-  z-index: 2;
-  top: 0;
   color: var(--cc-tone-muted);
   background: var(--cc-surface-3);
   font-size: var(--cc-font-size-xs);

@@ -214,7 +214,7 @@ dismantling path is introduced by the extraction.
 
 Skill Explorer owns its complete typed route-control snapshot, subject picker, suggestions,
 structured result search, availability/rarity/slot filters, sort controls, and paging in
-`SkillExplorerWorkspace.vue`. It projects its domain evidence into the shared
+`SkillExplorerWorkspace.vue`. It projects typed skill modifiers into the shared
 `ResearchItemTableRow` contract and renders `ResearchItemTable.vue`, the same comparison surface as
 Leveling Planner. The table starts at required level ascending and presents item identity, level,
 slot, support, skill modifiers, acquisition, and archive/roll context inside its local horizontal
@@ -235,10 +235,15 @@ Version-1 links and preferences containing the former `list | grid` values migra
 Journey respectively. Switching Table/Journey preserves the focused result and brings it back into
 the unobscured viewport after the bounded surface remounts.
 
+The shared row contract distinguishes rank, pet, conversion, special, and visual modifiers so
+future global damage-type presentation can consume semantic data instead of parsing display text.
+
 The global item tooltip remains viewport-bounded and preserves its full descendant text as the item
 trigger's accessible description. In research tables, the complete item identity cell is the pointer
-trigger; Journey retains its prominent picture trigger. Ordinary wheel input over either the trigger
-or tooltip scrolls overflowing tooltip content, then returns to workspace scrolling at its boundary.
+trigger; Journey retains its prominent picture trigger. Direct wheel input over the tooltip and wheel
+input over its item trigger use the same short, reduced-motion-aware scrolling path. The Settings
+preference determines whether input at a tooltip boundary continues into the
+workspace (the default) or stays contained until the pointer leaves the preview.
 Keyboard users use Page Up/Down while the describing item retains focus. Hovering the tooltip cancels
 pending dismissal, and horizontal table containment never blocks vertical workspace scrolling.
 

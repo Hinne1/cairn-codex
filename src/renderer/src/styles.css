@@ -547,11 +547,16 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 15px;
   line-height: 1.24;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   pointer-events: auto;
   scrollbar-color: var(--cc-border-emphasis) var(--cc-canvas-deep);
   scrollbar-width: thin;
 }
+.game-tooltip.tooltip-boundary-contain { overscroll-behavior: contain; }
+.item-icon-placeholder { display: grid; place-items: center; border: 1px solid var(--cc-border-default); border-radius: var(--cc-radius-md); color: var(--cc-tone-accent); background: var(--cc-surface-1); font: 600 var(--cc-font-size-lg) var(--cc-font-display); letter-spacing: var(--cc-letter-label); }
+.tooltip-icon-placeholder { width: 44px; height: 54px; }
+.comparison-icon-placeholder { width: 70px; height: 76px; }
+.copy-icon-placeholder { width: 44px; height: 54px; }
 .game-tooltip::-webkit-scrollbar { width: 9px; }
 .game-tooltip::-webkit-scrollbar-track { background: var(--cc-canvas-deep); }
 .game-tooltip::-webkit-scrollbar-thumb { border: 2px solid var(--cc-canvas-deep); border-radius: var(--cc-radius-pill); background: var(--cc-border-emphasis); }
@@ -800,7 +805,8 @@ body.onboarding-active { overflow: hidden; }
 .comparison-backdrop { justify-content: stretch; background: rgba(5, 5, 4, .9); backdrop-filter: blur(8px); }
 .item-drawer.comparison-workspace { width: 100vw; max-width: none; padding: 28px 34px 52px; border-left: 0; background: radial-gradient(circle at 50% -20%, rgba(92, 68, 35, .28), transparent 43%), linear-gradient(155deg, #1b1915, #0c0c0b 72%); box-shadow: none; }
 .comparison-heading { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; align-items: center; gap: 18px; max-width: 1500px; margin: 0 auto 18px; padding: 0 54px 18px 0; border-bottom: 1px solid #413a2e; }
-.comparison-heading > img { width: 70px; height: 76px; object-fit: contain; filter: drop-shadow(0 4px 8px #000); }
+.comparison-heading > img,
+.comparison-heading > .comparison-icon-placeholder { width: 70px; height: 76px; object-fit: contain; filter: drop-shadow(0 4px 8px #000); }
 .comparison-heading h2 { margin: 3px 0 5px; color: #eee4ce; font: 500 34px Georgia, serif; }
 .comparison-heading .drawer-intro { max-width: 780px; margin: 0; }
 .comparison-count { display: grid; min-width: 75px; justify-items: center; padding: 10px 14px; border: 1px solid #55462f; border-radius: 8px; background: rgba(56, 43, 26, .42); }
@@ -1263,6 +1269,8 @@ body.planner-setup-active { overflow: hidden; }
 .zoom-controls { display: flex; align-items: center; gap: 7px; }
 .zoom-controls button, .settings-card select { padding: 8px 11px; border: 1px solid #51452f; border-radius: 5px; color: #d2bd88; background: #2a241b; cursor: pointer; }
 .zoom-controls strong { min-width: 56px; color: #e2cf9e; text-align: center; }
+.settings-choice-group { display: grid; gap: var(--cc-space-2); margin: var(--cc-space-2) 0 0; padding: 0; border: 0; }
+.settings-choice-group legend { margin-bottom: var(--cc-space-2); color: var(--cc-text-secondary); font-size: var(--cc-font-size-sm); font-weight: 650; }
 .source-settings { grid-column: span 1; }
 .source-settings > header { display: flex; justify-content: space-between; gap: 12px; }
 .source-settings .source-presets { align-self: start; }
@@ -1483,7 +1491,8 @@ body.planner-setup-active { overflow: hidden; }
   .drawer-mi-tools { grid-template-columns: 1fr 1fr; }
   .drawer-mi-tools > button { grid-column: 1 / -1; }
   .comparison-heading { grid-template-columns: 62px minmax(0, 1fr); }
-  .comparison-heading > img { width: 56px; height: 62px; }
+  .comparison-heading > img,
+  .comparison-heading > .comparison-icon-placeholder { width: 56px; height: 62px; }
   .comparison-count { grid-column: 2; grid-template-columns: auto auto; justify-self: start; gap: 6px; min-width: 0; }
   .dismantling-resource-gaps, .dismantling-costs { grid-template-columns: 1fr; }
 }
@@ -1527,7 +1536,8 @@ body.planner-setup-active { overflow: hidden; }
   .item-drawer { padding: 28px 22px; }
   .item-drawer.comparison-workspace { padding: 22px 18px 40px; }
   .comparison-heading { grid-template-columns: 1fr; padding-right: 48px; }
-  .comparison-heading > img { display: none; }
+  .comparison-heading > img,
+  .comparison-heading > .comparison-icon-placeholder { display: none; }
   .comparison-count { grid-column: 1; }
   .copy-card > header { grid-template-columns: 1fr; }
   .copy-actions { flex-flow: row wrap; }

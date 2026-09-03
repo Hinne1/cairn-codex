@@ -21,7 +21,8 @@ complete document on the next launch.
 Version 1 separates settings by purpose:
 
 - `appearance`, `workspace`, and `search` are disposable interface preferences. They include
-  the theme, zoom, tracker and workspace-navigation density, planner presentation, visible and experimental tools,
+  the theme, zoom, tracker and workspace-navigation density, planner presentation, tooltip-edge
+  scroll handoff, visible and experimental tools,
   Monster Infrequent tier counting, and remembered explorer choices.
 - `planner` and `notes` contain user-authored builds, ignored/favorite records, and to-dos.
   Planner profiles may include a combined class name and its two masteries; older profiles
@@ -64,7 +65,9 @@ Breaking changes to this schema require:
 Bounded optional interface fields may be added to the current version when older documents remain
 valid and receive an explicit safe default. The adaptive-sidebar density preference follows that
 rule: older version-1 documents load expanded, while every newly canonicalized document includes
-the boolean field.
+the boolean field. Tooltip-edge scrolling follows the same compatibility rule: older documents
+default to continuing into the page, while users can choose to contain wheel input at the top and
+bottom of an overflowing tooltip.
 
 ## Export
 

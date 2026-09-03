@@ -80,7 +80,8 @@ import {
 import {
   createPreferenceRepository,
   type StoredPlannerProfile as PlannerProfile,
-  type StoredTodoItem as TodoItem
+  type StoredTodoItem as TodoItem,
+  type TooltipBoundaryScrollPreference
 } from './preference-repository'
 import { searchGuidance } from './search-guidance'
 import {
@@ -294,6 +295,8 @@ const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
         : 'idle'
 )
 const zoomFactor = ref(initialPreferences.appearance.zoomFactor)
+const tooltipBoundaryScroll = ref<TooltipBoundaryScrollPreference>(initialPreferences.appearance.tooltipBoundaryScroll)
+const failedItemIconUrls = ref(new Set<string>())
 const activeView = ref<ActiveView>('collection')
 const query = ref('')
 const searchQuery = ref('')
@@ -1119,15 +1122,17 @@ const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.v
         tone: 'accent' as const
       }))
     ],
-    evidence: [
-      ...(row.petBonuses.length ? [{ label: 'All pets', text: row.petBonuses.join('; '), tone: 'accent' as const }] : []),
-      ...row.masteryMatches.map((match) => ({ label: 'Mastery-wide', text: masteryMatchEffect(match) })),
+    modifiers: [
+      ...(row.petBonuses.length ? [{ kind: 'pet' as const, label: 'All pets', text: row.petBonuses.join('; '), tone: 'accent' as const }] : []),
+      ...row.masteryMatches.map((match) => ({ kind: 'rank' as const, label: 'Mastery-wide', text: masteryMatchEffect(match), skill: researchSkillName(match.mastery) })),
       ...row.matches.flatMap((match) => [
-        ...(match.conversionTarget ? [{ label: 'Converts to', text: match.conversionTarget, tone: 'accent' as const }] : []),
-        ...([match.conversionDetails, match.special].filter(Boolean).length
-          ? [{ label: researchSkillName(match.skill), text: [match.conversionDetails, match.special].filter(Boolean).join('; ') }]
-          : [{ label: researchSkillName(match.skill), text: match.amount ? `+${match.amount} ranks` : 'Skill support' }]),
-        ...(match.visualTransformation ? [{ label: 'Visual', text: match.visualTransformation, tone: 'positive' as const }] : [])
+        ...(match.conversionTarget ? [{ kind: 'conversion' as const, label: 'Converts to', text: match.conversionTarget, tone: 'accent' as const, skill: researchSkillName(match.skill), targetDamageType: match.conversionTarget }] : []),
+        ...(match.conversionDetails ? [{ kind: 'conversion' as const, label: researchSkillName(match.skill), text: match.conversionDetails, skill: researchSkillName(match.skill) }] : []),
+        ...(match.special ? [{ kind: 'special' as const, label: researchSkillName(match.skill), text: match.special, skill: researchSkillName(match.skill) }] : []),
+        ...(!match.conversionDetails && !match.special
+          ? [{ kind: 'rank' as const, label: researchSkillName(match.skill), text: match.amount ? `+${match.amount} ranks` : 'Skill support', skill: researchSkillName(match.skill) }]
+          : []),
+        ...(match.visualTransformation ? [{ kind: 'visual' as const, label: 'Visual', text: match.visualTransformation, tone: 'positive' as const, skill: researchSkillName(match.skill) }] : [])
       ])
     ],
     acquisition: [
@@ -1782,6 +1787,7 @@ watch(plannerLevelCap, (level) => {
 })
 watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch(navigationCollapsed, (navigationCollapsed) => preferenceRepository.update('appearance', { navigationCollapsed }))
+watch(tooltipBoundaryScroll, (tooltipBoundaryScroll) => preferenceRepository.update('appearance', { tooltipBoundaryScroll }))
 watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
   if (restoringAppHistory) return
   plannerPage.value = 1
@@ -3682,7 +3688,14 @@ function openSelectedMiInWorkshop(): void {
 }
 
 function itemIconUrl(item: CollectionItem): string | null {
-  return item.iconKey ? `cairn-icon://asset/${item.iconKey}.png` : null
+  if (!item.iconKey) return null
+  const url = `cairn-icon://asset/${item.iconKey}.png`
+  return failedItemIconUrls.value.has(url) ? null : url
+}
+
+function handleItemIconError(item: CollectionItem): void {
+  if (!item.iconKey) return
+  failedItemIconUrls.value = new Set([...failedItemIconUrls.value, `cairn-icon://asset/${item.iconKey}.png`])
 }
 
 function isArchivedItem(item: CollectionItem): boolean {
@@ -4020,9 +4033,37 @@ function scheduleTooltipHide(): void {
 }
 
 function resetTooltipScroll(): void {
+  tooltipWheelTarget = null
+  cancelTooltipScrollAnimation()
   void nextTick(() => {
     if (tooltipElement.value) tooltipElement.value.scrollTop = 0
   })
+}
+
+let tooltipWheelTarget: number | null = null
+let tooltipScrollFrame: number | null = null
+
+function cancelTooltipScrollAnimation(): void {
+  if (tooltipScrollFrame !== null) cancelAnimationFrame(tooltipScrollFrame)
+  tooltipScrollFrame = null
+}
+
+function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
+  cancelTooltipScrollAnimation()
+  if (preferredScrollBehavior() === 'auto') {
+    tooltip.scrollTop = target
+    return
+  }
+  const initial = tooltip.scrollTop
+  const distance = target - initial
+  const started = performance.now()
+  const tick = (now: number): void => {
+    const progress = Math.min(1, (now - started) / 120)
+    tooltip.scrollTop = initial + distance * (1 - Math.pow(1 - progress, 3))
+    if (progress < 1) tooltipScrollFrame = requestAnimationFrame(tick)
+    else tooltipScrollFrame = null
+  }
+  tooltipScrollFrame = requestAnimationFrame(tick)
 }
 
 function scrollTooltip(event: WheelEvent): void {
@@ -4031,18 +4072,46 @@ function scrollTooltip(event: WheelEvent): void {
   if (!tooltip || tooltip.scrollHeight <= tooltip.clientHeight) return
   const maximumScrollTop = tooltip.scrollHeight - tooltip.clientHeight
   const boundaryTolerance = 1
-  if (
-    (event.deltaY < 0 && tooltip.scrollTop <= boundaryTolerance) ||
-    (event.deltaY > 0 && tooltip.scrollTop >= maximumScrollTop - boundaryTolerance)
-  ) return
+  const directWheel = event.currentTarget === tooltip
+  if (directWheel) {
+    tooltipWheelTarget = null
+    cancelTooltipScrollAnimation()
+  }
+  const actualScrollTop = tooltip.scrollTop
+  const queuedBoundaryPending = !directWheel && tooltipWheelTarget !== null && (
+    (event.deltaY < 0 && tooltipWheelTarget <= boundaryTolerance && actualScrollTop > boundaryTolerance) ||
+    (event.deltaY > 0 && tooltipWheelTarget >= maximumScrollTop - boundaryTolerance && actualScrollTop < maximumScrollTop - boundaryTolerance)
+  )
+  if (queuedBoundaryPending) {
+    event.preventDefault()
+    event.stopPropagation()
+    return
+  }
+  const currentScrollTop = directWheel ? tooltip.scrollTop : (tooltipWheelTarget ?? tooltip.scrollTop)
+  const atBoundary =
+    (event.deltaY < 0 && actualScrollTop <= boundaryTolerance) ||
+    (event.deltaY > 0 && actualScrollTop >= maximumScrollTop - boundaryTolerance)
+  if (atBoundary) {
+    if (tooltipBoundaryScroll.value === 'contain') {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    return
+  }
+  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? event.deltaY * 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? event.deltaY * tooltip.clientHeight
+      : event.deltaY
   const nextScrollTop = Math.max(
     0,
-    Math.min(tooltip.scrollTop + event.deltaY, maximumScrollTop)
+    Math.min(currentScrollTop + delta, maximumScrollTop)
   )
-  if (nextScrollTop === tooltip.scrollTop) return
+  if (nextScrollTop === currentScrollTop) return
   event.preventDefault()
   event.stopPropagation()
-  tooltip.scrollTop = nextScrollTop
+  tooltipWheelTarget = nextScrollTop
+  animateTooltipScroll(tooltip, nextScrollTop)
 }
 
 function scrollTooltipFromKeyboard(event: KeyboardEvent): boolean {
@@ -4071,6 +4140,8 @@ function hideTooltip(): void {
   tooltipRecord.value = null
   tooltipCopyAffixes.value = null
   tooltipDetailsHeld.value = false
+  tooltipWheelTarget = null
+  cancelTooltipScrollAnimation()
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -5448,7 +5519,7 @@ function formatRollValue(value: number): string {
                   @mouseleave="scheduleTooltipHide"
                   @click="openItem(item)"
                 >
-                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
+                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" @error="handleItemIconError(item)" />
                   <span>
                     <strong>{{ item.name }}</strong>
                     <small>Lv{{ item.levelRequirement }} · {{ researchItemTypeLabel(item) }}</small>
@@ -5537,6 +5608,7 @@ function formatRollValue(value: number): string {
         :game-connection-label="gameConnectionLabel"
         :connection-recommendation="connectionRecommendation"
         :zoom-factor="zoomFactor"
+        :tooltip-boundary-scroll="tooltipBoundaryScroll"
         :experimental-tools-enabled="experimentalToolsEnabled"
         :workspace-tool-definitions="workspaceToolDefinitions"
         :visible-workspace-tool-ids="visibleWorkspaceToolIds"
@@ -5563,6 +5635,7 @@ function formatRollValue(value: number): string {
         @set-auto-live-connect="setAutoLiveConnect"
         @show-connection-diagnostics="showConnectionDiagnostics = true"
         @set-zoom="setZoom"
+        @set-tooltip-boundary-scroll="tooltipBoundaryScroll = $event"
         @show-essential-tools="showEssentialWorkspaceTools"
         @show-all-tools="showAllWorkspaceTools"
         @set-experimental-tools="setExperimentalToolsEnabled"
@@ -5787,7 +5860,7 @@ function formatRollValue(value: number): string {
         ref="tooltipElement"
         id="item-tooltip"
         class="game-tooltip"
-        :class="tooltipItem.rarity"
+        :class="[tooltipItem.rarity, `tooltip-boundary-${tooltipBoundaryScroll}`]"
         :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px`, maxHeight: `${tooltipMaxHeight}px` }"
         role="tooltip"
         @mouseenter="cancelTooltipHide"
@@ -5795,7 +5868,8 @@ function formatRollValue(value: number): string {
         @wheel="scrollTooltip"
       >
         <header class="tooltip-header">
-          <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" />
+          <img v-if="itemIconUrl(tooltipItem)" :src="itemIconUrl(tooltipItem)!" alt="" @error="handleItemIconError(tooltipItem)" />
+          <span v-else class="item-icon-placeholder tooltip-icon-placeholder" aria-hidden="true">{{ tooltipItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
           <div>
             <h3>
               <span v-if="tooltipItem.upgradeRecord || tooltipItem.baseVersionRecord" class="awakening-sigil tooltip-awakening-sigil"><i /></span>
@@ -6032,7 +6106,8 @@ function formatRollValue(value: number): string {
       <aside class="item-drawer comparison-workspace" :aria-label="selectedItem.name + ' copy comparison'">
         <button class="drawer-close" type="button" aria-label="Close comparison" @click="selectedRecord = null">×</button>
         <header class="comparison-heading">
-          <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" />
+          <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" @error="handleItemIconError(selectedItem)" />
+          <span v-else class="item-icon-placeholder comparison-icon-placeholder" aria-hidden="true">{{ selectedItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
           <div>
             <p class="section-label">Copy comparison</p>
             <h2>{{ selectedItem.name }}</h2>
@@ -6116,7 +6191,8 @@ function formatRollValue(value: number): string {
             <header>
               <div class="copy-identity">
                 <div class="copy-item-heading" :class="selectedItem.rarity">
-                  <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" />
+                  <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" @error="handleItemIconError(selectedItem)" />
+                  <span v-else class="item-icon-placeholder copy-icon-placeholder" aria-hidden="true">{{ selectedItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
                   <div>
                     <p>
                       {{ copy.instanceKey === comparisonReferenceCopy?.instanceKey ? 'Reference copy' : `Copy ${index + 1}` }}

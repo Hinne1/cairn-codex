@@ -79,11 +79,12 @@ export function isPreferenceDocument(value: unknown): value is Record<string, un
   if (!exactKeys(meta, ['profileKind', 'updatedAtUtc']) ||
       (meta.profileKind !== 'fresh' && meta.profileKind !== 'returning') ||
       !boundedString(meta.updatedAtUtc, 64)) return false
-  if (!onlyKeys(appearance, ['theme', 'zoomFactor', 'trackerCollapsed', 'navigationCollapsed', 'plannerDisplay']) ||
+  if (!onlyKeys(appearance, ['theme', 'zoomFactor', 'trackerCollapsed', 'navigationCollapsed', 'plannerDisplay', 'tooltipBoundaryScroll']) ||
       !['theme', 'zoomFactor', 'trackerCollapsed', 'plannerDisplay'].every((key) => key in appearance) ||
       appearance.theme !== 'cairn' || !boundedNumber(appearance.zoomFactor, 0.7, 1.8) ||
       typeof appearance.trackerCollapsed !== 'boolean' ||
       (appearance.navigationCollapsed !== undefined && typeof appearance.navigationCollapsed !== 'boolean') ||
+      (appearance.tooltipBoundaryScroll !== undefined && appearance.tooltipBoundaryScroll !== 'page' && appearance.tooltipBoundaryScroll !== 'contain') ||
       !['table', 'journey', 'map', 'list', 'grid'].includes(String(appearance.plannerDisplay))) return false
   if (!exactKeys(workspace, ['visibleTools', 'experimentalToolsEnabled', 'showLegacyScanner', 'miCountingMode']) ||
       !Array.isArray(workspace.visibleTools) || workspace.visibleTools.length > WORKSPACE_TOOLS.size ||

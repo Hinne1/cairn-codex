@@ -214,6 +214,7 @@ function visibleGridColumns(): number {
 }
 
 function handleKeydown(event: KeyboardEvent, entry: { key: BoundedResultKey, item: T }): void {
+  if (event.target !== event.currentTarget) return
   const intent = event.key === 'Home' ? 'first'
     : event.key === 'End' ? 'last'
       : event.key === 'ArrowLeft' ? 'previous'

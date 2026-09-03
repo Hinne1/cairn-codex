@@ -11,7 +11,7 @@ export const PREFERENCE_SCHEMA_VERSION = 1
 export type PreferenceLoadSource = 'fresh' | 'legacy' | 'stored'
 export type CollectionBasisPreference = 'stashes' | 'archive'
 export type PreferenceTheme = 'cairn'
-export type PlannerDisplayPreference = 'list' | 'grid' | 'map'
+export type PlannerDisplayPreference = 'table' | 'journey' | 'map'
 export type MiCountingPreference = 'base' | 'tier'
 export type SkillScopePreference = 'archive' | 'all'
 export type OracleStylePreference = 'all' | 'pets' | 'retaliation' | 'weapon' | 'caster'
@@ -252,7 +252,7 @@ function interfaceDefaults(): Pick<AppPreferencesV1, 'appearance' | 'workspace' 
   return {
     appearance: {
       theme: 'cairn', zoomFactor: 1, trackerCollapsed: false,
-      navigationCollapsed: false, plannerDisplay: 'list'
+      navigationCollapsed: false, plannerDisplay: 'table'
     },
     workspace: {
       visibleTools: [...DEFAULT_WORKSPACE_TOOLS], experimentalToolsEnabled: false,
@@ -326,9 +326,11 @@ function legacyPreferences(
         : false,
       navigationCollapsed: false,
       plannerDisplay: storage.getItem('cairn-codex-planner-display') === 'grid' ||
-        storage.getItem('cairn-codex-planner-display') === 'map'
-        ? storage.getItem('cairn-codex-planner-display') as PlannerDisplayPreference
-        : defaults.appearance.plannerDisplay
+        storage.getItem('cairn-codex-planner-display') === 'journey'
+        ? 'journey'
+        : storage.getItem('cairn-codex-planner-display') === 'map'
+          ? 'map'
+          : defaults.appearance.plannerDisplay
     },
     workspace: {
       visibleTools,
@@ -424,8 +426,12 @@ function validateStored(
     result.appearance.zoomFactor = readNumber(source.appearance.zoomFactor, 'appearance.zoomFactor', result.appearance.zoomFactor, 0.7, 1.8)
     result.appearance.trackerCollapsed = readBoolean(source.appearance.trackerCollapsed, 'appearance.trackerCollapsed', result.appearance.trackerCollapsed)
     result.appearance.navigationCollapsed = readBoolean(source.appearance.navigationCollapsed, 'appearance.navigationCollapsed', result.appearance.navigationCollapsed)
-    if (source.appearance.plannerDisplay === 'list' || source.appearance.plannerDisplay === 'grid' || source.appearance.plannerDisplay === 'map') {
+    if (source.appearance.plannerDisplay === 'table' || source.appearance.plannerDisplay === 'journey' || source.appearance.plannerDisplay === 'map') {
       result.appearance.plannerDisplay = source.appearance.plannerDisplay
+    } else if ((source.appearance.plannerDisplay as unknown) === 'list') {
+      result.appearance.plannerDisplay = 'table'
+    } else if ((source.appearance.plannerDisplay as unknown) === 'grid') {
+      result.appearance.plannerDisplay = 'journey'
     } else if (source.appearance.plannerDisplay !== undefined) invalid('appearance.plannerDisplay')
   } else invalid('appearance')
   if (source.workspace && typeof source.workspace === 'object') {

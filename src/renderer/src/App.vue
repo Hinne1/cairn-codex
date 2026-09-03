@@ -4,7 +4,9 @@ import BoundedResultSurface from './components/BoundedResultSurface.vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import FailureProbe from './components/FailureProbe.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
+import PlannerJourney from './components/PlannerJourney.vue'
 import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
+import ResearchItemTable from './components/ResearchItemTable.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
@@ -22,6 +24,13 @@ import {
   type SkillExplorerControls,
   type SkillMatch
 } from './workspaces/skill-explorer'
+import {
+  researchAcquisitionFacts,
+  researchItemTypeLabel,
+  researchRarityLabel,
+  researchRollFact,
+  type ResearchItemTableRow
+} from './workspaces/research-item-table'
 import MiWorkshopWorkspace from './workspaces/MiWorkshopWorkspace.vue'
 import {
   buildMiMetricOptions,
@@ -1088,6 +1097,53 @@ const plannerRows = computed(() => plannerCandidateRows.value.filter(({ item }) 
   return plannerShowIgnored.value ? ignored : !ignored
 }))
 
+const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.value.map((row) => {
+  const ownership = plannerOwnershipLabel(row.item)
+  const roll = researchRollFact(row.item)
+  const recipe = recipeStatus(row.item)
+  return {
+    item: row.item,
+    itemType: researchItemTypeLabel(row.item),
+    favorite: isPlannerFavorite(row.item),
+    ignored: plannerShowIgnored.value,
+    supports: [
+      ...row.masteryMatches.map((match) => ({
+        label: `All ${match.mastery} skills`,
+        text: match.amount > 0 ? `+${match.amount}` : 'Supported',
+        tone: 'accent' as const
+      })),
+      ...row.matches.map((match) => ({
+        label: match.skill,
+        text: match.amount > 0 ? `+${match.amount}` : 'Modifier',
+        tone: 'accent' as const
+      }))
+    ],
+    evidence: [
+      ...(row.petBonuses.length ? [{ label: 'All pets', text: row.petBonuses.join('; '), tone: 'accent' as const }] : []),
+      ...row.masteryMatches.map((match) => ({ label: 'Mastery-wide', text: masteryMatchEffect(match) })),
+      ...row.matches.flatMap((match) => [
+        ...(match.conversionTarget ? [{ label: 'Converts to', text: match.conversionTarget, tone: 'accent' as const }] : []),
+        ...([match.conversionDetails, match.special].filter(Boolean).length
+          ? [{ label: match.skill, text: [match.conversionDetails, match.special].filter(Boolean).join('; ') }]
+          : [{ label: match.skill, text: match.amount ? `+${match.amount} ranks` : 'Skill support' }]),
+        ...(match.visualTransformation ? [{ label: 'Visual', text: match.visualTransformation, tone: 'positive' as const }] : [])
+      ])
+    ],
+    acquisition: [
+      ...(recipe ? [{
+        label: 'Blueprint',
+        text: recipe.label,
+        tone: recipe.known ? 'positive' as const : recipe.known === false ? 'warning' as const : 'muted' as const
+      }] : []),
+      ...researchAcquisitionFacts(row.item)
+    ],
+    archive: [
+      ...(ownership ? [{ text: ownership, tone: 'positive' as const }] : [{ text: 'Not archived', tone: 'muted' as const }]),
+      ...(roll ? [roll] : [])
+    ]
+  }
+}))
+
 const plannerMiItems = computed(() => {
   const source = plannerMapScope.value === 'selected'
     ? plannerRows.value.map((row) => row.item)
@@ -1439,6 +1495,21 @@ function togglePlannerIgnored(item: CollectionItem): void {
   plannerIgnoredRecords.value = plannerIgnoredRecordSet.value.has(key)
     ? plannerIgnoredRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
     : [...plannerIgnoredRecords.value, key]
+}
+
+function switchPlannerDisplay(display: PlannerDisplay): void {
+  const focused = document.activeElement instanceof HTMLElement
+    ? document.activeElement.dataset.resultKey
+    : undefined
+  plannerDisplay.value = display
+  if (!focused) return
+  void nextTick(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const target = [...document.querySelectorAll<HTMLElement>('[data-result-key]')]
+      .find((element) => element.dataset.resultKey === focused)
+    target?.scrollIntoView({ block: 'center' })
+    target?.focus({ preventScroll: true })
+  })
 }
 
 function currentAppRoute(): AppRoute {
@@ -3664,42 +3735,6 @@ function searchErrorMessage(query: CompiledSearchQuery): string | null {
     : query.error.message
 }
 
-function itemTypeLabel(item: CollectionItem): string {
-  const itemClass = item.itemClass.toLocaleLowerCase()
-  if (itemClass.includes('ranged2h')) return 'Two-handed ranged weapon'
-  if (itemClass.includes('ranged1h')) return 'One-handed ranged weapon'
-  if (itemClass.includes('spear2h')) return 'Two-handed spear'
-  if (itemClass.includes('sword2h')) return 'Two-handed sword'
-  if (itemClass.includes('axe2h')) return 'Two-handed axe'
-  if (itemClass.includes('mace2h') || itemClass.includes('blunt2h')) return 'Two-handed mace'
-  if (itemClass.includes('scepter')) return 'One-handed scepter (caster weapon)'
-  if (itemClass.includes('dagger')) return 'One-handed dagger (caster weapon)'
-  if (itemClass.includes('sword')) return 'One-handed sword'
-  if (itemClass.includes('axe')) return 'One-handed axe'
-  if (itemClass.includes('mace') || itemClass.includes('blunt')) return 'One-handed mace'
-  if (itemClass.includes('melee') && itemClass.includes('2h')) return 'Two-handed melee weapon'
-  if (itemClass.includes('shield')) return 'Shield'
-  if (itemClass.includes('offhand') || itemClass.includes('focus')) return 'Caster off-hand'
-  const labels: Record<string, string> = {
-    head: 'Head armor', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Hands',
-    legs: 'Leg armor', feet: 'Feet', waist: 'Waist', ring: 'Ring', amulet: 'Amulet',
-    medal: 'Medal', relic: 'Relic', offhand: 'Offhand', weapon: 'Weapon',
-    component: 'Component', material: 'Crafting material', 'potion-formula': 'Potion formula',
-    augment: 'Augment', rune: 'Movement rune', writ: 'Faction writ', mandate: 'Faction mandate',
-    warrant: 'Nemesis warrant', merit: 'Difficulty merit'
-  }
-  return labels[item.slot] ?? item.slot
-}
-
-function rarityLabel(item: CollectionItem): string {
-  if (item.rarity === 'mi') return 'Monster Infrequent'
-  if (item.rarity === 'rare') return 'Rare'
-  if (item.rarity === 'faction') return 'Faction Rare'
-  if (item.rarity === 'component') return 'Component'
-  if (item.rarity === 'consumable') return item.slot === 'potion-formula' ? 'Learned formula' : 'Consumable'
-  return item.rarity.charAt(0).toLocaleUpperCase() + item.rarity.slice(1)
-}
-
 function contentPackRank(contentPack: string): number {
   return ({ base: 0, gdx1: 1, gdx2: 2, gdx3: 3 } as Record<string, number>)[contentPack] ?? 9
 }
@@ -5119,9 +5154,9 @@ function formatRollValue(value: number): string {
         >
           <template #aside>
             <div class="segmented-control planner-display" aria-label="Planner display">
-              <button type="button" :class="{ active: plannerDisplay === 'list' }" @click="plannerDisplay = 'list'">List</button>
-              <button type="button" :class="{ active: plannerDisplay === 'grid' }" @click="plannerDisplay = 'grid'">Grid</button>
-              <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="plannerDisplay = 'map'">MI sources</button>
+              <button type="button" :class="{ active: plannerDisplay === 'table' }" @click="switchPlannerDisplay('table')">Table</button>
+              <button type="button" :class="{ active: plannerDisplay === 'journey' }" @click="switchPlannerDisplay('journey')">Journey</button>
+              <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="switchPlannerDisplay('map')">MI sources</button>
             </div>
           </template>
         </ToolHeader>
@@ -5266,129 +5301,43 @@ function formatRollValue(value: number): string {
             <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
             <span><strong>{{ plannerRows.filter((row) => row.item.acquisition?.crafting).length }}</strong> craftable</span>
           </div>
-          <p v-if="plannerDisplay === 'list'" id="planner-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
-          <BoundedResultSurface
+          <ResearchItemTable
+            v-if="plannerDisplay === 'table'"
             v-model:page="plannerPage"
-            :class="['planner-results bounded-tooltip-results', plannerDisplay === 'list' ? 'planner-table-wrap planner-table-results' : 'planner-card-results']"
-            :items="plannerRows"
-            :get-key="row => row.item.record"
-            :page-size="50"
-            pagination="continuous"
-            :layout="plannerDisplay === 'list' ? 'table' : 'grid'"
+            :rows="plannerResearchRows"
+            :icon-url-for-item="itemIconUrl"
+            :sort="plannerSortMode"
+            :direction="plannerSortDirection"
+            :sort-columns="{ item: 'name', level: 'level' }"
             :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
             :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select a mastery or skill, widen the item level range, or restore an ignored base.'"
             label="Leveling Planner item results"
-            :aria-describedby="plannerDisplay === 'list' ? 'planner-table-scroll-help' : undefined"
-            :tabindex="plannerDisplay === 'list' ? 0 : undefined"
-            interactive
-            item-described-by="item-tooltip"
-            @activate="(_key, row) => openItem(row.item)"
-            @item-focus="(_key, row, element) => showTooltip(row.item, element)"
-            @item-blur="scheduleTooltipHide"
-          >
-            <template v-if="plannerDisplay === 'list'" #header>
-              <div class="planner-table-header" role="row">
-                <span role="columnheader">Level</span>
-                <span role="columnheader">Item</span>
-                <span role="columnheader">Supports</span>
-                <span role="columnheader">What it does</span>
-                <span role="columnheader">How to get it</span>
-              </div>
-            </template>
-            <template #item="{ item: row }">
-              <div
-                v-if="plannerDisplay === 'list'"
-                class="planner-table-row"
-                :class="{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }"
-                  @mouseenter="queueTooltip(row.item, $event)"
-                  @mousemove="moveTooltip"
-                  @mouseleave="scheduleTooltipHide"
-              >
-                  <span role="gridcell" class="planner-level">{{ row.item.levelRequirement }}</span>
-                  <span role="gridcell">
-                    <span class="planner-item-cell">
-                      <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-                      <span>
-                        <strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong>
-                        <small class="planner-item-type">{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
-                        <span class="planner-item-actions">
-                          <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
-                          <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore base' }}</button>
-                        </span>
-                        <small>{{ row.item.rarity === 'faction' ? 'Faction rare' : row.item.rarity }} · {{ row.item.slot }}</small>
-                      </span>
-                    </span>
-                  </span>
-                  <span role="gridcell">
-                    <span class="planner-match-skills">
-                      <em v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery`">All {{ match.mastery }} skills<b v-if="match.amount"> +{{ match.amount }}</b></em>
-                      <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
-                    </span>
-                  </span>
-                  <span role="gridcell" class="planner-effects">
-                    <span v-if="row.petBonuses.length" class="planner-pet-bonuses">
-                      <b>All pets</b> {{ row.petBonuses.join('; ') }}
-                    </span>
-                    <span v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery-effect`">
-                      <b>Mastery-wide</b> {{ masteryMatchEffect(match) }}
-                    </span>
-                    <span v-for="match in row.matches" :key="`${match.skill}:effect`">
-                      <b v-if="match.conversionTarget">→ {{ match.conversionTarget }}</b>
-                      {{ [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support') }}
-                    </span>
-                  </span>
-                  <span role="gridcell" class="planner-acquisition">
-                    <span
-                      v-if="recipeStatus(row.item)"
-                      class="recipe-status"
-                      :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }"
-                    >
-                      <b>Blueprint</b> · {{ recipeStatus(row.item)?.label }}
-                    </span>
-                    <span v-for="faction in row.item.acquisition?.factions ?? []" :key="`${faction.kind ?? 'item'}:${faction.vendorRecord}`">
-                      <b>{{ faction.kind === 'blueprint' ? 'Blueprint vendor: ' : '' }}{{ faction.faction }}</b> · {{ faction.reputation }}
-                    </span>
-                    <span v-if="!(row.item.acquisition?.factions?.length)">{{ row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
-                    <small v-if="row.item.acquisition?.locations?.length">{{ row.item.acquisition.locations.map(locationDisplayName).slice(0, 2).join(', ') }}</small>
-                  </span>
-              </div>
-              <article
-                v-else
-                class="planner-card"
-                :class="[{ favorite: isPlannerFavorite(row.item), ignored: plannerShowIgnored }, `rarity-${row.item.rarity}`]"
-                @mouseenter="queueTooltip(row.item, $event)"
-                @mousemove="moveTooltip"
-                @mouseleave="scheduleTooltipHide"
-              >
-                <header>
-                  <span class="planner-card-level">Lv{{ row.item.levelRequirement }}</span>
-                  <span class="planner-card-actions">
-                    <button type="button" :class="{ active: isPlannerFavorite(row.item) }" :aria-label="`${isPlannerFavorite(row.item) ? 'Unfavorite' : 'Favorite'} ${row.item.name}`" @click.stop="togglePlannerFavorite(row.item)">★</button>
-                    <button type="button" @click.stop="togglePlannerIgnored(row.item)">{{ plannerShowIgnored ? 'Restore' : 'Ignore' }}</button>
-                  </span>
-                </header>
-                <img v-if="itemIconUrl(row.item)" :src="itemIconUrl(row.item)!" alt="" />
-                <div class="planner-card-title">
-                  <strong>{{ row.item.name }}</strong>
-                  <small>{{ rarityLabel(row.item) }} · {{ itemTypeLabel(row.item) }}<span v-if="plannerOwnershipLabel(row.item)" class="archive-mark"> · {{ plannerOwnershipLabel(row.item) }}</span></small>
-                </div>
-                <div class="planner-match-skills">
-                  <em v-for="match in row.masteryMatches" :key="`${match.mastery}:mastery`">All {{ match.mastery }} skills<b> +{{ match.amount }}</b></em>
-                  <em v-for="match in row.matches" :key="match.skill">{{ match.skill }}<b v-if="match.amount"> +{{ match.amount }}</b></em>
-                </div>
-                <p v-if="row.petBonuses.length" class="planner-card-pets"><b>All pets</b> {{ row.petBonuses.join('; ') }}</p>
-                <p class="planner-card-effect">
-                  {{ [...row.masteryMatches.map(masteryMatchEffect), ...row.matches.map((match) => [match.conversionDetails, match.special].filter(Boolean).join('; ') || (match.amount ? `+${match.amount} ranks` : 'Skill support'))].join(' · ') }}
-                </p>
-                <footer>
-                  <b v-if="recipeStatus(row.item)" class="recipe-status" :class="{ known: recipeStatus(row.item)?.known, missing: recipeStatus(row.item)?.known === false }">
-                    {{ recipeStatus(row.item)?.label }}
-                  </b>
-                  <span>{{ row.item.acquisition?.factions?.[0]?.kind === 'blueprint' ? `Blueprint: ${row.item.acquisition.factions[0].faction}` : row.item.acquisition?.factions?.[0]?.faction ?? row.item.acquisition?.sources[0] ?? 'Random drop' }}</span>
-                </footer>
-              </article>
-            </template>
-          </BoundedResultSurface>
+            pagination="continuous"
+            actions
+            :ignored-view="plannerShowIgnored"
+            @sort="plannerSortMode = $event as PlannerSortMode"
+            @activate="openItem"
+            @queue-tooltip="queueTooltip"
+            @show-tooltip="showTooltip"
+            @move-tooltip="moveTooltip"
+            @hide-tooltip="scheduleTooltipHide"
+            @favorite="togglePlannerFavorite"
+            @ignore="togglePlannerIgnored"
+          />
+          <PlannerJourney
+            v-else
+            v-model:page="plannerPage"
+            :rows="plannerResearchRows"
+            :icon-url-for-item="itemIconUrl"
+            :ignored-view="plannerShowIgnored"
+            @activate="openItem"
+            @queue-tooltip="queueTooltip"
+            @show-tooltip="showTooltip"
+            @move-tooltip="moveTooltip"
+            @hide-tooltip="scheduleTooltipHide"
+            @favorite="togglePlannerFavorite"
+            @ignore="togglePlannerIgnored"
+          />
         </template>
 
         <template v-else>
@@ -5491,7 +5440,7 @@ function formatRollValue(value: number): string {
                   <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" />
                   <span>
                     <strong>{{ item.name }}</strong>
-                    <small>Lv{{ item.levelRequirement }} · {{ itemTypeLabel(item) }}</small>
+                    <small>Lv{{ item.levelRequirement }} · {{ researchItemTypeLabel(item) }}</small>
                     <small>{{ item.acquisition?.sources[0] }}</small>
                   </span>
                 </button>
@@ -5845,7 +5794,7 @@ function formatRollValue(value: number): string {
             <p v-else-if="tooltipItem.baseVersionRecord" class="awakening-copy">Awakened with Ashes of Awakening.</p>
             <p v-if="itemAvailableByAwakeningOnly(tooltipItem)" class="awakening-availability">{{ awakeningAvailabilityLabel(tooltipItem) }}</p>
             <p v-if="tooltipItem.presentation?.flavorText">“{{ tooltipItem.presentation.flavorText }}”</p>
-            <strong>{{ rarityLabel(tooltipItem) }} · {{ itemTypeLabel(tooltipItem) }}</strong>
+            <strong>{{ researchRarityLabel(tooltipItem) }} · {{ researchItemTypeLabel(tooltipItem) }}</strong>
           </div>
         </header>
 
@@ -6186,7 +6135,7 @@ function formatRollValue(value: number): string {
                         :class="copyAffixRarity(copy.suffixRecord)"
                       >{{ copyAffixName(copy.suffixRecord, '') }}</span>
                     </h3>
-                    <small>{{ rarityLabel(selectedItem) }} · {{ itemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
+                    <small>{{ researchRarityLabel(selectedItem) }} · {{ researchItemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
                   </div>
                 </div>
                 <div class="copy-score">

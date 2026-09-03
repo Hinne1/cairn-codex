@@ -174,6 +174,12 @@ The tooltip remains global because only one hover target can be active at a time
 mouse-wheel scrolling, viewport placement, held details, affix composition, and item links must
 behave identically everywhere.
 
+Dense research tables use a narrower pointer contract: only the prominent item picture queues the
+global tooltip. Names, types, actions, and ordinary data cells remain free for reading, selection,
+and page scrolling. Moving off the picture schedules the same global dismissal used elsewhere.
+Keyboard focus stays on the bounded result row, which keeps `item-tooltip` as its accessible
+description without adding the decorative picture as another Tab stop.
+
 ## Workspace ownership and extraction
 
 `App.vue` is the application shell, not the long-term owner of tool-local query, filter, paging,
@@ -207,16 +213,27 @@ redacted-error formatter. The workspace never reaches the preload API directly, 
 dismantling path is introduced by the extraction.
 
 Skill Explorer owns its complete typed route-control snapshot, subject picker, suggestions,
-structured result search, availability/rarity/slot filters, sort controls, paging, and dense-table
-markup in `SkillExplorerWorkspace.vue`. The table starts at required level ascending and presents
-item identity, ranks, damage conversion, special modifiers, and visual transformations as distinct
-columns inside its local horizontal scroller. `skill-explorer.ts` owns deterministic skill indexing,
+structured result search, availability/rarity/slot filters, sort controls, and paging in
+`SkillExplorerWorkspace.vue`. It projects its domain evidence into the shared
+`ResearchItemTableRow` contract and renders `ResearchItemTable.vue`, the same comparison surface as
+Leveling Planner. The table starts at required level ascending and presents item identity, level,
+slot, support, match evidence, acquisition, and archive/roll context inside its local horizontal
+scroller. `skill-explorer.ts` owns deterministic skill indexing,
 direct-rank, modifier, and visual-only matching, damage-conversion projection, lower-tier MI base
 collapse, and row filtering/sorting. `App.vue` supplies the immutable catalog, shared ownership/icon adapters,
 the global immediate-focus and delayed-pointer tooltip adapters, the item-drawer adapter, and the
 same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
+
+Leveling Planner projects skill ranks, mastery-wide bonuses, conversions, special and visual
+modifiers, blueprint/faction/drop acquisition, archive availability, and roll context into the
+same row contract. Table is the default comparison view. Journey reuses those rows as a bounded,
+level-ordered timeline with the same picture target and favorite/ignore actions; MI Sources remains
+the dedicated spatial view. The typed route and preference vocabulary is `table | journey | map`.
+Version-1 links and preferences containing the former `list | grid` values migrate to Table and
+Journey respectively. Switching Table/Journey preserves the focused result and brings it back into
+the unobscured viewport after the bounded surface remounts.
 
 The global item tooltip remains viewport-bounded and preserves its full descendant text as the item
 trigger's accessible description. Ordinary wheel input scrolls only when targeted at overflowing

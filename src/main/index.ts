@@ -5688,7 +5688,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           `)
         }
         if (plannerDisplay) {
-          const plannerDisplayLabel = ({ table: 'List', cards: 'Grid', map: 'MI sources' } as Record<string, string>)[plannerDisplay] ?? ''
+          const plannerDisplayLabel = ({ table: 'Table', cards: 'Journey', journey: 'Journey', map: 'MI sources' } as Record<string, string>)[plannerDisplay] ?? ''
           await window.webContents.executeJavaScript(`
             (async () => {
               const label = ${JSON.stringify(plannerDisplayLabel)}
@@ -5794,9 +5794,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const started = performance.now()
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const resultCount = () => Number((document.querySelector('.planner-explorer-toolbar .explorer-result-count')?.textContent ?? '').replace(/[^0-9]/g, ''))
-              const firstResult = () => document.querySelector('.planner-results .bounded-results-item')
-              const first = firstResult()
-              const buttons = first?.querySelectorAll('.planner-item-actions button, .planner-card-actions button')
+              const buttons = document.querySelectorAll('.leveling-planner .research-item-actions button, .leveling-planner .planner-journey-actions button')
               const favorite = buttons?.[0]
               const ignore = buttons?.[1]
               if (!(favorite instanceof HTMLButtonElement) || !(ignore instanceof HTMLButtonElement)) {
@@ -5821,7 +5819,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               listFilter.dispatchEvent(new Event('change', { bubbles: true }))
               await frames()
               if (resultCount() !== 1) throw new Error('Planner ignored-list filter did not reveal the ignored base.')
-              const restore = firstResult()?.querySelectorAll('.planner-item-actions button, .planner-card-actions button')[1]
+              const restore = document.querySelectorAll('.leveling-planner .research-item-actions button, .leveling-planner .planner-journey-actions button')[1]
               if (!(restore instanceof HTMLButtonElement) || restore.textContent?.trim() !== 'Restore') {
                 throw new Error('Planner ignored result did not expose Restore.')
               }
@@ -5850,17 +5848,17 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 throw new Error(failure)
               }
               const buttons = [...document.querySelectorAll('.planner-display button')]
-              const list = buttons.find((button) => button.textContent?.trim() === 'List')
-              const grid = buttons.find((button) => button.textContent?.trim() === 'Grid')
+              const list = buttons.find((button) => button.textContent?.trim() === 'Table')
+              const grid = buttons.find((button) => button.textContent?.trim() === 'Journey')
               if (!(list instanceof HTMLButtonElement) || !(grid instanceof HTMLButtonElement)) {
-                throw new Error('Planner scrolling verification could not find List and Grid views.')
+                throw new Error('Planner scrolling verification could not find Table and Journey views.')
               }
               if (!list.classList.contains('active')) list.click()
               await frames()
-              const surface = document.querySelector('.planner-table-wrap')
-              if (!(surface instanceof HTMLElement)) throw new Error('Planner list surface was not rendered.')
+              let surface = document.querySelector('.research-item-table')
+              if (!(surface instanceof HTMLElement)) throw new Error('Planner table surface was not rendered.')
               if (getComputedStyle(surface).maxHeight !== 'none' || surface.clientHeight <= innerHeight) {
-                throw new Error('Planner list still creates a bottom-bounded vertical viewport.')
+                throw new Error('Planner table still creates a bottom-bounded vertical viewport.')
               }
               const initialRows = [...surface.querySelectorAll('.bounded-results-item')]
               if (initialRows.length !== 50) throw new Error('Planner continuous window started with ' + initialRows.length + ' mounted rows instead of 50.')
@@ -5941,7 +5939,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const viewportTolerance = 1
               grid.click()
               await frames(); await frames()
-              const gridCards = document.querySelectorAll('.planner-card-results .planner-card').length
+              const gridCards = document.querySelectorAll('.planner-journey-results .bounded-results-item').length
               const gridFocus = document.activeElement
               const gridFocusRect = gridFocus instanceof HTMLElement ? gridFocus.getBoundingClientRect() : null
               if (
@@ -5953,7 +5951,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 gridFocusRect.top < unobscuredTop() - viewportTolerance ||
                 gridFocusRect.top >= innerHeight + viewportTolerance
               ) {
-                throw new Error('Planner Grid view did not preserve the focused visible result and continuous window: ' + JSON.stringify({
+                throw new Error('Planner Journey view did not preserve the focused visible result and continuous window: ' + JSON.stringify({
                   gridCards, listCount, active: grid.classList.contains('active'), focusedKey,
                   gridFocusKey: gridFocus instanceof HTMLElement ? gridFocus.dataset.resultKey : null,
                   top: gridFocusRect?.top, bottom: gridFocusRect?.bottom, unobscuredTop: unobscuredTop(), innerHeight
@@ -5961,10 +5959,11 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               list.click()
               await frames(); await frames()
+              const restoredSurface = document.querySelector('.research-item-table')
               const restoredFocus = document.activeElement
               const restoredFocusRect = restoredFocus instanceof HTMLElement ? restoredFocus.getBoundingClientRect() : null
               if (
-                !document.querySelector('.planner-table-results') ||
+                !(restoredSurface instanceof HTMLElement) ||
                 !list.classList.contains('active') ||
                 !(restoredFocus instanceof HTMLElement) ||
                 restoredFocus.dataset.resultKey !== focusedKey ||
@@ -5972,11 +5971,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 restoredFocusRect.top < unobscuredTop() - viewportTolerance ||
                 restoredFocusRect.top >= innerHeight + viewportTolerance
               ) {
-                throw new Error('Planner List view did not restore the focused visible result and continuous window: ' + JSON.stringify({
+                throw new Error('Planner Table view did not restore the focused visible result and continuous window: ' + JSON.stringify({
                   focusedKey, restoredFocusKey: restoredFocus instanceof HTMLElement ? restoredFocus.dataset.resultKey : null,
                   top: restoredFocusRect?.top, bottom: restoredFocusRect?.bottom, unobscuredTop: unobscuredTop(), innerHeight
                 }))
               }
+              surface = restoredSurface
               const trailingFocus = [...surface.querySelectorAll('.bounded-results-item')].at(-1)
               if (!(trailingFocus instanceof HTMLElement)) throw new Error('Planner trailing-page focus target was not rendered.')
               trailingFocus.focus()
@@ -6832,8 +6832,8 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const started = performance.now()
               const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
               const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
-              const root = document.querySelector('.skill-table-results')
-              const rows = () => [...document.querySelectorAll('.skill-table-results .bounded-results-item')]
+              const root = document.querySelector('.skill-explorer .research-item-table')
+              const rows = () => [...document.querySelectorAll('.skill-explorer .research-item-table .bounded-results-item')]
               const resultCount = () => Number((document.querySelector('.skill-explorer-toolbar .explorer-result-count')?.textContent ?? '').replace(/[^0-9]/g, ''))
               const setQuery = async (value) => {
                 const input = document.querySelector('.skill-explorer-toolbar .explorer-search input')
@@ -6857,24 +6857,24 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                   !(directionSelect instanceof HTMLSelectElement) || directionSelect.value !== 'asc') {
                 throw new Error('Skill Explorer did not start with level ascending sorting.')
               }
-              const initialLevels = rows().map((row) => Number(row.querySelector('.skill-level')?.textContent?.trim()))
+              const initialLevels = rows().map((row) => Number(row.querySelector('.research-level')?.textContent?.trim()))
               if (initialLevels.some((level, index) => !Number.isFinite(level) || (index > 0 && level < initialLevels[index - 1]))) {
                 throw new Error('Skill Explorer rows were not initially ordered by ascending level.')
               }
-              const initialLevelColumn = [...document.querySelectorAll('.skill-table-header [role="columnheader"]')]
+              const initialLevelColumn = [...document.querySelectorAll('.skill-explorer .research-table-header [role="columnheader"]')]
                 .find((column) => column.textContent?.trim().startsWith('Level'))
               if (initialLevelColumn?.getAttribute('aria-sort') !== 'ascending') {
                 throw new Error('Skill Explorer did not expose its default ascending level sort.')
               }
-              const visualColumn = [...document.querySelectorAll('.skill-table-header [role="columnheader"]')]
-                .find((column) => column.textContent?.trim() === 'Visual transformation')
-              if (!visualColumn || !rows().some((row) => row.querySelector('.skill-visual')?.textContent?.includes('Alternate crimson spirit effect'))) {
+              const evidenceColumn = [...document.querySelectorAll('.skill-explorer .research-table-header [role="columnheader"]')]
+                .find((column) => column.textContent?.trim().startsWith('Match evidence'))
+              if (!evidenceColumn || !rows().some((row) => row.querySelector('.research-evidence')?.textContent?.includes('Alternate crimson spirit effect'))) {
                 throw new Error('Skill Explorer did not render visual transformation data.')
               }
-              const firstItem = rows()[0]?.querySelector('.skill-item-name')
+              const firstItem = rows()[0]?.querySelector('.research-item-identity')
               const firstIcon = firstItem?.querySelector('img')
               const firstItemCell = firstItem?.closest('[role="gridcell"]')
-              const firstLevel = rows()[0]?.querySelector('.skill-level')
+              const firstLevel = rows()[0]?.querySelector('.research-level')
               if (!(firstItem instanceof HTMLElement) || !(firstItemCell instanceof HTMLElement) ||
                   firstItemCell.getBoundingClientRect().height < 70 ||
                   (firstIcon instanceof HTMLImageElement && firstIcon.getBoundingClientRect().height < 50) ||
@@ -6938,17 +6938,33 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
               await wait(20)
               if (document.activeElement !== second) throw new Error('ArrowDown did not move to the next Skill Explorer row.')
-              const firstRow = first.querySelector('.skill-table-row')
+              second.blur()
+              second.dispatchEvent(new FocusEvent('blur'))
+              for (let attempt = 0; attempt < 20 && document.querySelector('.game-tooltip'); attempt += 1) await wait(20)
+              if (document.querySelector('.game-tooltip')) throw new Error('Skill Explorer keyboard tooltip did not dismiss after row blur.')
+              const firstRow = first.querySelector('.research-table-row')
               if (!(firstRow instanceof HTMLElement)) throw new Error('Skill Explorer row content was unavailable.')
               const rowRect = firstRow.getBoundingClientRect()
               firstRow.dispatchEvent(new MouseEvent('mouseenter', {
                 clientX: rowRect.left + Math.min(12, rowRect.width / 2),
                 clientY: rowRect.top + Math.min(12, rowRect.height / 2)
               }))
+              await wait(220)
+              if (document.querySelector('.game-tooltip')) {
+                throw new Error('Skill Explorer opened an item tooltip from ordinary table content instead of the picture.')
+              }
+              const firstPicture = firstRow.querySelector('.research-item-picture')
+              if (!(firstPicture instanceof HTMLElement)) throw new Error('Skill Explorer item picture was unavailable.')
+              const pictureRect = firstPicture.getBoundingClientRect()
+              firstPicture.dispatchEvent(new MouseEvent('mouseenter', {
+                bubbles: true,
+                clientX: pictureRect.left + pictureRect.width / 2,
+                clientY: pictureRect.top + pictureRect.height / 2
+              }))
               for (let attempt = 0; attempt < 40 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
-              if (!document.querySelector('.game-tooltip')) throw new Error('Skill Explorer did not use the global item tooltip.')
-              firstRow.dispatchEvent(new MouseEvent('mouseleave'))
-              const levelSort = [...document.querySelectorAll('.skill-table-header button')]
+              if (!document.querySelector('.game-tooltip')) throw new Error('Skill Explorer picture did not use the global item tooltip.')
+              firstPicture.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+              const levelSort = [...document.querySelectorAll('.skill-explorer .research-table-header button')]
                 .find((button) => button.textContent?.trim().startsWith('Level'))
               if (!(levelSort instanceof HTMLButtonElement)) throw new Error('Skill Explorer level sort was unavailable.')
               levelSort.focus()
@@ -6959,7 +6975,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (levelColumn?.getAttribute('aria-sort') !== 'descending') {
                 throw new Error('Skill Explorer level sort did not expose descending aria-sort state.')
               }
-              const sortedColumns = [...document.querySelectorAll('.skill-table-header [role="columnheader"][aria-sort]')]
+              const sortedColumns = [...document.querySelectorAll('.skill-explorer .research-table-header [role="columnheader"][aria-sort]')]
               if (sortedColumns.length !== 1 || sortedColumns[0] !== levelColumn) {
                 throw new Error('Skill Explorer exposed sort state on more than the active column.')
               }
@@ -7359,7 +7375,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (dialog.open || document.activeElement !== advancedTrigger) {
                 throw new Error('Escape did not close Advanced search and restore focus to its trigger.')
               }
-              const localScroller = [...document.querySelectorAll('.skill-table-wrap, .planner-table-wrap, .mi-table-wrap')]
+              const localScroller = [...document.querySelectorAll('.research-item-table, .mi-table-wrap')]
                 .find((element) => element instanceof HTMLElement && element.offsetParent !== null)
               if (localScroller instanceof HTMLElement && localScroller.scrollWidth > localScroller.clientWidth) {
                 const descriptionId = localScroller.getAttribute('aria-describedby')
@@ -8160,10 +8176,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           copyCards: document.querySelectorAll('.copy-card').length,
           vaultRows: document.querySelectorAll('.quarantine-results .vault-row, .vault-item-list .vault-row').length,
           operationRows: document.querySelectorAll('.operation-history-row').length,
-          plannerRows: document.querySelectorAll('.planner-table-results .planner-table-row').length,
-          plannerCards: document.querySelectorAll('.planner-card-results .planner-card').length,
+          plannerRows: document.querySelectorAll('.research-item-table .research-table-row').length,
+          plannerCards: document.querySelectorAll('.planner-journey-results .planner-journey-row').length,
           boundedRows: document.querySelectorAll('.bounded-results .bounded-results-item').length,
-          skillRows: document.querySelectorAll('.skill-table-results .skill-table-row').length,
+          skillRows: document.querySelectorAll('.skill-explorer .research-item-table .research-table-row').length,
           dismantlingRows: document.querySelectorAll('.dismantling-row').length,
           farmingRows: document.querySelectorAll('.farm-list .bounded-results-item > article').length,
           oracleCards: document.querySelectorAll('.oracle-card').length,

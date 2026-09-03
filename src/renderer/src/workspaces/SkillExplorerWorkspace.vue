@@ -3,19 +3,24 @@ import { computed, nextTick, ref, useId } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import { compileSearchQuery } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
-import type { SkillSort } from '../app-route'
-import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
+import ResearchItemTable from '../components/ResearchItemTable.vue'
 import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import {
   createSkillExplorerRows,
   nextSkillSuggestionIndex,
   nextSkillSortControls,
-  skillSortAriaValue,
   type SkillExplorerControls,
   updateSkillExplorerControls
 } from './skill-explorer'
+import {
+  researchAcquisitionFacts,
+  researchItemTypeLabel,
+  researchRollFact,
+  type ResearchItemTableColumn,
+  type ResearchItemTableRow
+} from './research-item-table'
 
 const props = defineProps<{
   items: readonly CollectionItem[]
@@ -59,6 +64,37 @@ const structuredQuery = computed(() => compileSearchQuery(query.value, searchQue
 const rows = computed(() => createSkillExplorerRows(props.items, controls.value, {
   isArchivedItem: props.isArchivedItem,
   query: structuredQuery.value
+}))
+const researchRows = computed<ResearchItemTableRow[]>(() => rows.value.map((row) => {
+  const ownership = props.ownershipLabelForItem(row.item)
+  const roll = researchRollFact(row.item)
+  return {
+    item: row.item,
+    itemType: researchItemTypeLabel(row.item),
+    supports: [{
+      label: row.skill,
+      text: row.amount > 0 ? `+${row.amount}` : 'Modifier',
+      tone: 'accent'
+    }],
+    evidence: [
+      ...(row.conversionTarget ? [{ label: 'Converts to', text: row.conversionTarget, tone: 'accent' as const }] : []),
+      ...(row.conversionDetails ? [{ text: row.conversionDetails }] : []),
+      ...(row.special ? [{ label: 'Modifier', text: row.special }] : []),
+      ...(row.visualTransformation ? [{ label: 'Visual', text: row.visualTransformation, tone: 'positive' as const }] : [])
+    ],
+    acquisition: researchAcquisitionFacts(row.item),
+    archive: [
+      ...(ownership ? [{ text: ownership, tone: 'positive' as const }] : [{ text: 'Not archived', tone: 'muted' as const }]),
+      ...(roll ? [roll] : [])
+    ]
+  }
+}))
+const tableSortColumns = computed<Partial<Record<ResearchItemTableColumn, string>>>(() => ({
+  item: 'item',
+  level: 'level',
+  slot: 'slot',
+  supports: 'amount',
+  evidence: sort.value === 'conversion' ? 'conversion' : 'special'
 }))
 const slotOptions = computed(() => [...new Set(props.items.map((item) => item.slot).filter(Boolean))]
   .sort((left, right) => left.localeCompare(right)))
@@ -157,12 +193,9 @@ function handlePickerFocusOut(event: FocusEvent): void {
   pickerOpen.value = false
 }
 
-function changeSort(next: SkillSort): void {
-  controls.value = nextSkillSortControls(controls.value, next)
-}
-
-function showFocusedTooltip(_key: string | number, row: { item: CollectionItem }, element: HTMLElement): void {
-  emit('show-tooltip', row.item, element)
+function changeSort(next: string): void {
+  if (!['item', 'level', 'slot', 'amount', 'conversion', 'special'].includes(next)) return
+  controls.value = nextSkillSortControls(controls.value, next as SkillExplorerControls['sort'])
 }
 </script>
 
@@ -233,47 +266,22 @@ function showFocusedTooltip(_key: string | number, row: { item: CollectionItem }
         <label><span>Order</span><select v-model="direction" autocomplete="off"><option value="asc">Lowest first</option><option value="desc">Highest first</option></select></label>
       </template>
     </ExplorerToolbar>
-    <p id="skill-table-scroll-help" class="dense-table-scroll-hint">Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field.</p>
-    <BoundedResultSurface
+    <ResearchItemTable
       v-model:page="page"
-      class="skill-table-wrap skill-table-results bounded-tooltip-results"
-      :items="rows"
-      :get-key="row => row.item.record"
-      :page-size="50"
+      :rows="researchRows"
+      :icon-url-for-item="iconUrlForItem"
+      :sort="sort"
+      :direction="direction"
+      :sort-columns="tableSortColumns"
       :empty-title="selectedSkill ? 'No matching items' : 'Choose a skill to begin'"
       :empty-detail="selectedSkill ? (query || rarity !== 'all' || slot !== 'all' ? 'No items match the current search and filters.' : 'No matching items in this availability scope.') : 'Select an indexed skill to compare its supporting items.'"
       label="Items matching the selected skill"
-      aria-describedby="skill-table-scroll-help"
-      tabindex="0"
-      layout="table"
-      interactive
-      item-described-by="item-tooltip"
-      @activate="(_key, row) => emit('open-item', row.item)"
-      @item-focus="showFocusedTooltip"
-      @item-blur="emit('hide-tooltip')"
-    >
-      <template #header>
-        <div class="skill-table-header" role="row">
-          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'item')"><button type="button" @click="changeSort('item')">Item <span v-if="sort === 'item'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span class="skill-level" role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'level')"><button type="button" @click="changeSort('level')">Level <span v-if="sort === 'level'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'slot')"><button type="button" @click="changeSort('slot')">Slot <span v-if="sort === 'slot'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span class="skill-ranks" role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'amount')"><button type="button" @click="changeSort('amount')">Ranks <span v-if="sort === 'amount'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'conversion')"><button type="button" @click="changeSort('conversion')">Damage conversion <span v-if="sort === 'conversion'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span role="columnheader" :aria-sort="skillSortAriaValue(sort, direction, 'special')"><button type="button" @click="changeSort('special')">Special modifier <span v-if="sort === 'special'" aria-hidden="true">{{ direction === 'asc' ? '↑' : '↓' }}</span></button></span>
-          <span class="skill-visual" role="columnheader">Visual transformation</span>
-        </div>
-      </template>
-      <template #item="{ item: row }">
-        <div class="skill-table-row" @mouseenter="emit('queue-tooltip', row.item, $event)" @mousemove="emit('move-tooltip', $event)" @mouseleave="emit('hide-tooltip')">
-          <span role="gridcell"><span class="skill-item-name"><img v-if="iconUrlForItem(row.item)" :src="iconUrlForItem(row.item)!" alt="" /><span><strong :class="`rarity-${row.item.rarity}`">{{ row.item.name }}</strong><small>{{ row.item.rarity }}<template v-if="ownershipLabelForItem(row.item)"> · {{ ownershipLabelForItem(row.item) }}</template></small></span></span></span>
-          <span role="gridcell" class="skill-level">{{ row.item.levelRequirement }}</span>
-          <span role="gridcell">{{ row.item.slot }}</span>
-          <span role="gridcell" class="skill-amount skill-ranks">{{ row.amount > 0 ? `+${row.amount}` : '—' }}</span>
-          <span role="gridcell"><strong v-if="row.conversionTarget" class="skill-conversion-target">{{ row.conversionTarget }}</strong><small v-if="row.conversionDetails" class="skill-cell-detail">{{ row.conversionDetails }}</small><template v-if="!row.conversionTarget && !row.conversionDetails">—</template></span>
-          <span role="gridcell">{{ row.special || '—' }}</span>
-          <span role="gridcell" class="skill-visual">{{ row.visualTransformation || '—' }}</span>
-        </div>
-      </template>
-    </BoundedResultSurface>
+      @sort="changeSort"
+      @activate="emit('open-item', $event)"
+      @queue-tooltip="(item, event) => emit('queue-tooltip', item, event)"
+      @show-tooltip="(item, element) => emit('show-tooltip', item, element)"
+      @move-tooltip="emit('move-tooltip', $event)"
+      @hide-tooltip="emit('hide-tooltip')"
+    />
   </section>
 </template>

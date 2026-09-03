@@ -167,9 +167,10 @@ const defaultRows = createSkillExplorerRows(items, { ...controls, sort: 'level',
 })
 assert.deepEqual(defaultRows.map((row) => row.item.levelRequirement), [65, 70, 82, 94])
 
-const [app, workspace, model, packageSource] = await Promise.all([
+const [app, workspace, table, model, packageSource] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/SkillExplorerWorkspace.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/ResearchItemTable.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/skill-explorer.ts', import.meta.url), 'utf8'),
   readFile(new URL('../package.json', import.meta.url), 'utf8')
 ])
@@ -180,21 +181,22 @@ assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>/)
 assert.match(app, /v-model:controls="skillExplorerControls"/)
 assert.doesNotMatch(app, /const skillItemRows|const skillSuggestions|const skillItemPage|const skillPickerOpen/)
 assert.match(workspace, /defineModel<SkillExplorerControls>\('controls'/)
-assert.match(workspace, /<ExplorerToolbar[\s\S]*?<BoundedResultSurface/)
-assert.match(workspace, /:page-size="50"/)
-assert.match(workspace, /emit\('queue-tooltip', row\.item/)
-assert.match(workspace, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.item, element\)/)
-assert.match(workspace, /@item-focus="showFocusedTooltip"/)
-assert.match(workspace, /emit\('open-item', row\.item/)
+assert.match(workspace, /<ExplorerToolbar[\s\S]*?<ResearchItemTable/)
+assert.match(table, /<BoundedResultSurface[\s\S]*?:page-size="50"/)
+assert.match(table, /class="research-item-picture"[\s\S]*?@mouseenter="emit\('queue-tooltip', row\.item, \$event\)"/)
+assert.doesNotMatch(table, /class="research-table-row"[^>]*@mouseenter/)
+assert.match(table, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.item, element\)/)
+assert.match(table, /@item-focus="showFocusedTooltip"/)
+assert.match(workspace, /@activate="emit\('open-item', \$event\)"/)
 assert.match(workspace, /:aria-activedescendant="activeSuggestionId"/)
 assert.match(workspace, /:aria-controls="pickerOpen \? skillListboxId : undefined"/)
 assert.match(workspace, /props\.skillNames\.map\(\(skill, index\) => \[skill, `\$\{skillListboxId\}-option-\$\{index\}`\]\)/)
 assert.match(workspace, /role="option"[\s\S]*?tabindex="-1"[\s\S]*?:aria-selected="index === pickerIndex"/)
 assert.match(workspace, /@mousedown\.prevent[\s\S]*?@click="selectSkill\(skill\)"/)
 assert.match(workspace, /function revealActiveSuggestion[\s\S]*?listbox\.scrollTop/)
-assert.match(workspace, /role="columnheader" :aria-sort="skillSortAriaValue\(sort, direction, 'level'\)"/)
-assert.match(workspace, /v-if="sort === 'level'" aria-hidden="true"/)
-assert.match(workspace, /Visual transformation[\s\S]*?row\.visualTransformation \|\| '—'/)
+assert.match(table, /\{ key: 'item', label: 'Item' \}[\s\S]*?\{ key: 'archive', label: 'Archive \/ roll' \}/)
+assert.match(table, /:aria-sort="ariaSort\(column\.key\)"/)
+assert.match(workspace, /label: 'Visual'[\s\S]*?row\.visualTransformation/)
 assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>\(\{[\s\S]*?sort: 'level',[\s\S]*?direction: 'asc'/)
 assert.match(app, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/)
 assert.match(app, /@mouseenter="cancelTooltipHide"[\s\S]*?@wheel="scrollTooltip"/)

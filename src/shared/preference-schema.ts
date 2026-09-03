@@ -84,7 +84,7 @@ export function isPreferenceDocument(value: unknown): value is Record<string, un
       appearance.theme !== 'cairn' || !boundedNumber(appearance.zoomFactor, 0.7, 1.8) ||
       typeof appearance.trackerCollapsed !== 'boolean' ||
       (appearance.navigationCollapsed !== undefined && typeof appearance.navigationCollapsed !== 'boolean') ||
-      !['list', 'grid', 'map'].includes(String(appearance.plannerDisplay))) return false
+      !['table', 'journey', 'map', 'list', 'grid'].includes(String(appearance.plannerDisplay))) return false
   if (!exactKeys(workspace, ['visibleTools', 'experimentalToolsEnabled', 'showLegacyScanner', 'miCountingMode']) ||
       !Array.isArray(workspace.visibleTools) || workspace.visibleTools.length > WORKSPACE_TOOLS.size ||
       !workspace.visibleTools.every((tool) => typeof tool === 'string' && WORKSPACE_TOOLS.has(tool)) ||

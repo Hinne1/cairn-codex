@@ -58,15 +58,21 @@ assert.deepEqual(updateBoundedSelection(['a'], 'b', 'single'), ['b'])
 assert.deepEqual(updateBoundedSelection(['a'], 'b', 'multiple'), ['a', 'b'])
 assert.deepEqual(updateBoundedSelection(['a', 'b'], 'a', 'multiple'), ['b'])
 
-const [appSource, surfaceSource, styleSource] = await Promise.all([
+const [appSource, researchTableSource, plannerJourneySource, surfaceSource, styleSource] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/ResearchItemTable.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/PlannerJourney.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
 ])
-assert.match(appSource, /pagination="continuous"[\s\S]*?label="Leveling Planner item results"/u,
-  'The planner must use continuous bounded results instead of explicit page navigation.')
-assert.match(appSource, />List<\/button>[\s\S]*?>Grid<\/button>/u,
-  'The planner display switcher must expose clear List and Grid choices.')
+assert.match(researchTableSource, /:pagination="pagination"/u,
+  'The shared research table must pass its pagination mode to the bounded result surface.')
+assert.match(appSource, /<ResearchItemTable[\s\S]*?label="Leveling Planner item results"[\s\S]*?pagination="continuous"/u,
+  'The planner table must request continuous bounded results instead of explicit page navigation.')
+assert.match(plannerJourneySource, /pagination="continuous"[\s\S]*?label="Leveling Planner journey items"/u,
+  'The Planner journey must use continuous bounded results instead of explicit page navigation.')
+assert.match(appSource, />Table<\/button>[\s\S]*?>Journey<\/button>/u,
+  'The planner display switcher must expose clear Table and Journey choices.')
 assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.preventDefault\(\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/u,
   'Overflowing tooltips must scroll with an ordinary wheel while the tooltip itself is targeted.')
 assert.match(appSource, /@mouseenter="cancelTooltipHide"[\s\S]*?@mouseleave="scheduleTooltipHide"[\s\S]*?@wheel="scrollTooltip"/u,

@@ -92,7 +92,7 @@ runGate('Planner continuous scrolling and views', [
     controls: {
       profileId: null, skills: ['Wendigo Totem'], minimumLevel: 1, maximumLevel: 70,
       query: '', ownership: 'all', showIgnored: false, sort: 'level', direction: 'asc',
-      display: 'list', page: 1, atlasQuery: '', atlasRegion: null, mapScope: 'selected',
+      display: 'table', page: 1, atlasQuery: '', atlasRegion: null, mapScope: 'selected',
       mapSort: 'items', mapDirection: 'desc'
     }
   }),
@@ -108,7 +108,7 @@ runGate('Planner compact continuous Grid anchoring', [
     controls: {
       profileId: null, skills: ['Wendigo Totem'], minimumLevel: 1, maximumLevel: 70,
       query: '', ownership: 'all', showIgnored: false, sort: 'level', direction: 'asc',
-      display: 'list', page: 1, atlasQuery: '', atlasRegion: null, mapScope: 'selected',
+      display: 'table', page: 1, atlasQuery: '', atlasRegion: null, mapScope: 'selected',
       mapSort: 'items', mapDirection: 'desc'
     }
   }),
@@ -157,4 +157,4 @@ runGate('Accessible modal focus', [
   '--width', '520', '--height', '900', '--screenshot-name', 'accessible-dialog-focus'
 ])
 
-console.log('Electron route gates passed for Collection, Sets, persistent application navigation, Planner continuous List/Grid scrolling and map restoration, and native/custom accessible modal focus.')
+console.log('Electron route gates passed for Collection, Sets, persistent application navigation, Planner continuous Table/Journey scrolling and MI Sources restoration, and native/custom accessible modal focus.')

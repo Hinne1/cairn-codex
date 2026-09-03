@@ -79,7 +79,7 @@ examples valid for that particular tool.
     <td width="50%">
       <img src="docs/images/item-tooltip.png" alt="Cairn Codex Grim Dawn-style item tooltip">
       <br><strong>Game-native item details</strong> — exact ranges, skill modifiers,
-      pet bonuses, acquisition sources, and roll quality.
+      pet bonuses, acquisition sources, and offense/retaliation/defense/utility roll profiles.
     </td>
     <td width="50%">
       <img src="docs/images/set-collection.png" alt="Cairn Codex set collection">

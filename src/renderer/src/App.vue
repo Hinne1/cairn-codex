@@ -7,9 +7,11 @@ import OnboardingDialog from './components/OnboardingDialog.vue'
 import PlannerJourney from './components/PlannerJourney.vue'
 import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
 import ResearchItemTable from './components/ResearchItemTable.vue'
+import RollCategoryProfile from './components/RollCategoryProfile.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
+import { rollCategoryScores, rollStatQuality, averageRollQuality, formatCombinationPercentile } from './roll-rating'
 import cairnCodexLogo from '../../../build/icon.svg?url'
 import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
 import type { CollectionFarmingControls } from './workspaces/collection-farming'
@@ -49,7 +51,9 @@ import {
 } from './workspaces/mi-workshop'
 import CollectionMaterialsWorkspace from './workspaces/CollectionMaterialsWorkspace.vue'
 import {
+  buildCollectionRollSummaries,
   collectionCategories,
+  collectionRollFocusForSort,
   matchesCollectionCategory,
   updateCollectionMaterialsControls,
   type CollectionMaterialsControls,
@@ -194,14 +198,16 @@ interface PresentedRollStat {
   maximumValue: number | null
   unit: string
   valueLabel: string
-  percentile: number | null
+  qualityPercent: number | null
+  rankLabel: string | null
+  rankDescription: string
   rangeLabel: string
 }
 
 interface ComparisonStatRow extends PresentedRollStat {
   deltaLabel: string
   deltaTone: 'positive' | 'negative' | 'same' | 'unique' | 'missing' | 'reference'
-  percentileDeltaLabel: string | null
+  qualityDeltaLabel: string | null
   missingFromCopy: boolean
 }
 
@@ -401,6 +407,7 @@ const {
 } = transfersSession
 const currentPage = ref(1)
 const selectedRecord = ref<string | null>(null)
+const selectedReferenceInstanceKey = ref<string | null>(null)
 const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
 const pinning = ref(false)
 const vaultItems = ref<VaultListItem[]>([])
@@ -1017,26 +1024,43 @@ const allOwnedCopies = computed(() => {
   return copies
 })
 
+const collectionRollSummaries = computed(() => buildCollectionRollSummaries(
+  allOwnedCopies.value,
+  collectionRollFocusForSort(collectionControls.value.sort)
+))
+
 const selectedCopies = computed(() => {
   if (!snapshot.value || !selectedRecord.value) return []
   const pinned = selectedItem.value?.pinnedInstanceKey
+  const requestedReference = selectedReferenceInstanceKey.value
   const copies = allOwnedCopies.value
     .filter((item) => item.baseRecord === selectedRecord.value && item.instanceKey)
   return copies
     .sort((left, right) => {
+      if ((left.instanceKey === requestedReference) !== (right.instanceKey === requestedReference)) {
+        return left.instanceKey === requestedReference ? -1 : 1
+      }
       if ((left.instanceKey === pinned) !== (right.instanceKey === pinned)) {
         return left.instanceKey === pinned ? -1 : 1
       }
-      const metric = selectedItem.value?.rarity === 'mi' ? miWorkshopControls.value.metric : 'overall'
-      return compareCopiesByMiMetric(left, right, metric, miWorkshopControls.value.metricDirection)
+      if (selectedItem.value?.rarity !== 'mi') return 0
+      return compareCopiesByMiMetric(
+        left,
+        right,
+        miWorkshopControls.value.metric,
+        miWorkshopControls.value.metricDirection
+      )
     })
 })
 
 const comparisonReferenceCopy = computed(() => {
   const copies = selectedCopies.value
   if (!copies.length) return null
+  const requestedReference = selectedReferenceInstanceKey.value
+  const requested = copies.find((copy) => copy.instanceKey === requestedReference)
+  if (requested) return requested
   const pinned = selectedItem.value?.pinnedInstanceKey
-  return copies.find((copy) => copy.instanceKey === pinned) ?? copies.find(isAutoBest) ?? copies[0]!
+  return copies.find((copy) => copy.instanceKey === pinned) ?? copies[0]!
 })
 
 const selectedStoredCopies = computed(() => {
@@ -1048,14 +1072,8 @@ const selectedStoredCopies = computed(() => {
     )
     .flatMap((observed) => {
       const item = vaultItemForObserved(observed)
-      if (!item) return []
-      return {
-        item,
-        score: observed?.rollAnalysis?.overallEstimatedPercentile ??
-          item.rollAnalysis?.overallEstimatedPercentile ?? null
-      }
+      return item ? [item] : []
     })
-    .sort((left, right) => (right.score ?? -1) - (left.score ?? -1))
 })
 
 const skillNames = computed(() => buildSkillNames(
@@ -1586,7 +1604,7 @@ function currentAppRoute(): AppRoute {
 }
 
 function currentAppHistoryState(index = appHistoryIndex): AppHistoryEntry {
-  return createAppHistoryEntry(index, currentAppRoute())
+  return createAppHistoryEntry(index, currentAppRoute(), selectedReferenceInstanceKey.value)
 }
 
 function writeAppHistory(mode: 'push' | 'replace', index = appHistoryIndex): void {
@@ -1601,9 +1619,10 @@ function updateHistoryButtons(): void {
   canNavigateForward.value = appHistoryIndex < appHistoryMaximum
 }
 
-function restoreAppRoute(route: AppRoute): void {
+function restoreAppRoute(route: AppRoute, referenceInstanceKey: string | null = null): void {
   restoringAppHistory = true
   activeView.value = route.workspace
+  selectedReferenceInstanceKey.value = route.itemRecord ? referenceInstanceKey : null
   selectedRecord.value = route.itemRecord
   switch (route.workspace) {
     case 'collection':
@@ -1695,7 +1714,7 @@ function restoreAppRoute(route: AppRoute): void {
 function handlePageShow(): void {
   const entry = parseAppHistoryEntry(window.history.state)
   const route = entry?.route ?? parseAppRouteHash(window.location.hash)
-  if (route) restoreAppRoute(route)
+  if (route) restoreAppRoute(route, entry?.referenceInstanceKey)
 }
 
 function handleAppHistory(event: PopStateEvent): void {
@@ -1704,7 +1723,7 @@ function handleAppHistory(event: PopStateEvent): void {
   if (!route) return
   appHistoryIndex = entry?.index ?? 0
   appHistoryMaximum = Math.max(appHistoryMaximum, appHistoryIndex)
-  restoreAppRoute(route)
+  restoreAppRoute(route, entry?.referenceInstanceKey)
   updateHistoryButtons()
 }
 
@@ -1775,6 +1794,7 @@ watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId], (
 watch(
   [
     collectionControls, materialsControls,
+    selectedReferenceInstanceKey,
     query, rarityFilter, currentPage,
     setProgressFilter, setFeatureFilter, setSortMode, setSortDirection,
     skillExplorerControls,
@@ -1958,7 +1978,7 @@ onMounted(async () => {
   const initialRoute = existingHistoryEntry?.route ?? parseAppRouteHash(window.location.hash)
   appHistoryIndex = existingHistoryEntry?.index ?? 0
   appHistoryMaximum = appHistoryIndex
-  if (initialRoute) restoreAppRoute(initialRoute)
+  if (initialRoute) restoreAppRoute(initialRoute, existingHistoryEntry?.referenceInstanceKey)
   writeAppHistory('replace', appHistoryIndex)
   appHistoryReady = true
   updateHistoryButtons()
@@ -3650,21 +3670,25 @@ function bestStoredCopy(record: string): VaultListItem | null {
     )
     .flatMap((copy) => {
       const item = vaultItemForObserved(copy)
-      return item ? [item] : []
+      return item ? [{ copy, item }] : []
     })
   if (matches.length === 0) return null
-  return matches.sort((left, right) => {
-    const leftCopy = snapshot.value?.observedItems.find((copy) => copy.sourcePath === `vault://${left.id}`)
-    const rightCopy = snapshot.value?.observedItems.find((copy) => copy.sourcePath === `vault://${right.id}`)
-    return (
-      (rightCopy?.rollAnalysis?.overallEstimatedPercentile ?? -1) -
-      (leftCopy?.rollAnalysis?.overallEstimatedPercentile ?? -1)
-    )
-  })[0]!
+  const pinned = catalogItemByRecord(record)?.pinnedInstanceKey
+  const pinnedMatch = matches.find(({ copy }) => copy.instanceKey === pinned)
+  if (pinnedMatch) return pinnedMatch.item
+  const focus = collectionRollFocusForSort(collectionControls.value.sort)
+  if (focus) {
+    const leader = buildCollectionRollSummaries(matches.map(({ copy }) => copy), focus)
+      .get(record.toLocaleLowerCase())
+    const focusedMatch = matches.find(({ copy }) => copy.instanceKey === leader?.copy.instanceKey)
+    if (focusedMatch) return focusedMatch.item
+  }
+  return matches.length === 1 ? matches[0]!.item : null
 }
 
-function openItem(item: CollectionItem): void {
+function openItem(item: CollectionItem, referenceInstanceKey: string | null = null): void {
   hideTooltip()
+  selectedReferenceInstanceKey.value = referenceInstanceKey
   selectedRecord.value = item.record
 }
 
@@ -4262,15 +4286,10 @@ async function pinCopy(copy: ObservedStashItem): Promise<void> {
       source?.isHardcore ?? snapshot.value?.isHardcore ?? false
     )
     selectedItem.value.pinnedInstanceKey = next
+    selectedReferenceInstanceKey.value = next
   } finally {
     pinning.value = false
   }
-}
-
-function isAutoBest(copy: ObservedStashItem): boolean {
-  const score = copy.rollAnalysis?.overallEstimatedPercentile
-  const best = selectedItem.value?.bestRollPercentile
-  return score !== null && score !== undefined && best !== null && best !== undefined && Math.abs(score - best) < 0.0000001
 }
 
 function vaultItemForId(id: string): VaultListItem | null {
@@ -4394,9 +4413,9 @@ function presentRolledStats(source: RolledStat[] | undefined, includeFixed = fal
               maximumValue: maximum.value,
               unit,
               valueLabel,
-              percentile: stat.estimatedPercentile === null || maximum.estimatedPercentile === null
-                ? null
-                : (stat.estimatedPercentile + maximum.estimatedPercentile) / 2,
+              qualityPercent: averageRollQuality([stat, maximum]),
+              rankLabel: null,
+              rankDescription: `Individual sampled percentile ranks: minimum ${formatCombinationPercentile(stat.estimatedPercentile) ?? 'fixed'}; maximum ${formatCombinationPercentile(maximum.estimatedPercentile) ?? 'fixed'}.`,
               rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(maximum.observedMaximum ?? maximum.value)}${unit}`
             }
           ]
@@ -4410,7 +4429,9 @@ function presentRolledStats(source: RolledStat[] | undefined, includeFixed = fal
           maximumValue: null,
           unit: rollStatUnit(stat.field),
           valueLabel: `${formatRollValue(stat.value)}${rollStatUnit(stat.field)}`,
-          percentile: stat.estimatedPercentile,
+          qualityPercent: rollStatQuality(stat),
+          rankLabel: formatCombinationPercentile(stat.estimatedPercentile),
+          rankDescription: 'Range quality (0% minimum, 100% maximum); parentheses show sampled percentile rank, counting half of ties.',
           rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(stat.observedMaximum ?? stat.value)}${rollStatUnit(stat.field)}`
         }
       ]
@@ -4477,7 +4498,7 @@ function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatR
   }
   return [...universe.entries()]
     .filter(([, variants]) =>
-      variants.some((stat) => stat.percentile !== null) ||
+      variants.some((stat) => stat.qualityPercent !== null) ||
       variants.length !== selectedCopies.value.length ||
       variants.some((stat) => !statValuesMatch(stat, variants[0]!))
     )
@@ -4490,10 +4511,10 @@ function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatR
         return {
           ...template,
           valueLabel: own?.valueLabel ?? '—',
-          percentile: own?.percentile ?? null,
+          qualityPercent: own?.qualityPercent ?? null,
           deltaLabel: 'Reference',
           deltaTone: 'reference' as const,
-          percentileDeltaLabel: null,
+          qualityDeltaLabel: null,
           missingFromCopy: !own
         }
       }
@@ -4501,10 +4522,10 @@ function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatR
         return {
           ...baseline,
           valueLabel: '—',
-          percentile: null,
+          qualityPercent: null,
           deltaLabel: `Missing ${baseline.valueLabel}`,
           deltaTone: 'missing' as const,
-          percentileDeltaLabel: null,
+          qualityDeltaLabel: null,
           missingFromCopy: true
         }
       }
@@ -4513,7 +4534,7 @@ function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatR
           ...own,
           deltaLabel: `Adds ${own.valueLabel}`,
           deltaTone: 'unique' as const,
-          percentileDeltaLabel: null,
+          qualityDeltaLabel: null,
           missingFromCopy: false
         }
       }
@@ -4521,10 +4542,10 @@ function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatR
         return {
           ...template,
           valueLabel: own?.valueLabel ?? '—',
-          percentile: own?.percentile ?? null,
+          qualityPercent: own?.qualityPercent ?? null,
           deltaLabel: '—',
           deltaTone: 'same' as const,
-          percentileDeltaLabel: null,
+          qualityDeltaLabel: null,
           missingFromCopy: !own
         }
       }
@@ -4535,8 +4556,8 @@ function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatR
       const deltaLabel = upperDelta !== null && upperDelta !== lowerDelta
         ? `${formatSignedRollDelta(lowerDelta, own.unit)} / ${formatSignedRollDelta(upperDelta, own.unit)}`
         : formatSignedRollDelta(lowerDelta, own.unit)
-      const percentileDelta = own.percentile !== null && baseline.percentile !== null
-        ? own.percentile - baseline.percentile
+      const qualityDelta = own.qualityPercent !== null && baseline.qualityPercent !== null
+        ? own.qualityPercent - baseline.qualityPercent
         : null
       return {
         ...own,
@@ -4546,9 +4567,9 @@ function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatR
           : lowerDelta < 0 || (lowerDelta === 0 && (upperDelta ?? 0) < 0)
             ? 'negative' as const
             : 'same' as const,
-        percentileDeltaLabel: percentileDelta === null || Math.abs(percentileDelta) < 0.05
+        qualityDeltaLabel: qualityDelta === null || Math.abs(qualityDelta) < 0.05
           ? null
-          : `${percentileDelta > 0 ? '+' : '−'}${Math.abs(percentileDelta).toFixed(0)} percentile points`,
+          : `${qualityDelta > 0 ? '+' : '−'}${Math.abs(qualityDelta).toFixed(0)} quality points`,
         missingFromCopy: false
       }
     })
@@ -4561,16 +4582,6 @@ function comparisonItemStats(copy: ObservedStashItem): ComparisonStatRow[] {
 
 function comparisonPetStats(copy: ObservedStashItem): ComparisonStatRow[] {
   return comparisonStats(copy, true)
-}
-
-function copyOverallDelta(copy: ObservedStashItem): string {
-  const score = copy.rollAnalysis?.overallEstimatedPercentile
-  const reference = comparisonReferenceCopy.value?.rollAnalysis?.overallEstimatedPercentile
-  if (copy.instanceKey === comparisonReferenceCopy.value?.instanceKey) return 'Reference score'
-  if (score == null || reference == null) return 'No comparable score'
-  const delta = score - reference
-  if (Math.abs(delta) < 0.05) return 'Same overall score'
-  return `${delta > 0 ? '+' : '−'}${Math.abs(delta).toFixed(1)} percentile points vs reference`
 }
 
 function copyAffixDelta(copy: ObservedStashItem, kind: 'prefix' | 'suffix'): string {
@@ -5203,6 +5214,7 @@ function formatRollValue(value: number): string {
         :category-progress="categoryProgress"
         :icon-url-for-item="itemIconUrl"
         :best-stored-copy-for-item="bestStoredCopy"
+        :roll-summaries="collectionRollSummaries"
         :live-ready="liveStatus?.state === 'ready'"
         :retrieval-busy="vaultBusy"
         @show-tooltip="showTooltip"
@@ -6135,7 +6147,7 @@ function formatRollValue(value: number): string {
             <p class="section-label">Copy comparison</p>
             <h2>{{ selectedItem.name }}</h2>
             <p class="drawer-intro">
-              One copy is the reference. Every other copy shows its exact value and percentile deltas against it.
+              One copy is the reference. Every other copy shows its exact value and quality deltas against it.
               Saving a reference also remembers that copy as your preferred roll.
             </p>
           </div>
@@ -6248,22 +6260,24 @@ function formatRollValue(value: number): string {
                     <small>{{ researchRarityLabel(selectedItem) }} · {{ researchItemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
                   </div>
                 </div>
-                <div class="copy-score">
-                  <strong v-if="copy.rollAnalysis?.overallEstimatedPercentile != null">
-                    {{ copy.rollAnalysis.overallEstimatedPercentile.toFixed(1) }}%
-                  </strong>
-                  <strong v-else class="unscored">Unscored</strong>
-                  <small>overall roll quality</small>
+                <div class="copy-roll-profile">
+                  <small :title="selectedItem.rarity === 'mi'
+                    ? 'Category badges rate variable values for this exact base, prefix, and suffix. They do not rate affix suitability.'
+                    : 'Category badges show average range quality (0% minimum, 100% maximum), then its sampled percentile in parentheses.'">
+                    {{ selectedItem.rarity === 'mi' ? 'Roll profile · exact affix rolls' : 'Roll profile · average (rarity)' }}
+                  </small>
+                  <RollCategoryProfile
+                    :scores="rollCategoryScores(copy.rollAnalysis)"
+                    :max-visible="5"
+                  />
+                  <span v-if="!rollCategoryScores(copy.rollAnalysis).length" class="copy-roll-unscored">
+                    {{ copy.rollAnalysis?.trusted ? ((copy.rollAnalysis.modelVersion ?? 0) < 9 ? 'Quality recalculation pending' : 'No variable rolls') : 'Unscored' }}
+                  </span>
                 </div>
                 <p
-                  class="copy-overall-delta"
-                  :class="{
-                    positive: copyOverallDelta(copy).startsWith('+'),
-                    negative: copyOverallDelta(copy).startsWith('−'),
-                    reference: copy.instanceKey === comparisonReferenceCopy?.instanceKey
-                  }"
-                >{{ copyOverallDelta(copy) }}</p>
-                <p v-if="selectedItem.rarity === 'mi'" class="copy-selected-metric">
+                  v-if="selectedItem.rarity === 'mi' && (miWorkshopControls.metric.startsWith('item:') || miWorkshopControls.metric.startsWith('pet:'))"
+                  class="copy-selected-metric"
+                >
                   <span>{{ selectedMiMetricLabel }}</span>
                   <strong>{{ miMetricResult(copy, miWorkshopControls.metric).display }}</strong>
                 </p>
@@ -6306,7 +6320,6 @@ function formatRollValue(value: number): string {
               </div>
               <div class="copy-actions">
                 <span v-if="copy.instanceKey === comparisonReferenceCopy?.instanceKey" class="reference-badge">Reference</span>
-                <span v-if="isAutoBest(copy)" class="auto-badge">Auto-best</span>
                 <button
                   v-if="vaultCopyForObserved(copy)"
                   class="retrieve-copy"
@@ -6332,19 +6345,19 @@ function formatRollValue(value: number): string {
             <div v-else-if="copy.rollAnalysis && (comparisonItemStats(copy).length || comparisonPetStats(copy).length)" class="copy-roll-sections">
               <section v-if="comparisonItemStats(copy).length">
                 <h3>Item differences</h3>
-                <p class="copy-roll-guide">Actual value · delta from reference · percentile within this exact item and affix range</p>
+                <p class="copy-roll-guide">Actual value · delta from reference · range quality (0–100%); parentheses show sampled percentile</p>
                 <div class="stat-list">
                   <div v-for="stat in comparisonItemStats(copy)" :key="stat.key" class="stat-row" :class="{ missing: stat.missingFromCopy }">
                     <div class="stat-heading">
                       <span>{{ stat.label }}</span>
-                      <strong>{{ stat.valueLabel }}<template v-if="stat.percentile !== null"> · {{ stat.percentile.toFixed(0) }}%</template><template v-else> · fixed</template></strong>
+                      <strong :title="stat.rankDescription">{{ stat.valueLabel }}<template v-if="stat.qualityPercent !== null"> · {{ stat.qualityPercent.toFixed(0) }}%<template v-if="stat.rankLabel"> ({{ stat.rankLabel }})</template></template><template v-else> · fixed</template></strong>
                     </div>
                     <div class="stat-delta" :class="`delta-${stat.deltaTone}`">
                       <b>{{ stat.deltaLabel }}</b>
-                      <small v-if="stat.percentileDeltaLabel">{{ stat.percentileDeltaLabel }}</small>
+                      <small v-if="stat.qualityDeltaLabel">{{ stat.qualityDeltaLabel }}</small>
                     </div>
-                    <div v-if="stat.percentile !== null" class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
-                    <small>{{ stat.percentile === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
+                    <div v-if="stat.qualityPercent !== null" class="stat-meter"><span :style="{ width: `${stat.qualityPercent}%` }" /></div>
+                    <small>{{ stat.qualityPercent === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
                   </div>
                 </div>
               </section>
@@ -6355,14 +6368,14 @@ function formatRollValue(value: number): string {
                   <div v-for="stat in comparisonPetStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row" :class="{ missing: stat.missingFromCopy }">
                     <div class="stat-heading">
                       <span>{{ stat.label }}</span>
-                      <strong>{{ stat.valueLabel }}<template v-if="stat.percentile !== null"> · {{ stat.percentile.toFixed(0) }}%</template><template v-else> · fixed</template></strong>
+                      <strong :title="stat.rankDescription">{{ stat.valueLabel }}<template v-if="stat.qualityPercent !== null"> · {{ stat.qualityPercent.toFixed(0) }}%<template v-if="stat.rankLabel"> ({{ stat.rankLabel }})</template></template><template v-else> · fixed</template></strong>
                     </div>
                     <div class="stat-delta" :class="`delta-${stat.deltaTone}`">
                       <b>{{ stat.deltaLabel }}</b>
-                      <small v-if="stat.percentileDeltaLabel">{{ stat.percentileDeltaLabel }}</small>
+                      <small v-if="stat.qualityDeltaLabel">{{ stat.qualityDeltaLabel }}</small>
                     </div>
-                    <div v-if="stat.percentile !== null" class="stat-meter"><span :style="{ width: `${stat.percentile}%` }" /></div>
-                    <small>{{ stat.percentile === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
+                    <div v-if="stat.qualityPercent !== null" class="stat-meter"><span :style="{ width: `${stat.qualityPercent}%` }" /></div>
+                    <small>{{ stat.qualityPercent === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
                   </div>
                 </div>
               </section>

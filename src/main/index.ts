@@ -181,7 +181,7 @@ if (process.env.CAIRN_CODEX_SCREENSHOT_PATH) app.disableHardwareAcceleration()
 
 const CATALOG_PRESENTATION_VERSION = 33
 const DOUBLE_RARE_MI_BITMAP = 'character/item_doubleraremonsterinfrequent.tex'
-const ROLL_ANALYSIS_VERSION = 4
+const ROLL_ANALYSIS_VERSION = 9
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
 const SAHDINAS_MEMENTO = {
   record: 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr',
@@ -2075,7 +2075,7 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
         affixRerolls: 0,
         instanceKey: `fixture-mi-${index}`,
         rollAnalysis: {
-          modelVersion: 4,
+          modelVersion: 9,
           baseRecord: base.record,
           prefixRecord: prefix.records[0]!,
           suffixRecord: suffix.records[0]!,
@@ -2088,6 +2088,53 @@ function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
           baseEstimatedPercentile: Math.max(1, percentile - 7),
           prefixEstimatedPercentile: Math.min(99, percentile + 5),
           suffixEstimatedPercentile: Math.max(1, percentile - 3),
+          categoryScores: [
+            {
+              key: 'offense:physical',
+              category: 'offense',
+              damageType: 'physical',
+              estimatedPercentile: percentile,
+              qualityPercent: percentile,
+              statCount: 2,
+              combinationPercentile: Math.min(99, percentile + 15)
+            },
+            ...(index % 3 === 0 ? [{
+              key: 'offense:fire',
+              category: 'offense' as const,
+              damageType: 'fire',
+              estimatedPercentile: Math.max(4, 98 - percentile),
+              qualityPercent: Math.max(4, 98 - percentile),
+              statCount: 1,
+              combinationPercentile: Math.max(4, 98 - percentile)
+            }] : []),
+            {
+              key: 'defense',
+              category: 'defense',
+              damageType: null,
+              estimatedPercentile: Math.max(3, percentile - 13),
+              qualityPercent: Math.max(3, percentile - 13),
+              statCount: 2,
+              combinationPercentile: Math.max(8, percentile - 2)
+            },
+            {
+              key: 'utility',
+              category: 'utility',
+              damageType: null,
+              estimatedPercentile: Math.min(99, percentile + 9),
+              qualityPercent: Math.min(99, percentile + 9),
+              statCount: 1,
+              combinationPercentile: Math.min(99, percentile + 9)
+            },
+            ...(index % 4 === 0 ? [{
+              key: 'pet',
+              category: 'pet' as const,
+              damageType: null,
+              estimatedPercentile: 25 + (index * 11) % 70,
+              qualityPercent: 25 + (index * 11) % 70,
+              statCount: 2,
+              combinationPercentile: 30 + (index * 13) % 69
+            }] : [])
+          ],
           stats: [{
             field: 'offensivePhysicalModifier',
             value: 80 + index,

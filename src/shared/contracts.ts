@@ -849,9 +849,21 @@ export interface ItemRollAnalysis {
   baseEstimatedPercentile: number | null
   prefixEstimatedPercentile: number | null
   suffixEstimatedPercentile: number | null
+  categoryScores?: RollCategoryScore[]
   stats: RolledStat[]
   petStats?: RolledStat[]
   unmodeledFields: string[]
+}
+
+export interface RollCategoryScore {
+  key: string
+  category: 'offense' | 'retaliation' | 'defense' | 'utility' | 'pet'
+  damageType: string | null
+  estimatedPercentile: number
+  /** Range-based average; absent in pre-v9 cached analyses. */
+  qualityPercent?: number
+  statCount: number
+  combinationPercentile?: number | null
 }
 
 export interface RolledStat {
@@ -861,4 +873,6 @@ export interface RolledStat {
   observedMinimum: number | null
   observedMaximum: number | null
   estimatedPercentile: number | null
+  /** 0 = sampled minimum, 100 = sampled maximum; null for fixed/untrusted stats. */
+  qualityPercent?: number | null
 }

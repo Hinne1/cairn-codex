@@ -92,6 +92,14 @@ assert.equal(suppliesRoute.controls.mode, 'offline')
 assert.equal(suppliesRoute.controls.page, 7)
 assert.deepEqual(parseAppRouteHash(appRouteHash(suppliesRoute)), suppliesRoute)
 
+const categoryMetricRoute = parseAppRoute({
+  version: 1,
+  workspace: 'mi-workshop',
+  controls: { metric: 'category:offense:fire' }
+})
+assert.ok(categoryMetricRoute)
+assert.equal(categoryMetricRoute.controls.metric, 'category:offense:fire')
+
 const defaultSkillRoute = parseAppRoute({
   version: 1,
   workspace: 'skills',
@@ -101,8 +109,40 @@ assert.ok(defaultSkillRoute)
 assert.equal(defaultSkillRoute.controls.sort, 'level')
 assert.equal(defaultSkillRoute.controls.direction, 'asc')
 
+const collectionRollRoute = parseAppRoute({
+  version: 1,
+  workspace: 'collection',
+  controls: { sort: 'roll-fire', direction: 'desc' }
+})
+assert.ok(collectionRollRoute)
+assert.equal(collectionRollRoute.controls.sort, 'roll-fire')
+const retaliationRollRoute = parseAppRoute({
+  version: 1,
+  workspace: 'collection',
+  controls: { sort: 'roll-retaliation', direction: 'desc' }
+})
+assert.ok(retaliationRollRoute)
+assert.equal(retaliationRollRoute.controls.sort, 'roll-retaliation')
+const legacyCollectionRollRoute = parseAppRoute({
+  version: 1,
+  workspace: 'collection',
+  controls: { sort: 'roll' }
+})
+assert.ok(legacyCollectionRollRoute)
+assert.equal(legacyCollectionRollRoute.controls.sort, 'roll-offense')
+
 const historyEntry = createAppHistoryEntry(7, plannerRoute)
 assert.deepEqual(parseAppHistoryEntry(historyEntry), historyEntry)
+const copyHistoryEntry = createAppHistoryEntry(8, plannerRoute, 'score-leader')
+assert.equal(parseAppHistoryEntry(JSON.parse(JSON.stringify(copyHistoryEntry))).referenceInstanceKey, 'score-leader')
+assert.equal(parseAppHistoryEntry({ ...copyHistoryEntry, referenceInstanceKey: undefined }).referenceInstanceKey, null,
+  'older history entries must remain valid')
+assert.equal(parseAppHistoryEntry({ ...copyHistoryEntry, referenceInstanceKey: {} }).referenceInstanceKey, null)
+assert.equal(parseAppHistoryEntry({ ...copyHistoryEntry, referenceInstanceKey: 'x'.repeat(501) }).referenceInstanceKey.length, 500)
+assert.equal(createAppHistoryEntry(9, defaultAppRoute('collection'), 'stale-copy').referenceInstanceKey, null,
+  'closed drawers must not retain an unrelated copy')
+assert.equal(appRouteHash(copyHistoryEntry.route).includes('score-leader'), false,
+  'local copy identity must not leak into shareable deep links')
 assert.equal(parseAppHistoryEntry({ ...historyEntry, routeVersion: 2 }), null)
 assert.equal(parseAppHistoryEntry({ cairnCodex: true, routeVersion: 1, index: 0, route: { version: 1, workspace: 'unknown' } }), null)
 assert.equal(parseAppRoute({ version: 2, workspace: 'collection', controls: {} }), null)
@@ -136,6 +176,12 @@ const benchmarkSource = await readFile(new URL('./benchmark-ui.mjs', import.meta
 assert.match(appSource, /function currentAppRoute\(\): AppRoute/)
 assert.match(appSource, /appRouteHref\(state\.route, window\.location\.href\)/)
 assert.match(appSource, /parseAppRouteHash\(window\.location\.hash\)/)
+assert.match(appSource, /createAppHistoryEntry\(index, currentAppRoute\(\), selectedReferenceInstanceKey\.value\)/)
+assert.match(appSource, /selectedReferenceInstanceKey\.value = route\.itemRecord \? referenceInstanceKey : null/)
+assert.match(appSource, /restoreAppRoute\(route, entry\?\.referenceInstanceKey\)/)
+assert.match(appSource, /restoreAppRoute\(initialRoute, existingHistoryEntry\?\.referenceInstanceKey\)/)
+assert.match(appSource, /collectionControls, materialsControls,\s+selectedReferenceInstanceKey,/,
+  'changing the pinned reference must update the current history entry')
 assert.match(appSource, /if \(restoringAppHistory\) return\s+currentPage\.value = 1/)
 assert.match(appSource, /const collectionControls = ref<CollectionControls>/)
 assert.match(appSource, /const materialsControls = ref<MaterialsControls>/)

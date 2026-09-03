@@ -21,7 +21,11 @@ export type ActiveView =
 export type OwnershipFilter = 'all' | 'owned' | 'missing'
 export type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'double-rare' | 'rare' | 'recipe'
 export type SortDirection = 'asc' | 'desc'
-export type SortMode = 'name' | 'level' | 'completion' | 'recent' | 'roll'
+export type CollectionRollFocus =
+  | 'offense' | 'physical' | 'pierce' | 'bleeding' | 'fire' | 'cold' | 'lightning'
+  | 'acid' | 'vitality' | 'aether' | 'chaos' | 'elemental' | 'retaliation' | 'defense' | 'utility' | 'pet'
+export type RollSortMode = `roll-${CollectionRollFocus}`
+export type SortMode = 'name' | 'level' | 'completion' | 'recent' | RollSortMode
 export type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
 export type SetFeatureFilter = 'all' | 'visual'
 export type SetSortMode = 'completion' | 'level' | 'name'
@@ -30,7 +34,7 @@ export type SkillSort = 'item' | 'slot' | 'amount' | 'conversion' | 'special' | 
 export type SkillRarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'rare'
 export type MiAffixFilter = 'all' | 'double-rare'
 export type MiSortMode = 'metric' | 'level' | 'name' | 'copies'
-export type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `item:${string}` | `pet:${string}`
+export type MiMetricKey = 'overall' | 'base' | 'prefix' | 'suffix' | `category:${string}` | `item:${string}` | `pet:${string}`
 export type OracleSortMode = 'score' | 'name' | 'class' | 'readiness'
 export type PlannerSortMode = 'level' | 'name' | 'rarity'
 export type PlannerDisplay = 'table' | 'journey' | 'map'
@@ -164,6 +168,8 @@ export interface AppHistoryEntry {
   routeVersion: typeof APP_ROUTE_VERSION
   index: number
   route: AppRoute
+  // Local session history only: never serialized into a shareable route/hash.
+  referenceInstanceKey: string | null
 }
 
 type UnknownRecord = Record<string, unknown>
@@ -175,7 +181,12 @@ const activeViews: readonly ActiveView[] = [
 const ownershipFilters: readonly OwnershipFilter[] = ['all', 'owned', 'missing']
 const rarityFilters: readonly RarityFilter[] = ['all', 'epic', 'legendary', 'mi', 'double-rare', 'rare', 'recipe']
 const directions: readonly SortDirection[] = ['asc', 'desc']
-const sortModes: readonly SortMode[] = ['name', 'level', 'completion', 'recent', 'roll']
+const rollSortModes: readonly RollSortMode[] = [
+  'roll-offense', 'roll-physical', 'roll-pierce', 'roll-bleeding', 'roll-fire', 'roll-cold',
+  'roll-lightning', 'roll-acid', 'roll-vitality', 'roll-aether', 'roll-chaos', 'roll-elemental',
+  'roll-retaliation', 'roll-defense', 'roll-utility', 'roll-pet'
+]
+const sortModes: readonly SortMode[] = ['name', 'level', 'completion', 'recent', ...rollSortModes]
 const setProgressFilters: readonly SetProgressFilter[] = ['all', 'complete', 'progress', 'unstarted']
 const setFeatureFilters: readonly SetFeatureFilter[] = ['all', 'visual']
 const setSortModes: readonly SetSortMode[] = ['completion', 'level', 'name']
@@ -226,6 +237,10 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], fall
   return typeof value === 'string' && allowed.includes(value as T) ? value as T : fallback
 }
 
+function sortModeValue(value: unknown): SortMode {
+  return value === 'roll' ? 'roll-offense' : enumValue(value, sortModes, 'recent')
+}
+
 function integerValue(value: unknown, fallback: number, minimum: number, maximum: number): number {
   return typeof value === 'number' && Number.isInteger(value)
     ? Math.min(maximum, Math.max(minimum, value))
@@ -245,7 +260,7 @@ function stringArray(value: unknown, maximumItems = 24): string[] {
 function metricValue(value: unknown): MiMetricKey {
   const metric = stringValue(value, 'overall', 180)
   return metric === 'overall' || metric === 'base' || metric === 'prefix' || metric === 'suffix' ||
-    metric.startsWith('item:') || metric.startsWith('pet:')
+    metric.startsWith('category:') || metric.startsWith('item:') || metric.startsWith('pet:')
     ? metric as MiMetricKey
     : 'overall'
 }
@@ -266,7 +281,7 @@ export function parseAppRoute(value: unknown): AppRoute | null {
     case 'collection': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       category: stringValue(controls.category, 'All', 80), query: stringValue(controls.query),
       ownership: enumValue(controls.ownership, ownershipFilters, 'all'), rarity: enumValue(controls.rarity, rarityFilters, 'all'),
-      sort: enumValue(controls.sort, sortModes, 'recent'), direction: enumValue(controls.direction, directions, 'desc'),
+      sort: sortModeValue(controls.sort), direction: enumValue(controls.direction, directions, 'desc'),
       page: integerValue(controls.page, 1, 1, 100_000)
     } }
     case 'sets': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
@@ -277,7 +292,7 @@ export function parseAppRoute(value: unknown): AppRoute | null {
     case 'materials': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       category: enumValue(controls.category, materialCategories, 'all'), query: stringValue(controls.query),
       ownership: enumValue(controls.ownership, ownershipFilters, 'all'), rarity: enumValue(controls.rarity, rarityFilters, 'all'),
-      sort: enumValue(controls.sort, sortModes, 'recent'), direction: enumValue(controls.direction, directions, 'desc'),
+      sort: sortModeValue(controls.sort), direction: enumValue(controls.direction, directions, 'desc'),
       page: integerValue(controls.page, 1, 1, 100_000)
     } }
     case 'skills': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
@@ -333,8 +348,11 @@ export function parseAppRoute(value: unknown): AppRoute | null {
   }
 }
 
-export function createAppHistoryEntry(index: number, route: AppRoute): AppHistoryEntry {
-  return { cairnCodex: true, routeVersion: APP_ROUTE_VERSION, index: Math.max(0, Math.trunc(index)), route }
+export function createAppHistoryEntry(index: number, route: AppRoute, referenceInstanceKey: string | null = null): AppHistoryEntry {
+  return {
+    cairnCodex: true, routeVersion: APP_ROUTE_VERSION, index: Math.max(0, Math.trunc(index)), route,
+    referenceInstanceKey: route.itemRecord ? nullableString(referenceInstanceKey, 500) : null
+  }
 }
 
 export function parseAppHistoryEntry(value: unknown): AppHistoryEntry | null {
@@ -342,7 +360,7 @@ export function parseAppHistoryEntry(value: unknown): AppHistoryEntry | null {
   if (!input || input.cairnCodex !== true || input.routeVersion !== APP_ROUTE_VERSION) return null
   const route = parseAppRoute(input.route)
   if (!route) return null
-  return createAppHistoryEntry(integerValue(input.index, 0, 0, 1_000_000), route)
+  return createAppHistoryEntry(integerValue(input.index, 0, 0, 1_000_000), route, nullableString(input.referenceInstanceKey, 500))
 }
 
 export function appRouteHash(route: AppRoute): string {

@@ -28,6 +28,25 @@ The protocol is versioned independently of either executable. Binary item data
 will be base64 encoded at this boundary unless profiling demonstrates that a
 separate binary transport is necessary.
 
+## Process lanes and cache lifetime
+
+The Electron client runs two protocol-identical helper processes with deliberately
+different lifetimes:
+
+- The live lane handles health checks, hook ownership, incoming polling, and live
+  retrieval receipts. It remains at normal priority and never parses installed ARZ
+  data, so a cold catalog request cannot delay a live transfer.
+- The worker lane handles discovery, game-data projection, icons, stash operations,
+  and offline analysis. It runs below normal priority, reuses parsed game data while
+  requests remain active, and exits after 30 seconds idle. Process exit is the hard
+  cache boundary and releases the expanded game-data graph back to Windows.
+
+An in-flight request always suppresses idle eviction. A later worker request starts a
+fresh process and retains the existing file-fingerprint invalidation rules. The
+diagnostic-only `measure-memory` request reports process, working-set, private, and
+managed-heap bytes for the installed-data performance gate; it does not inspect user
+items or game memory.
+
 ## Read-only transfer-stash scan
 
 ```json

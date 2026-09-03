@@ -463,11 +463,13 @@ function createHelperClient(diagnostics?: DiagnosticLogger): GrimDawnHelperClien
     (event) => {
       if (event.outcome === 'failed') {
         diagnostics?.error('helper', 'request.failed', event.error, {
+          lane: event.lane,
           method: event.method,
           durationMs: event.durationMs
         })
       } else {
         diagnostics?.debugEvent('helper', 'request.completed', {
+          lane: event.lane,
           method: event.method,
           durationMs: event.durationMs
         })

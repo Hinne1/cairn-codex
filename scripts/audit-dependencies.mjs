@@ -4,7 +4,9 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const AUDIT_NPM_VERSION = '11.17.0'
-export const AUDIT_TIMEOUT_MS = 30000
+// A clean Windows registry audit has taken ~175 seconds; allow that latency
+// without returning to npm's unbounded/default retry behavior.
+export const AUDIT_TIMEOUT_MS = 210000
 const severities = ['info', 'low', 'moderate', 'high', 'critical']
 
 // Never turn an endpoint error, invalid response, or killed process into a clean audit.
@@ -39,7 +41,7 @@ export function runAudit(npmCli, { run = spawnSync, emit = console.log } = {}) {
       // CLI precedence must override both inherited environment and .npmrc settings.
       '--offline=false',
       '--include=dev', '--include=optional', '--include=peer',
-      '--registry=https://registry.npmjs.org/', '--fetch-retries=0', '--fetch-timeout=15000'], {
+      '--registry=https://registry.npmjs.org/', '--fetch-retries=0', '--fetch-timeout=180000'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: AUDIT_TIMEOUT_MS,
       maxBuffer: 5 * 1024 * 1024, windowsHide: true
     })

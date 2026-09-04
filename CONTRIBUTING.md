@@ -45,8 +45,10 @@ for high/critical findings and 2 for unavailable/invalid reports, which **are no
 security verdict**. The outer npm/CI launcher may normalize failure to exit 1; use the
 explicit `DEPENDENCY AUDIT FAILED` versus `DEPENDENCY AUDIT UNAVAILABLE` log messages
 to distinguish these outcomes.
-Each attempt has a 30-second process deadline and a 15-second fetch timeout, with one
-bounded retry only for unavailable results. CI also caps the step at two minutes.
+Each attempt has a 210-second process deadline and a 180-second fetch timeout, with one
+bounded retry only for unavailable results. CI also caps the step at eight minutes.
+This allows the approximately 175-second successful audit observed on a clean Windows
+runner without inheriting npm's default retry delays.
 No vulnerability finding is retried away or marked successful. Report-validation and
 timeout/error contracts run in `test:dependency-audit` and the full verification suite.
 

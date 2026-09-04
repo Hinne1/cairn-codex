@@ -34,6 +34,7 @@ const run = (command, args, options) => {
   assert.ok(args.includes('--offline=false'))
   for (const type of ['dev', 'optional', 'peer']) assert.ok(args.includes(`--include=${type}`))
   assert.ok(args.includes('--fetch-retries=0'))
+  assert.ok(args.includes('--fetch-timeout=180000'))
   assert.equal(options.timeout, AUDIT_TIMEOUT_MS)
   assert.equal(options.windowsHide, true)
   return calls === 1 ? result({ error: 'registry unavailable' }, 1) : result()

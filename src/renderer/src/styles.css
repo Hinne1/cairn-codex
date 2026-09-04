@@ -11,6 +11,11 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select { font: inherit; }
 button, select { color: inherit; }
 
+.roll-help-note { margin: var(--cc-space-3) 0; color: var(--cc-text-muted); font-size: var(--cc-font-size-sm); }
+.roll-help-link { padding: var(--cc-space-2); border: 0; border-radius: var(--cc-radius-sm); background: transparent; color: var(--cc-accent-strong); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.roll-help-link:hover { background: var(--cc-accent-surface); }
+.roll-help-link:focus-visible { outline: 2px solid var(--cc-focus); outline-offset: 2px; }
+
 .app-shell {
   min-height: 100vh;
   background:

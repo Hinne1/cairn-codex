@@ -19,8 +19,8 @@ specialist tool, and Collection must not add a second card-based tool launcher b
 navigation.
 
 `src/renderer/src/components/WorkspaceSidebar.vue` is the one primary navigation surface on every
-route. Collection is first, the user's configured tools follow in their persisted order, and Transfers
-and Settings are anchored with the sidebar actions. The active route uses `aria-current="page"`.
+route. Collection is first, the user's configured tools follow in their persisted order, and Glossary,
+Transfers, and Settings are anchored with the sidebar actions. The active route uses `aria-current="page"`.
 Transfers and Settings use the same content canvas as other routes: they never remove, resize, or
 replace the sidebar. Browser-style Back/Forward still restores the exact previous typed route.
 
@@ -32,7 +32,7 @@ Destinations use one coherent, high-contrast stroked icon family. When labels ar
 destination retains its accessible name and exposes that label as a hover and keyboard-focus tooltip.
 Hiding the currently open tool returns to Collection; hidden and disabled experimental tools do not
 remain reachable. The sidebar itself stays available if collection data is unavailable so Collection,
-Transfers, Settings, customization, and recovery navigation remain predictable.
+Glossary, Transfers, Settings, customization, and recovery navigation remain predictable.
 
 The top bar contains identity, history, and live status rather than a second navigation strip. The
 Cairn Codex mark and name occupy the upper left and expose link semantics that return to Collection.
@@ -348,6 +348,39 @@ delivery, quarantine release, safety refreshes, recovery coordination, notificat
 confirmation/preload boundaries behind five narrow callbacks. The workspace never reaches the
 preload bridge and historical operations remain noninteractive.
 
+## Glossary and contextual roll help
+
+Isolated presentation fixtures are routed by `src/main/screenshot-collection.ts`, requiring both
+a screenshot destination and a recognized fixture name. MI Workshop and bounded-grid fixtures
+retain already source-filtered synthetic copies without importing them into the disposable archive;
+Skill Explorer retains its explicit synthetic availability. Ordinary startup and unrecognized
+fixtures still use the production archive presenter. Feature verification flags do not select data.
+`test:mi-workshop-fixture:electron` exercises 72 synthetic MI combinations at 1,440 and 520px,
+mounts at most 50 rows, and checks that archive/source/journal tables remain empty afterward.
+
+Glossary is a permanent, data-independent destination, not an optional collection tool.
+`GlossaryWorkspace.vue` renders the entry registry in `workspaces/glossary.ts`; prose does not live
+in `App.vue`. Each entry has a stable ID, structured sections, optional native details, and sources.
+The typed `glossary` route retains the entry ID, normalizes unknown IDs to `item-rolls`, and rejects
+item-drawer state. Entry navigation moves focus to its heading. The contents disclosure reveals
+section jump controls, which open calculation details and focus their summary when needed.
+
+Collection, MI Workshop, and copy comparison offer concise roll-help links. Opening help clears
+the current drawer without modifying the previous session-history entry or saved reference pin;
+Back restores the prior filters and exact viewed copy. Glossary state is not a saved preference.
+
+The initial guide explains model-v9 range quality separately from midrank percentile, deterministic
+sampling, fixed-member exclusion, grouped damage ranges, offense families, Elemental damage,
+retaliation/pet separation, and exact-template MI limitations. The primary example is `78% (98th)`;
+the optional 7/8/9 table illustrates why maximum quality can have an 83rd-percentile rank.
+Source links come from `shared/glossary-sources.ts`. The main process opens only those exact HTTPS
+URLs in the system browser and denies child windows and all other URLs at that boundary.
+
+`test:glossary` checks routes, examples against production roll-quality functions, source allowlisting,
+and content integration. `test:glossary:electron` uses empty and populated synthetic profiles at
+1,440 and 520px, testing native keyboard input, heading focus, disclosures, contextual links,
+exact-reference Back/Forward, and horizontal overflow. Captures remain in ignored local cache.
+
 ## Semantic badges and Grim Dawn rarity
 
 Dialog focus, reduced-motion behavior, and the remaining keyboard-audit debt are specified in
@@ -365,8 +398,9 @@ piece being discovered. Surfaces must name those qualifications explicitly.
 
 ## Adding a workspace
 
-1. Register the route once in `workspaceToolDefinitions`; the shared sidebar derives its visible
-   destinations from that single preference source.
+1. Register an optional tool once in `workspaceToolDefinitions`; the shared sidebar derives its
+   visible tools from that single preference source. Permanent system/reference destinations
+   belong to the sidebar actions instead and must work without collection data.
 2. Use `ToolHeader` for the workspace heading.
 3. Use `ExplorerToolbar` if the result set is searchable or filterable.
 4. Keep query, filters, sorting, and result count reactive from the same source of truth.

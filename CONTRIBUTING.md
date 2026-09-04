@@ -30,6 +30,47 @@ npm.cmd ci
 npm.cmd run verify
 ```
 
+### Dependency audit
+
+The mandatory `npm run audit:dependencies` gate queries the live
+[OSV API](https://google.github.io/osv.dev/api/) for every distinct npm name/version
+in `package-lock.json`. The maintainer approved this provider change after npm's own
+advisory endpoint repeatedly returned service errors. `npm ci --no-audit` still validates
+the unchanged lockfile; it skips only npm's implicit audit, not the blocking OSV gate.
+No additional npm version, scanner executable, API key, or system installation is needed.
+
+Coverage includes development, optional, peer, nested, aliased, and other-platform
+dependencies, even when they are absent from local `node_modules`. Local/git/workspace
+sources or malformed/empty inventories are rejected for explicit review, never skipped.
+Only package names and versions are sent to OSV; no saves, source code, or credentials.
+
+OSV matches affected versions; full matching advisories supply GitHub's qualitative
+`database_specific.severity`. HIGH/CRITICAL findings return 1. LOW/MODERATE findings
+are reported without blocking; withdrawn advisories are identified separately.
+Missing/unknown severity, mismatched advisory identity, incomplete batches, malformed
+responses, and service errors return 2: **not a clean security verdict**. Outer launchers
+may normalize failure exit codes; the FAILED/UNAVAILABLE log labels remain distinct.
+
+Every request has a 15-second deadline and at most one retry. The whole audit has a
+two-minute deadline, with a three-minute CI step limit. Response size, batch size and
+pagination are bounded; exceeding a limit fails closed. No persistent/offline advisory
+cache or npm settings can suppress the live lookup. A later service failure never
+falls back to a previous clean result or retries away known findings.
+
+Local verification:
+
+```powershell
+npm.cmd run test:dependency-audit
+npm.cmd run test:dependency-audit:live
+npm.cmd run audit:dependencies
+```
+
+CI runs known-vulnerable and patched minimist controls before the real lockfile audit,
+then proceeds to `npm run verify` only on success. Offline contract tests also run in
+full verification, but are not a dependency-security verdict. A new advisory affecting
+the patched control will intentionally require investigation, not an automatic exception.
+The provider's coverage differs from npm's own audit; this is explicitly an OSV verdict.
+
 For installed-game integration checks:
 
 ```powershell

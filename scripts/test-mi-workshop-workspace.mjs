@@ -153,6 +153,24 @@ assert.equal(rareRow?.copies.length, 2)
 assert.equal(rareRow?.leader.instanceKey, rareHigh.instanceKey)
 assert.equal(rareRow?.selectedMetric.display, '72.0%')
 
+// Glossary contract: the metric selects each group's strongest copy;
+// direction reverses group order without replacing that leader.
+for (const [metric, expectedLeader] of [
+  ['overall', rareHigh],
+  ['category:offense:fire', rareLow],
+  ['item:offensiveFireModifier', rareLow]
+]) {
+  const projected = ['asc', 'desc'].map(metricDirection => createMiWorkshopRows({
+    items, affixes, copies,
+    controls: { ...controls, metric, metricDirection },
+    query: compileSearchQuery('')
+  }))
+  for (const directionRows of projected) {
+    assert.equal(directionRows.find(row => row.prefix === "Subjugator's")?.leader.instanceKey, expectedLeader.instanceKey)
+  }
+  assert.deepEqual(projected[0].map(row => row.leader.instanceKey), projected[1].map(row => row.leader.instanceKey).reverse())
+}
+
 const doubleRareRows = createMiWorkshopRows({
   items,
   affixes,

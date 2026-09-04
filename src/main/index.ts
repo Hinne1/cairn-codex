@@ -3,6 +3,8 @@ import { createHash, randomInt, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { arch, platform, release } from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron'
+import { isGlossarySourceUrl } from '../shared/glossary-sources'
+import { presentScreenshotCollection } from './screenshot-collection'
 import {
   IPC_CHANNELS,
   type ArchiveBackupEntry,
@@ -1184,14 +1186,10 @@ function registerIpcHandlers(
     archive: { persistSnapshot: (snapshot) => database.persistSnapshot(snapshot) },
     projector: {
       projectSources: projectCollectionSources,
-      present: (snapshot, basis) => process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
-        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'skill-explorer'
-        // Keep synthetic archive availability in this visual fixture; its disposable DB is empty.
-        ? Promise.resolve({ ...snapshot, basis, items: createScreenshotCollectionFixture('skill-explorer').items })
-        : process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
-          process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y'
-          ? Promise.resolve({ ...snapshot, basis })
-          : presentCollection(helper, database, snapshot, basis)
+      present: async (snapshot, basis) => presentScreenshotCollection(
+        snapshot, basis, process.env.CAIRN_CODEX_SCREENSHOT_PATH,
+        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE, createScreenshotCollectionFixture
+      ) ?? presentCollection(helper, database, snapshot, basis)
     },
     hydration: {
       hydrateAll: ({ installationPath, batchLimit, onProgress }) =>
@@ -5379,6 +5377,12 @@ async function createWindow(recoveryStatus: StartupRecoveryStatus): Promise<void
     }
   })
   window.setMenuBarVisibility(false)
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    // Only the fixed glossary references may leave the app. Never create a
+    // privileged child window or accept arbitrary external protocols/URLs.
+    if (isGlossarySourceUrl(url)) void shell.openExternal(url).catch(() => undefined)
+    return { action: 'deny' }
+  })
   window.setAutoHideMenuBar(true)
   if (savedState?.maximized) window.maximize()
 
@@ -5752,7 +5756,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
           Boolean(document.querySelector([
             '.catalog-grid', '.catalog-results', '.set-results', '.settings-workspace', '.vault-workspace',
             '.leveling-planner', '.mi-workshop', '.collection-materials-workspace', '.skill-explorer',
-            '.supplies-workspace', '.farming-workspace', '.stash-oracle', '.dismantling-workspace'
+            '.supplies-workspace', '.farming-workspace', '.stash-oracle', '.dismantling-workspace', '.glossary-workspace'
           ].join(', ')))) &&
          (!document.querySelector('.primary-action')?.disabled ||
           Boolean(document.querySelector('.workspace-error, .root-recovery, .safe-mode-offer')) ||
@@ -8015,7 +8019,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (document.activeElement !== affixed) throw new Error('An affixed MI Workshop row was not keyboard focusable.')
               if (nativeFocusEvents === 0) affixed.dispatchEvent(new FocusEvent('focus'))
               for (let attempt = 0; attempt < 8 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(10)
-              const tooltipName = document.querySelector('.game-tooltip h3')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+              const tooltipName = document.querySelector('.game-tooltip h3')?.textContent?.replace(/\\s+/g, ' ').trim() ?? ''
               const rowAffixes = [...affixed.querySelectorAll('.affix-name')].map((node) => node.textContent?.trim()).filter(Boolean)
               // Older imported catalog tags contain a few singular/plural label variants (for
               // example, "of Spine" versus "of Spines") for the same serialized affix record.
@@ -8475,7 +8479,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!collection) throw new Error('Persistent Collection navigation was not rendered.')
               const destinationButtons = [...sidebar.querySelectorAll('[data-destination-id]')]
               const destinationIds = destinationButtons.map((button) => button.getAttribute('data-destination-id'))
-              if (destinationIds.join('|') !== 'collection|vault|settings') {
+              if (destinationIds.join('|') !== 'collection|glossary|vault|settings') {
                 throw new Error('Application destination order was not deterministic: ' + destinationIds.join('|') + '.')
               }
               const navRect = sidebar.getBoundingClientRect()
@@ -8740,6 +8744,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
             })()
           `)
           await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_GLOSSARY === '1') {
+          const { verifyGlossary } = await import('./glossary-verification')
+          await verifyGlossary(window.webContents)
         }
         const renderedState = await window.webContents.executeJavaScript(`({
           heading: document.querySelector('.hero h2')?.textContent,

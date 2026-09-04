@@ -30,6 +30,13 @@ npm.cmd ci
 npm.cmd run verify
 ```
 
+### CI cancellation
+
+CI cancels superseded runs using a workflow-and-full-ref concurrency group.
+Different PRs, branches, tags, and workflows remain independent; push and PR
+merge-ref checks also remain separate. `npm run test:ci-concurrency` guards this
+contract and runs as part of full verification. Release publishing is unchanged.
+
 ### Dependency audit
 
 CI installs npm **11.17.0** independently of the npm bundled with Node 22. This pinned

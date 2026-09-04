@@ -38,8 +38,11 @@ quick-audit endpoint. Installations use `npm ci --no-audit` only to avoid an imp
 duplicate audit; the separate `npm run audit:dependencies` step remains mandatory.
 The lockfile is still validated by `npm ci`, not regenerated to conceal endpoint errors.
 
-The audit includes development, optional, and peer dependencies. High/critical findings
-exit 1; unavailable/invalid audit reports exit 2 and **are not a clean security verdict**.
+The audit includes development, optional, and peer dependencies. The wrapper returns 1
+for high/critical findings and 2 for unavailable/invalid reports, which **are not a clean
+security verdict**. The outer npm/CI launcher may normalize failure to exit 1; use the
+explicit `DEPENDENCY AUDIT FAILED` versus `DEPENDENCY AUDIT UNAVAILABLE` log messages
+to distinguish these outcomes.
 Each attempt has a 30-second process deadline and a 15-second fetch timeout, with one
 bounded retry only for unavailable results. CI also caps the step at two minutes.
 No vulnerability finding is retried away or marked successful. Report-validation and

@@ -111,6 +111,14 @@ if (!process.versions.electron) {
           assert.equal(await run(`document.querySelector('.explorer-result-count strong').textContent`), '0')
         }
       }
+      window.webContents.setZoomFactor(1.25)
+      for (const workspace of ['planner', 'skills']) {
+        await act(`researchFixture.workspace.value='${workspace}';researchFixture.setCount(120)`)
+        assert.equal(await run(`document.documentElement.scrollWidth <= innerWidth`), true, 'Compact 125% zoom must not widen the document')
+        assert.equal(await run(`Array.from(document.querySelectorAll('.research-toolbar input,.research-toolbar select,.research-toolbar button')).filter(el=>el.getClientRects().length).every(el=>{const r=el.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth})`), true, 'Compact 125% zoom keeps all controls in view')
+        await capture(workspace + '-520-zoom125')
+      }
+      window.webContents.setZoomFactor(1)
       window.setContentSize(1440, 1000)
       for (const workspace of ['planner', 'skills']) {
         const start = Date.now()
@@ -118,6 +126,7 @@ if (!process.versions.electron) {
         assert.equal(await run(`document.querySelector('.explorer-result-count strong').textContent.replaceAll(',','')`), '20000')
         const mounted = await run(`document.querySelectorAll('.research-table-row').length`)
         assert.equal(mounted, 50)
+        assert.ok(Date.now()-start < 5000, '20k toolbar rendering stays within the five-second regression budget')
         console.log(`${workspace}: synthetic 20k rendered in ${Date.now()-start}ms including settle, ${mounted} mounted rows`)
       }
       await act(`researchFixture.workspace.value='probe'`)

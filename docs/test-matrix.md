@@ -205,7 +205,8 @@ portable and installer hashes are carried by the release's `.sha256` and manifes
 
 `npm run test:research-toolbars:electron` builds and mounts the production Planner,
 Skill Explorer and shared toolbar against synthetic data and a memory-only
-preference repository. It verifies 1,440px/520px control containment, the same
+preference repository. It verifies 1,440px/520px control containment (including
+compact 125% zoom), the same
 context/search/filter/result structure, inline add/remove skills with native Enter,
 keyboard sort direction, Explorer picker Escape, and Planner view-switch focus
 with independent item/map queries. It checks data-empty and filter-empty results,

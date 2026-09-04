@@ -35,6 +35,9 @@ export function classifyAudit(result) {
 export function runAudit(npmCli, { run = spawnSync, emit = console.log } = {}) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const result = run(process.execPath, [npmCli, 'audit', '--json', '--audit-level=high',
+      // npm offline mode fabricates an empty report without requesting advisories.
+      // CLI precedence must override both inherited environment and .npmrc settings.
+      '--offline=false',
       '--include=dev', '--include=optional', '--include=peer',
       '--registry=https://registry.npmjs.org/', '--fetch-retries=0', '--fetch-timeout=15000'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: AUDIT_TIMEOUT_MS,

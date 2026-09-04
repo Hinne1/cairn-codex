@@ -37,6 +37,8 @@ version uses the supported bulk-advisory endpoint without falling back to the re
 quick-audit endpoint. Installations use `npm ci --no-audit` only to avoid an implicit,
 duplicate audit; the separate `npm run audit:dependencies` step remains mandatory.
 The lockfile is still validated by `npm ci`, not regenerated to conceal endpoint errors.
+The audit explicitly disables offline mode, overriding environment and `.npmrc` settings
+that would otherwise let npm report zero findings without contacting the registry.
 
 The audit includes development, optional, and peer dependencies. The wrapper returns 1
 for high/critical findings and 2 for unavailable/invalid reports, which **are not a clean

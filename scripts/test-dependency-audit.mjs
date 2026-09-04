@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { classifyAudit, runAudit, AUDIT_NPM_VERSION, AUDIT_TIMEOUT_MS } from './audit-dependencies.mjs'
 
@@ -24,10 +25,13 @@ for (const bad of [
 
 let calls = 0
 const messages = []
+let auditArgs
 const run = (command, args, options) => {
+  auditArgs = args
   calls++
   assert.equal(command, process.execPath)
   assert.ok(args.includes('--audit-level=high'))
+  assert.ok(args.includes('--offline=false'))
   for (const type of ['dev', 'optional', 'peer']) assert.ok(args.includes(`--include=${type}`))
   assert.ok(args.includes('--fetch-retries=0'))
   assert.equal(options.timeout, AUDIT_TIMEOUT_MS)
@@ -37,6 +41,16 @@ const run = (command, args, options) => {
 assert.equal(runAudit('npm-cli.js', { run, emit: message => messages.push(message) }), 0)
 assert.equal(calls, 2)
 assert.match(messages[0], /UNAVAILABLE.*No clean security verdict/)
+// Exercise real npm configuration precedence, not just a fabricated audit report.
+// This reads configuration only: no registry request or package/profile mutation.
+assert.ok(process.env.npm_execpath, 'Run this regression through npm run test:dependency-audit')
+const config = spawnSync(process.execPath, [process.env.npm_execpath, 'config', 'get', 'offline', ...auditArgs.slice(2)], {
+  encoding: 'utf8', timeout: AUDIT_TIMEOUT_MS, windowsHide: true,
+  env: { ...process.env, npm_config_offline: 'true', npm_config_logs_max: '0' }
+})
+assert.ifError(config.error)
+assert.equal(config.status, 0, config.stderr)
+assert.equal(config.stdout.trim(), 'false', 'Audit CLI arguments must override inherited npm offline mode')
 calls = 0
 assert.equal(runAudit('npm-cli.js', { run: () => { calls++; return result(report('critical'), 1) }, emit: () => {} }), 1)
 assert.equal(calls, 1, 'vulnerability findings must not be retried away')

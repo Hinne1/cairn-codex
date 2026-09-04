@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { moveBoundedVisualRowKey } from '../src/renderer/src/bounded-results.ts'
+import { presentScreenshotCollection } from '../src/main/screenshot-collection.ts'
 
 const [component, collection, oracle, supplies, main, benchmark, packageJson] = await Promise.all([
   readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
@@ -27,7 +28,10 @@ assert.match(oracle, /layout="grid" navigable/)
 assert.match(supplies, /layout="grid"[\s\S]*?selection-mode="multiple"/)
 
 assert.match(main, /name === 'bounded-grid-a11y'/)
-assert.match(main, /CAIRN_CODEX_SCREENSHOT_PATH &&[\s\S]*?CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y'[\s\S]*?Promise\.resolve\(\{ \.\.\.snapshot, basis \}\)/)
+assert.match(main, /presentScreenshotCollection\([\s\S]*?CAIRN_CODEX_SCREENSHOT_PATH[\s\S]*?CAIRN_CODEX_SCREENSHOT_FIXTURE/)
+const gridFixture = { observedItems: [{ instanceKey: 'synthetic-grid-copy' }] }
+assert.strictEqual(presentScreenshotCollection(gridFixture, 'archive', 'capture.png', 'bounded-grid-a11y', () => { throw new Error('Must retain projected grid copies') }).observedItems, gridFixture.observedItems)
+assert.equal(presentScreenshotCollection(gridFixture, 'archive', undefined, 'bounded-grid-a11y', () => null), null)
 assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_GRID_SEMANTICS/)
 assert.match(main, /direct grid rows/)
 assert.match(main, /direct gridcell/)

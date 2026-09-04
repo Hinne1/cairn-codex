@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'n
 import { arch, platform, release } from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron'
 import { isGlossarySourceUrl } from '../shared/glossary-sources'
+import { presentScreenshotCollection } from './screenshot-collection'
 import {
   IPC_CHANNELS,
   type ArchiveBackupEntry,
@@ -1185,17 +1186,10 @@ function registerIpcHandlers(
     archive: { persistSnapshot: (snapshot) => database.persistSnapshot(snapshot) },
     projector: {
       projectSources: projectCollectionSources,
-      // Interaction fixtures own their synthetic copies; do not replace them
-      // with the deliberately empty archive in the disposable profile.
-      present: (snapshot, basis) => process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
-        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'skill-explorer'
-        // Keep synthetic archive availability in this visual fixture; its disposable DB is empty.
-        ? Promise.resolve({ ...snapshot, basis, items: createScreenshotCollectionFixture('skill-explorer').items })
-        : process.env.CAIRN_CODEX_SCREENSHOT_PATH &&
-          (process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'bounded-grid-a11y' ||
-            process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_GLOSSARY === '1')
-          ? Promise.resolve({ ...snapshot, basis })
-          : presentCollection(helper, database, snapshot, basis)
+      present: async (snapshot, basis) => presentScreenshotCollection(
+        snapshot, basis, process.env.CAIRN_CODEX_SCREENSHOT_PATH,
+        process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE, createScreenshotCollectionFixture
+      ) ?? presentCollection(helper, database, snapshot, basis)
     },
     hydration: {
       hydrateAll: ({ installationPath, batchLimit, onProgress }) =>
@@ -8025,7 +8019,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (document.activeElement !== affixed) throw new Error('An affixed MI Workshop row was not keyboard focusable.')
               if (nativeFocusEvents === 0) affixed.dispatchEvent(new FocusEvent('focus'))
               for (let attempt = 0; attempt < 8 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(10)
-              const tooltipName = document.querySelector('.game-tooltip h3')?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+              const tooltipName = document.querySelector('.game-tooltip h3')?.textContent?.replace(/\\s+/g, ' ').trim() ?? ''
               const rowAffixes = [...affixed.querySelectorAll('.affix-name')].map((node) => node.textContent?.trim()).filter(Boolean)
               // Older imported catalog tags contain a few singular/plural label variants (for
               // example, "of Spine" versus "of Spines") for the same serialized affix record.

@@ -133,6 +133,15 @@ edge; reduced-motion scrolling reaches the edge immediately and allows the next
 event to return to the page. The fixture restores the original media-query API in
 a `finally` block, independent of the Windows runner's animation setting.
 
+Planner extraction regressions (2026-09-04): the production session and preference repository
+pass plan isolation, shared favorites, SC/HC recipe availability, level commits, profile creation
+and deletion, route/page/area restoration, character-discovery loading/error, Oracle handoff,
+empty catalog, and reload checks. The pure 20k item projection completed in 89ms on the local
+host. The existing 1,440px and 520px Electron gates passed Table/Journey scrolling and focused
+row restoration, keyboard actions, profile isolation, setup focus, and MI Sources history.
+The 120-item Planner fixture retains 50-row batches (100 mounted after advancing the continuous
+window). No personal profile, save, game process, or asset was used or modified.
+
 ## Manual live-transfer gates
 
 These require Grim Dawn, deliberate sacrificial items, and human confirmation.

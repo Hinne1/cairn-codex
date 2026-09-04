@@ -4,9 +4,6 @@ import BoundedResultSurface from './components/BoundedResultSurface.vue'
 import ExplorerToolbar from './components/ExplorerToolbar.vue'
 import FailureProbe from './components/FailureProbe.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
-import PlannerJourney from './components/PlannerJourney.vue'
-import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
-import ResearchItemTable from './components/ResearchItemTable.vue'
 import RollCategoryProfile from './components/RollCategoryProfile.vue'
 import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
@@ -19,23 +16,16 @@ import DismantlingWorkspace from './workspaces/DismantlingWorkspace.vue'
 import { createDismantlingSession, type DismantlingControls } from './workspaces/dismantling'
 import StashOracleWorkspace from './workspaces/StashOracleWorkspace.vue'
 import type { StashOracleControls } from './workspaces/stash-oracle'
+import LevelingPlannerWorkspace from './workspaces/LevelingPlannerWorkspace.vue'
+import { createLevelingPlannerSession } from './workspaces/leveling-planner'
 import SkillExplorerWorkspace from './workspaces/SkillExplorerWorkspace.vue'
 import {
   buildSkillNames,
-  skillMatchForItem,
-  type SkillExplorerControls,
-  type SkillMatch
+  type SkillExplorerControls
 } from './workspaces/skill-explorer'
 import {
-  researchAcquisitionFacts,
-  researchItemIsAvailable,
-  nextResearchSort,
-  researchItemPreferenceKey,
   researchItemTypeLabel,
-  researchRarityLabel,
-  researchRollFact,
-  researchSkillName,
-  type ResearchItemTableRow
+  researchRarityLabel
 } from './workspaces/research-item-table'
 import MiWorkshopWorkspace from './workspaces/MiWorkshopWorkspace.vue'
 import {
@@ -86,7 +76,6 @@ import {
 } from './renderer-recovery'
 import {
   createPreferenceRepository,
-  type StoredPlannerProfile as PlannerProfile,
   type StoredTodoItem as TodoItem,
   type TooltipBoundaryScrollPreference
 } from './preference-repository'
@@ -101,10 +90,6 @@ import {
   type AppRoute,
   type MaterialCategory,
   type OwnershipFilter,
-  type PlannerDisplay,
-  type PlannerMapScope,
-  type PlannerMapSortMode,
-  type PlannerSortMode,
   type RarityFilter,
   type SetFeatureFilter,
   type SetProgressFilter,
@@ -112,16 +97,6 @@ import {
   type SortDirection,
   type TransferMode
 } from './app-route'
-import {
-  createCharacterPlannerProfile,
-  createManualPlannerProfile,
-  createPlannerClassOptions,
-  type PlannerSetupSubmission
-} from './planner-setup'
-import {
-  masteryMatchesForItem,
-  type PlannerMasteryMatch
-} from './planner-item-matches'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import {
   compareSetCompletion,
@@ -341,37 +316,6 @@ const skillExplorerControls = ref<SkillExplorerControls>({
   direction: 'asc',
   page: 1
 })
-const plannerProfiles = ref<PlannerProfile[]>(structuredClone(initialPreferences.planner.profiles))
-const selectedPlannerProfileId = ref(initialPreferences.planner.selectedProfileId)
-const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)
-  ?? plannerProfiles.value[0]
-const plannerSkills = ref<string[]>([...(initialPlannerProfile?.skills ?? ['Wendigo Totem'])])
-const plannerSkillDraft = ref('')
-const plannerSetupOpen = ref(false)
-const plannerMinimumLevel = ref(initialPlannerProfile?.minimumLevel ?? 1)
-const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? 70)
-const plannerMinimumLevelDraft = ref(plannerMinimumLevel.value)
-const plannerLevelCapDraft = ref(plannerLevelCap.value)
-let applyingPlannerProfile = false
-const plannerDisplay = ref<PlannerDisplay>(initialPreferences.appearance.plannerDisplay)
-const plannerPage = ref(1)
-const plannerMapScope = ref<PlannerMapScope>('selected')
-const plannerMapSortMode = ref<PlannerMapSortMode>('items')
-const plannerMapSortDirection = ref<SortDirection>('desc')
-const plannerQuery = ref('')
-const plannerOwnership = ref<OwnershipFilter>('all')
-const plannerSortMode = ref<PlannerSortMode>('level')
-const plannerSortDirection = ref<SortDirection>('asc')
-const plannerIgnoredRecords = computed<string[]>({
-  get: () => plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)?.ignoredRecords ?? [],
-  set: (records) => {
-    plannerProfiles.value = plannerProfiles.value.map((profile) => profile.id === selectedPlannerProfileId.value
-      ? { ...profile, ignoredRecords: [...records], modifiedAt: new Date().toISOString() }
-      : profile)
-  }
-})
-const plannerFavoriteRecords = ref<string[]>([...initialPreferences.planner.favoriteRecords])
-const plannerShowIgnored = ref(false)
 const oracleControls = ref<StashOracleControls>({
   query: '',
   characterClass: initialPreferences.search.oracleClass,
@@ -383,11 +327,6 @@ const oracleControls = ref<StashOracleControls>({
   direction: 'desc',
   page: 1
 })
-const discoveredCharacters = ref<CharacterSaveProfile[]>([])
-const characterImportLoading = ref(false)
-const characterImportError = ref<string | null>(null)
-const atlasRegionQuery = ref('')
-const selectedAtlasRegion = ref<string | null>(null)
 const transfersSession = createTransfersSession()
 const {
   mode: transferMode,
@@ -514,9 +453,6 @@ let restoringAppHistory = false
 let appHistoryIndex = 0
 let appHistoryMaximum = 0
 const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, searchQueryOptions(searchSchemas.sets)))
-const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
-const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
-
 const categories = collectionCategories
 
 const targetStash = computed(() =>
@@ -956,17 +892,6 @@ const plannerCatalogItems = computed(() => [
   ...(snapshot.value?.items ?? []),
   ...(snapshot.value?.plannerItems ?? [])
 ])
-const selectedPlannerProfile = computed(() =>
-  plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value) ?? null
-)
-const plannerClassOptions = computed(() => createPlannerClassOptions(snapshot.value?.skillClassNames))
-const plannerIgnoredRecordSet = computed(() => new Set(
-  plannerIgnoredRecords.value.map((record) => record.toLocaleLowerCase())
-))
-const plannerFavoriteRecordSet = computed(() => new Set(
-  plannerFavoriteRecords.value.map((record) => record.toLocaleLowerCase())
-))
-
 const archivedRecordSet = computed(() => {
   if (collectionBasis.value === 'archive') {
     return new Set(
@@ -1081,203 +1006,24 @@ const skillNames = computed(() => buildSkillNames(
   snapshot.value?.skillMasteries
 ))
 
-const plannerSkillOptions = computed(() => {
-  const needle = plannerSkillDraft.value.trim().toLocaleLowerCase()
-  return skillNames.value
-    .filter((skill) => !plannerSkills.value.includes(skill))
-    .filter((skill) => !needle || skill.toLocaleLowerCase().includes(needle))
-    .slice(0, 30)
+const plannerSession = createLevelingPlannerSession({
+  initialPreferences,
+  items: () => plannerCatalogItems.value,
+  snapshot: () => snapshot.value,
+  skillNames: () => skillNames.value,
+  archivedRecords: () => archivedRecordSet.value,
+  isArchivedItem,
+  ownershipLabel: plannerOwnershipLabel,
+  itemSearchDocument: itemStructuredSearchDocument,
+  formatPresentationLine,
+  persistPlanner: (patch) => preferenceRepository.update('planner', patch),
+  persistDisplay: (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }),
+  listCharacters: () => window.cairnCodex.listCharacters(),
+  readableError,
+  reportProblem: reportTransferProblem,
+  reportSuccess
 })
-
-const plannerCandidateRows = computed(() => plannerCatalogItems.value
-  .filter((item) => item.levelRequirement >= plannerMinimumLevel.value)
-  .filter((item) => item.levelRequirement <= plannerLevelCap.value)
-  .filter((item) => {
-    const archived = isArchivedItem(item)
-    if (plannerOwnership.value === 'owned') return archived
-    if (plannerOwnership.value === 'missing') return !archived
-    return true
-  })
-  .filter((item) => plannerStructuredQuery.value.matches(plannerSearchDocument(item)))
-  .flatMap((item) => {
-    const matches = plannerSkills.value
-      .map((skill) => skillMatchForItem(item, skill))
-      .filter((match): match is SkillMatch => match !== null)
-    const masteryMatches = masteryMatchesForItem(item, selectedPlannerProfile.value?.masteries ?? [])
-    const petBonuses = (item.presentation?.sections ?? [])
-      .filter((section) => section.kind === 'pet')
-      .flatMap((section) => section.lines)
-      .map(formatPresentationLine)
-    return matches.length > 0 || masteryMatches.length > 0
-      ? [{ item, matches, masteryMatches, petBonuses }]
-      : []
-  })
-  .sort((left, right) => {
-    const direction = plannerSortDirection.value === 'asc' ? 1 : -1
-    const rarityRank: Record<string, number> = { legendary: 5, epic: 4, mi: 3, faction: 2, rare: 1 }
-    let comparison = 0
-    if (plannerSortMode.value === 'name') comparison = left.item.name.localeCompare(right.item.name)
-    else if (plannerSortMode.value === 'rarity') {
-      comparison = (rarityRank[left.item.rarity] ?? 0) - (rarityRank[right.item.rarity] ?? 0)
-    } else comparison = left.item.levelRequirement - right.item.levelRequirement
-    if (comparison === 0) comparison = left.item.name.localeCompare(right.item.name)
-    return comparison * direction
-  }))
-
-const plannerRows = computed(() => plannerCandidateRows.value.filter(({ item }) => {
-  const ignored = plannerIgnoredRecordSet.value.has(plannerRecordKey(item))
-  return plannerShowIgnored.value ? ignored : !ignored
-}))
-
-const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.value.map((row) => {
-  const ownership = plannerOwnershipLabel(row.item)
-  const roll = researchRollFact(row.item)
-  const recipe = recipeStatus(row.item)
-  return {
-    item: row.item,
-    available: researchItemIsAvailable(row.item, archivedRecordSet.value, recipe ? recipe.known === true : row.item.recipeUnlocked === true),
-    itemType: researchItemTypeLabel(row.item),
-    favorite: isPlannerFavorite(row.item),
-    ignored: plannerShowIgnored.value,
-    supports: [
-      ...row.masteryMatches.map((match) => ({
-        label: `All ${researchSkillName(match.mastery)} skills`,
-        text: match.amount > 0 ? `+${match.amount}` : 'Supported',
-        tone: 'accent' as const
-      })),
-      ...row.matches.map((match) => ({
-        label: researchSkillName(match.skill),
-        text: match.amount > 0 ? `+${match.amount}` : 'Modifier',
-        tone: 'accent' as const
-      }))
-    ],
-    modifiers: [
-      ...(row.petBonuses.length ? [{ kind: 'pet' as const, label: 'All pets', text: row.petBonuses.join('; '), tone: 'accent' as const }] : []),
-      ...row.masteryMatches.map((match) => ({ kind: 'rank' as const, label: 'Mastery-wide', text: masteryMatchEffect(match), skill: researchSkillName(match.mastery) })),
-      ...row.matches.flatMap((match) => [
-        ...(match.conversionTarget ? [{ kind: 'conversion' as const, label: 'Converts to', text: match.conversionTarget, tone: 'accent' as const, skill: researchSkillName(match.skill), targetDamageType: match.conversionTarget }] : []),
-        ...(match.conversionDetails ? [{ kind: 'conversion' as const, label: researchSkillName(match.skill), text: match.conversionDetails, skill: researchSkillName(match.skill) }] : []),
-        ...(match.special ? [{ kind: 'special' as const, label: researchSkillName(match.skill), text: match.special, skill: researchSkillName(match.skill) }] : []),
-        ...(!match.conversionDetails && !match.special
-          ? [{ kind: 'rank' as const, label: researchSkillName(match.skill), text: match.amount ? `+${match.amount} ranks` : 'Skill support', skill: researchSkillName(match.skill) }]
-          : []),
-        ...(match.visualTransformation ? [{ kind: 'visual' as const, label: 'Visual', text: match.visualTransformation, tone: 'positive' as const, skill: researchSkillName(match.skill) }] : [])
-      ])
-    ],
-    acquisition: [
-      ...(recipe ? [{
-        label: 'Blueprint',
-        text: recipe.label,
-        tone: recipe.known ? 'positive' as const : recipe.known === false ? 'warning' as const : 'muted' as const
-      }] : []),
-      ...researchAcquisitionFacts(row.item)
-    ],
-    archive: [
-      ...(ownership ? [{ text: ownership, tone: 'positive' as const }] : [{ text: 'Not archived', tone: 'muted' as const }]),
-      ...(roll ? [roll] : [])
-    ]
-  }
-}))
-
-const plannerMiItems = computed(() => {
-  const source = plannerMapScope.value === 'selected'
-    ? plannerRows.value.map((row) => row.item)
-    : (snapshot.value?.items ?? []).filter((item) => item.rarity === 'mi')
-  return source.filter((item, index) =>
-    item.rarity === 'mi' && source.findIndex((candidate) => candidate.record === item.record) === index
-  )
-})
-
-const atlasRegions = computed(() => {
-  const regions = new Map<string, {
-    key: string
-    name: string
-    contentPack: string
-    minimumItemLevel: number
-    location: MapRegionLocation
-    items: CollectionItem[]
-  }>()
-  for (const item of plannerMiItems.value) {
-    for (const location of item.acquisition?.locations ?? []) {
-      const key = `${location.contentPack}:${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
-      const existing = regions.get(key)
-      if (existing) {
-        if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
-        existing.minimumItemLevel = Math.min(existing.minimumItemLevel, item.levelRequirement)
-      } else {
-        regions.set(key, {
-          key,
-          name: location.name,
-          contentPack: location.contentPack,
-          minimumItemLevel: item.levelRequirement,
-          location,
-          items: [item]
-        })
-      }
-    }
-  }
-  return [...regions.values()].sort((left, right) =>
-    contentPackRank(left.contentPack) - contentPackRank(right.contentPack) ||
-    left.minimumItemLevel - right.minimumItemLevel ||
-    left.name.localeCompare(right.name)
-  )
-})
-
-const unlocatedPlannerMiItems = computed(() =>
-  plannerMiItems.value.filter((item) => !(item.acquisition?.locations?.length))
-)
-
-const visibleAtlasRegions = computed(() => {
-  const structuredQuery = atlasStructuredQuery.value
-  const direction = plannerMapSortDirection.value === 'asc' ? 1 : -1
-  return atlasRegions.value
-    .filter((region) => structuredQuery.matches({
-      text: [region.name, region.contentPack, ...region.items.map((item) => item.name), ...region.items.flatMap((item) => item.acquisition?.sources ?? [])].join(' '),
-      fields: {
-        name: region.name,
-        area: [region.name, region.location.routeName ?? ''],
-        item: region.items.map((item) => item.name),
-        monster: region.items.flatMap((item) => item.acquisition?.sources ?? []),
-        source: region.items.flatMap((item) => item.acquisition?.sources ?? []),
-        pack: region.contentPack,
-        level: region.minimumItemLevel
-      }
-    }))
-    .sort((left, right) => {
-      let comparison = 0
-      if (plannerMapSortMode.value === 'name') comparison = left.name.localeCompare(right.name)
-      else if (plannerMapSortMode.value === 'level') comparison = left.minimumItemLevel - right.minimumItemLevel
-      else comparison = left.items.length - right.items.length
-      if (comparison === 0) comparison = left.name.localeCompare(right.name)
-      return comparison * direction
-    })
-})
-
-const atlasMapPins = computed(() => {
-  const regions = visibleAtlasRegions.value.filter((region) =>
-    Boolean(region.location.zoneRecord) &&
-    Number.isFinite(region.location.originX) &&
-    Number.isFinite(region.location.originY)
-  )
-  if (regions.length === 0) return []
-  const xs = regions.map((region) => region.location.originX)
-  const ys = regions.map((region) => region.location.originY)
-  const minimumX = Math.min(...xs)
-  const maximumX = Math.max(...xs)
-  const minimumY = Math.min(...ys)
-  const maximumY = Math.max(...ys)
-  const width = Math.max(1, maximumX - minimumX)
-  const height = Math.max(1, maximumY - minimumY)
-  return regions.map((region) => ({
-    ...region,
-    left: 4 + ((region.location.originX - minimumX) / width) * 92,
-    top: 4 + ((maximumY - region.location.originY) / height) * 92
-  }))
-})
-
-const selectedAtlasItems = computed(() =>
-  atlasRegions.value.find((region) => region.key === selectedAtlasRegion.value)?.items ?? []
-)
+const recipeStatus = plannerSession.recipeStatus
 
 const affixByRecord = computed(() => {
   const byRecord = new Map<string, {
@@ -1352,208 +1098,6 @@ const selectedMiMetricDirection = computed({
   }
 })
 
-function masteryMatchEffect(match: PlannerMasteryMatch): string {
-  return match.amount > 0
-    ? `+${match.amount} rank${match.amount === 1 ? '' : 's'} to every ${match.mastery} skill`
-    : `Supports every ${match.mastery} skill`
-}
-
-function addPlannerSkill(skill = plannerSkillDraft.value): void {
-  const exact = skillNames.value.find(
-    (candidate) => candidate.toLocaleLowerCase() === skill.trim().toLocaleLowerCase()
-  ) ?? plannerSkillOptions.value[0]
-  if (!exact || plannerSkills.value.includes(exact)) return
-  plannerSkills.value = [...plannerSkills.value, exact]
-  plannerSkillDraft.value = ''
-}
-
-function removePlannerSkill(skill: string): void {
-  const profile = selectedPlannerProfile.value
-  if (profile?.source === 'character' && !profile.excludedSkills.includes(skill)) {
-    plannerProfiles.value = plannerProfiles.value.map((candidate) =>
-      candidate.id === profile.id
-        ? { ...candidate, excludedSkills: [...candidate.excludedSkills, skill] }
-        : candidate
-    )
-  }
-  plannerSkills.value = plannerSkills.value.filter((candidate) => candidate !== skill)
-}
-
-function restorePlannerSkill(skill: string): void {
-  const profile = selectedPlannerProfile.value
-  if (!profile || plannerSkills.value.includes(skill)) return
-  plannerProfiles.value = plannerProfiles.value.map((candidate) =>
-    candidate.id === profile.id
-      ? { ...candidate, excludedSkills: candidate.excludedSkills.filter((value) => value !== skill) }
-      : candidate
-  )
-  plannerSkills.value = [...plannerSkills.value, skill]
-}
-
-function selectPlannerProfile(profileId: string): void {
-  const profile = plannerProfiles.value.find((candidate) => candidate.id === profileId)
-  if (!profile) return
-  applyingPlannerProfile = true
-  selectedPlannerProfileId.value = profile.id
-  plannerSkills.value = [...profile.skills]
-  plannerMinimumLevel.value = profile.minimumLevel
-  plannerLevelCap.value = profile.levelCap
-  void nextTick(() => { applyingPlannerProfile = false })
-}
-
-function commitPlannerMinimumLevel(): void {
-  const next = Math.min(plannerLevelCap.value, Math.max(1, Number(plannerMinimumLevelDraft.value) || 1))
-  plannerMinimumLevelDraft.value = next
-  plannerMinimumLevel.value = next
-}
-
-function commitPlannerLevelCap(): void {
-  const next = Math.max(plannerMinimumLevel.value, Math.min(100, Number(plannerLevelCapDraft.value) || 100))
-  plannerLevelCapDraft.value = next
-  plannerLevelCap.value = next
-}
-
-function openPlannerSetup(): void {
-  plannerSetupOpen.value = true
-}
-
-async function loadCharacterProfiles(): Promise<void> {
-  if (characterImportLoading.value) return
-  characterImportLoading.value = true
-  characterImportError.value = null
-  try {
-    discoveredCharacters.value = await window.cairnCodex.listCharacters()
-  } catch (error) {
-    characterImportError.value = readableError(error)
-  } finally {
-    characterImportLoading.value = false
-  }
-}
-
-function importCharacterProfile(character: CharacterSaveProfile, setup?: PlannerSetupSubmission): void {
-  if (character.error) return
-  const existing = plannerProfiles.value.find((profile) =>
-    profile.source === 'character' && profile.characterPath?.toLocaleLowerCase() === character.path.toLocaleLowerCase()
-  )
-  const profile = createCharacterPlannerProfile({
-    character,
-    skillNames: skillNames.value,
-    classOptions: plannerClassOptions.value,
-    ...(existing ? { existing } : {}),
-    ...(setup ? { setup } : {}),
-    id: crypto.randomUUID(),
-    modifiedAt: new Date().toISOString()
-  })
-  plannerProfiles.value = existing
-    ? plannerProfiles.value.map((candidate) => candidate.id === existing.id ? profile : candidate)
-    : [...plannerProfiles.value, profile]
-  selectPlannerProfile(profile.id)
-}
-
-function completePlannerSetup(submission: PlannerSetupSubmission): void {
-  if (submission.source === 'character') {
-    const character = discoveredCharacters.value.find((candidate) => candidate.path === submission.characterPath)
-    if (!character) {
-      characterImportError.value = 'That character save is no longer available. Reopen New plan and refresh the save list.'
-      return
-    }
-    importCharacterProfile(character, submission)
-  } else {
-    const profile = createManualPlannerProfile(submission, crypto.randomUUID(), new Date().toISOString())
-    plannerProfiles.value = [...plannerProfiles.value, profile]
-    selectPlannerProfile(profile.id)
-  }
-  plannerSetupOpen.value = false
-}
-
-async function refreshSelectedCharacterProfile(): Promise<void> {
-  const profile = selectedPlannerProfile.value
-  if (profile?.source !== 'character' || !profile.characterPath) return
-  await loadCharacterProfiles()
-  const character = discoveredCharacters.value.find((candidate) =>
-    candidate.path.localeCompare(profile.characterPath!, undefined, { sensitivity: 'base' }) === 0
-  )
-  if (!character) {
-    reportTransferProblem('The source character save could not be found. The existing plan was not changed.')
-    return
-  }
-  importCharacterProfile(character)
-  reportSuccess(`Refreshed ${profile.name} from its character save.`)
-}
-
-function deletePlannerProfile(): void {
-  if (plannerProfiles.value.length <= 1) return
-  const index = plannerProfiles.value.findIndex((profile) => profile.id === selectedPlannerProfileId.value)
-  plannerProfiles.value = plannerProfiles.value.filter((profile) => profile.id !== selectedPlannerProfileId.value)
-  const fallback = plannerProfiles.value[Math.max(0, index - 1)] ?? plannerProfiles.value[0]
-  if (fallback) selectPlannerProfile(fallback.id)
-}
-
-function plannerRecordKey(item: CollectionItem): string {
-  return researchItemPreferenceKey(item)
-}
-
-function sortPlannerTable(sort: string): void {
-  if (sort !== 'name' && sort !== 'level' && sort !== 'rarity') return
-  const next = nextResearchSort(plannerSortMode.value, plannerSortDirection.value, sort)
-  plannerSortMode.value = next.sort
-  plannerSortDirection.value = next.direction
-}
-
-function recipeStatus(item: CollectionItem): { label: string; known: boolean | null } | null {
-  const crafting = item.acquisition?.crafting
-  if (!crafting) return null
-  const profileMode = selectedPlannerProfile.value?.isHardcore
-  if (profileMode !== undefined) {
-    const known = profileMode ? crafting.knownHardcore : crafting.knownSoftcore
-    return {
-      known,
-      label: known === null
-        ? 'Recipe status unavailable'
-        : `${known ? 'Recipe learned' : 'Recipe not learned'} (${profileMode ? 'HC' : 'SC'})`
-    }
-  }
-  if (crafting.knownSoftcore || crafting.knownHardcore) {
-    const modes = [crafting.knownSoftcore ? 'SC' : '', crafting.knownHardcore ? 'HC' : ''].filter(Boolean).join(' + ')
-    return { known: true, label: `Recipe learned (${modes})` }
-  }
-  const known = crafting.knownSoftcore === false && crafting.knownHardcore === false ? false : null
-  return { known, label: known === false ? 'Recipe not learned' : 'Recipe status unavailable' }
-}
-
-function isPlannerFavorite(item: CollectionItem): boolean {
-  return plannerFavoriteRecordSet.value.has(plannerRecordKey(item))
-}
-
-function togglePlannerFavorite(item: CollectionItem): void {
-  const key = plannerRecordKey(item)
-  plannerFavoriteRecords.value = plannerFavoriteRecordSet.value.has(key)
-    ? plannerFavoriteRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
-    : [...plannerFavoriteRecords.value, key]
-}
-
-function togglePlannerIgnored(item: CollectionItem): void {
-  const key = plannerRecordKey(item)
-  plannerIgnoredRecords.value = plannerIgnoredRecordSet.value.has(key)
-    ? plannerIgnoredRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
-    : [...plannerIgnoredRecords.value, key]
-}
-
-function switchPlannerDisplay(display: PlannerDisplay): void {
-  const focused = document.activeElement instanceof HTMLElement
-    ? document.activeElement.dataset.resultKey
-    : undefined
-  plannerDisplay.value = display
-  if (!focused) return
-  void nextTick(async () => {
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-    const target = [...document.querySelectorAll<HTMLElement>('[data-result-key]')]
-      .find((element) => element.dataset.resultKey === focused)
-    target?.scrollIntoView({ block: 'center' })
-    target?.focus({ preventScroll: true })
-  })
-}
-
 function currentAppRoute(): AppRoute {
   const itemRecord = selectedRecord.value
   switch (activeView.value) {
@@ -1570,14 +1114,7 @@ function currentAppRoute(): AppRoute {
     case 'skills': return { version: 1, workspace: 'skills', itemRecord, controls: {
       ...skillExplorerControls.value
     } }
-    case 'planner': return { version: 1, workspace: 'planner', itemRecord, controls: {
-      profileId: selectedPlannerProfileId.value, skills: [...plannerSkills.value], minimumLevel: plannerMinimumLevel.value,
-      maximumLevel: plannerLevelCap.value, query: plannerQuery.value, ownership: plannerOwnership.value,
-      showIgnored: plannerShowIgnored.value, sort: plannerSortMode.value, direction: plannerSortDirection.value,
-      display: plannerDisplay.value, page: plannerPage.value, atlasQuery: atlasRegionQuery.value,
-      atlasRegion: selectedAtlasRegion.value, mapScope: plannerMapScope.value, mapSort: plannerMapSortMode.value,
-      mapDirection: plannerMapSortDirection.value
-    } }
+    case 'planner': return { version: 1, workspace: 'planner', itemRecord, controls: plannerSession.routeControls.value }
     case 'oracle': return { version: 1, workspace: 'oracle', itemRecord, controls: {
       ...oracleControls.value
     } }
@@ -1648,23 +1185,7 @@ function restoreAppRoute(route: AppRoute, referenceInstanceKey: string | null = 
       skillExplorerControls.value = { ...route.controls }
       break
     case 'planner':
-      applyingPlannerProfile = true
-      if (route.controls.profileId) selectPlannerProfile(route.controls.profileId)
-      if (route.controls.skills.length > 0) plannerSkills.value = [...route.controls.skills]
-      plannerMinimumLevel.value = route.controls.minimumLevel
-      plannerLevelCap.value = Math.max(route.controls.minimumLevel, route.controls.maximumLevel)
-      plannerQuery.value = route.controls.query
-      plannerOwnership.value = route.controls.ownership
-      plannerShowIgnored.value = route.controls.showIgnored
-      plannerSortMode.value = route.controls.sort
-      plannerSortDirection.value = route.controls.direction
-      plannerDisplay.value = route.controls.display
-      plannerPage.value = route.controls.page
-      atlasRegionQuery.value = route.controls.atlasQuery
-      selectedAtlasRegion.value = route.controls.atlasRegion
-      plannerMapScope.value = route.controls.mapScope
-      plannerMapSortMode.value = route.controls.mapSort
-      plannerMapSortDirection.value = route.controls.mapDirection
+      plannerSession.restoreRoute(route.controls)
       break
     case 'oracle':
       oracleControls.value = {
@@ -1706,7 +1227,6 @@ function restoreAppRoute(route: AppRoute, referenceInstanceKey: string | null = 
       scheduleOperationHistoryRefresh()
       scheduleVaultPageRefresh()
     }
-    applyingPlannerProfile = false
     restoringAppHistory = false
   })
 }
@@ -1784,7 +1304,7 @@ watch(
 watch(selectedRecord, () => {
   activeCopyAffixTarget.value = null
 })
-watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId], () => {
+watch([activeView, selectedRecord, transferSection, plannerSession.selectedPlannerProfileId], () => {
   if (!appHistoryReady || restoringAppHistory) return
   appHistoryIndex += 1
   appHistoryMaximum = appHistoryIndex
@@ -1800,9 +1320,7 @@ watch(
     skillExplorerControls,
     oracleControls,
     miWorkshopControls,
-    plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
-    plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
-    plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
+    plannerSession.routeControls,
     supplyControls,
     farmingControls,
     dismantlingControls,
@@ -1815,60 +1333,8 @@ watch(
   },
   { flush: 'post', deep: true }
 )
-watch(plannerMinimumLevel, (level) => {
-  plannerMinimumLevelDraft.value = level
-  if (level > plannerLevelCap.value) plannerLevelCap.value = level
-})
-watch(plannerLevelCap, (level) => {
-  plannerLevelCapDraft.value = level
-  if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
-})
-watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch(navigationCollapsed, (navigationCollapsed) => preferenceRepository.update('appearance', { navigationCollapsed }))
 watch(tooltipBoundaryScroll, (tooltipBoundaryScroll) => preferenceRepository.update('appearance', { tooltipBoundaryScroll }))
-watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
-  if (restoringAppHistory) return
-  plannerPage.value = 1
-})
-watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
-  if (applyingPlannerProfile) return
-  plannerProfiles.value = plannerProfiles.value.map((profile) =>
-    profile.id === selectedPlannerProfileId.value
-      ? {
-          ...profile,
-          skills: [...plannerSkills.value],
-          minimumLevel: plannerMinimumLevel.value,
-          levelCap: plannerLevelCap.value,
-          modifiedAt: new Date().toISOString()
-        }
-      : profile
-  )
-}, { deep: true })
-watch(plannerProfiles, (profiles) => {
-  preferenceRepository.update('planner', {
-    profiles: profiles.map((profile) => ({
-      ...profile,
-      skills: [...profile.skills],
-      excludedSkills: [...profile.excludedSkills]
-    }))
-  })
-}, { deep: true, immediate: true })
-watch(selectedPlannerProfileId, (profileId) => {
-  preferenceRepository.update('planner', { selectedProfileId: profileId })
-})
-watch(plannerFavoriteRecords, (records) => {
-  preferenceRepository.update('planner', { favoriteRecords: [...records] })
-}, { deep: true })
-watch([plannerMapScope, plannerMinimumLevel, plannerLevelCap, plannerSkills], () => {
-  if (restoringAppHistory) return
-  selectedAtlasRegion.value = null
-})
-watch(visibleAtlasRegions, (regions) => {
-  if (restoringAppHistory) return
-  if (!regions.some((region) => region.key === selectedAtlasRegion.value)) {
-    selectedAtlasRegion.value = regions[0]?.key ?? null
-  }
-}, { immediate: true })
 watch(transferMode, () => {
   if (supplyControls.value.mode !== transferMode.value) {
     supplyControls.value = { ...supplyControls.value, mode: transferMode.value }
@@ -2960,13 +2426,7 @@ function openStashOracle(): void {
 }
 
 function sendOracleCandidateToPlanner(candidate: OracleCandidate): void {
-  plannerSkills.value = [...new Set([candidate.skill, ...candidate.relatedSkills])]
-  plannerMinimumLevelDraft.value = Math.min(plannerMinimumLevel.value, oracleControls.value.minimumLevel)
-  plannerLevelCapDraft.value = Math.max(plannerLevelCap.value, oracleControls.value.maximumLevel)
-  plannerMinimumLevel.value = plannerMinimumLevelDraft.value
-  plannerLevelCap.value = plannerLevelCapDraft.value
-  plannerQuery.value = ''
-  plannerOwnership.value = 'all'
+  plannerSession.buildFromOracle(candidate, oracleControls.value.minimumLevel, oracleControls.value.maximumLevel)
   activeView.value = 'planner'
 }
 
@@ -3760,36 +3220,11 @@ function normalizeLoose(value: string): string {
   return value.normalize('NFKD').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
 }
 
-function plannerSearchDocument(item: CollectionItem): SearchDocument {
-  const itemDocument = itemStructuredSearchDocument(item)
-  const sources = item.acquisition?.sources ?? []
-  const areas = (item.acquisition?.locations ?? []).flatMap((location) => [location.name, location.routeName ?? ''])
-  return {
-    text: [itemDocument.text, ...sources, ...areas].join(' '),
-    fields: {
-      name: item.name,
-      type: item.itemClass,
-      slot: item.slot,
-      rarity: item.rarity,
-      skill: itemDocument.fields?.skill,
-      damage: itemDocument.fields?.damage,
-      source: sources,
-      area: areas,
-      level: item.levelRequirement,
-      owned: isArchivedItem(item)
-    }
-  }
-}
-
 function searchErrorMessage(query: CompiledSearchQuery): string | null {
   if (!query.error) return null
   return query.error.fragment
     ? `${query.error.message} Check “${query.error.fragment}”.`
     : query.error.message
-}
-
-function contentPackRank(contentPack: string): number {
-  return ({ base: 0, gdx1: 1, gdx2: 2, gdx3: 3 } as Record<string, number>)[contentPack] ?? 9
 }
 
 function contentPackShortLabel(contentPack: string): string {
@@ -5260,313 +4695,19 @@ function formatRollValue(value: number): string {
         @inspect-skill="inspectOracleSkill"
       />
 
-      <section v-else-if="activeView === 'planner'" class="leveling-planner" aria-label="Character leveling shopping list">
-        <ToolHeader
-          eyebrow="Character shopping list"
-          title="Leveling Planner"
-          description="Pick the skills your character actually uses. CC merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route."
-          tone="blue"
-        >
-          <template #aside>
-            <div class="segmented-control planner-display" aria-label="Planner display">
-              <button type="button" :class="{ active: plannerDisplay === 'table' }" @click="switchPlannerDisplay('table')">Table</button>
-              <button type="button" :class="{ active: plannerDisplay === 'journey' }" @click="switchPlannerDisplay('journey')">Journey</button>
-              <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="switchPlannerDisplay('map')">MI sources</button>
-            </div>
-          </template>
-        </ToolHeader>
-
-        <div class="planner-controls">
-          <div class="planner-profile-control">
-            <label for="planner-profile-select">Active plan</label>
-            <div class="planner-control-row">
-              <select
-                id="planner-profile-select"
-                :value="selectedPlannerProfileId"
-                @change="selectPlannerProfile(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="profile in plannerProfiles" :key="profile.id" :value="profile.id">
-                  {{ profile.name }}{{ profile.className ? ` · ${profile.className}` : '' }}{{ profile.source === 'character' ? ' · character' : '' }}
-                </option>
-              </select>
-              <button type="button" class="planner-new-plan" @click="openPlannerSetup">New plan</button>
-              <button
-                v-if="selectedPlannerProfile?.source === 'character'"
-                type="button"
-                :disabled="characterImportLoading"
-                @click="refreshSelectedCharacterProfile"
-              >{{ characterImportLoading ? 'Refreshing…' : 'Refresh save' }}</button>
-              <button type="button" :disabled="plannerProfiles.length <= 1" title="Delete this plan" @click="deletePlannerProfile">Delete</button>
-            </div>
-            <small>
-              {{ selectedPlannerProfile?.className || 'Class not set' }}
-              <template v-if="selectedPlannerProfile?.masteries?.length"> · {{ selectedPlannerProfile.masteries.join(' + ') }}</template>
-            </small>
-          </div>
-          <div class="planner-skill-control">
-            <label for="planner-skill-input">Add a skill</label>
-            <span>
-              <input
-                id="planner-skill-input"
-                v-model="plannerSkillDraft"
-                type="search"
-                list="planner-skill-options"
-                autocomplete="off"
-                placeholder="Type a skill name…"
-                @keydown.enter.prevent="addPlannerSkill()"
-              />
-              <datalist id="planner-skill-options">
-                <option v-for="skill in plannerSkillOptions" :key="skill" :value="skill" />
-              </datalist>
-              <button type="button" :disabled="plannerSkillOptions.length === 0" @click="addPlannerSkill()">Add</button>
-            </span>
-          </div>
-          <div class="planner-level-range" aria-label="Item level range">
-            <label class="planner-level-control">
-              <span>Minimum item level</span>
-              <input v-model.number="plannerMinimumLevelDraft" type="number" min="1" :max="plannerLevelCapDraft" @change="commitPlannerMinimumLevel" @keydown.enter.prevent="commitPlannerMinimumLevel" />
-            </label>
-            <label class="planner-level-control">
-              <span>Level cap</span>
-              <input v-model.number="plannerLevelCapDraft" type="number" :min="plannerMinimumLevelDraft" max="100" @change="commitPlannerLevelCap" @keydown.enter.prevent="commitPlannerLevelCap" />
-            </label>
-          </div>
-          <div class="planner-skill-chips" aria-label="Selected skills">
-            <button
-              v-for="skill in plannerSkills"
-              :key="skill"
-              type="button"
-              :aria-label="`Remove ${skill}`"
-              @click="removePlannerSkill(skill)"
-            >
-              {{ skill }} <span>×</span>
-            </button>
-            <small v-if="plannerSkills.length === 0">Add two or three build-defining skills to begin.</small>
-          </div>
-          <div v-if="selectedPlannerProfile?.excludedSkills.length" class="planner-excluded-skills">
-            <small>Ignored character skills</small>
-            <button v-for="skill in selectedPlannerProfile.excludedSkills" :key="skill" type="button" @click="restorePlannerSkill(skill)">
-              + {{ skill }}
-            </button>
-          </div>
-        </div>
-
-        <PlannerSetupDialog
-          v-if="plannerSetupOpen"
-          :profiles="plannerProfiles"
-          :characters="discoveredCharacters"
-          :characters-loading="characterImportLoading"
-          :characters-error="characterImportError"
-          :class-options="plannerClassOptions"
-          :skill-names="skillNames"
-          :skill-masteries="snapshot?.skillMasteries"
-          @cancel="plannerSetupOpen = false"
-          @request-characters="loadCharacterProfiles"
-          @submit="completePlannerSetup"
-        />
-        <template v-if="plannerDisplay !== 'map'">
-          <ExplorerToolbar
-            v-model="plannerQuery"
-            v-bind="searchGuidance.planner"
-            class="planner-explorer-toolbar"
-            search-label="Search shopping list"
-            placeholder="Item, monster, area… (try zarias)"
-            :result-count="plannerRows.length"
-            result-label="relevant item tiers"
-            :search-error="searchErrorMessage(plannerStructuredQuery)"
-          >
-            <template #filters>
-              <label>
-                <span>Archive status</span>
-                <select v-model="plannerOwnership" autocomplete="off">
-                  <option value="all">All items</option>
-                  <option value="owned">In Archive</option>
-                  <option value="missing">Not archived</option>
-                </select>
-              </label>
-              <label>
-                <span>List</span>
-                <select v-model="plannerShowIgnored" autocomplete="off">
-                  <option :value="false">Shopping list</option>
-                  <option :value="true">Ignored bases ({{ plannerIgnoredRecords.length }})</option>
-                </select>
-              </label>
-            </template>
-            <template #sort>
-              <label>
-                <span>Sort by</span>
-                <select v-model="plannerSortMode" autocomplete="off">
-                  <option value="level">Required level</option>
-                  <option value="name">Item name</option>
-                  <option value="rarity">Rarity</option>
-                </select>
-              </label>
-              <label>
-                <span>Order</span>
-                <select v-model="plannerSortDirection" autocomplete="off">
-                  <option value="asc">Lowest first</option>
-                  <option value="desc">Highest first</option>
-                </select>
-              </label>
-            </template>
-          </ExplorerToolbar>
-          <div class="planner-summary">
-            <span><strong>{{ plannerRows.length }}</strong> relevant item tiers</span>
-            <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'mi').length }}</strong> MIs</span>
-            <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
-            <span><strong>{{ plannerRows.filter((row) => row.item.acquisition?.crafting).length }}</strong> craftable</span>
-          </div>
-          <ResearchItemTable
-            v-if="plannerDisplay === 'table'"
-            v-model:page="plannerPage"
-            :rows="plannerResearchRows"
-            :icon-url-for-item="itemIconUrl"
-            :sort="plannerSortMode"
-            :direction="plannerSortDirection"
-            :sort-columns="{ item: 'name', level: 'level' }"
-            :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
-            :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select a mastery or skill, widen the item level range, or restore an ignored base.'"
-            label="Leveling Planner item results"
-            pagination="continuous"
-            actions
-            :ignored-view="plannerShowIgnored"
-            @sort="sortPlannerTable"
-            @activate="openItem"
-            @queue-tooltip="queueTooltip"
-            @show-tooltip="showTooltip"
-            @move-tooltip="moveTooltip"
-            @scroll-tooltip="scrollTooltip"
-            @hide-tooltip="scheduleTooltipHide"
-            @favorite="togglePlannerFavorite"
-            @ignore="togglePlannerIgnored"
-          />
-          <PlannerJourney
-            v-else
-            v-model:page="plannerPage"
-            :rows="plannerResearchRows"
-            :icon-url-for-item="itemIconUrl"
-            :ignored-view="plannerShowIgnored"
-            @activate="openItem"
-            @queue-tooltip="queueTooltip"
-            @show-tooltip="showTooltip"
-            @move-tooltip="moveTooltip"
-            @scroll-tooltip="scrollTooltip"
-            @hide-tooltip="scheduleTooltipHide"
-            @favorite="togglePlannerFavorite"
-            @ignore="togglePlannerIgnored"
-          />
-        </template>
-
-        <template v-else>
-          <ExplorerToolbar
-            v-model="atlasRegionQuery"
-            v-bind="searchGuidance.atlas"
-            class="planner-map-explorer-toolbar"
-            search-label="Search MI sources"
-            placeholder="Area, MI, monster…"
-            :result-count="visibleAtlasRegions.length"
-            result-label="source areas"
-            :search-error="searchErrorMessage(atlasStructuredQuery)"
-          >
-            <template #filters>
-              <label>
-                <span>Catalog scope</span>
-                <select v-model="plannerMapScope" autocomplete="off">
-                  <option value="selected">Selected build</option>
-                  <option value="all">All MI tiers</option>
-                </select>
-              </label>
-            </template>
-            <template #sort>
-              <label>
-                <span>Sort by</span>
-                <select v-model="plannerMapSortMode" autocomplete="off">
-                  <option value="items">Matching MI tiers</option>
-                  <option value="level">Earliest item level</option>
-                  <option value="name">Area name</option>
-                </select>
-              </label>
-              <label>
-                <span>Order</span>
-                <select v-model="plannerMapSortDirection" autocomplete="off">
-                  <option value="desc">Highest first</option>
-                  <option value="asc">Lowest first</option>
-                </select>
-              </label>
-            </template>
-          </ExplorerToolbar>
-          <p class="explorer-context-note">{{ plannerMiItems.length }} MI tiers indexed<span v-if="unlocatedPlannerMiItems.length"> · {{ unlocatedPlannerMiItems.length }} unlocated</span></p>
-          <section class="planner-world-map" aria-label="Cairn item source map">
-            <header>
-              <span><strong>Campaign source map</strong><small>Positions come directly from Grim Dawn's world-region coordinates.</small></span>
-              <span class="planner-map-legend">
-                <i class="base" />GD <i class="gdx1" />AoM <i class="gdx2" />FG <i class="gdx3" />FoA
-              </span>
-            </header>
-            <div v-if="atlasMapPins.length" class="planner-map-canvas">
-              <button
-                v-for="pin in atlasMapPins"
-                :key="pin.key"
-                type="button"
-                class="planner-map-pin"
-                :class="[pin.contentPack, { active: selectedAtlasRegion === pin.key }]"
-                :style="{ left: `${pin.left}%`, top: `${pin.top}%` }"
-                :aria-label="`${pin.name}, ${pin.items.length} matching item tiers`"
-                :title="`${pin.name} (${contentPackShortLabel(pin.contentPack)}) · ${pin.items.length} tiers`"
-                @click="selectedAtlasRegion = pin.key"
-              >
-                <b>{{ pin.items.length }}</b>
-                <span>{{ pin.name }}</span>
-              </button>
-            </div>
-            <p v-else class="skill-empty">No campaign coordinates are available for the current filter.</p>
-          </section>
-          <div class="mi-source-layout">
-            <aside class="mi-atlas-regions">
-              <button
-                v-for="region in visibleAtlasRegions"
-                :key="region.key"
-                type="button"
-                :data-region-key="region.key"
-                :class="{ active: selectedAtlasRegion === region.key }"
-                @click="selectedAtlasRegion = region.key"
-              >
-                <span>
-                  <strong>{{ region.name }} ({{ contentPackShortLabel(region.contentPack) }})</strong>
-                  <small>{{ [...new Set(region.items.flatMap((item) => item.acquisition?.sources ?? []))].slice(0, 2).join(' · ') }}</small>
-                </span>
-                <b>{{ region.items.length }} tiers · earliest item Lv{{ region.minimumItemLevel }}</b>
-              </button>
-            </aside>
-            <section class="mi-source-detail">
-              <header v-if="selectedAtlasRegion">
-                <p class="section-label">Area drops</p>
-                <h3>{{ atlasRegions.find((region) => region.key === selectedAtlasRegion)?.name }} ({{ contentPackShortLabel(atlasRegions.find((region) => region.key === selectedAtlasRegion)?.contentPack ?? '') }})</h3>
-                <p>Item tiers whose indexed monster source can appear in this area.</p>
-              </header>
-              <div v-if="selectedAtlasItems.length" class="atlas-item-list">
-                <button
-                  v-for="item in selectedAtlasItems"
-                  :key="item.record"
-                  type="button"
-                  @mouseenter="queueTooltip(item, $event)"
-                  @mousemove="moveTooltip"
-                  @mouseleave="scheduleTooltipHide"
-                  @click="openItem(item)"
-                >
-                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" @error="handleItemIconError(item)" />
-                  <span>
-                    <strong>{{ item.name }}</strong>
-                    <small>Lv{{ item.levelRequirement }} · {{ researchItemTypeLabel(item) }}</small>
-                    <small>{{ item.acquisition?.sources[0] }}</small>
-                  </span>
-                </button>
-              </div>
-              <p v-else class="skill-empty">No indexed MIs match this area filter.</p>
-            </section>
-          </div>
-        </template>
-      </section>
+      <LevelingPlannerWorkspace
+        v-else-if="activeView === 'planner'"
+        :session="plannerSession"
+        :icon-url-for-item="itemIconUrl"
+        :content-pack-label="contentPackShortLabel"
+        @queue-tooltip="queueTooltip"
+        @show-tooltip="showTooltip"
+        @move-tooltip="moveTooltip"
+        @scroll-tooltip="scrollTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+        @icon-error="handleItemIconError"
+      />
 
       <MiWorkshopWorkspace
         v-else-if="activeView === 'mi-workshop'"

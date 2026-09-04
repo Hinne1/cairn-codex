@@ -18,7 +18,7 @@ const allowedLoreLines = new Set([
   "src/main/index.ts::slot: 'medal', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',",
   "src/main/index.ts::awakeningSourceName: 'Cairn Mark', setPresentation",
   "src/renderer/src/App.vue::<h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>",
-  'src/renderer/src/App.vue::<section class="planner-world-map" aria-label="Cairn item source map">'
+  'src/renderer/src/workspaces/LevelingPlannerWorkspace.vue::<section class="planner-world-map" aria-label="Cairn item source map">'
 ])
 
 const allowedProductNameLines = new Set([

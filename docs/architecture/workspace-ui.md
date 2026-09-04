@@ -226,6 +226,18 @@ same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
 
+Leveling Planner owns its controls, setup dialog, Table/Journey/MI Sources markup, and view-switch
+focus restoration in `LevelingPlannerWorkspace.vue`. Its shell-lifetime `leveling-planner.ts`
+session owns profiles, level drafts, skills, scoped exclusions, favorites, character discovery,
+map selection, route restoration, and preference writes through typed injected adapters. Keeping
+the session alive across workspace unmounts preserves drafts and in-flight discovery. `App.vue`
+only supplies shared catalog/search/ownership services, navigation, notifications, and global
+tooltip/drawer adapters; it does not manipulate individual Planner controls. The session exposes
+one typed route snapshot and one restoration method, suppressing profile writes and page/area
+reset watchers during restoration. `planner-results.ts` owns pure item matching, sorting,
+exclusion filtering, and projection into the shared research rows. Regression tests exercise the
+production session with Vue reactivity and the real preference repository, plus a 20k item model.
+
 Leveling Planner projects skill ranks, mastery-wide bonuses, conversions, special and visual
 modifiers, blueprint/faction/drop acquisition, archive availability, and roll context into the
 same row contract. Table is the default comparison view. Journey reuses those rows as a bounded,

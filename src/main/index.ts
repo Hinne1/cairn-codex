@@ -6258,7 +6258,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               if (!(list instanceof HTMLButtonElement) || !(grid instanceof HTMLButtonElement)) {
                 throw new Error('Planner scrolling verification could not find Table and Journey views.')
               }
-              if (!list.classList.contains('active')) list.click()
+              if (list.getAttribute('aria-pressed') !== 'true') list.click()
               await frames()
               let surface = document.querySelector('.research-item-table')
               if (!(surface instanceof HTMLElement)) throw new Error('Planner table surface was not rendered.')
@@ -6373,7 +6373,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const gridFocusRect = gridFocus instanceof HTMLElement ? gridFocus.getBoundingClientRect() : null
               if (
                 gridCards !== listCount ||
-                !grid.classList.contains('active') ||
+                grid.getAttribute('aria-pressed') !== 'true' ||
                 !(gridFocus instanceof HTMLElement) ||
                 gridFocus.dataset.resultKey !== focusedKey ||
                 !gridFocusRect ||
@@ -6381,7 +6381,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
                 gridFocusRect.top >= innerHeight + viewportTolerance
               ) {
                 throw new Error('Planner Journey view did not preserve the focused visible result and continuous window: ' + JSON.stringify({
-                  gridCards, listCount, active: grid.classList.contains('active'), focusedKey,
+                  gridCards, listCount, active: grid.getAttribute('aria-pressed') === 'true', focusedKey,
                   gridFocusKey: gridFocus instanceof HTMLElement ? gridFocus.dataset.resultKey : null,
                   top: gridFocusRect?.top, bottom: gridFocusRect?.bottom, unobscuredTop: unobscuredTop(), innerHeight
                 }))
@@ -6393,7 +6393,7 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const restoredFocusRect = restoredFocus instanceof HTMLElement ? restoredFocus.getBoundingClientRect() : null
               if (
                 !(restoredSurface instanceof HTMLElement) ||
-                !list.classList.contains('active') ||
+                list.getAttribute('aria-pressed') !== 'true' ||
                 !(restoredFocus instanceof HTMLElement) ||
                 restoredFocus.dataset.resultKey !== focusedKey ||
                 !restoredFocusRect ||

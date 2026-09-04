@@ -30,6 +30,38 @@ npm.cmd ci
 npm.cmd run verify
 ```
 
+### Dependency audit
+
+CI installs npm **11.17.0** independently of the npm bundled with Node 22. This pinned
+version uses the supported bulk-advisory endpoint without falling back to the retired
+quick-audit endpoint. Installations use `npm ci --no-audit` only to avoid an implicit,
+duplicate audit; the separate `npm run audit:dependencies` step remains mandatory.
+The lockfile is still validated by `npm ci`, not regenerated to conceal endpoint errors.
+The audit explicitly disables offline mode, overriding environment and `.npmrc` settings
+that would otherwise let npm report zero findings without contacting the registry.
+
+The audit includes development, optional, and peer dependencies. The wrapper returns 1
+for high/critical findings and 2 for unavailable/invalid reports, which **are not a clean
+security verdict**. The outer npm/CI launcher may normalize failure to exit 1; use the
+explicit `DEPENDENCY AUDIT FAILED` versus `DEPENDENCY AUDIT UNAVAILABLE` log messages
+to distinguish these outcomes.
+Each attempt has a 210-second process deadline and a 180-second fetch timeout, with one
+bounded retry only for unavailable results. CI also caps the step at eight minutes.
+This allows the approximately 175-second successful audit observed on a clean Windows
+runner without inheriting npm's default retry delays.
+No vulnerability finding is retried away or marked successful. Report-validation and
+timeout/error contracts run in `test:dependency-audit` and the full verification suite.
+
+For local auditing without changing your system npm:
+
+```powershell
+npm.cmd exec --yes --package=npm@11.17.0 -- npm run audit:dependencies
+```
+
+See the [npm audit documentation](https://docs.npmjs.com/cli/audit/) for the advisory
+protocol. A healthy registry and a successful clean-runner audit remain required evidence;
+passing the offline wrapper tests alone does not establish dependency security.
+
 For installed-game integration checks:
 
 ```powershell

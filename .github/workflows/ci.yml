@@ -10,7 +10,7 @@ permissions:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,6 +20,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - run: npm ci
-      - run: npm audit --audit-level=high
+      - name: Install pinned bulk-only audit CLI
+        timeout-minutes: 3
+        run: npm install --global npm@11.17.0 --ignore-scripts --no-audit --fetch-retries=1 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=3000 --fetch-timeout=15000
+      - name: Install locked dependencies
+        timeout-minutes: 5
+        run: npm ci --no-audit --fetch-retries=1 --fetch-timeout=15000
+      - run: npm run test:dependency-audit
+      - name: Audit dependencies (high and critical gate)
+        timeout-minutes: 8
+        run: npm run audit:dependencies
       - run: npm run verify

@@ -7351,10 +7351,12 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               }
               if (!(resultCounter instanceof HTMLElement)) throw new Error('Skill Explorer result count was unavailable.')
               const resultCounterStyle = getComputedStyle(resultCounter)
-              if (window.innerWidth > 1180
-                ? resultCounterStyle.borderLeftStyle === 'none' || resultCounterStyle.textAlign === 'right'
-                : resultCounterStyle.flexDirection !== 'row' || resultCounterStyle.borderTopStyle === 'none') {
-                throw new Error('Skill Explorer result count did not use the balanced wide/compact treatment.')
+              const resultBar = resultCounter.closest('.explorer-toolbar-results')
+              if (!(resultBar instanceof HTMLElement) ||
+                  resultCounterStyle.flexDirection !== 'row' || resultCounterStyle.borderLeftStyle !== 'none' ||
+                  resultCounterStyle.textAlign === 'right' || getComputedStyle(resultBar).borderTopStyle === 'none' ||
+                  resultCounter.getAttribute('aria-live') !== 'polite') {
+                throw new Error('Skill Explorer result count did not use the shared research results row.')
               }
               const first = rows()[0]
               const second = rows()[1]

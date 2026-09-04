@@ -1,5 +1,6 @@
 import type { OperationHistoryOutcome } from '@shared/contracts'
 import type { OracleReadiness, OracleStyle } from './stash-oracle'
+import { glossaryEntry } from './workspaces/glossary.ts'
 
 export const APP_ROUTE_VERSION = 1 as const
 export const APP_ROUTE_HASH_KEY = 'cc-route'
@@ -17,6 +18,7 @@ export type ActiveView =
   | 'dismantling'
   | 'vault'
   | 'settings'
+  | 'glossary'
 
 export type OwnershipFilter = 'all' | 'owned' | 'missing'
 export type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'double-rare' | 'rare' | 'recipe'
@@ -162,6 +164,7 @@ export type AppRoute =
       quarantinePage: number
     }>
   | RouteBase<'settings', Record<string, never>>
+  | RouteBase<'glossary', { entry: string }>
 
 export interface AppHistoryEntry {
   cairnCodex: true
@@ -176,7 +179,7 @@ type UnknownRecord = Record<string, unknown>
 
 const activeViews: readonly ActiveView[] = [
   'collection', 'sets', 'materials', 'skills', 'planner', 'oracle', 'mi-workshop',
-  'supplies', 'farming', 'dismantling', 'vault', 'settings'
+  'supplies', 'farming', 'dismantling', 'vault', 'settings', 'glossary'
 ]
 const ownershipFilters: readonly OwnershipFilter[] = ['all', 'owned', 'missing']
 const rarityFilters: readonly RarityFilter[] = ['all', 'epic', 'legendary', 'mi', 'double-rare', 'rare', 'recipe']
@@ -345,6 +348,7 @@ export function parseAppRoute(value: unknown): AppRoute | null {
       quarantinePage: integerValue(controls.quarantinePage, 1, 1, 100_000)
     } }
     case 'settings': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {} }
+    case 'glossary': return { version: APP_ROUTE_VERSION, workspace, itemRecord: null, controls: { entry: glossaryEntry(controls.entry).id } }
   }
 }
 

@@ -33,6 +33,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'open-roll-help': []
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement, copy: ObservedStashItem]
   'show-tooltip': [item: CollectionItem, element: HTMLElement, copy: ObservedStashItem]
   'move-tooltip': [event: MouseEvent]
@@ -111,6 +112,7 @@ defineExpose({ syncNativeControls })
       tone="green"
     >
       <template #aside>
+        <button type="button" class="roll-help-link" @click="emit('open-roll-help')">Roll ratings → Glossary</button>
         <label class="reserve-toggle">
           <input v-model="showReserves" type="checkbox" />
           Show archived copies

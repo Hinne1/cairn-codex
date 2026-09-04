@@ -19,6 +19,7 @@ const emit = defineEmits<{
   home: []
   transfers: []
   settings: []
+  glossary: []
   customize: []
   toggle: []
 }>()
@@ -145,6 +146,21 @@ onBeforeUnmount(() => {
     </nav>
 
     <div class="workspace-sidebar-actions">
+      <button
+        type="button"
+        class="workspace-nav-item"
+        data-destination-id="glossary"
+        :aria-current="activeId === 'glossary' ? 'page' : undefined"
+        aria-label="Glossary"
+        @mouseenter="showTooltip($event, 'Glossary', 'hover')"
+        @mouseleave="hideTooltip($event, 'hover')"
+        @focusin="showTooltip($event, 'Glossary', 'focus')"
+        @blur="hideTooltip($event, 'focus')"
+        @click="emit('glossary')"
+      >
+        <span class="workspace-nav-icon" aria-hidden="true"><WorkspaceNavIcon name="glossary" /></span>
+        <span class="workspace-nav-label">Glossary</span>
+      </button>
       <button
         type="button"
         class="workspace-nav-item"

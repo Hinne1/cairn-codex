@@ -1,68 +1,121 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { classifyAudit, runAudit, AUDIT_NPM_VERSION, AUDIT_TIMEOUT_MS } from './audit-dependencies.mjs'
+import { auditLock, lockedPackages, requestJson, runAudit } from './audit-dependencies.mjs'
 
-function report(severity = null) {
-  const counts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: severity ? 1 : 0 }
-  if (severity) counts[severity] = 1
-  return { auditReportVersion: 2, metadata: { vulnerabilities: counts }, vulnerabilities: severity ? { fixture: { severity } } : {} }
+const entry = (version = '1.2.5', extra = {}) => ({ version, resolved: 'https://registry.npmjs.org/minimist/-/minimist.tgz', ...extra })
+const lock = (packages = { 'node_modules/minimist': entry() }) => ({ lockfileVersion: 3, packages: { '': { name: 'test-root' }, ...packages } })
+const response = data => new Response(JSON.stringify(data), { headers: { 'content-type': 'application/json' } })
+const advisory = (severity = 'CRITICAL', extra = {}) => ({ id: 'GHSA-test', affected: [{ package: { name: 'minimist', ecosystem: 'npm' } }], database_specific: { severity }, ...extra })
+const quiet = () => {}
+const mock = (severity = null, extra = {}) => async (url, options) => {
+  assert.ok(url.startsWith('https://api.osv.dev/v1/'))
+  assert.equal(options.redirect, 'error')
+  assert.ok(options.signal instanceof AbortSignal)
+  return response(url.endsWith('querybatch')
+    ? { results: JSON.parse(options.body).queries.map(() => severity ? { vulns: [{ id: 'GHSA-test' }] } : {}) }
+    : advisory(severity, extra))
 }
-const result = (body = report(), status = 0) => ({ status, stdout: JSON.stringify(body), stderr: '' })
-assert.equal(classifyAudit(result()).kind, 'passed')
-assert.equal(classifyAudit(result(report('moderate'))).kind, 'passed')
-for (const severity of ['high', 'critical']) {
-  for (const status of [0, 1]) assert.equal(classifyAudit(result(report(severity), status)).kind, 'vulnerable')
+
+const inventory = lockedPackages(lock({
+  'node_modules/minimist': entry(),
+  'node_modules/dev/node_modules/minimist': entry(),
+  'node_modules/@scope/optional': entry('2.0.0', { optional: true, os: ['darwin'] }),
+  'node_modules/peer': entry('3.0.0', { peer: true }),
+  'node_modules/alias': entry('4.0.0', { name: '@real/name', dev: true })
+}))
+assert.deepEqual(inventory.map(p => p.package.name), ['minimist', '@scope/optional', 'peer', '@real/name'])
+assert.equal(lockedPackages({ ...lock(), lockfileVersion: 2 }).length, 1)
+for (const bad of [null, {}, lock({}), { ...lock(), lockfileVersion: 1 }, lock({ 'workspace/pkg': entry() }),
+  lock({ 'node_modules/a': entry('1.0.0', { link: true }) }), lock({ 'node_modules/a': entry('latest') }),
+  lock({ 'node_modules/a': entry('1.0.0', { resolved: 'git+https://example.org/a' }) }),
+  lock({ 'node_modules/a': entry('1.0.0', { resolved: 'https://registry.npmjs.org.evil/a' }) })
+]) assert.throws(() => lockedPackages(bad))
+
+for (const [severity, expected] of [[null, 0], ['LOW', 0], ['MODERATE', 0], ['HIGH', 1], ['CRITICAL', 1], ['UNKNOWN', 2]]) {
+  assert.equal(await runAudit(lock(), { fetchImpl: mock(severity), emit: quiet }), expected)
 }
-for (const bad of [
-  { status: 1, stdout: 'service unavailable' },
-  result({ error: { code: 'E503' } }, 1), result({}), result(null), result([]),
-  result(report(), 1), { ...result(), signal: 'SIGTERM' }, { ...result(), error: new Error('timeout') },
-  result({ ...report(), vulnerabilities: { omitted: { severity: 'high' } } }),
-  result({ ...report('high'), vulnerabilities: { fixture: { severity: 'low' } } }),
-  result({ ...report(), metadata: { vulnerabilities: { ...report().metadata.vulnerabilities, high: -1 } } })
-]) assert.equal(classifyAudit(bad).kind, 'unavailable')
+assert.equal(await runAudit(lock(), { fetchImpl: mock('HIGH', { withdrawn: '2026-01-01T00:00:00Z' }), emit: quiet }), 0)
+for (const extra of [{ id: 'wrong-id' }, { affected: [] }, { withdrawn: null }, { database_specific: {} }]) {
+  assert.equal(await runAudit(lock(), { fetchImpl: mock('HIGH', extra), emit: quiet }), 2)
+}
+
+// Missing/malformed batch data must never be accepted as zero findings.
+for (const data of [{}, { results: [] }, { results: [null] }, { results: [{ error: 'unavailable' }] },
+  { results: [{ vulns: null }] }, { results: [{ vulns: [{}] }] }, { results: [{ next_page_token: 1 }] }
+]) assert.equal(await runAudit(lock(), { fetchImpl: async () => response(data), emit: quiet }), 2)
 
 let calls = 0
-const messages = []
-let auditArgs
-const run = (command, args, options) => {
-  auditArgs = args
-  calls++
-  assert.equal(command, process.execPath)
-  assert.ok(args.includes('--audit-level=high'))
-  assert.ok(args.includes('--offline=false'))
-  for (const type of ['dev', 'optional', 'peer']) assert.ok(args.includes(`--include=${type}`))
-  assert.ok(args.includes('--fetch-retries=0'))
-  assert.ok(args.includes('--fetch-timeout=180000'))
-  assert.equal(options.timeout, AUDIT_TIMEOUT_MS)
-  assert.equal(options.windowsHide, true)
-  return calls === 1 ? result({ error: 'registry unavailable' }, 1) : result()
-}
-assert.equal(runAudit('npm-cli.js', { run, emit: message => messages.push(message) }), 0)
+await requestJson('querybatch', {}, { fetchImpl: async () => ++calls === 1 ? new Response('unavailable', { status: 503 }) : response({ results: [] }) })
 assert.equal(calls, 2)
-assert.match(messages[0], /UNAVAILABLE.*No clean security verdict/)
-// Exercise real npm configuration precedence, not just a fabricated audit report.
-// This reads configuration only: no registry request or package/profile mutation.
-assert.ok(process.env.npm_execpath, 'Run this regression through npm run test:dependency-audit')
-const config = spawnSync(process.execPath, [process.env.npm_execpath, 'config', 'get', 'offline', ...auditArgs.slice(2)], {
-  encoding: 'utf8', timeout: AUDIT_TIMEOUT_MS, windowsHide: true,
-  env: { ...process.env, npm_config_offline: 'true', npm_config_logs_max: '0' }
-})
-assert.ifError(config.error)
-assert.equal(config.status, 0, config.stderr)
-assert.equal(config.stdout.trim(), 'false', 'Audit CLI arguments must override inherited npm offline mode')
+for (const failing of [() => new Response('unavailable', { status: 503 }), () => new Response('not JSON'),
+  () => response(null), () => { throw new Error('network timeout') }, () => new Response('x'.repeat(4 * 1024 * 1024 + 1))]) {
+  calls = 0
+  await assert.rejects(requestJson('querybatch', {}, { fetchImpl: async () => { calls++; return failing() } }))
+  assert.equal(calls, 2, 'At most one request retry')
+}
+const controller = new AbortController()
+controller.abort(new Error('whole audit deadline'))
 calls = 0
-assert.equal(runAudit('npm-cli.js', { run: () => { calls++; return result(report('critical'), 1) }, emit: () => {} }), 1)
-assert.equal(calls, 1, 'vulnerability findings must not be retried away')
+assert.equal(await runAudit(lock(), { signal: controller.signal, fetchImpl: async () => { calls++; return response({}) }, emit: quiet }), 2)
+assert.equal(calls, 0, 'Expired audit must not start more requests')
+const duringRequest = new AbortController()
 calls = 0
-assert.equal(runAudit('npm-cli.js', { run: () => { calls++; return { error: new Error('timeout') } }, emit: () => {} }), 2)
-assert.equal(calls, 2, 'unavailable audit must stop after a bounded retry')
+assert.equal(await runAudit(lock(), { signal: duringRequest.signal, emit: quiet, fetchImpl: async (_, options) => {
+  calls++
+  duringRequest.abort(new Error('deadline during request'))
+  options.signal.throwIfAborted()
+} }), 2)
+assert.equal(calls, 1, 'Whole-audit timeout must stop retries')
 
+// Follow only paginated queries; keep each response attached to its own package.
+calls = 0
+const paged = await auditLock(lock({ 'node_modules/minimist': entry(), 'node_modules/clean': entry() }), {
+  fetchImpl: async (url, options) => {
+    calls++
+    if (calls === 1) return response({ results: [{ vulns: [{ id: 'GHSA-test' }], next_page_token: 'page2' }, {}] })
+    if (calls === 2) {
+      const queries = JSON.parse(options.body).queries
+      assert.equal(queries.length, 1)
+      assert.equal(queries[0].package.name, 'minimist')
+      assert.equal(queries[0].page_token, 'page2')
+      return response({ results: [{ vulns: [{ id: 'GHSA-test' }] }] })
+    }
+    return response(advisory())
+  }
+})
+assert.equal(calls, 3)
+assert.equal(paged.findings.length, 1)
+assert.equal(await runAudit(lock(), { fetchImpl: async () => response({ results: [{ next_page_token: 'cycle' }] }), emit: quiet }), 2)
+let page = 0
+assert.equal(await runAudit(lock(), { fetchImpl: async () => response({ results: [{ next_page_token: String(++page) }] }), emit: quiet }), 2)
+assert.equal(page, 20)
+let batchSizes = []
+const large = lock(Object.fromEntries(Array.from({ length: 205 }, (_, i) => [`node_modules/pkg-${i}`, entry()])))
+assert.equal(await runAudit(large, { emit: quiet, fetchImpl: async (_, options) => {
+  const size = JSON.parse(options.body).queries.length
+  batchSizes.push(size)
+  return response({ results: Array.from({ length: size }, () => ({})) })
+} }), 0)
+assert.deepEqual(batchSizes, [100, 100, 5])
+
+// npm settings cannot disable a direct OSV request or filter its lock inventory.
+const previous = process.env.npm_config_offline
+try {
+  process.env.npm_config_offline = 'true'
+  assert.equal(await runAudit(lock(), { fetchImpl: mock('HIGH'), emit: quiet }), 1)
+} finally {
+  if (previous === undefined) delete process.env.npm_config_offline
+  else process.env.npm_config_offline = previous
+}
 const workflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
-assert.ok(workflow.includes(`npm@${AUDIT_NPM_VERSION}`))
 assert.match(workflow, /npm ci --no-audit/)
-assert.match(workflow, /npm run audit:dependencies/)
-assert.doesNotMatch(workflow, /continue-on-error|\|\| true/)
+assert.doesNotMatch(workflow, /continue-on-error|\|\| true|npm@11\.17\.0/)
 assert.ok(workflow.indexOf('npm run audit:dependencies') < workflow.indexOf('npm run verify'))
-console.log('Dependency audit passed: pinned bulk-only npm, validated reports, high/critical gate, unavailable versus vulnerable outcomes, bounded timeout/retry, and fail-closed CI.')
+assert.match(workflow, /npm run test:dependency-audit:live/)
+console.log('OSV audit contracts passed: complete lock inventory, severity gate, errors, retries, abort, pagination, malformed/incomplete responses, and offline-setting immunity.')
+
+if (process.argv.includes('--live')) {
+  assert.equal(await runAudit(lock(), { emit: console.log }), 1, 'Known critical minimist control must fail the gate')
+  assert.equal(await runAudit(lock({ 'node_modules/minimist': entry('1.2.8') }), { emit: console.log }), 0, 'Patched minimist control should pass')
+  console.log('Live OSV controls passed: known critical finding detected, patched version clear.')
+}

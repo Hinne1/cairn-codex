@@ -338,6 +338,14 @@ preload bridge and historical operations remain noninteractive.
 
 ## Glossary and contextual roll help
 
+Isolated presentation fixtures are routed by `src/main/screenshot-collection.ts`, requiring both
+a screenshot destination and a recognized fixture name. MI Workshop and bounded-grid fixtures
+retain already source-filtered synthetic copies without importing them into the disposable archive;
+Skill Explorer retains its explicit synthetic availability. Ordinary startup and unrecognized
+fixtures still use the production archive presenter. Feature verification flags do not select data.
+`test:mi-workshop-fixture:electron` exercises 72 synthetic MI combinations at 1,440 and 520px,
+mounts at most 50 rows, and checks that archive/source/journal tables remain empty afterward.
+
 Glossary is a permanent, data-independent destination, not an optional collection tool.
 `GlossaryWorkspace.vue` renders the entry registry in `workspaces/glossary.ts`; prose does not live
 in `App.vue`. Each entry has a stable ID, structured sections, optional native details, and sources.

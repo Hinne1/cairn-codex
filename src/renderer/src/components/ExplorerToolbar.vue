@@ -439,7 +439,7 @@ onBeforeUnmount(() => {
 .research-toolbar :deep(.research-context-row) { display: flex; align-items: end; flex-wrap: wrap; gap: var(--cc-space-3); min-width: 0; }
 .research-toolbar :deep(.research-subject-field) { display: grid; flex: 1 1 220px; gap: var(--cc-space-2); min-width: 0; }
 .research-toolbar :deep(.research-context-label) { color: var(--cc-text-muted); font-size: var(--cc-font-size-xs); }
-.research-toolbar :deep(.research-context-input) { width: 100%; height: var(--cc-control-height); padding: 0 var(--cc-space-3); border: 1px solid var(--cc-border-default); border-radius: var(--cc-radius-sm); color: var(--cc-text-primary); background: var(--cc-surface-input); font: var(--cc-font-size-md) var(--cc-font-interface); }
+.research-toolbar :deep(.research-context-input) { width: 100%; height: var(--cc-control-height); padding: 0 var(--cc-control-height) 0 var(--cc-space-3); border: 1px solid var(--cc-border-default); border-radius: var(--cc-radius-sm); color: var(--cc-text-primary); background: var(--cc-surface-input); font: var(--cc-font-size-md) var(--cc-font-interface); }
 .research-toolbar :deep(.research-context-button) { min-height: var(--cc-control-height); padding: var(--cc-space-2) var(--cc-space-3); border: 1px solid var(--cc-border-default); border-radius: var(--cc-radius-sm); color: var(--cc-text-primary); background: var(--cc-surface-input); cursor: pointer; font: var(--cc-font-size-md) var(--cc-font-interface); }
 .research-toolbar :deep(.research-context-button:hover:not(:disabled)) { border-color: var(--cc-accent-border); background: var(--cc-accent-surface); }
 .research-toolbar :deep(.research-context-button:disabled) { opacity: .45; cursor: default; }

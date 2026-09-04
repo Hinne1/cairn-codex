@@ -101,6 +101,7 @@ if (!process.versions.electron) {
             assert.equal(await run(`researchFixture.session.atlasRegionQuery.value`), 'Fixture area')
             await act(`document.querySelector('.explorer-search-input button').click()`)
           } else {
+            assert.equal(await run(`{ const input=document.querySelector('#skill-picker-input'); const clear=input.parentElement.querySelector('button'); parseFloat(getComputedStyle(input).paddingRight) >= clear.getBoundingClientRect().width + parseFloat(getComputedStyle(clear).right); }`), true, 'Skill names must not run underneath the clear button')
             await act(`document.querySelector('#skill-picker-input').focus()`)
             await key('ArrowDown')
             assert.equal(await run(`document.querySelector('#skill-picker-input').getAttribute('aria-expanded')`), 'true')

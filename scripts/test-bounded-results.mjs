@@ -58,17 +58,25 @@ assert.deepEqual(updateBoundedSelection(['a'], 'b', 'single'), ['b'])
 assert.deepEqual(updateBoundedSelection(['a'], 'b', 'multiple'), ['a', 'b'])
 assert.deepEqual(updateBoundedSelection(['a', 'b'], 'a', 'multiple'), ['b'])
 
-const [appSource, surfaceSource, styleSource] = await Promise.all([
+const [appSource, researchTableSource, plannerJourneySource, surfaceSource, styleSource] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/ResearchItemTable.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/PlannerJourney.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
 ])
-assert.match(appSource, /pagination="continuous"[\s\S]*?label="Leveling Planner item results"/u,
-  'The planner must use continuous bounded results instead of explicit page navigation.')
-assert.match(appSource, />List<\/button>[\s\S]*?>Grid<\/button>/u,
-  'The planner display switcher must expose clear List and Grid choices.')
-assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.preventDefault\(\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/u,
-  'Overflowing tooltips must scroll with an ordinary wheel while the tooltip itself is targeted.')
+assert.match(researchTableSource, /:pagination="pagination"/u,
+  'The shared research table must pass its pagination mode to the bounded result surface.')
+assert.match(appSource, /<ResearchItemTable[\s\S]*?label="Leveling Planner item results"[\s\S]*?pagination="continuous"/u,
+  'The planner table must request continuous bounded results instead of explicit page navigation.')
+assert.match(plannerJourneySource, /pagination="continuous"[\s\S]*?label="Leveling Planner journey items"/u,
+  'The Planner journey must use continuous bounded results instead of explicit page navigation.')
+assert.match(appSource, />Table<\/button>[\s\S]*?>Journey<\/button>/u,
+  'The planner display switcher must expose clear Table and Journey choices.')
+assert.match(appSource, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.currentTarget === tooltip[\s\S]*?tooltipBoundaryScroll\.value === 'contain'[\s\S]*?animateTooltipScroll/u,
+  'Tooltips and item triggers must share smooth wheel routing while honoring edge containment.')
+assert.match(surfaceSource, /function handleKeydown[\s\S]*?event\.target !== event\.currentTarget[\s\S]*?event\.key === 'Enter'/u,
+  'Nested row controls must retain native keyboard activation instead of activating the result row.')
 assert.match(appSource, /@mouseenter="cancelTooltipHide"[\s\S]*?@mouseleave="scheduleTooltipHide"[\s\S]*?@wheel="scrollTooltip"/u,
   'Pointer users must be able to enter and scroll the tooltip without dismissing it.')
 assert.match(appSource, /function scrollTooltipFromKeyboard\(event: KeyboardEvent\)[\s\S]*?PageDown[\s\S]*?PageUp[\s\S]*?aria-describedby[\s\S]*?item-tooltip/u,
@@ -92,5 +100,9 @@ assert.match(surfaceSource, /:data-result-key="String\(entry\.key\)"/u,
   'Bounded results must expose stable rendered identity for cross-layout interaction verification.')
 assert.doesNotMatch(styleSource, /\.planner-table-wrap\s*\{[^}]*max-height/iu,
   'The planner list must not create a height-bounded nested vertical scroller.')
+assert.match(researchTableSource, /overscroll-behavior-x: contain;[\s\S]*?overscroll-behavior-y: auto;/u,
+  'Wide research tables must preserve horizontal containment without blocking vertical page scrolling.')
+assert.match(researchTableSource, /class="research-item"[\s\S]*?@wheel="emit\('scroll-tooltip', \$event\)"/u,
+  'The complete item identity cell must route wheel input to an overflowing tooltip.')
 
 console.log('Bounded result contract passed for 20k and 50k generated collections; mounted entries remained capped at 50.')

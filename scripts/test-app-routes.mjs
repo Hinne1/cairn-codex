@@ -53,6 +53,20 @@ assert.equal(plannerRoute.controls.skills.length, 2)
 assert.equal('results' in plannerRoute.controls, false)
 assert.equal('snapshot' in plannerRoute, false)
 
+const legacyPlannerTableRoute = parseAppRoute({
+  version: 1,
+  workspace: 'planner',
+  controls: { display: 'list' }
+})
+const legacyPlannerGridRoute = parseAppRoute({
+  version: 1,
+  workspace: 'planner',
+  controls: { display: 'grid' }
+})
+assert.equal(legacyPlannerTableRoute?.controls.display, 'table')
+assert.equal(legacyPlannerGridRoute?.controls.display, 'journey')
+assert.equal(defaultAppRoute('planner').controls.display, 'table')
+
 const deepLink = appRouteHref(plannerRoute, 'file:///C:/Cairn%20Codex/index.html?safeMode=0')
 const deepLinkUrl = new URL(deepLink)
 assert.equal(deepLinkUrl.searchParams.get('safeMode'), '0')

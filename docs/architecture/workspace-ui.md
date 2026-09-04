@@ -174,6 +174,12 @@ The tooltip remains global because only one hover target can be active at a time
 mouse-wheel scrolling, viewport placement, held details, affix composition, and item links must
 behave identically everywhere.
 
+Dense research tables use a narrower pointer contract: only the prominent item picture queues the
+global tooltip. Names, types, actions, and ordinary data cells remain free for reading, selection,
+and page scrolling. Moving off the picture schedules the same global dismissal used elsewhere.
+Keyboard focus stays on the bounded result row, which keeps `item-tooltip` as its accessible
+description without adding the decorative picture as another Tab stop.
+
 ## Workspace ownership and extraction
 
 `App.vue` is the application shell, not the long-term owner of tool-local query, filter, paging,
@@ -207,10 +213,12 @@ redacted-error formatter. The workspace never reaches the preload API directly, 
 dismantling path is introduced by the extraction.
 
 Skill Explorer owns its complete typed route-control snapshot, subject picker, suggestions,
-structured result search, availability/rarity/slot filters, sort controls, paging, and dense-table
-markup in `SkillExplorerWorkspace.vue`. The table starts at required level ascending and presents
-item identity, ranks, damage conversion, special modifiers, and visual transformations as distinct
-columns inside its local horizontal scroller. `skill-explorer.ts` owns deterministic skill indexing,
+structured result search, availability/rarity/slot filters, sort controls, and paging in
+`SkillExplorerWorkspace.vue`. It projects typed skill modifiers into the shared
+`ResearchItemTableRow` contract and renders `ResearchItemTable.vue`, the same comparison surface as
+Leveling Planner. The table starts at required level ascending and presents item identity, level,
+slot, support, skill modifiers, acquisition, and archive/roll context inside its local horizontal
+scroller. `skill-explorer.ts` owns deterministic skill indexing,
 direct-rank, modifier, and visual-only matching, damage-conversion projection, lower-tier MI base
 collapse, and row filtering/sorting. `App.vue` supplies the immutable catalog, shared ownership/icon adapters,
 the global immediate-focus and delayed-pointer tooltip adapters, the item-drawer adapter, and the
@@ -218,10 +226,52 @@ same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
 
+Leveling Planner projects skill ranks, mastery-wide bonuses, conversions, special and visual
+modifiers, blueprint/faction/drop acquisition, archive availability, and roll context into the
+same row contract. Table is the default comparison view. Journey reuses those rows as a bounded,
+level-ordered timeline with the same picture target and favorite/ignore actions; MI Sources remains
+the dedicated spatial view. The typed route and preference vocabulary is `table | journey | map`.
+Version-1 links and preferences containing the former `list | grid` values migrate to Table and
+Journey respectively. Switching Table/Journey preserves the focused result and brings it back into
+the unobscured viewport after the bounded surface remounts.
+
+The shared row contract distinguishes rank, pet, conversion, special, and visual modifiers so
+future global damage-type presentation can consume semantic data instead of parsing display text.
+Catalog presentation sections carry optional `parentSkills` derived from the game's explicit
+`grantedSkills` relationships. Selecting a shapeshift includes modifiers to its granted abilities,
+with the ability name retained in the effect text. Rank and modifier extraction enumerates actual
+numbered fields, including sparse/high indices. Presentation version 33 refreshes older caches.
+Planner header clicks toggle the active direction and reset new columns to ascending. Exclusions
+are scoped to the selected profile, not inherited from the historical global ignore list.
+
+`ResearchSkillFx.vue` renders all item-level visual transformation sections ahead of ordinary
+modifiers in both the shared table and Journey. FX uses the existing semantic FX badge and named
+skills; it is not limited to the currently selected skill or Journey's first ordinary modifier.
+Visual-only skills also enter the skill index. The horizontal table scroller does not reserve a
+vertical scrollbar gutter, so its final header reaches the rounded right edge. Toolbar composition
+unification is tracked in #138, with wide/compact mockup review before material UI changes.
+
+Epic and legendary item names share the protected rarity palette
+across cards, research results, tooltips, and copy headings. The supplied game references are epic
+`#338CCE` and legendary `#A638FF`; the latter is lifted to `#B653FF` to retain text contrast on CC's
+surfaces. Rarity badges use the solid shared card surface so their small text keeps the same
+contrast over tinted set cards. Research Table and Journey mark unavailable items using a subtle name fade (96%) and
+picture fade (78%). An archived copy, a learned crafting recipe, or an available awakening base
+keeps an item at full strength; history alone does not. Planner crafting respects the plan's SC/HC
+recipe status. Skill modifiers and controls remain at full opacity, and availability labels retain
+the distinction between archived, crafting, awakening, and previously archived.
+
 The global item tooltip remains viewport-bounded and preserves its full descendant text as the item
-trigger's accessible description. Ordinary wheel input scrolls only when targeted at overflowing
-tooltip content; keyboard users use Page Up/Down while the describing item retains focus. Hovering
-the tooltip cancels pending dismissal, while wheel input elsewhere continues to scroll the workspace.
+trigger's accessible description. In research tables, the complete item identity cell is the pointer
+trigger; Journey retains its prominent picture trigger. Direct wheel input over the tooltip and wheel
+input over its item trigger use the same short, reduced-motion-aware scrolling path. The Settings
+preference determines whether input at a tooltip boundary continues into the
+workspace (the default) or stays contained until the pointer leaves the preview.
+Direct wheel input at a tooltip edge explicitly scrolls the page in continuation mode; it must not
+depend on Chromium chaining from a fixed overlay. Item-trigger edge input keeps ordinary native
+page scrolling. Both paths retain containment when selected.
+Keyboard users use Page Up/Down while the describing item retains focus. Hovering the tooltip cancels
+pending dismissal, and horizontal table containment never blocks vertical workspace scrolling.
 
 Supplies owns its typed category, compatible-slot, query, transfer-mode, and page controls plus
 its transient keyed selection in `SuppliesWorkspace.vue`. `supplies.ts` owns reusable-unlock

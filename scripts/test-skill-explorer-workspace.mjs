@@ -4,6 +4,7 @@ import { compileSearchQuery } from '../src/shared/search-query.ts'
 import {
   buildSkillNames,
   createSkillExplorerRows,
+  itemSkillVisualTransformations,
   nextSkillSuggestionIndex,
   nextSkillSortControls,
   skillSortAriaValue,
@@ -104,6 +105,27 @@ const visualItem = item({
   }
 })
 const archivedMiHigh = item({ record: 'mi-high', name: 'Wendigo Barb', rarity: 'mi', slot: 'weapon', levelRequirement: 94, presentation: rankItem.presentation })
+const grantedAbilityItem = item({ presentation: { sections: [
+  { kind: 'skill-modifier', heading: 'Ice Talons', parentSkills: ['Wereraven'], lines: [line('Weapon Damage', 30)] }
+] } })
+assert.equal(skillMatchForItem(grantedAbilityItem, 'Wereraven').special, '30% Weapon Damage (Ice Talons)')
+assert.equal(skillMatchForItem(grantedAbilityItem, 'Ice Talons').special, '30% Weapon Damage')
+assert.equal(skillMatchForItem(grantedAbilityItem, 'Werewolf'), null)
+assert.deepEqual(buildSkillNames([grantedAbilityItem]), ['Ice Talons', 'Wereraven'])
+assert.deepEqual(buildSkillNames([visualItem], {}), ['Wendigo Totem'])
+const multiFxItem = item({ presentation: { sections: [
+  ...visualItem.presentation.sections,
+  { kind: 'visual-modifier', heading: 'Storm Totem · Visual transformation', lines: [line('Alternate azure storm effect', null, 'visual')] }
+] } })
+assert.deepEqual(itemSkillVisualTransformations(multiFxItem), [
+  { skill: 'Wendigo Totem', text: 'Alternate crimson spirit effect' },
+  { skill: 'Storm Totem', text: 'Alternate azure storm effect' }
+])
+assert.equal(skillMatchForItem(multiFxItem, 'Wendigo Totem').visualTransformation, 'Alternate crimson spirit effect')
+assert.deepEqual(itemSkillVisualTransformations(item({ presentation: null })), [])
+assert.deepEqual(itemSkillVisualTransformations(item({ presentation: { sections: [
+  { kind: 'visual-modifier', heading: 'Storm Totem · visual transformation', lines: [] }
+] } })), [{ skill: 'Storm Totem', text: 'Alternate skill visuals' }])
 const archivedMiLow = item({ record: 'mi-low', name: 'Wendigo Barb', rarity: 'mi', slot: 'weapon', levelRequirement: 70, presentation: rankItem.presentation })
 const unrelated = item({ record: 'other', name: 'Other', presentation: { sections: [] } })
 const items = [rankItem, modifierItem, visualItem, archivedMiHigh, archivedMiLow, unrelated]
@@ -167,9 +189,10 @@ const defaultRows = createSkillExplorerRows(items, { ...controls, sort: 'level',
 })
 assert.deepEqual(defaultRows.map((row) => row.item.levelRequirement), [65, 70, 82, 94])
 
-const [app, workspace, model, packageSource] = await Promise.all([
+const [app, workspace, table, model, packageSource] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/SkillExplorerWorkspace.vue', import.meta.url), 'utf8'),
+  readFile(new URL('../src/renderer/src/components/ResearchItemTable.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/skill-explorer.ts', import.meta.url), 'utf8'),
   readFile(new URL('../package.json', import.meta.url), 'utf8')
 ])
@@ -180,23 +203,25 @@ assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>/)
 assert.match(app, /v-model:controls="skillExplorerControls"/)
 assert.doesNotMatch(app, /const skillItemRows|const skillSuggestions|const skillItemPage|const skillPickerOpen/)
 assert.match(workspace, /defineModel<SkillExplorerControls>\('controls'/)
-assert.match(workspace, /<ExplorerToolbar[\s\S]*?<BoundedResultSurface/)
-assert.match(workspace, /:page-size="50"/)
-assert.match(workspace, /emit\('queue-tooltip', row\.item/)
-assert.match(workspace, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.item, element\)/)
-assert.match(workspace, /@item-focus="showFocusedTooltip"/)
-assert.match(workspace, /emit\('open-item', row\.item/)
+assert.match(workspace, /<ExplorerToolbar[\s\S]*?<ResearchItemTable/)
+assert.match(table, /<BoundedResultSurface[\s\S]*?:page-size="50"/)
+assert.match(table, /class="research-item"[\s\S]*?@mouseenter="emit\('queue-tooltip', row\.item, \$event\)"/)
+assert.doesNotMatch(table, /class="research-table-row"[^>]*@mouseenter/)
+assert.match(table, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.item, element\)/)
+assert.match(table, /@item-focus="showFocusedTooltip"/)
+assert.match(workspace, /@activate="emit\('open-item', \$event\)"/)
 assert.match(workspace, /:aria-activedescendant="activeSuggestionId"/)
 assert.match(workspace, /:aria-controls="pickerOpen \? skillListboxId : undefined"/)
 assert.match(workspace, /props\.skillNames\.map\(\(skill, index\) => \[skill, `\$\{skillListboxId\}-option-\$\{index\}`\]\)/)
 assert.match(workspace, /role="option"[\s\S]*?tabindex="-1"[\s\S]*?:aria-selected="index === pickerIndex"/)
 assert.match(workspace, /@mousedown\.prevent[\s\S]*?@click="selectSkill\(skill\)"/)
 assert.match(workspace, /function revealActiveSuggestion[\s\S]*?listbox\.scrollTop/)
-assert.match(workspace, /role="columnheader" :aria-sort="skillSortAriaValue\(sort, direction, 'level'\)"/)
-assert.match(workspace, /v-if="sort === 'level'" aria-hidden="true"/)
-assert.match(workspace, /Visual transformation[\s\S]*?row\.visualTransformation \|\| '—'/)
+assert.match(table, /\{ key: 'item', label: 'Item' \}[\s\S]*?\{ key: 'modifiers', label: 'Skill modifiers' \}[\s\S]*?\{ key: 'archive', label: 'Archive \/ roll' \}/)
+assert.match(table, /:aria-sort="ariaSort\(column\.key\)"/)
+assert.match(workspace, /label: 'Visual'[\s\S]*?row\.visualTransformation/)
 assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>\(\{[\s\S]*?sort: 'level',[\s\S]*?direction: 'asc'/)
-assert.match(app, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?tooltip\.scrollTop = nextScrollTop/)
+assert.match(app, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.currentTarget === tooltip[\s\S]*?tooltipBoundaryScroll\.value === 'contain'[\s\S]*?animateTooltipScroll/)
+assert.match(app, /tooltip-boundary-\$\{tooltipBoundaryScroll\}[\s\S]*?tooltip-icon-placeholder/)
 assert.match(app, /@mouseenter="cancelTooltipHide"[\s\S]*?@wheel="scrollTooltip"/)
 assert.match(app, /<SkillExplorerWorkspace[\s\S]*?@show-tooltip="showTooltip"/)
 assert.doesNotMatch(workspace, /window\.cairnCodex/)

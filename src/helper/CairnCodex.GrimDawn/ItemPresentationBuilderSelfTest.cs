@@ -51,6 +51,8 @@ internal static class ItemPresentationBuilderSelfTest
         Check(HasWeaponDamage(linked["Attack Nova"], 400),
             "attackSkillName did not inherit the parent granted-skill level.");
 
+        CheckCompleteness(Check);
+
         return new ItemPresentationBuilderSelfTestResult(
             Passed: true,
             Assertions: assertions,
@@ -61,6 +63,54 @@ internal static class ItemPresentationBuilderSelfTest
 
     private static bool HasWeaponDamage(ItemGrantedSkillPresentation skill, double expected) =>
         skill.Lines.Any(line => line.Label == "Weapon Damage" && line.Minimum == expected);
+
+    private static void CheckCompleteness(Action<bool, string> check)
+    {
+        const string parent = "records/skills/fixture/form.dbr";
+        const string child = "records/skills/fixture/talons.dbr";
+        const string weapon = "records/skills/fixture/weapon_modifier.dbr";
+        const string healing = "records/skills/fixture/healing_modifier.dbr";
+        const string slow = "records/skills/fixture/time_bubble.dbr";
+        var records = new Dictionary<string, CatalogSourceRecord>(StringComparer.OrdinalIgnoreCase)
+        {
+            [parent] = Source(parent, "Skill_Shapeshift", ("skillDisplayName", Text("tagForm")), ("grantedSkills", Text(child))),
+            [child] = Source(child, "Skill_AttackProjectile", ("skillDisplayName", Text("tagTalons"))),
+            [weapon] = Source(weapon, "Skill_Modifier", ("weaponDamagePct", Number(30))),
+            [healing] = Source(healing, "Skill_Modifier", ("skillLifeBonusBuffDuration", Number(400))),
+            [slow] = Source(slow, "Skill_AttackProjectileAreaEffect", ("skillDisplayName", Text("tagBubble")),
+                ("offensiveSlowTotalSpeedMin", Number(40, 55)), ("offensiveSlowTotalSpeedDurationMin", Number(1, 2)),
+                ("projectileExplosionRadius", Number(4.5)), ("skillActiveDuration", Number(5)))
+        };
+        var tags = new Dictionary<string, string> { ["tagForm"] = "Fixture Form", ["tagTalons"] = "Fixture Talons", ["tagBubble"] = "Time Bubble" };
+        var data = new ItemPresentationSource(tags, records);
+        var item = Source("records/items/fixture.dbr", "ArmorProtective_Feet",
+            ("augmentSkillName5", Text(parent)), ("augmentSkillLevel5", Number(2)),
+            ("augmentSkillName11", Text(child)), ("augmentSkillLevel11", Number(3)),
+            ("augmentSkillNameInvalid", Text(parent)),
+            ("augmentMasteryName5", Text(parent)), ("augmentMasteryLevel5", Number(1)),
+            ("modifiedSkillName7", Text(child)), ("modifierSkillName7", Text(weapon)),
+            ("modifiedSkillName1", Text(parent)), ("modifierSkillName1", Text(healing)),
+            ("itemSkillName", Text(slow)), ("itemSkillLevel", Number(2))).Record;
+        var result = ItemPresentationBuilder.Build(item, data);
+        var rankLines = result.Sections.Single(section => section.Kind == "base").Lines;
+        check(rankLines.Count(line => line.Tone == "skill") == 2, "Sparse rank fields above four were truncated or malformed suffixes were accepted.");
+        check(rankLines.Any(line => line.Label == "to Fixture Form" && line.Minimum == 2), "Fifth rank bonus was lost.");
+        check(rankLines.Any(line => line.Tone == "mastery"), "Higher mastery bonus field was lost.");
+        var ability = result.Sections.Single(section => section.Heading == "Fixture Talons");
+        check(ability.Lines.Any(line => line.Label == "Weapon Damage" && line.Minimum == 30), "Seventh modifier slot was lost.");
+        check(ability.ParentSkills?.SequenceEqual(new[] { "Fixture Form" }) == true, "Granted-ability parent metadata was lost.");
+        check(result.Sections.Single(section => section.Heading == "Fixture Form").Lines.Any(line => line.Label == "Health Restored per Second" && line.Minimum == 400), "Shapeshift flat healing was lost.");
+        check(result.GrantedSkill!.Lines.Any(line => line.Label == "Reduced Target's Total Speed for 2 Seconds" && line.Minimum == 55), "Granted slow effect did not use its skill level.");
+        check(result.GrantedSkill.Lines.Any(line => line.Label == "Target Area" && line.Minimum == 4.5), "Projectile area was lost.");
+        var set = Source("set", "ItemSet", ("setName", Text("tagForm")), ("setMembers", Text("a", "b")),
+            ("augmentSkillName5", Text(parent)), ("augmentSkillLevel5", Number(0, 2))).Record;
+        records["set"] = new CatalogSourceRecord(set, "fixture");
+        var setPresentation = ItemPresentationBuilder.BuildSet("set", data)!;
+        check(setPresentation.Tiers.Any(tier => tier.RequiredPieces == 2 && tier.Lines.Any(line => line.Label == "to Fixture Form")), "Fifth set rank bonus was lost.");
+        check(ItemCatalogBuilder.QualifyAwakenedName("records/items/awakened/fixture.dbr", "Fixture") == "Awakened Fixture", "Awakened name was not qualified.");
+        check(ItemCatalogBuilder.QualifyAwakenedName("records/items/awakened/fixture.dbr", "Awakened Fixture") == "Awakened Fixture", "Awakened qualifier was duplicated.");
+        check(ItemCatalogBuilder.QualifyAwakenedName("records/items/fixture.dbr", "Fixture") == "Fixture", "Ordinary item name was changed.");
+    }
 
     private static IReadOnlyDictionary<string, CatalogSourceRecord> FixtureRecords() =>
         new Dictionary<string, CatalogSourceRecord>(StringComparer.OrdinalIgnoreCase)

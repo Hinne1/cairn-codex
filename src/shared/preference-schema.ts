@@ -38,7 +38,7 @@ function stringArray(value: unknown, maximumEntries: number, maximumLength: numb
 function plannerProfile(value: unknown): boolean {
   const profile = record(value)
   if (!profile || !onlyKeys(profile, [
-    'id', 'name', 'className', 'masteries', 'skills', 'excludedSkills', 'minimumLevel',
+    'id', 'name', 'className', 'masteries', 'skills', 'excludedSkills', 'ignoredRecords', 'minimumLevel',
     'levelCap', 'source', 'characterPath', 'characterLevel', 'isHardcore', 'modifiedAt'
   ])) return false
   if (!boundedString(profile.id, 200) || !boundedString(profile.name, 60) ||
@@ -48,6 +48,7 @@ function plannerProfile(value: unknown): boolean {
       !boundedString(profile.modifiedAt, 64)) return false
   if (profile.className !== undefined && !boundedString(profile.className, 80, false)) return false
   if (profile.masteries !== undefined && !stringArray(profile.masteries, 2, 40)) return false
+  if (profile.ignoredRecords !== undefined && !stringArray(profile.ignoredRecords, 512, 4096)) return false
   if (profile.characterPath !== undefined && !boundedString(profile.characterPath, 4096, false)) return false
   if (profile.characterLevel !== undefined && !boundedNumber(profile.characterLevel, 1, 100)) return false
   return profile.isHardcore === undefined || typeof profile.isHardcore === 'boolean'
@@ -79,12 +80,13 @@ export function isPreferenceDocument(value: unknown): value is Record<string, un
   if (!exactKeys(meta, ['profileKind', 'updatedAtUtc']) ||
       (meta.profileKind !== 'fresh' && meta.profileKind !== 'returning') ||
       !boundedString(meta.updatedAtUtc, 64)) return false
-  if (!onlyKeys(appearance, ['theme', 'zoomFactor', 'trackerCollapsed', 'navigationCollapsed', 'plannerDisplay']) ||
+  if (!onlyKeys(appearance, ['theme', 'zoomFactor', 'trackerCollapsed', 'navigationCollapsed', 'plannerDisplay', 'tooltipBoundaryScroll']) ||
       !['theme', 'zoomFactor', 'trackerCollapsed', 'plannerDisplay'].every((key) => key in appearance) ||
       appearance.theme !== 'cairn' || !boundedNumber(appearance.zoomFactor, 0.7, 1.8) ||
       typeof appearance.trackerCollapsed !== 'boolean' ||
       (appearance.navigationCollapsed !== undefined && typeof appearance.navigationCollapsed !== 'boolean') ||
-      !['list', 'grid', 'map'].includes(String(appearance.plannerDisplay))) return false
+      (appearance.tooltipBoundaryScroll !== undefined && appearance.tooltipBoundaryScroll !== 'page' && appearance.tooltipBoundaryScroll !== 'contain') ||
+      !['table', 'journey', 'map', 'list', 'grid'].includes(String(appearance.plannerDisplay))) return false
   if (!exactKeys(workspace, ['visibleTools', 'experimentalToolsEnabled', 'showLegacyScanner', 'miCountingMode']) ||
       !Array.isArray(workspace.visibleTools) || workspace.visibleTools.length > WORKSPACE_TOOLS.size ||
       !workspace.visibleTools.every((tool) => typeof tool === 'string' && WORKSPACE_TOOLS.has(tool)) ||

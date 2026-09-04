@@ -129,6 +129,13 @@ hide a new cross-tool inconsistency.
 
 ## Enforcement
 
+Research toolbar follow-through (#138, 2026-09-04): Skill Explorer and Planner now
+use one opt-in ExplorerToolbar composition for subject, search, filters, result
+count, sorting and view controls. Wide and compact mockups were approved with
+always-inline Planner skill editing; no Edit build gate. Domain-specific selectors
+remain in typed workspace/session boundaries. Shared controls consume semantic
+tokens, and isolated production-component tests cover both workspaces together.
+
 `npm run test:theme-contract` verifies required semantic roles and runtime/CSS fallback parity,
 exercises manifest versioning and fail-closed contrast behavior, protects gameplay semantics,
 rejects literal colors in every Vue component, and prevents the remaining `styles.css` palette

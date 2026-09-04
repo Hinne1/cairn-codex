@@ -7282,11 +7282,10 @@ async function captureWindowWhenReady(window: BrowserWindow, path: string): Prom
               const originalTotal = resultCount()
               const originalFirst = rows()[0]?.textContent?.replace(/\s+/g, ' ').trim()
               if (!Number.isFinite(originalTotal) || originalTotal < rows().length) throw new Error('Skill Explorer result count was invalid.')
-              const toolbarSelects = [...document.querySelectorAll('.skill-explorer-toolbar select')]
-              const sortSelect = toolbarSelects.at(-2)
-              const directionSelect = toolbarSelects.at(-1)
+              const sortSelect = document.querySelector('.skill-explorer-toolbar .explorer-toolbar-sort select')
+              const directionButton = document.querySelector('.skill-explorer-toolbar .sort-direction-button')
               if (!(sortSelect instanceof HTMLSelectElement) || sortSelect.value !== 'level' ||
-                  !(directionSelect instanceof HTMLSelectElement) || directionSelect.value !== 'asc') {
+                  !(directionButton instanceof HTMLButtonElement) || directionButton.getAttribute('aria-label') !== 'Sort ascending') {
                 throw new Error('Skill Explorer did not start with level ascending sorting.')
               }
               const initialLevels = rows().map((row) => Number(row.querySelector('.research-level')?.textContent?.trim()))

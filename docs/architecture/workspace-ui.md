@@ -82,6 +82,26 @@ Planner result modes, MI Workshop, Supplies, Collection Farming, Dismantling Lab
 Transfers archive browser currently use this contract. Settings and configuration forms do not
 use an explorer toolbar because they do not represent a searchable result set.
 
+### Research composition
+
+Skill Explorer and all three Planner views opt into the typed `layout="research"`
+composition of `ExplorerToolbar`, approved in #138. It uses the same search, clear,
+tips, advanced-query dialog, error and loading controls as the standard layout:
+
+- `before`: domain context, followed by search and always-visible filters;
+- results row: one live count, sort selector, shared `SortDirectionButton`, optional `views`;
+- `summary`: optional compact domain facts, without duplicating the main count.
+
+Planner skills are always visible and editable inline, including at compact widths.
+There is no Edit build mode. Profiles, levels, skill additions/removals, character
+refresh and ignored-skill restoration retain session ownership. The shared shell
+owns spacing, context-field styling, focus treatment and responsive wrapping;
+workspaces supply their domain controls through slots, not parallel toolbar CSS.
+Planner keeps one mounted toolbar when changing Table/Journey/MI sources, so the
+view switch retains keyboard focus. A workspace-local adapter selects the item or
+area query without merging their state. No new App.vue orchestration or preference
+schema is required. Other workspaces retain the default standard composition.
+
 ## Tool headers
 
 Specialist workspaces use `src/renderer/src/components/ToolHeader.vue` for their eyebrow,

@@ -132,8 +132,30 @@ message as no active character; malformed UTF-16 also clears it.
 These reader-side corrections do not change the verified hook or its hashes. The existing hook
 reports nonempty name changes, so immediate world-exit reporting while the process remains alive
 still requires the native transition patch and a separately qualified replacement binary (#107).
-That unqualified source draft is preserved outside the shipping patch. Synthetic presence and
-helper self-tests validate the reader behavior without injecting or running a personal game.
+This draft branch includes the proposed native source change, but the bundled DLL and every
+allowlisted hash still refer to the previous qualified hook. Do not merge this branch as a release
+change until the source, binary, and hash can be qualified together. Synthetic presence and helper
+self-tests validate the reader behavior without injecting or running a personal game.
+
+### Unqualified world-exit candidate
+
+The candidate emits an empty active-character event when the world, engine, game information,
+or main player disappears, and emits a new name only when it changes. It preserves the existing
+active-adapter gate, queue locking, item-delivery logic, payloads, and receipt handling.
+
+On 2026-09-06 the patch applied cleanly to the pinned upstream commit and compiled with MSVC
+14.43, Windows SDK 10.0.22621.0, and Boost 1.78.0. The compile-only candidate SHA-256 was
+`e4280ad827bff8533f30e9f0cac46afe88be6cf3e2a3599c49b57a86341c1aa4`.
+It was not injected, copied into release resources, or added to the allowlist. The standard build
+script requested SDK 10.0.26100.0, which was unavailable on the host; the direct compile used the
+installed SDK documented above. This is compile evidence, not binary compatibility evidence.
+
+Before replacing the shipping hook, qualify the exact candidate against an explicitly selected
+disposable character and isolated archive: enter a world, leave to the menu without exiting the
+game, re-enter the same character, switch characters, and disconnect/reconnect. Confirm that
+identity clears or changes at each transition and unchanged names do not flood events. Then
+complete the receipt-verified sacrificial-item round trip below and update the patch, bundled
+binary, provenance, allowlist, and regression fingerprints together. Issue #107 remains open.
 
 ## Planned local compatibility approval
 

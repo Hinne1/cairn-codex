@@ -140,6 +140,52 @@ if (!process.versions.electron) {
         assert.equal(await run("collectionOwnerFixture.inspection.selectedReferenceInstanceKey.value"), 'copy-19999')
         await act("document.querySelector('.drawer-close').click()")
       }
+      for (const width of [1440, 520]) {
+        window.setContentSize(width, 1000)
+        await act(`collectionOwnerFixture.workspace.value='collection'; collectionOwnerFixture.setCount(120);
+          collectionOwnerFixture.controls.value={...collectionOwnerFixture.controls.value,query:'',ownership:'all',page:1};
+          collectionOwnerFixture.favoritesEnabled.value=true;
+          collectionOwnerFixture.copies.value=collectionOwnerFixture.copies.value.map((copy,index)=>({...copy,instanceKey:index.toString(16).padStart(64,'0'),isHardcore:false,isFavorite:false}));
+          collectionOwnerFixture.inspection.open(collectionOwnerFixture.snapshot.value.items[0]);
+          document.querySelector('.favorite-copy')?.focus()`)
+        await act("document.querySelector('.favorite-copy').focus()")
+        await key('Enter')
+        assert.equal(await run("document.querySelector('.favorite-copy').getAttribute('aria-pressed')"), 'true')
+        assert.equal(await run("collectionOwnerFixture.events.at(-1)[0]"), 'favorite')
+        assert.equal(await run("collectionOwnerFixture.copies.value.filter(copy=>copy.isFavorite).length"), 1)
+        await capture('favorites-' + width)
+        await act("collectionOwnerFixture.favoriteFailure.value=true; document.querySelector('.favorite-copy').focus()")
+        await key('Enter')
+        assert.equal(await run("document.querySelector('.favorite-copy').getAttribute('aria-pressed')"), 'true', 'failed persistence cannot change the visible preference')
+        assert.equal(await run("collectionOwnerFixture.events.at(-1)[0]"), 'favorite-error')
+        await act("collectionOwnerFixture.favoriteFailure.value=false; collectionOwnerFixture.inspection.close()")
+        await act(`{ const select=document.querySelector('.collection-explorer-toolbar select'); select.value='favorite'; select.dispatchEvent(new Event('change',{bubbles:true})); }`)
+        assert.equal(await run("document.querySelectorAll('.item-card').length"), 1)
+        await act(`{ const select=Array.from(document.querySelectorAll('.collection-explorer-toolbar select')).find(select=>Array.from(select.options).some(option=>option.value==='roll-fire')); select.value='roll-fire'; select.dispatchEvent(new Event('change',{bubbles:true})); }`)
+        assert.equal(await run('collectionOwnerFixture.controls.value.ownership'), 'favorite', 'roll sorting retains the favorite filter')
+        await act("document.querySelector('.catalog-results .bounded-results-item').focus()")
+        await key('Enter')
+        await act("document.querySelector('.favorite-copy').focus()")
+        await key('Enter')
+        await act("collectionOwnerFixture.inspection.close()")
+        assert.equal(await run("document.querySelectorAll('.item-card').length"), 0)
+        assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
+        const start = Date.now()
+        await act(`collectionOwnerFixture.setCount(20000);
+          collectionOwnerFixture.snapshot.value={...collectionOwnerFixture.snapshot.value,items:collectionOwnerFixture.snapshot.value.items.map(item=>({...item,rarity:'mi'}))};
+          collectionOwnerFixture.copies.value=collectionOwnerFixture.snapshot.value.items.map((item,index)=>({baseRecord:item.record,instanceKey:index.toString(16).padStart(64,'0'),sourcePath:'synthetic.gst',tabIndex:0,itemIndex:index,seed:index,prefixRecord:'',suffixRecord:'',isHardcore:false,isFavorite:index%10===0}));`)
+        assert.equal(await run("document.querySelectorAll('.item-card').length"), 48)
+        await act("collectionOwnerFixture.workspace.value='mi'")
+        await act(`{ const select=document.querySelector('.mi-favorite-filter select'); select.value='true'; select.dispatchEvent(new Event('change',{bubbles:true})); }`)
+        assert.equal(await run('collectionOwnerFixture.miControls.value.favoritesOnly'), true)
+        assert.equal(await run("document.querySelectorAll('.mi-table-row').length <= 100"), true)
+        assert.equal(await run("document.querySelectorAll('.mi-table-row').length > 0"), true)
+        assert.match(await run("document.querySelector('.explorer-toolbar').textContent"), /2,000/)
+        assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
+        console.log('Favorites ' + width + ': 20k copies, 2k matches, Collection 48 mounted, MI ' + await run("document.querySelectorAll('.mi-table-row').length") + ' mounted, ' + (Date.now()-start) + 'ms including keyboard/settle')
+        await capture('favorites-mi-' + width)
+        await act('collectionOwnerFixture.miControls.value={...collectionOwnerFixture.miControls.value,favoritesOnly:false}')
+      }
       assert.deepEqual(errors, [])
       console.log('Collection ownership UI passed: dashboard actions, empty/error states, typed Sets restoration, keyboard copy pinning, 20k catalog/copies, bounded pages, wide and compact. Captures: ' + testRoot)
       app.exit(0)

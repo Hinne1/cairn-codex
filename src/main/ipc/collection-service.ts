@@ -83,6 +83,7 @@ export interface CollectionDiscoveryService {
 }
 
 export interface CollectionPreferenceStore {
+  setFavoriteItem(instanceKey: string, isHardcore: boolean, favorite: boolean): void
   setPinnedBest(record: string, instanceKey: string | null, isHardcore: boolean): void
   getInfiniteSupplies(): boolean
   setInfiniteSupplies(enabled: boolean): boolean
@@ -295,6 +296,13 @@ export class CollectionService {
         input.record, input.instanceKey, input.isHardcore
       )
       this.dependencies.preferences.queueArchiveBackup('pinned copy changed')
+    })
+  }
+
+  setFavoriteItem(input: { instanceKey: string; isHardcore: boolean; favorite: boolean }): Promise<void> {
+    return this.dependencies.preferences.runExclusive(async () => {
+      this.dependencies.preferences.setFavoriteItem(input.instanceKey, input.isHardcore, input.favorite)
+      this.dependencies.preferences.queueArchiveBackup('favorite copy changed')
     })
   }
 

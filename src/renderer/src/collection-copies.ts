@@ -53,6 +53,8 @@ export function useCollectionCopies(options: Parameters<typeof useArchiveCopySes
 export function vaultItemAsObserved(item: VaultListItem, itemIndex: number): ObservedStashItem {
   return {
     sourcePath: `vault://${item.id}`,
+    isHardcore: item.isHardcore,
+    isFavorite: item.isFavorite,
     tabIndex: -1,
     itemIndex,
     baseRecord: item.baseRecord,

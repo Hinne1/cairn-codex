@@ -27,6 +27,7 @@ export const IPC_CHANNELS = {
   scanCollection: 'grim-dawn:scan-collection',
   rebuildGameDataIndex: 'grim-dawn:rebuild-game-data-index',
   setPinnedBest: 'collection:set-pinned-best',
+  setFavoriteItem: 'collection:set-favorite-item',
   getInfiniteSupplies: 'settings:get-infinite-supplies',
   setInfiniteSupplies: 'settings:set-infinite-supplies',
   getDebugLogging: 'settings:get-debug-logging',
@@ -259,6 +260,7 @@ export interface CairnCodexApi {
   scanCollection: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   rebuildGameDataIndex: (sourcePaths: string[], basis: CollectionBasis) => Promise<CollectionSnapshot>
   setPinnedBest: (record: string, instanceKey: string | null, isHardcore: boolean) => Promise<void>
+  setFavoriteItem: (instanceKey: string, isHardcore: boolean, favorite: boolean) => Promise<void>
   getInfiniteSupplies: () => Promise<boolean>
   setInfiniteSupplies: (enabled: boolean) => Promise<boolean>
   getDebugLogging: () => Promise<DebugLoggingStatus>
@@ -420,6 +422,7 @@ export interface VaultListItem {
   augmentRecord: string
   ascendant: boolean
   instanceKey: string
+  isFavorite: boolean
   rollAnalysis: ItemRollAnalysis | null
   ingestedAtUtc: string
   retrievedAtUtc: string | null
@@ -844,6 +847,8 @@ export interface ObservedStashItem {
   affixRerolls: number
   rollAnalysis: ItemRollAnalysis | null
   instanceKey?: string
+  isHardcore?: boolean
+  isFavorite?: boolean
 }
 
 export interface ItemRollAnalysis {

@@ -61,14 +61,14 @@ try {
   // Represent a real v13 archive; reopening must backfill once without changing payloads.
   const hashBefore = payloadHash()
   raw.exec(`DROP TRIGGER vault_item_projection_insert; DROP TRIGGER vault_item_projection_update;
-    DROP TABLE vault_item_projection; DROP INDEX vault_item_group_idx; PRAGMA user_version=13;`)
+    DROP TABLE vault_item_projection; DROP INDEX vault_item_group_idx; DROP TABLE favorite_item; PRAGMA user_version=13;`)
   raw.close(); database.close()
   const migrationStart = performance.now()
   database = new CollectionDatabase(path)
   const migrationMs = performance.now() - migrationStart
   raw = new DatabaseSync(path)
   insert = raw.prepare(insertSql)
-  assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 14)
+  assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 15)
   assert.equal(payloadHash(), hashBefore, 'every exact payload remains byte-identical through migration')
   assert.equal(raw.prepare('SELECT COUNT(*) AS count FROM vault_item_projection').get().count, 20_145 + corruptPayloads.length)
   assert.equal(raw.prepare('SELECT COUNT(*) AS count FROM vault_item_projection WHERE payload_valid=0').get().count, corruptPayloads.length)

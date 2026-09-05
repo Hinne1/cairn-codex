@@ -243,6 +243,7 @@ function collectionDependencies(overrides = {}) {
     },
     preferences: {
       setPinnedBest: () => undefined,
+      setFavoriteItem: () => undefined,
       getInfiniteSupplies: () => false,
       setInfiniteSupplies: (enabled) => enabled,
       runExclusive: async (operation) => operation(),
@@ -360,6 +361,7 @@ for (const kind of ['scan', 'rebuild']) {
   const service = new CollectionService(collectionDependencies({
     preferences: {
       setPinnedBest: () => events.push('pin'),
+      setFavoriteItem: (...args) => events.push(['favorite', ...args]),
       getInfiniteSupplies: () => true,
       setInfiniteSupplies: (enabled) => { events.push(`supplies:${enabled}`); return enabled },
       runExclusive: async (operation) => { events.push('exclusive'); return operation() },
@@ -367,10 +369,12 @@ for (const kind of ['scan', 'rebuild']) {
     }
   }))
   await service.setPinnedBest({ record: 'records/a.dbr', instanceKey: null, isHardcore: false })
+  await service.setFavoriteItem({ instanceKey: 'a'.repeat(64), isHardcore: true, favorite: true })
   assert.equal(service.getInfiniteSupplies(), true)
   assert.equal(await service.setInfiniteSupplies({ enabled: false }), false)
   assert.deepEqual(events, [
     'exclusive', 'pin', 'backup:pinned copy changed',
+    'exclusive', ['favorite', 'a'.repeat(64), true, true], 'backup:favorite copy changed',
     'exclusive', 'supplies:false', 'backup:supply settings changed'
   ])
 }

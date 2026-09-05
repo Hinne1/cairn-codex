@@ -142,6 +142,15 @@ export function validatePinnedBest(input: unknown): { record: string; instanceKe
   return value as { record: string; instanceKey: string | null; isHardcore: boolean }
 }
 
+export function validateFavoriteItem(input: unknown): { instanceKey: string; isHardcore: boolean; favorite: boolean } {
+  const value = objectInput(input, 'Favorite-copy input is outside its safe bounds.')
+  if (typeof value.instanceKey !== 'string' || !/^[a-f0-9]{64}$/i.test(value.instanceKey) ||
+      typeof value.isHardcore !== 'boolean' || typeof value.favorite !== 'boolean') {
+    throw new Error('Favorite-copy input is outside its safe bounds.')
+  }
+  return { instanceKey: value.instanceKey.toLowerCase(), isHardcore: value.isHardcore, favorite: value.favorite }
+}
+
 export function validateOptionalMode(input: unknown): { isHardcore?: boolean } {
   if (input === undefined) return {}
   const value = objectInput(input, 'Archive mode is outside its safe bounds.')

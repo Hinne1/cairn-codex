@@ -49,7 +49,7 @@ const stashes = { basis: 'stashes', sourcePaths: ['C:/fixtures/transfer.gst'] }
   assert.equal(state.visible.name, 'recovered plus regular ingest')
   state.session.dispose()
   state.session.invalidate()
-  assert.equal(state.reloads.length, 2, 'disposed sessions do not reload')
+  assert.equal(state.reloads.length, 3, 'superseded committed hydration reloads once; disposed sessions do not reload')
 }
 assert.equal(collectionRequestKey(sc), collectionRequestKey({ basis: 'archive', sourcePaths: ['c:\\fixtures\\TRANSFER.gst', 'C:/fixtures/transfer.gst'] }))
 assert.notEqual(collectionRequestKey(sc), collectionRequestKey(hc))
@@ -144,5 +144,16 @@ for (const target of [hc, stashes]) {
   state.session.dispose()
   delayed.resolve({ name: 'unmounted' }); await request
   assert.equal(state.visible, null)
+}
+{
+  const state = fixture(), hydration = deferred()
+  await state.session.run('cache', async read => read.install({ favorite: false, rating: null }))
+  const pending = state.read('hydration', hydration)
+  state.session.commit({ favorite: true, rating: null })
+  hydration.resolve({ favorite: false, rating: 99 }); await pending
+  assert.deepEqual(state.visible, { favorite: true, rating: null }, 'stale hydration cannot overwrite the committed favorite')
+  assert.equal(state.reloads.length, 1, 'committed hydration triggers an authoritative projection after the favorite update')
+  await state.session.run('cache', async read => read.install({ favorite: true, rating: 99 }))
+  assert.deepEqual(state.visible, { favorite: true, rating: 99 })
 }
 console.log('Collection session gates passed: selection identity, reversed completions, stale errors, busy counts and committed updates.')

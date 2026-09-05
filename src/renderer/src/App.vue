@@ -12,6 +12,7 @@ import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import { formatPresentationLine } from './item-presentation'
 import { createItemInspectionSession } from './inspection/item-inspection'
 import ItemInspectionDrawer from './inspection/ItemInspectionDrawer.vue'
+import { applyCopyFavorite, createCopyFavorites } from './inspection/copy-favorites'
 import cairnCodexLogo from '../../../build/icon.svg?url'
 import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
 import type { CollectionFarmingControls } from './workspaces/collection-farming'
@@ -322,6 +323,22 @@ const { archiveItems: vaultItems, copies: allOwnedCopies, archivedRecords: archi
     source: JSON.stringify([collectionBasis.value, snapshot.value?.scannedStashes.map(stash => stash.path)]) }),
   query: request => window.cairnCodex.queryVaultItems(request),
   reportError: error => console.warn('Archive comparison copies could not be refreshed.', error)
+})
+const favoriteRecords = computed(() => new Set(allOwnedCopies.value
+  .filter(copy => copy.isFavorite).map(copy => copy.baseRecord.toLocaleLowerCase())))
+const copyFavorites = createCopyFavorites({
+  contextKey: () => JSON.stringify([collectionRequestKey(collectionContext()), snapshot.value?.isHardcore, snapshot.value?.scannedAtUtc]),
+  modeFor: copy => copy.isHardcore,
+  write: (instanceKey, isHardcore, favorite) => window.cairnCodex.setFavoriteItem(instanceKey, isHardcore, favorite),
+  reconcile: () => { void reloadCollection() },
+  apply: (instanceKey, isHardcore, favorite) => {
+    vaultItems.value = applyCopyFavorite(vaultItems.value, instanceKey, isHardcore, favorite)
+    storedVaultPage.value = { ...storedVaultPage.value, items: applyCopyFavorite(storedVaultPage.value.items, instanceKey, isHardcore, favorite) }
+    if (snapshot.value) collectionSession.commit({ ...snapshot.value,
+      observedItems: applyCopyFavorite(snapshot.value.observedItems, instanceKey, isHardcore, favorite) })
+  },
+  reportError: error => notifications.notify({ key: 'favorite-copy', title: 'Could not save favorite',
+    message: readableError(error), severity: 'error', timeoutMs: null })
 })
 const querySupplyItems = window.cairnCodex.querySupplies
 const selectSupplyBoosts = window.cairnCodex.selectSupplyBoosts
@@ -2141,6 +2158,9 @@ async function syncLiveMode(): Promise<void> {
     if (JSON.stringify(liveIssues.value) !== JSON.stringify(result.issues)) liveIssues.value = result.issues
     if (result.ingested.length > 0) {
       applyLiveIngests(result.ingested)
+      // The optimistic ingest receipt lacks preference/mode metadata. Reproject
+      // the committed batch before enabling favorite edits on those new copies.
+      await reloadCollection()
       reportSuccess(`Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`)
       await refreshVault()
       void hydrateArchiveRolls()
@@ -3052,7 +3072,8 @@ function vaultItemForObserved(copy: ObservedStashItem): VaultListItem | null {
     itemLevel: catalogItem.itemLevel,
     catalogued: true,
     reusable: false,
-    isHardcore: snapshot.value?.isHardcore ?? false,
+    isHardcore: copy.isHardcore ?? snapshot.value?.isHardcore ?? false,
+    isFavorite: Boolean(copy.isFavorite),
     state: 'ingested',
     seed: copy.seed,
     stackCount: copy.stackCount,
@@ -3434,6 +3455,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         :mode="activeView === 'materials' ? 'materials' : 'collection'"
         :items="activeView === 'materials' ? (snapshot.materials ?? []) : snapshot.items"
         :double-rare-mi-base-records="doubleRareMiBaseRecords"
+        :favorite-records="favoriteRecords"
         :search-document-for-item="itemStructuredSearchDocument"
         :category-progress="categoryProgress"
         :icon-url-for-item="itemIconUrl"
@@ -3925,6 +3947,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
 
     <ItemInspectionDrawer
       :session="inspectionSession"
+      :favorites="copyFavorites"
       v-model:metric="selectedMiMetric"
       v-model:metric-direction="selectedMiMetricDirection"
       :item-icon-url="itemIconUrl"

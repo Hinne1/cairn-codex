@@ -1,5 +1,16 @@
 # Release test matrix
 
+## Exact-copy favorites (#50, 2026-09-05)
+
+Synthetic SQLite and validated domain-service tests cover migration from schema14, restart,
+rescans, identical/different fingerprints, SC/HC separation, repeated submissions, failed and
+pending writes, context switches, backup scheduling, and unchanged exact payload hashes.
+Collection and MI Workshop filters retain bounded results with 20k synthetic copies and 2k
+favorites: 48 Collection cards and 50 MI rows. Combined filter/keyboard/settle runs measured
+775 ms at 1440 px and 733 ms at 520 px. Real Vue/Electron tests cover keyboard toggling,
+failed-save feedback, removing the last matching favorite, and narrow layouts. No personal
+archive, save, or live game is used. Full integration verification is recorded in the PR.
+
 ## Quarantine command ownership (#155, 2026-09-05)
 
 Synthetic on-disk archive tests verify unchanged SQLite data versions across cached

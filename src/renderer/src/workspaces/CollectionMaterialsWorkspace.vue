@@ -23,6 +23,7 @@ const props = defineProps<{
   mode: 'collection' | 'materials'
   items: readonly CollectionItem[]
   doubleRareMiBaseRecords: ReadonlySet<string>
+  favoriteRecords?: ReadonlySet<string>
   searchDocumentForItem: (item: CollectionItem) => SearchDocument
   categoryProgress: (category: string) => string
   iconUrlForItem: (item: CollectionItem) => string | null
@@ -61,7 +62,7 @@ const sort = controlModel('sort')
 const direction = controlModel('direction')
 const page = controlModel('page', false)
 watch([() => props.mode, sort], ([mode, value]) => {
-  if (mode === 'collection' && value.startsWith('roll-') && ownership.value !== 'owned') {
+  if (mode === 'collection' && value.startsWith('roll-') && !['owned', 'favorite'].includes(ownership.value)) {
     ownership.value = 'owned'
   }
 }, { immediate: true })
@@ -90,6 +91,7 @@ const rows = computed(() => createCollectionMaterialsRows(props.items, projectio
   mode: props.mode,
   query: structuredQuery.value,
   doubleRareMiBaseRecords: props.doubleRareMiBaseRecords,
+  favoriteRecords: props.favoriteRecords,
   searchDocument: props.searchDocumentForItem,
   rollSummaries: props.rollSummaries
 }))
@@ -103,7 +105,7 @@ function changeSort(value: CollectionMaterialsControls['sort']): void {
     ? (direction.value === 'asc' ? 'desc' : 'asc')
     : value === 'name' ? 'asc' : 'desc'
   const patch = props.mode === 'collection' && value.startsWith('roll-')
-    ? { sort: value, direction: nextDirection, ownership: 'owned' as const }
+    ? { sort: value, direction: nextDirection, ownership: ownership.value === 'favorite' ? 'favorite' as const : 'owned' as const }
     : { sort: value, direction: nextDirection }
   controls.value = updateCollectionMaterialsControls(controls.value, patch, true)
 }
@@ -167,7 +169,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
       :search-error="searchError"
     >
       <template #filters>
-        <label><span>Collection status</span><select v-model="ownership" autocomplete="off"><option value="all">All items</option><option value="owned">Collected</option><option value="missing">Missing</option></select></label>
+        <label><span>Collection status</span><select v-model="ownership" autocomplete="off"><option value="all">All items</option><option value="owned">Collected</option><option value="missing">Missing</option><option v-if="mode === 'collection'" value="favorite">Favorites</option></select></label>
         <label v-if="mode === 'materials'"><span>Category</span><select v-model="category" autocomplete="off"><option value="all">All materials</option><option value="component">Components</option><option value="material">Materials</option><option value="potion-formula">Potion formulas</option></select></label>
         <label v-else><span>Rarity</span><select v-model="rarity" autocomplete="off"><option value="all">All rarities</option><option value="legendary">Legendary</option><option value="epic">Epic</option><option value="mi">Monster Infrequent</option><option value="double-rare">Double rare MIs</option><option value="rare">Rare items</option><option value="recipe">Craftable from recipe</option></select></label>
       </template>

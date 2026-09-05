@@ -806,11 +806,11 @@ export class CollectionDatabase {
           item.reusable === 1 && infiniteSupplies ? 1 : 0
         )
       }
-      this.database
+      const journal = this.database
         .prepare(`
           UPDATE operation_journal
           SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
-          WHERE id = ? AND state = 'prepared'
+          WHERE id = ? AND operation = 'ingest' AND state IN ('prepared', 'needs_recovery')
         `)
         .run(
           input.backupPath,
@@ -818,6 +818,9 @@ export class CollectionDatabase {
           JSON.stringify(input.detail),
           input.operationId
         )
+      if (Number(journal.changes) !== 1) {
+        throw new Error('Prepared ingest journal entry is missing.')
+      }
       this.database
         .prepare('DELETE FROM pending_ingest_item WHERE operation_id = ?')
         .run(input.operationId)
@@ -838,6 +841,24 @@ export class CollectionDatabase {
         WHERE id = ? AND state = 'prepared'
       `)
       .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
+  }
+
+  markIngestNeedsRecovery(operationId: string, error: unknown): void {
+    const row = this.database
+      .prepare('SELECT detail_json FROM operation_journal WHERE id = ?')
+      .get(operationId) as { detail_json: string } | undefined
+    const previous = row ? (JSON.parse(row.detail_json) as Record<string, unknown>) : {}
+    this.database
+      .prepare(`
+        UPDATE operation_journal
+        SET state = 'needs_recovery', detail_json = ?
+        WHERE id = ? AND operation = 'ingest' AND state IN ('prepared', 'needs_recovery')
+      `)
+      .run(JSON.stringify({
+        ...previous,
+        error: error instanceof Error ? error.message : String(error),
+        phase: 'commit_outcome_unknown'
+      }), operationId)
   }
 
   hasCommittedOperation(operationId: string): boolean {

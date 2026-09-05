@@ -10,7 +10,11 @@ import { CollectionDatabase, type ResolvedArchiveCatalogItem } from "../main/col
 import { ArchiveBackupService } from "../main/archive-backup";
 import { DiagnosticLogger } from "../main/diagnostics";
 import { ROLL_ANALYSIS_VERSION } from '../main/catalog-versions.ts'
-import { reconcileLiveRecoveryOperations, syncLiveIncoming, type HelperRequester, type LiveIncomingItem, type LiveRetrievalQueue, type LiveRetrievalStatus, type MapLocationIndex } from '../main/bootstrap.ts'
+import type { MapLocationIndex } from '../main/bootstrap.ts'
+import { reconcileLiveRecoveryOperations } from '../main/transfers/retained-receipts.ts'
+import { syncLiveIncoming } from '../main/transfers/live-incoming.ts'
+import { systemTransferClock, type HelperRequester } from '../main/transfers/runtime.ts'
+import type { LiveIncomingItem, LiveRetrievalQueue, LiveRetrievalStatus } from '../main/transfers/contracts.ts'
 
 export async function runSmokeTest(
   helper: GrimDawnHelperClient,
@@ -1115,8 +1119,11 @@ export async function runSmokeTest(
           throw new Error(`Unexpected live-ingest smoke helper method: ${method}`)
         }
       }
-      const firstIngestBatch = await syncLiveIncoming(incomingHelper, recoveryDatabase)
-      const repeatedIngestBatch = await syncLiveIncoming(incomingHelper, recoveryDatabase)
+      const transferPorts = { clock: systemTransferClock, paths: {
+        backups: join(recoverySmokeRoot, 'backups'), receipts: join(recoverySmokeRoot, 'receipts')
+      } }
+      const firstIngestBatch = await syncLiveIncoming({ ...transferPorts, helper: incomingHelper, database: recoveryDatabase })
+      const repeatedIngestBatch = await syncLiveIncoming({ ...transferPorts, helper: incomingHelper, database: recoveryDatabase })
       if (firstIngestBatch.ingested.length !== 2 || repeatedIngestBatch.ingested.length !== 0) {
         throw new Error('A repeated multi-item live ingest was not idempotent after durable commit.')
       }
@@ -1185,7 +1192,7 @@ export async function runSmokeTest(
         }
       }
       if (
-        await reconcileLiveRecoveryOperations(recoveryHelper, recoveryDatabase, diagnostics) !== 1 ||
+        await reconcileLiveRecoveryOperations({ ...transferPorts, helper: recoveryHelper, database: recoveryDatabase, diagnostics }) !== 1 ||
         recoveryDatabase.getVaultItems([recoveryImport.importedIds[0]!], true)[0]?.state !== 'retrieved' ||
         recoveryDatabase.getRecoveryOperationCount() !== 0
       ) {
@@ -1222,7 +1229,7 @@ export async function runSmokeTest(
         receiptPath: join(recoverySmokeRoot, 'incoming', `${generatedQueues[1]!.operationId}.csv`)
       })
       if (
-        await reconcileLiveRecoveryOperations(recoveryHelper, recoveryDatabase, diagnostics) !== 1 ||
+        await reconcileLiveRecoveryOperations({ ...transferPorts, helper: recoveryHelper, database: recoveryDatabase, diagnostics }) !== 1 ||
         !recoveryDatabase.hasCommittedOperation(generatedOperationId)
       ) {
         throw new Error('A partial multi-item supply delivery did not reconcile deterministically.')
@@ -1249,7 +1256,7 @@ export async function runSmokeTest(
       )
       recoveryStatuses.set(staleQueue.operationId, { state: 'unknown', receiptPath: null })
       if (
-        await reconcileLiveRecoveryOperations(recoveryHelper, recoveryDatabase, diagnostics) !== 0 ||
+        await reconcileLiveRecoveryOperations({ ...transferPorts, helper: recoveryHelper, database: recoveryDatabase, diagnostics }) !== 0 ||
         recoveryDatabase.getRecoveryOperationCount() !== 1 ||
         recoveryDatabase.getVaultItems([recoveryImport.importedIds[1]!], true)[0]?.state !== 'retrieval_pending'
       ) {

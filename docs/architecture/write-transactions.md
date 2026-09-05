@@ -53,11 +53,46 @@ making the items available twice. This conservative state is also used when a
 commit request was sent but its response was lost, because the file outcome is
 then unknown until hashes and stash contents are audited.
 
-Live multi-selection uses the same invariant at item granularity. The desktop
-queues one copy, waits for the game's durable deposited/rejected receipt, and
-commits that journal operation before queueing the next copy. If the destination
-fills or the hook stops responding, the batch stops: acknowledged items remain
-retrieved and every not-yet-queued copy remains `ingested` in the Archive.
+Live multi-selection prepares one operation and marks its selected archive copies
+pending before enqueueing them. The service retains each returned queue receipt,
+waits for terminal outcomes for the batch, and commits mixed deposited/rejected
+outcomes atomically. Deposited copies become retrieved; rejected copies become
+available only through receipt finalization. An uncertain batch stays pending
+and prevents another transfer. The older per-item orchestration has no callers
+and has been removed.
+
+## Concrete desktop adapters
+
+`src/main/transfers/` contains the production adapters, independently importable
+without Electron startup: offline transactions, incoming ingestion, generated
+deliveries, live retrieval service bindings, and retained-receipt recovery.
+Their dependencies name the helper request capability, narrow repository methods,
+backup/receipt directories, clock and diagnostic sink. Bootstrap supplies platform
+paths and owns process lifetime; the adapters do not discover app directories.
+
+The offline writer receives the complete approval from `ArchiveDomainService`:
+source path/hash, selected indexes/seeds, and target tab or vault IDs. It snapshots
+that approval and validates the helper plan against it before dispatch. It does
+not run another staging-tab policy path that could silently approve newer data.
+The explicit operational ingest, retrieval and planning commands use these same
+adapters and retain their console result formats.
+
+Both offline ingest and retrieval retain `needs_recovery` after a dispatched
+commit loses its response or fails subsequent verification/finalization. Ingest
+keeps exact payloads in `pending_ingest_item`; retrieval keeps archive copies
+unavailable in `retrieval_pending`. A received commit transaction is persisted
+before rescanning, including backup and rollback paths. Archive finalization
+occurs after that rescan succeeds. Recovery requires an audit of retained hashes,
+payloads and receipts; it never automatically repeats the save write.
+
+`npm run test:transfer-adapters` exercises the actual adapters, domain policies
+and SQLite implementation using generated payloads, disposable databases and
+an injected helper/clock. It covers stale approvals, rejected writes, lost
+responses, post-commit failures, repeated submission, mixed receipts, restart
+and coordinator shutdown. Helper self-tests separately exercise atomic file
+replacement. These checks do not replace the live release matrix in issue #8.
+Additional pre-existing live dispatch/acknowledgement failure windows identified
+during extraction are tracked in issue #165.
 
 The matching two-item v11 retrieval has now also been accepted by Grim Dawn.
 The game displayed both exact retrieved instances in the designated tab and

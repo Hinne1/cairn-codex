@@ -61,6 +61,15 @@ internal sealed class LiveGameAdapter : IDisposable
 
     public static LiveQueueSelfTestResult SelfTest()
     {
+        if (DecodeActiveCharacter([]) is not null ||
+            DecodeActiveCharacter(Encoding.Unicode.GetBytes("\0\0")) is not null ||
+            DecodeActiveCharacter([0x41]) is not null ||
+            DecodeActiveCharacter([0x00, 0xD8]) is not null ||
+            DecodeActiveCharacter(Encoding.Unicode.GetBytes("Name\0Other")) is not null ||
+            DecodeActiveCharacter(Encoding.Unicode.GetBytes("Confírmed\0")) != "Confírmed")
+        {
+            throw new InvalidDataException("Active-character messages did not preserve confirmed or empty identity.");
+        }
         var sample = new VaultItemPayload(
             11, -1, -1,
             "records/items/test.dbr", "records/prefix/test.dbr", "records/suffix/test.dbr",
@@ -241,6 +250,7 @@ internal sealed class LiveGameAdapter : IDisposable
                     detail = "The connected Grim Dawn process exited. Live queue operations are locked.";
                     gameProcessId = null;
                     isHardcore = null;
+                    activeCharacterName = null;
                     currentState = state;
                     currentDetail = detail;
                 }
@@ -803,6 +813,7 @@ internal sealed class LiveGameAdapter : IDisposable
                 detail = "The connected Grim Dawn process or live hook exited. Live queue operations are locked.";
                 gameProcessId = null;
                 isHardcore = null;
+                activeCharacterName = null;
                 throw new WriteSafetyException(detail);
             }
         }
@@ -812,6 +823,7 @@ internal sealed class LiveGameAdapter : IDisposable
             detail = "The connected Grim Dawn process exited. Live queue operations are locked.";
             gameProcessId = null;
             isHardcore = null;
+            activeCharacterName = null;
             throw new WriteSafetyException(detail);
         }
         finally
@@ -991,6 +1003,17 @@ internal sealed class LiveGameAdapter : IDisposable
         }
     }
 
+    private static string? DecodeActiveCharacter(byte[] data)
+    {
+        if (data.Length == 0 || data.Length % 2 != 0 || data.Length > 512) return null;
+        try
+        {
+            var name = new UnicodeEncoding(false, false, true).GetString(data).TrimEnd('\0').Trim();
+            return name.Length == 0 || name.Contains('\0') ? null : name;
+        }
+        catch (DecoderFallbackException) { return null; }
+    }
+
     private IntPtr WindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
         if (message == WmCopyData)
@@ -1007,9 +1030,9 @@ internal sealed class LiveGameAdapter : IDisposable
                 {
                     isHardcore = data[0] != 0;
                 }
-                if (type == TypeActiveCharacter && data.Length > 0)
+                if (type == TypeActiveCharacter)
                 {
-                    activeCharacterName = Encoding.Unicode.GetString(data).TrimEnd('\0');
+                    activeCharacterName = DecodeActiveCharacter(data);
                 }
                 if (type == TypeWorkerLaunched)
                 {

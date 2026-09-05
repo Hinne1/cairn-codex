@@ -67,6 +67,7 @@ import {
 import type { SupplySelectionItem } from '@shared/workspace-query-contracts'
 import { useCollectionCopies } from './collection-copies'
 import { createNotificationService, type AppNotification } from './notification-service'
+import { resolveActiveCharacter } from './live-presence'
 import { preferredScrollBehavior } from './motion-preference'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
 import { collectionRequestKey } from '@shared/collection-request'
@@ -484,16 +485,7 @@ const connectionColorState = computed(() =>
       ? 'connecting'
       : 'offline'
 )
-const activeCharacter = computed(() => {
-  if (!liveStatus.value?.grimDawnProcessIds.length) return null
-  const matching = headerCharacters.value
-    .filter((character) => !character.error)
-    .filter((character) => liveStatus.value?.isHardcore == null || character.isHardcore === liveStatus.value.isHardcore)
-    .filter((character) => !liveStatus.value?.activeCharacterName ||
-      character.name.localeCompare(liveStatus.value.activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
-    .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))
-  return matching[0] ?? null
-})
+const activeCharacter = computed(() => resolveActiveCharacter(liveStatus.value, headerCharacters.value))
 const activeCharacterClass = computed(() => {
   const character = activeCharacter.value
   if (!character) return ''

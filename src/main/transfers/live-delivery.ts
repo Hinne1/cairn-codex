@@ -90,7 +90,7 @@ async function deliverGeneratedItems(
     for (const queue of queues) {
       if (terminal.has(queue.operationId)) continue
       const status = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', {
-        queue, allowHashFallback: hasUniqueLivePayload(queue, queues)
+        queue, allowHashFallback: destination === 'shared-stash' && hasUniqueLivePayload(queue, queues)
       })
       if (status.state !== 'deposited' && status.state !== 'rejected') continue
       if (!status.receiptPath?.trim()) throw new Error('The live delivery has no durable terminal receipt.')

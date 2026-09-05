@@ -262,8 +262,10 @@ try {
   for (const kind of ['augment', 'memento']) {
     for (const outcome of ['deposited', 'rejected', 'pending']) {
       await fixture(async ({ dependencies, handlers, collection, calls, reopen }) => {
-        handlers.set('inspect-live-retrieval', ({ queue }) => ({ state: outcome,
-          receiptPath: outcome === 'pending' ? null : `${queue.outgoingPath}.${outcome}` }))
+        handlers.set('inspect-live-retrieval', ({ queue, allowHashFallback }) => {
+          assert.equal(allowHashFallback, false, 'personal delivery always requires its exact operation receipt')
+          return { state: outcome, receiptPath: outcome === 'pending' ? null : `${queue.outgoingPath}.${outcome}` }
+        })
         const result = kind === 'augment'
           ? executeLiveAugmentDispense(dependencies, collection, [record], 'Synthetic')
           : executeSahdinasMementoRecovery(dependencies, collection, 'character-inventory', 'Synthetic')
@@ -531,6 +533,25 @@ try {
     assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false)
     assert.deepEqual(dependencies.database.getVaultItems(['vault-a', 'vault-b', 'vault-c'], false).map(item => item.state),
       ['retrieval_pending', 'retrieval_pending', 'retrieval_pending'])
+  })
+  for (const malformed of ['missing-copy', 'invalid-sibling']) await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
+    seed(['vault-a', 'vault-b'])
+    for (const [index, id] of ['vault-a', 'vault-b'].entries()) {
+      const operationId = `legacy-claim-${index}`
+      const retained = queue(`${operationId}-0`)
+      const entry = { operationId: retained.operationId, state: 'rejected', receiptPath: `${path}.same`,
+        semanticSha256: sourceHash, copiedReceiptPath: `${path}.same-copy` }
+      if (index === 1 && malformed === 'missing-copy') delete entry.copiedReceiptPath
+      dependencies.database.prepareRetrievalOperation({ operationId, stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: [id],
+        detail: { vaultItemIds: [id], queues: [retained], recoveryResolution: {
+          entries: index === 1 && malformed === 'invalid-sibling' ? [entry, null] : [entry]
+        } } })
+    }
+    handlers.set('inspect-live-retrieval', () => { throw new Error('Synthetic legacy evidence unavailable') })
+    assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0, 'individually readable legacy claims reserve evidence despite invalid finalization metadata')
+    assert.equal(dependencies.database.getRecoveryOperationCount(), 2)
+    assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false)
   })
   for (const unavailable of ['pending', 'error']) await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
     seed(['vault-a', 'vault-b', 'vault-c'])

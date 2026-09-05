@@ -566,6 +566,13 @@ internal sealed class LiveGameAdapter : IDisposable
             throw new InvalidDataException("An identical-payload batch allowed hash-only fallback.");
         if (InspectRetrievalFiles(first, root, true).State != "deposited")
             throw new InvalidDataException("A uniquely permitted renamed shared-stash receipt could not resolve.");
+        var personal = new LiveRetrievalQueue("personal-copy", Path.Combine(outgoing, "cairn-personal-personal-copy.csv"), hash, false, [], []);
+        if (InspectRetrievalFiles(personal, root, true).State != "unknown")
+            throw new InvalidDataException("A personal delivery consumed unrelated renamed evidence.");
+        var personalReceipt = Path.Combine(deleted, "cairn-personal-personal-copy.csv");
+        File.WriteAllBytes(personalReceipt, bytes);
+        if (InspectRetrievalFiles(personal, root).State != "deposited")
+            throw new InvalidDataException("A personal delivery lost its exact operation evidence.");
         File.WriteAllBytes(renamedRejection, bytes);
         if (InspectRetrievalFiles(first, root, true).State != "unknown")
             throw new InvalidDataException("Conflicting renamed outcomes were guessed from identical bytes.");
@@ -728,7 +735,8 @@ internal sealed class LiveGameAdapter : IDisposable
         if (depositedMatches && rejectedMatches) return new LiveRetrievalStatus("unknown", null);
         if (depositedMatches) return new LiveRetrievalStatus("deposited", exactDeposited);
         if (rejectedMatches) return new LiveRetrievalStatus("rejected", exactRejected);
-        if (!allowHashFallback) return new LiveRetrievalStatus("unknown", null);
+        if (!allowHashFallback || !queueName.Equals($"cairn-{queue.OperationId}.csv", StringComparison.OrdinalIgnoreCase))
+            return new LiveRetrievalStatus("unknown", null);
 
         // Shared-stash receipts may be renamed by the pinned hook. The caller
         // permits this only for a payload unique across the complete queue set.

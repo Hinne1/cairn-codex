@@ -107,7 +107,8 @@ determines the outcome; conflicting deposited and rejected matches stay unknown.
 An exact rejection cannot be displaced by another operation's identical payload.
 
 The pinned shared-stash hook renames receipts, while the personal-inventory patch
-preserves operation filenames. For shared-stash compatibility, main permits hash
+preserves operation filenames. The helper never permits fallback for a personal
+queue, even if the caller requests it. For shared-stash compatibility, main permits hash
 fallback only when the payload and mode are unique among the complete known queue
 set. Recovery considers every pending retrieval; an incomplete queue journal
 disables fallback. The helper excludes baseline files and other operation-named

@@ -95,6 +95,17 @@ export function retainedTerminalResolution(operation: RecoveryJournalOperation):
     : []
 }
 
+/** Legacy or damaged metadata can reserve evidence without authorizing finalization. */
+function retainedReceiptClaims(operation: RecoveryJournalOperation): Array<{ receiptPath: string }> {
+  const resolution = operation.detail.recoveryResolution
+  if (!resolution || typeof resolution !== 'object' || Array.isArray(resolution)) return []
+  const entries = (resolution as Record<string, unknown>).entries
+  if (!Array.isArray(entries)) return []
+  return entries.flatMap(entry => entry && typeof entry === 'object' && !Array.isArray(entry) &&
+    typeof entry.receiptPath === 'string' && entry.receiptPath.trim()
+    ? [{ receiptPath: entry.receiptPath }] : [])
+}
+
 export async function finalizeLiveRecoveryOperation(
   dependencies: RetainedReceiptsDependencies,
   operation: RecoveryJournalOperation,
@@ -236,7 +247,7 @@ export async function reconcileLiveRecoveryOperations(
   for (const operation of operations) {
     if (operation.operation !== 'retrieve') continue
     let entries = retainedTerminalResolution(operation)
-    observe(operation.id, entries)
+    observe(operation.id, retainedReceiptClaims(operation))
     const queues = retainedRecoveryQueues(operation)
     if (queues.length === 0) continue
     try {

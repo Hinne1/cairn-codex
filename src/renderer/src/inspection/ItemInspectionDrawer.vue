@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { CollectionItem, ObservedStashItem, VaultListItem } from '../../../shared/contracts'
 import type { ItemInspectionSession } from './item-inspection'
+import { inspectionCopyKey } from './item-inspection'
 import type { MiWorkshopControls } from '../workspaces/mi-workshop'
 import { miMetricLabel, miMetricResult, buildMiMetricOptions } from '../workspaces/mi-workshop'
 import { researchItemTypeLabel, researchRarityLabel } from '../workspaces/research-item-table'
@@ -136,7 +137,7 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
           class="inspection-copies"
           :class="{ 'paged-copies': selectedCopies.length > 50 }"
           :items="selectedCopies"
-          :get-key="copy => copy.instanceKey!"
+          :get-key="inspectionCopyKey"
           :page-size="50"
           label="Item copies"
           layout="grid"

@@ -295,6 +295,7 @@ const {
   vaultStructuredQuery
 } = transfersSession
 const inspectionSession = createItemInspectionSession({
+  contextKey: () => JSON.stringify([collectionRequestKey(collectionContext()), snapshot.value?.isHardcore]),
   available: () => Boolean(snapshot.value),
   items: () => plannerCatalogItems.value,
   copies: () => allOwnedCopies.value,

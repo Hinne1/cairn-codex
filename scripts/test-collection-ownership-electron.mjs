@@ -108,6 +108,10 @@ if (!process.versions.electron) {
       }
 
       window.webContents.setZoomFactor(1)
+      await act(`collectionOwnerFixture.openCopies(4); collectionOwnerFixture.copies.value = collectionOwnerFixture.copies.value.map((copy, index) => ({...copy, instanceKey:'identical-payload', sourcePath: index < 2 ? 'vault://copy-' + index : 'synthetic.gst', itemIndex: index < 2 ? 0 : index - 2})); collectionOwnerFixture.inspection.restore(collectionOwnerFixture.snapshot.value.items[0].record, 'identical-payload')`)
+      assert.equal(await run("document.querySelectorAll('.copy-card').length"), 4, 'identical fingerprints must render distinct physical copies')
+      assert.equal(await run("collectionOwnerFixture.inspection.comparisonReferenceCopy.value.instanceKey"), 'identical-payload')
+      await act("collectionOwnerFixture.inspection.close()")
       for (const width of [1440, 520]) {
         window.setContentSize(width, 1000)
         for (const workspace of ['collection', 'sets']) {

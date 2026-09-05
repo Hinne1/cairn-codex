@@ -7,6 +7,8 @@ import { createCollectionDashboard, medianSummary, percentage } from '../src/ren
 import { buildCollectionSets, createSetsSession, setReadyFromStorage, setReadyAfterCrafting, setReadyWithQualifiedAvailability } from '../src/renderer/src/workspaces/sets.ts'
 import { useCollectionCopies } from '../src/renderer/src/collection-copies.ts'
 import { createComparisonProjection, copyAffixDelta } from '../src/renderer/src/inspection/inspection-presentation.ts'
+import { inspectionCopyKey } from '../src/renderer/src/inspection/item-inspection.ts'
+import { createBoundedResultWindow } from '../src/renderer/src/bounded-results.ts'
 
 // Owners may depend on shared contracts and renderer presentation, never on the shell
 // or privileged process implementations. Effects enter through explicit typed ports.
@@ -125,6 +127,16 @@ const stat = (field, value, overrides = {}) => ({ field, value, rollable: true, 
 const copy = (key, stats) => ({ instanceKey: key, prefixRecord: '', suffixRecord: '', rollAnalysis: { stats, petStats: [] } })
 const reference = copy('reference', [stat('offensiveFire', 5), stat('offensiveCold', 7)])
 const variant = copy('variant', [stat('offensiveFire', 8), stat('offensiveLightning', 4)])
+const identicalCopies = [
+  { ...reference, sourcePath: 'vault://copy-a', tabIndex: -1, itemIndex: 0 },
+  { ...reference, sourcePath: 'vault://copy-b', tabIndex: -1, itemIndex: 1 },
+  { ...reference, sourcePath: 'synthetic.gst', tabIndex: 0, itemIndex: 0 },
+  { ...reference, sourcePath: 'synthetic.gst', tabIndex: 0, itemIndex: 1 }
+]
+const identicalWindow = createBoundedResultWindow({ items: identicalCopies, getKey: inspectionCopyKey, page: 1, pageSize: 50 })
+assert.equal(identicalWindow.entries.length, 4, 'same fingerprint does not collapse distinct physical copies')
+assert.equal(new Set(identicalWindow.entries.map(entry => entry.key)).size, 4)
+assert.equal(inspectionCopyKey(identicalCopies[0]), inspectionCopyKey({ ...identicalCopies[0], itemIndex: 100 }), 'vault row identity survives aggregation reorder')
 const comparison = createComparisonProjection(false, [reference, variant], reference)
 const rows = comparison(variant)
 assert.equal(rows.find(row => row.key === 'offensiveFire').deltaTone, 'positive')

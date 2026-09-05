@@ -278,7 +278,9 @@ Reproduce with `npm run test:workspace-queries` and, after the verification/help
 The direct production-owner gates (`test:collection-ownership` and `test:roll-rating`) cover
 dashboard medians and readiness, typed Sets route restoration with pending query work,
 archive augmentation and mode isolation, exact comparison/reference identity, and pin rejection,
-overlap, navigation, disposal and catalog replacement. A generated 20,000-item catalog projected
+overlap, navigation, disposal, catalog replacement and source/mode ABA. Distinct vault/scanned
+copies with identical fingerprints pass both the production bounded-window and actual drawer
+regressions; reference semantics remain unchanged. A generated 20,000-item catalog projected
 4,000 sets in 13 ms; comparison setup for 20,000 copies plus the first 50 rows took 41 ms.
 The gate also enforces the extracted owners' dependency direction and typed effect boundaries.
 

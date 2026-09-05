@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { effectScope, shallowRef, nextTick } from 'vue'
+import { effectScope, ref, shallowRef, nextTick } from 'vue'
 import { createItemInspectionSession } from '../src/renderer/src/inspection/item-inspection.ts'
 import { presentRolledStats as present } from '../src/renderer/src/inspection/inspection-presentation.ts'
 import { createAppHistoryEntry, defaultAppRoute, parseAppHistoryEntry } from '../src/renderer/src/app-route.ts'
@@ -43,10 +43,12 @@ const copies = shallowRef([
 ])
 const items = shallowRef([{ record, rarity: 'legendary', pinnedInstanceKey: 'pinned-other' }])
 const writes = []
+const contextKey = ref('synthetic-sc')
 let finishPin
 let rejectPin
 const scope = effectScope()
 const harness = scope.run(() => createItemInspectionSession({
+  contextKey: () => contextKey.value,
   available: () => true, items: () => items.value, copies: () => copies.value,
   observedCopies: () => [], affixes: () => new Map(), metric: () => 'overall',
   metricDirection: () => 'desc', storedCopyFor: () => null,
@@ -109,6 +111,21 @@ finishPin()
 await refreshedPin
 assert.equal(items.value[0].pinnedInstanceKey, 'pinned-other', 'completed pin updates the refreshed catalog object')
 assert.equal(harness.selectedReferenceInstanceKey.value, 'pinned-other')
+for (const change of ['mode', 'source', 'aba']) {
+  harness.restore(record, 'pinned-other')
+  const previousContext = contextKey.value
+  const changedContextPin = harness.pinCopy(copies.value[1])
+  const previousItem = items.value[0]
+  contextKey.value = change === 'mode' ? 'synthetic-hc' : previousContext + '-other-source'
+  if (change === 'aba') contextKey.value = previousContext
+  items.value = [{ ...previousItem, pinnedInstanceKey: 'current-context-pin' }]
+  // Keep the record and explicit reference unchanged: only collection context invalidates it.
+  finishPin()
+  await changedContextPin
+  assert.equal(items.value[0].pinnedInstanceKey, 'current-context-pin', change + ': stale pin cannot update this catalog')
+  assert.equal(harness.selectedReferenceInstanceKey.value, 'pinned-other', change + ': stale pin cannot redirect the reference')
+  assert.notEqual(previousItem.pinnedInstanceKey, 'score-leader', change + ': no stale object mutation')
+}
 const disposedPin = harness.pinCopy(copies.value[1])
 scope.stop()
 finishPin()

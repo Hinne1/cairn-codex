@@ -11,6 +11,7 @@ export interface InspectionAffix {
   presentation?: ItemPresentation
 }
 export interface ItemInspectionOptions {
+  contextKey: () => string
   available: () => boolean
   items: () => readonly CollectionItem[]
   copies: () => readonly ObservedStashItem[]
@@ -30,7 +31,9 @@ export function createItemInspectionSession(options: ItemInspectionOptions) {
   const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
   const pinning = ref(false)
   let selectionRevision = 0
+  let contextRevision = 0
   let disposed = false
+  watch(options.contextKey, () => { contextRevision++; selectionRevision++ }, { flush: 'sync' })
   watch([selectedRecord, selectedReferenceInstanceKey], () => { selectionRevision++ }, { flush: 'sync' })
   watch(selectedRecord, () => { activeCopyAffixTarget.value = null })
   onScopeDispose(() => { disposed = true; selectionRevision++ })
@@ -104,10 +107,13 @@ export function createItemInspectionSession(options: ItemInspectionOptions) {
     const item = selectedItem.value
     if (!item || !copy.instanceKey || pinning.value) return
     const revision = selectionRevision
+    const context = contextRevision
     const next = item.pinnedInstanceKey === copy.instanceKey ? null : copy.instanceKey
     pinning.value = true
     try {
       await options.setPinnedBest(item.record, next, options.modeFor(copy))
+      // The durable write may finish, but a different source/mode owns the view now.
+      if (disposed || context !== contextRevision) return
       // A completed write belongs to its item, even if navigation occurred meanwhile.
       item.pinnedInstanceKey = next
       if (!disposed) {
@@ -169,3 +175,10 @@ export function createItemInspectionSession(options: ItemInspectionOptions) {
   }
 }
 export type ItemInspectionSession = ReturnType<typeof createItemInspectionSession>
+
+/** A fingerprint can belong to several physical copies; renderer rows need source identity. */
+export function inspectionCopyKey(copy: ObservedStashItem): string {
+  return JSON.stringify(copy.sourcePath.startsWith('vault://')
+    ? [copy.sourcePath]
+    : [copy.sourcePath, copy.tabIndex, copy.itemIndex])
+}

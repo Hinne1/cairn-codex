@@ -365,10 +365,14 @@ debt remains tracked by #16, and extraction is not counted as an accessibility m
 pin-in-flight state. `ItemInspectionDrawer.vue` receives that typed session and narrow icon,
 catalog, stored-copy and action ports. It renders at most 50 copy cards through the shared bounded
 surface; the explicit reference remains first on page one and remains the comparison reference
-on later pages. `inspection-presentation.ts` owns pure roll and delta projection, computing the
+on later pages. Rows use physical vault/source identity so identical item fingerprints cannot
+collide; saved pins and reference matching retain their existing fingerprint semantics.
+`inspection-presentation.ts` owns pure roll and delta projection, computing the
 cross-copy stat universe once and caching each displayed copy's rows. A pending pin captures its
-item, source mode and selection revision: success updates that item's pin after catalog refresh,
-but cannot redirect a newer selection or a disposed session. Rejection leaves the pin unchanged.
+item, source/mode context generation and selection revision: success updates that item's pin
+after catalog refresh only while its collection context is current. Source/mode changes, including
+A→B→A, invalidate completion updates; navigation or disposal cannot redirect a newer selection.
+Rejection leaves the pin unchanged.
 
 `collection-copies.ts` owns the legacy archive augmentation through `archive-copy-session.ts`.
 That reader still aggregates all comparison copies after 250-row reads and publishes only a

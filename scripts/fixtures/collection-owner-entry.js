@@ -36,6 +36,7 @@ createApp({ setup() {
   const sets = createSetsSession({ items: () => snapshot.value?.items ?? [], itemSearchDocument: itemDocument, restoringHistory: () => false })
   const dashboard = createCollectionDashboard({ snapshot: () => snapshot.value, miCountingMode: () => 'base', sets: () => sets.collectionSets.value })
   const inspection = createItemInspectionSession({ available: () => Boolean(snapshot.value), items: () => snapshot.value?.items ?? [],
+    contextKey: () => 'synthetic-sc',
     copies: () => copies.value, observedCopies: () => [], metric: () => metric.value, metricDirection: () => direction.value,
     affixes: () => new Map([['synthetic-prefix', { name: 'Synthetic prefix', kind: 'prefix', rarity: 'rare', presentation: { sections: [] } }]]),
     storedCopyFor: () => null, modeFor: () => false, setPinnedBest: async (...args) => { events.push(['pin', ...args]) } })
@@ -46,7 +47,7 @@ createApp({ setup() {
     copies.value = items.slice(0, 1).flatMap(item => Array.from({ length: 3 }, (_, index) => makeCopy(index, item.record)))
   }
   setCount(120)
-  window.collectionOwnerFixture = { workspace, snapshot, sets, dashboard, inspection, controls, collapsed, busy, events,
+  window.collectionOwnerFixture = { workspace, snapshot, copies, sets, dashboard, inspection, controls, collapsed, busy, events,
     setCount, openCopies: count => { copies.value = Array.from({ length: count }, (_, index) => makeCopy(index, snapshot.value.items[0].record)); inspection.open(snapshot.value.items[0]) } }
   const openItem = item => inspection.open(item)
   return () => h('main', { style: 'padding:16px;min-width:0' }, [

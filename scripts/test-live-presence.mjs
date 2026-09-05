@@ -15,6 +15,12 @@ for (const status of [null, { ...ready, state: 'blocked' }, { ...ready, grimDawn
 }
 assert.equal(resolveActiveCharacter(ready, [{ ...profiles[1], error: 'unreadable' }]), null)
 assert.equal(resolveActiveCharacter({ ...ready, activeCharacterName: 'Newest' }, profiles), profiles[0])
+const accented = { ...ready, activeCharacterName: 'Confírmed' }
+assert.equal(resolveActiveCharacter(accented, [profiles[1]]), null, 'a cached accent-confusable name needs metadata refresh')
+assert.equal(resolveActiveCharacter(accented, [profiles[1], profiles[3]]), profiles[3], 'refreshed exact metadata resolves the live identity')
+const app = await readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8')
+assert.match(app, /const currentCharacterResolved = Boolean\(resolveActiveCharacter\(current, headerCharacters\.value\)\)/,
+  'lifecycle polling uses the same exact identity match as the displayed character')
 const helper = await readFile(new URL('../src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs', import.meta.url), 'utf8')
 assert.match(helper, /if \(type == TypeActiveCharacter\)\s*\{\s*activeCharacterName = DecodeActiveCharacter\(data\)/)
 assert.doesNotMatch(helper, /isHardcore = null;\s*(?:currentState =|throw new WriteSafetyException)/,

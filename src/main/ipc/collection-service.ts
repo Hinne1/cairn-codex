@@ -5,6 +5,7 @@ import type {
   CollectionSnapshot,
   GrimDawnDiscovery
 } from '../../shared/contracts.ts'
+import { copyCollectionRequest, type CollectionRequestContext } from '../../shared/collection-request.ts'
 
 export const ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT = 256
 
@@ -104,10 +105,7 @@ export interface CollectionServiceDependencies {
   catalogPresentationVersion: number
 }
 
-export interface CollectionRequest {
-  sourcePaths: string[]
-  basis: CollectionBasis
-}
+export type CollectionRequest = CollectionRequestContext
 
 export interface CollectionHydrationServiceRequest {
   sourcePaths: string[]
@@ -332,7 +330,22 @@ export class CollectionService {
     }
   }
 
-  scan(request: CollectionRequest): Promise<CollectionSnapshot> {
+  async scan(request: CollectionRequest): Promise<CollectionSnapshot> {
+    const caller = copyCollectionRequest(request)
+    return this.present(await this.scanCatalog(), caller)
+  }
+
+  async rebuild(request: CollectionRequest): Promise<CollectionSnapshot> {
+    const caller = copyCollectionRequest(request)
+    return this.present(await this.rebuildCatalog(), caller)
+  }
+
+  present(snapshot: CollectionSnapshot, request: CollectionRequest): Promise<CollectionSnapshot> {
+    const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
+    return this.dependencies.projector.present(projected, request.basis)
+  }
+
+  scanCatalog(): Promise<CollectionSnapshot> {
     return this.startRefresh(async () => {
       const scanned = await this.dependencies.scanner.scanInstalledData()
       const withIcons = await this.dependencies.icons.attachIcons(scanned)
@@ -346,11 +359,11 @@ export class CollectionService {
           this.dependencies.diagnostics.reportMapIndexFailure(error)
         }
       }
-      return this.persistAndPresent(enriched, request)
+      return this.persist(enriched)
     })
   }
 
-  rebuild(request: CollectionRequest): Promise<CollectionSnapshot> {
+  rebuildCatalog(): Promise<CollectionSnapshot> {
     return this.startRefresh(async () => {
       const scanned = await this.dependencies.scanner.scanInstalledData()
       const withIcons = await this.dependencies.icons.attachIcons(scanned)
@@ -358,7 +371,7 @@ export class CollectionService {
         throw new CollectionInstallationUnavailableError()
       }
       const withLocations = await this.dependencies.maps.attachLocations(withIcons, true)
-      return this.persistAndPresent(withLocations, request)
+      return this.persist(withLocations)
     })
   }
 
@@ -415,10 +428,7 @@ export class CollectionService {
     return tracked
   }
 
-  private async persistAndPresent(
-    snapshot: CollectionSnapshot,
-    request: CollectionRequest
-  ): Promise<CollectionSnapshot> {
+  private async persist(snapshot: CollectionSnapshot): Promise<CollectionSnapshot> {
     const previous = await this.loadLatest()
     const reconciled = preserveUnavailableCollectionKnowledge(snapshot, previous)
     const persisted = {
@@ -429,7 +439,6 @@ export class CollectionService {
     // A failed durable write therefore cannot masquerade as a completed refresh.
     await this.dependencies.cache.write(persisted)
     this.latest = persisted
-    const projected = this.dependencies.projector.projectSources(persisted, request.sourcePaths)
-    return this.dependencies.projector.present(projected, request.basis)
+    return persisted
   }
 }

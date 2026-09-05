@@ -17,6 +17,23 @@ operations with different side effects; for example, creating and exporting back
 keys. Roll hydration deliberately analyzes the all-mode archive domain once, then each IPC caller
 receives its own Softcore/Hardcore source projection after the shared work settles.
 
+Collection scans and game-data rebuilds follow the same ownership rule through
+`runCollectionRefresh`: only the committed, unfiltered catalog is coalesced. Each
+caller projects its requested source paths and archive/stash basis afterward.
+Scan and rebuild retain distinct dedupe keys; the collection service rejects a
+different refresh while one is active. A scan keeps optional map-index failures
+nonfatal, while an explicit rebuild requires successful forced map indexing.
+
+The renderer's `CollectionSession` owns cached loads, scan/rebuild results and
+hydration. Selection identity includes basis and a normalized set of source paths;
+synchronous selection invalidation distinguishes A → B → A from the original A.
+Each new read supersedes older reads, and only the current read can install a
+snapshot or report a failure. Superseded work retains its busy count until it
+settles. Live/archive changes install through `commit`, invalidating all earlier
+reads so a delayed snapshot cannot erase a visible committed change. Responses
+are discarded after unmount. None of this cancels an in-flight durable main-process
+operation or replays a transfer.
+
 ## Cancellation
 
 Cancellation is cooperative. `canCancel` is true only before a side effect or between bounded

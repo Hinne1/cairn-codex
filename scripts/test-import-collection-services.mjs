@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { BackgroundJobCoordinator } from '../src/main/background-jobs.ts'
+import { runCollectionRefresh } from '../src/main/ipc/collection-refresh-jobs.ts'
 import {
   ItemAssistantImportCanceledError,
   ItemAssistantImportInProgressError,
@@ -248,6 +250,42 @@ function collectionDependencies(overrides = {}) {
     catalogPresentationVersion: 7,
     ...overrides
   }
+}
+
+// Production job coalescing shares the committed raw catalog, never the first
+// caller's SC/HC selection or archive/stash presentation. Scan and rebuild stay distinct.
+for (const kind of ['collection-scan', 'game-data-rebuild']) {
+  const scanned = deferred()
+  let scans = 0
+  let writes = 0
+  const rebuildFlags = []
+  const dependencies = collectionDependencies({
+    scanner: { scanInstalledData: () => { scans++; return scanned.promise } },
+    cache: { read: async () => null, write: async () => { writes++ } },
+    maps: { attachLocations: async (snapshot, rebuild) => { rebuildFlags.push(rebuild); return snapshot } }
+  })
+  const service = new CollectionService(dependencies)
+  const jobs = new BackgroundJobCoordinator()
+  const refresh = kind === 'collection-scan' ? () => service.scanCatalog() : () => service.rebuildCatalog()
+  const callers = [
+    { sourcePaths: ['C:/fixtures/transfer.gst'], basis: 'archive' },
+    { sourcePaths: ['C:/fixtures/transfer.gsh'], basis: 'archive' },
+    { sourcePaths: ['C:/fixtures/transfer.gst'], basis: 'stashes' },
+    { sourcePaths: ['C:/fixtures/transfer.gsh'], basis: 'stashes' }
+  ]
+  const results = callers.map(caller => runCollectionRefresh(jobs, kind, refresh, snapshot => service.present(snapshot, caller)))
+  await new Promise(resolve => setImmediate(resolve))
+  const opposite = kind === 'collection-scan' ? 'game-data-rebuild' : 'collection-scan'
+  await assert.rejects(runCollectionRefresh(jobs, opposite,
+    () => opposite === 'collection-scan' ? service.scanCatalog() : service.rebuildCatalog(),
+    snapshot => service.present(snapshot, callers[0])), { code: 'collection.refresh-already-running' })
+  scanned.resolve(collectionSnapshot('shared-catalog'))
+  const presented = await Promise.all(results)
+  assert.equal(scans, 1)
+  assert.equal(writes, 1)
+  assert.deepEqual(rebuildFlags, [kind === 'game-data-rebuild'])
+  assert.deepEqual(presented.map(value => ({ basis: value.basis, sourcePaths: value.projectedPaths })), callers)
+  assert.equal(new Set(presented).size, callers.length, 'each caller receives its own presentation')
 }
 
 // Discovery and character enumeration are concrete collection service methods,

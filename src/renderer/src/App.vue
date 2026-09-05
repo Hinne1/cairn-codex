@@ -82,6 +82,8 @@ import {
 } from './workspaces/supplies'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { preferredScrollBehavior } from './motion-preference'
+import { CollectionSession, type CollectionPendingReads } from './collection-session'
+import { collectionRequestKey } from '@shared/collection-request'
 import {
   resetUiPreferences,
   type RendererFailureReport
@@ -280,9 +282,10 @@ const enabledStashPaths = computed<string[]>({
     else indexStashPaths.value = paths
   }
 })
-const scanning = ref(false)
+const collectionPending = ref<CollectionPendingReads>({ cache: 0, scan: 0, rebuild: 0, hydration: 0 })
+const scanning = computed(() => collectionPending.value.cache + collectionPending.value.scan + collectionPending.value.rebuild > 0)
 const appInitializing = ref(true)
-const archiveRollHydrating = ref(false)
+const archiveRollHydrating = computed(() => collectionPending.value.hydration > 0)
 const archiveRollHydrationCompleted = ref(0)
 const archiveRollHydrationTotal = ref(0)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
@@ -296,6 +299,19 @@ const notifications = createNotificationService()
 const currentNotification = notifications.current
 const notificationAnnouncement = notifications.announcement
 const cacheIssue = ref<string | null>(null)
+const collectionContext = () => ({ basis: collectionBasis.value, sourcePaths: [...enabledStashPaths.value] })
+const collectionSession = new CollectionSession({
+  context: collectionContext,
+  install: applySnapshot,
+  pendingChanged: pending => { collectionPending.value = pending },
+  reportError: (error, kind) => {
+    if (kind === 'cache') cacheIssue.value = readableError(error)
+    else if (kind === 'scan') reportScanProblem(readableError(error))
+    else if (kind === 'rebuild') reportTransferProblem(readableError(error))
+    else console.warn('Archived item rolls could not be hydrated in the background.', error)
+  }
+})
+watch(() => collectionRequestKey(collectionContext()), () => collectionSession.contextChanged(), { flush: 'sync' })
 const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
   appInitializing.value && !snapshot.value
     ? 'opening-cache'
@@ -2042,19 +2058,17 @@ onMounted(async () => {
     await pollLiveLifecycle()
     liveSyncTimer = setInterval(() => void syncLiveMode(), 1000)
     liveLifecycleTimer = setInterval(() => void pollLiveLifecycle(), 10_000)
-    let cached: CollectionSnapshot | null = null
-    try {
-      cached = await window.cairnCodex.getCachedCollection(
-        [...enabledStashPaths.value],
-        collectionBasis.value
-      )
-    } catch (error) {
-      cacheIssue.value = readableError(error)
-      console.warn('Cached collection was unavailable; falling back to a full scan.', error)
-    }
+    const startupCache: { snapshot: CollectionSnapshot | null } = { snapshot: null }
+    const cacheCurrent = await collectionSession.run('cache', async (read) => {
+      const value = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
+      if (read.install(value)) startupCache.snapshot = value
+    })
+    // Another selection/request owns startup now. A default-source installation
+    // may itself populate the selection, so retain that successfully installed cache.
+    const cached = startupCache.snapshot
+    if (!cacheCurrent && !cached) return
     if (cached) {
       await reportStartupPhase('cache-hit')
-      applySnapshot(cached)
       await waitForPaint()
       await reportStartupPhase('cached-paint')
       await reportStartupPhase('interactive')
@@ -2083,6 +2097,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  collectionSession.dispose()
   stopBackgroundJobUpdates?.()
   stopBackgroundJobUpdates = null
   document.body.classList.remove('onboarding-active')
@@ -2103,58 +2118,29 @@ onBeforeUnmount(() => {
 })
 
 async function scanCollection(startupRun = false, hydrateAfter = true): Promise<void> {
-  const requestedSources = [...enabledStashPaths.value]
-  const requestedBasis = collectionBasis.value
-  const requestedKey = JSON.stringify({
-    basis: requestedBasis,
-    paths: requestedSources.map((path) => path.toLocaleLowerCase()).sort()
-  })
   scanActivity.value = 'collection'
-  scanning.value = true
   clearScanProblem()
   let shouldHydrate = false
   if (startupRun) await reportStartupPhase('scan-started')
-  try {
-    const result = await window.cairnCodex.scanCollection(requestedSources, requestedBasis)
-    const currentKey = JSON.stringify({
-      basis: collectionBasis.value,
-      paths: enabledStashPaths.value.map((path) => path.toLocaleLowerCase()).sort()
-    })
-    if (requestedKey === currentKey) {
-      applySnapshot(result)
+  await collectionSession.run('scan', async (read) => {
+    const result = await window.cairnCodex.scanCollection(read.context.sourcePaths, read.context.basis)
+    if (read.install(result)) {
       shouldHydrate = liveStatus.value?.state !== 'ready'
-    } else {
-      const current = await window.cairnCodex.getCachedCollection(
-        [...enabledStashPaths.value],
-        collectionBasis.value
-      )
-      if (current) applySnapshot(current)
     }
-  } catch (error) {
-    reportScanProblem(error instanceof Error ? error.message : 'Collection scan failed.')
-  } finally {
-    scanning.value = false
-    if (startupRun) await reportStartupPhase('scan-settled')
-  }
+  })
+  if (startupRun) await reportStartupPhase('scan-settled')
   if (hydrateAfter && shouldHydrate) void hydrateArchiveRolls(startupRun)
   else if (hydrateAfter && startupRun) await reportStartupPhase('roll-analysis-skipped')
 }
 
 async function rebuildGameDataIndex(): Promise<void> {
   scanActivity.value = 'game-data'
-  scanning.value = true
-  try {
+  await collectionSession.run('rebuild', async (read) => {
     const result = await window.cairnCodex.rebuildGameDataIndex(
-      [...enabledStashPaths.value],
-      collectionBasis.value
+      read.context.sourcePaths, read.context.basis
     )
-    applySnapshot(result)
-    reportSuccess('Game-data and map location indexes rebuilt from the installed Grim Dawn files.')
-  } catch (error) {
-    reportTransferProblem(readableError(error))
-  } finally {
-    scanning.value = false
-  }
+    if (read.install(result)) reportSuccess('Game-data and map location indexes rebuilt from the installed Grim Dawn files.')
+  })
 }
 
 async function exportDiagnostics(): Promise<void> {
@@ -2826,21 +2812,20 @@ async function selectSourceMode(isHardcore: boolean): Promise<void> {
 async function loadSelectedSources(): Promise<void> {
   hideTooltip()
   selectedRecord.value = null
-  const cached = await window.cairnCodex.getCachedCollection(
-    [...enabledStashPaths.value],
-    collectionBasis.value
-  )
-  if (cached) {
-    applySnapshot(cached)
-    void hydrateArchiveRolls()
-  }
-  else await scanCollection()
+  let needsScan = false
+  const current = await collectionSession.run('cache', async (read) => {
+    const cached = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
+    if (read.install(cached)) needsScan = cached === null
+  })
+  if (!current) return
+  if (needsScan) await scanCollection()
+  else void hydrateArchiveRolls()
   await refreshVault()
 }
 
 async function hydrateArchiveRolls(startupRun = false): Promise<void> {
   if (
-    archiveRollHydrating.value ||
+    scanning.value ||
     collectionBasis.value !== 'archive' ||
     !snapshot.value ||
     liveGameIsReady()
@@ -2848,40 +2833,28 @@ async function hydrateArchiveRolls(startupRun = false): Promise<void> {
     if (startupRun) await reportStartupPhase('roll-analysis-skipped')
     return
   }
-  archiveRollHydrating.value = true
   archiveRollHydrationCompleted.value = 0
   archiveRollHydrationTotal.value = 0
-  const requestedSources = [...enabledStashPaths.value]
-  const requestedSourceKey = JSON.stringify([...requestedSources].sort())
   if (startupRun) await reportStartupPhase('roll-analysis-started')
-  try {
+  await collectionSession.run('hydration', async (read) => {
     let pending = 1
-    while (pending > 0 && collectionBasis.value === 'archive' && !liveGameIsReady()) {
-      const result = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
-      if (
-        !result ||
-        collectionBasis.value !== 'archive' ||
-        JSON.stringify([...enabledStashPaths.value].sort()) !== requestedSourceKey
-      ) break
+    while (pending > 0 && read.isCurrent() && !liveGameIsReady()) {
+      const result = await window.cairnCodex.hydrateArchiveRolls(read.context.sourcePaths)
+      if (!result || liveGameIsReady() || !read.install(result.snapshot)) break
       archiveRollHydrationCompleted.value += result.processed
       pending = result.pending
       archiveRollHydrationTotal.value = Math.max(
         archiveRollHydrationTotal.value,
         archiveRollHydrationCompleted.value + pending
       )
-      if (result.snapshot) applySnapshot(result.snapshot)
       if (result.processed === 0 && pending > 0) {
         console.warn('Archived roll hydration made no progress; stopping this background run.')
         break
       }
       if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
     }
-  } catch (error) {
-    console.warn('Archived item rolls could not be hydrated in the background.', error)
-  } finally {
-    archiveRollHydrating.value = false
-    if (startupRun) await reportStartupPhase('roll-analysis-settled')
-  }
+  })
+  if (startupRun) await reportStartupPhase('roll-analysis-settled')
 }
 
 function liveGameIsReady(): boolean {
@@ -3487,7 +3460,7 @@ function applyLiveIngests(
         }))
       ]
     : snapshot.value.observedItems
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
+  collectionSession.commit(withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies }))
 }
 
 function applyLiveRetrievals(
@@ -3533,7 +3506,7 @@ function applyLiveRetrievals(
       ? item
       : { ...item, availableCount: Math.max(0, item.availableCount - removed) }
   })
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
+  collectionSession.commit(withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies }))
 }
 
 function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {

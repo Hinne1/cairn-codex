@@ -167,7 +167,7 @@ function isSnapshot(value: unknown): value is CollectionSnapshot {
     Array.isArray(snapshot.rarities) && snapshot.rarities.every((summary) =>
       isCountSummary(summary) && isRecord(summary) && typeof summary.rarity === 'string'
     ) &&
-    (snapshot.recipeSummary === undefined || isRecipeSummary(snapshot.recipeSummary)) &&
+    (snapshot.recipeSummary == null || isRecipeSummary(snapshot.recipeSummary)) &&
     isCountSummary(snapshot.affixSummary) &&
     Array.isArray(snapshot.affixes) && snapshot.affixes.every((affix) =>
       isRecord(affix) && typeof affix.key === 'string' && Array.isArray(affix.records)

@@ -30,6 +30,13 @@ npm.cmd ci
 npm.cmd run verify
 ```
 
+### CI cancellation
+
+CI cancels superseded runs using a workflow-and-full-ref concurrency group.
+Different PRs, branches, tags, and workflows remain independent; push and PR
+merge-ref checks also remain separate. `npm run test:ci-concurrency` guards this
+contract and runs as part of full verification. Release publishing is unchanged.
+
 ### Dependency audit
 
 The mandatory `npm run audit:dependencies` gate queries the live

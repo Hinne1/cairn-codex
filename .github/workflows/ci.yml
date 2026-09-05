@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# New commits replace obsolete checks for this ref, not another PR or workflow.
+# Push refs and PR merge refs stay separate so neither cancels the other's check.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

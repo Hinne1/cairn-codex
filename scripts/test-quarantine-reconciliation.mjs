@@ -87,6 +87,27 @@ for (const response of [[], [resolvedItem('unrequested')], [resolvedItem('one', 
 }
 
 const directory = await mkdtemp(join(tmpdir(), 'cairn-quarantine-'))
+// Case aliases share helper classification but retain exact SQLite/vault keys.
+{
+  const database = new CollectionDatabase(':memory:')
+  try {
+    const records = ['records/Rare.dbr', 'records/rare.dbr', 'records/unrelated.dbr']
+    for (const record of records) database.ensureQuarantineCatalogItem(record)
+    const requests = []
+    const coordinator = operations()
+    const service = new QuarantineReconciliationService({
+      jobs: new BackgroundJobCoordinator(), listRecords: () => database.listQuarantineCatalogRecords(),
+      resolve: async (_path, records) => { requests.push(records); return records.map(record => resolvedItem(record)) },
+      commit: items => database.resolveQuarantineCatalogItems(items),
+      runExclusive: operation => coordinator.runExclusive(operation), queueBackup: () => {}
+    })
+    assert.equal((await service.reconcile('fixture-install')).releasedRecords, 3)
+    assert.deepEqual(requests, [['records/rare.dbr', 'records/unrelated.dbr']])
+    assert.equal(database.getCatalogNames(records).size, 2, 'canonical names resolve while both exact aliases are updated')
+    assert.deepEqual(database.listQuarantineCatalogRecords(), [])
+    await service.shutdown()
+  } finally { database.close() }
+}
 assert.ok(resolve(directory).startsWith(resolve(tmpdir()) + sep))
 const path = join(directory, 'archive.sqlite3')
 let database = new CollectionDatabase(path)

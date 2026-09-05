@@ -58,24 +58,29 @@ export class QuarantineReconciliationService {
       while (true) {
         if (this.stopped) { job.finishAsCanceled('canceled'); break }
         job.safeBoundary('before the next metadata batch')
-        const records = this.dependencies.listRecords().filter(record => !attempted.has(record.toLowerCase()))
+        const records = this.dependencies.listRecords().filter(record => !attempted.has(record))
         if (records.length === 0) break
         const batch = records.slice(0, QUARANTINE_BATCH_LIMIT)
         job.update({ stage: 'resolving', canCancel: false, boundary: null,
           progress: { completed: attempted.size, total: attempted.size + records.length,
             label: 'Resolve installed item records', detail: `Classifying ${batch.length} records.` } })
-        const resolved = await this.dependencies.resolve(installationPath, batch)
-        validateBatch(batch, resolved)
+        // The helper deduplicates case-insensitively; SQLite retains exact keys.
+        // Bound both the original commit rows and the unique helper request.
+        const canonical = [...new Set(batch.map(record => record.toLowerCase()))]
+        const resolved = await this.dependencies.resolve(installationPath, canonical)
+        validateBatch(canonical, resolved)
+        const byRecord = new Map(resolved.map(item => [item.record.toLowerCase(), item]))
+        const exactRows = batch.map(record => ({ ...byRecord.get(record.toLowerCase())!, record }))
         job.update({ stage: 'persisting', progress: { label: 'Store quarantine metadata', detail: 'Committing a bounded metadata batch.' } })
         const committed = await this.dependencies.runExclusive(async () => {
-          const result = this.dependencies.commit(resolved)
+          const result = this.dependencies.commit(exactRows)
           if (result.releasedRecords + result.recoveryRecords > 0) {
             this.dependencies.queueBackup('quarantine metadata reconciled')
           }
           return result
         })
         for (const key of ['releasedRecords', 'recoveryRecords', 'missingRecords'] as const) totals[key] += committed[key]
-        for (const record of batch) attempted.add(record.toLowerCase())
+        for (const record of batch) attempted.add(record)
         job.update({ progress: { completed: attempted.size } })
       }
       return totals

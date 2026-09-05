@@ -95,15 +95,28 @@ export function retainedTerminalResolution(operation: RecoveryJournalOperation):
     : []
 }
 
+function receiptClaims(entries: readonly unknown[]): Array<{ receiptPath: string }> {
+  return entries.flatMap(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const path = (entry as Record<string, unknown>).receiptPath
+    return typeof path === 'string' && path.trim() ? [{ receiptPath: path }] : []
+  })
+}
+
 /** Legacy or damaged metadata can reserve evidence without authorizing finalization. */
 function retainedReceiptClaims(operation: RecoveryJournalOperation): Array<{ receiptPath: string }> {
   const resolution = operation.detail.recoveryResolution
   if (!resolution || typeof resolution !== 'object' || Array.isArray(resolution)) return []
   const entries = (resolution as Record<string, unknown>).entries
   if (!Array.isArray(entries)) return []
-  return entries.flatMap(entry => entry && typeof entry === 'object' && !Array.isArray(entry) &&
-    typeof entry.receiptPath === 'string' && entry.receiptPath.trim()
-    ? [{ receiptPath: entry.receiptPath }] : [])
+  return receiptClaims(entries)
+}
+
+function isTerminalReceipt(status: unknown): status is LiveRetrievalStatus & { state: 'deposited' | 'rejected'; receiptPath: string } {
+  if (!status || typeof status !== 'object' || Array.isArray(status)) return false
+  const entry = status as Record<string, unknown>
+  return (entry.state === 'deposited' || entry.state === 'rejected') &&
+    typeof entry.receiptPath === 'string' && Boolean(entry.receiptPath.trim())
 }
 
 export async function finalizeLiveRecoveryOperation(
@@ -235,9 +248,8 @@ export async function reconcileLiveRecoveryOperations(
   const allQueues = retrievals.flatMap(retainedRecoveryQueues)
   const plans: Array<{ operation: RecoveryJournalOperation; queues: LiveRetrievalQueue[]; entries: TerminalRecoveryEntry[] }> = []
   const owners = new Map<string, Set<string>>()
-  const observe = (operationId: string, entries: Array<{ receiptPath: string | null }>): void => {
-    for (const entry of entries) {
-      if (!entry.receiptPath) continue
+  const observe = (operationId: string, entries: readonly unknown[]): void => {
+    for (const entry of receiptClaims(entries)) {
       const key = liveReceiptPathKey(entry.receiptPath)
       const set = owners.get(key) ?? new Set<string>()
       set.add(operationId)
@@ -261,10 +273,8 @@ export async function reconcileLiveRecoveryOperations(
         observe(operation.id, inspected)
         const failed = inspections.find(result => result.status === 'rejected')
         if (failed?.status === 'rejected') throw failed.reason
-        if (inspected.some((status) =>
-          (status.state !== 'deposited' && status.state !== 'rejected') || !status.receiptPath
-        )) continue
-        if (!haveDistinctLiveReceipts(inspected as Array<LiveRetrievalStatus & { receiptPath: string }>)) continue
+        if (!inspected.every(isTerminalReceipt)) continue
+        if (!haveDistinctLiveReceipts(inspected)) continue
         entries = []
         for (const [index, status] of inspected.entries()) {
           const queue = queues[index]!

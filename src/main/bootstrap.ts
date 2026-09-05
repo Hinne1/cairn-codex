@@ -43,6 +43,8 @@ import { ArchiveDomainService } from './ipc/archive-service.ts';
 import { LiveGameDomainService } from './ipc/live-game-service.ts';
 import { DiagnosticExportService } from './ipc/diagnostic-export-service.ts';
 import { readCollectionSnapshotCache, writeCollectionSnapshotCache } from './collection-snapshot-cache.ts';
+import { validateDismantlingQuery, validateSupplyQuery } from './archive-workspace-queries.ts'
+import type { DismantlingQueryRequest, SupplyQueryRequest } from '../shared/workspace-query-contracts.ts'
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -953,6 +955,7 @@ function registerIpcHandlers(
     reads: {
       findCatalogNames: (records) => database.getCatalogNames([...records]),
       readVaultItems: () => database.listVaultItems(),
+      readDismantlingItems: (ids) => database.workspaceQueries.itemsByIds(ids),
       readVaultPage: (request) => database.queryVaultItems(request),
       readOperationHistory: (request) => database.queryOperationHistory(request),
       readVaultSummary: () => {
@@ -1004,6 +1007,14 @@ function registerIpcHandlers(
       archiveService.queryOperationHistory(input),
     validateOperationHistory
   )
+  ipcDomains.archive.handle(IPC_CHANNELS.queryDismantling,
+    (_event, input: DismantlingQueryRequest) => database.workspaceQueries.dismantlingPage(input), validateDismantlingQuery)
+  ipcDomains.archive.handle(IPC_CHANNELS.selectDismantlingDuplicates,
+    (_event, input: DismantlingQueryRequest) => database.workspaceQueries.dismantlingDuplicates(input), validateDismantlingQuery)
+  ipcDomains.archive.handle(IPC_CHANNELS.querySupplies,
+    (_event, input: SupplyQueryRequest) => database.workspaceQueries.suppliesPage(input, latestCollection?.supplies ?? []), validateSupplyQuery)
+  ipcDomains.archive.handle(IPC_CHANNELS.selectSupplyBoosts,
+    (_event, input: SupplyQueryRequest) => database.workspaceQueries.supplyBoostSelection(input, latestCollection?.supplies ?? []), validateSupplyQuery)
   ipcDomains.archive.handle(
     IPC_CHANNELS.getVaultSummary,
     (): VaultSummary => {

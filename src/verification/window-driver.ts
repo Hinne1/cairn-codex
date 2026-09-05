@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { app, BrowserWindow } from "electron";
 import { type StartupStatus } from "@shared/contracts";
+import { verifyWorkspaceQueries } from './workspace-query-verification.ts'
 
 export async function verifyNativeSkillExplorerWheelInput(window: BrowserWindow): Promise<void> {
   let stage = 'locate item cell'
@@ -1099,6 +1100,9 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               await verifyGridNavigation(oracleCells, 'Stash Oracle')
 
               await openWorkspace('Supplies')
+              for (let attempt = 0; attempt < 100 && !document.querySelector('.supply-results .bounded-results-state.is-empty'); attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 50))
+              }
               if (!document.querySelector('.supply-results .bounded-results-state.is-empty')) {
                 throw new Error('Supplies did not retain its shared empty state before selecting augments.')
               }
@@ -1107,6 +1111,9 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               category.value = 'augments'
               category.dispatchEvent(new Event('change', { bubbles: true }))
               await frames()
+              for (let attempt = 0; attempt < 100 && document.querySelectorAll('.supply-results .bounded-results-row').length !== 6; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 50))
+              }
               const supplyCells = assertGrid('.supply-results', 'Supplies', 6)
               if (supplyCells.some((cell) => cell.getAttribute('aria-selected') !== 'false' || cell.getAttribute('aria-disabled') !== 'true')) {
                 throw new Error('Supplies selection and disabled semantics did not remain on each gridcell.')
@@ -2335,6 +2342,9 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
             })()
           `)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_QUERIES === '1') {
+          Object.assign(interactionTimings, await verifyWorkspaceQueries(window))
+        }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE === '1') {
           interactionTimings.dismantlingWorkspaceMs = await window.webContents.executeJavaScript(`
             (async () => {
@@ -2389,23 +2399,25 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               const forward = waitForPopState()
               history.forward()
               await forward
+              for (let attempt = 0; attempt < 100 && !document.querySelector('.dismantling-run')?.disabled; attempt++) await wait(50)
               const restoredRun = document.querySelector('.dismantling-run')
-              if (!(restoredRun instanceof HTMLButtonElement) || !restoredRun.textContent?.includes('Preview 1 selected')) {
-                throw new Error('Forward did not restore Dismantling Lab with its transient selection intact.')
+              if (!(restoredRun instanceof HTMLButtonElement) || !restoredRun.disabled) {
+                throw new Error('Dismantling archive refresh did not invalidate the old preview selection.')
               }
               await setQuery('zz-no-dismantling-result-zz')
-              if (rows().length !== 0 || !document.querySelector('.dismantling-candidates .vault-empty')) {
+              if (rows().length !== 0 || !document.querySelector('.dismantling-candidates .bounded-results-state.is-empty')) {
                 throw new Error('Dismantling did not render its empty state after an impossible search.')
               }
               await setQuery(${JSON.stringify(process.env.CAIRN_CODEX_SCREENSHOT_QUERY ?? '')})
               if (rows().length !== 120) throw new Error('Dismantling search did not restore its initial 120-copy window.')
-              const more = document.querySelector('.dismantling-more')
-              if (!(more instanceof HTMLButtonElement)) throw new Error('Dismantling progressive disclosure control was unavailable.')
+              const firstIdentity = rows()[0]?.textContent
+              const more = [...document.querySelectorAll('.dismantling-list .bounded-results-footer button')].find(button => button.textContent.trim() === 'Next')
+              if (!(more instanceof HTMLButtonElement)) throw new Error('Dismantling next-page control was unavailable.')
               more.focus()
-              if (document.activeElement !== more) throw new Error('Dismantling progressive disclosure was not keyboard focusable.')
+              if (document.activeElement !== more) throw new Error('Dismantling paging was not keyboard focusable.')
               more.click()
-              await frames()
-              if (rows().length !== 240) throw new Error('Dismantling did not reveal the next 120 candidate copies.')
+              for (let attempt = 0; attempt < 100 && rows()[0]?.textContent === firstIdentity; attempt++) await wait(50)
+              if (rows().length !== 120 || rows()[0]?.textContent === firstIdentity) throw new Error('Dismantling did not replace its bounded 120-copy page.')
               return performance.now() - started
             })()
           `)

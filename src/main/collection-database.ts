@@ -1,6 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
-import { compileSearchQuery, type SearchExpression } from '../shared/search-query.ts'
+import { migrateArchiveItemProjection } from './archive-item-projection.ts'
+import { ArchiveWorkspaceQueries } from './archive-workspace-queries.ts'
+import { compileSearchQuery } from '../shared/search-query.ts'
+import { numericSearchSql, searchExpressionSql, textSearchSql, type SqlSearchFragment } from './archive-search-sql.ts'
 import { searchQueryOptions, searchSchemas } from '../shared/search-schema.ts'
 import type {
   CollectionItem,
@@ -17,47 +20,7 @@ import type {
 } from '@shared/contracts'
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 13
-
-interface SqlSearchFragment {
-  sql: string
-  parameters: Array<string | number>
-}
-
-function escapedLike(value: string): string {
-  return `%${value.replace(/[\\%_]/g, '\\$&')}%`
-}
-
-function textSearchSql(expression: string, value: string): SqlSearchFragment {
-  return {
-    sql: `LOWER(COALESCE(${expression}, '')) LIKE ? ESCAPE char(92)`,
-    parameters: [escapedLike(value)]
-  }
-}
-
-function numericSearchSql(expression: string, value: string): SqlSearchFragment {
-  const match = /^(>=|<=|>|<|=)?\s*(-?\d+(?:\.\d+)?)$/.exec(value)
-  if (!match) return { sql: '0', parameters: [] }
-  const operator = match[1] ?? '='
-  return { sql: `CAST(${expression} AS REAL) ${operator} ?`, parameters: [Number(match[2])] }
-}
-
-function searchExpressionSql(
-  expression: SearchExpression,
-  resolveTerm: (term: Extract<SearchExpression, { kind: 'term' }>) => SqlSearchFragment
-): SqlSearchFragment {
-  if (expression.kind === 'term') return resolveTerm(expression)
-  if (expression.kind === 'not') {
-    const operand = searchExpressionSql(expression.operand, resolveTerm)
-    return { sql: `(NOT (${operand.sql}))`, parameters: operand.parameters }
-  }
-  const left = searchExpressionSql(expression.left, resolveTerm)
-  const right = searchExpressionSql(expression.right, resolveTerm)
-  return {
-    sql: `((${left.sql}) ${expression.kind === 'and' ? 'AND' : 'OR'} (${right.sql}))`,
-    parameters: [...left.parameters, ...right.parameters]
-  }
-}
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 14
 
 export interface ValidatedCollectionDatabase {
   schemaVersion: number
@@ -180,6 +143,7 @@ function vaultPayloadFingerprint(payload: unknown): string {
 export class CollectionDatabase {
   private readonly database: DatabaseSync
   private readonly path: string
+  readonly workspaceQueries: ArchiveWorkspaceQueries
 
   constructor(path: string) {
     this.path = path
@@ -194,6 +158,7 @@ export class CollectionDatabase {
       this.database.exec('PRAGMA wal_autocheckpoint = 0')
     }
     this.migrate()
+    this.workspaceQueries = new ArchiveWorkspaceQueries(this.database)
   }
 
   checkpointForArchiveBackup(): void {
@@ -2183,7 +2148,9 @@ export class CollectionDatabase {
         PRAGMA user_version = 13;
         COMMIT;
       `)
+      version = 13
     }
+    if (version === 13) migrateArchiveItemProjection(this.database)
   }
 
   private persistCatalog(items: CollectionItem[]): void {

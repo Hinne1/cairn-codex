@@ -249,6 +249,7 @@ function collectionDependencies(overrides = {}) {
       queueArchiveBackup: () => undefined
     },
     catalogPresentationVersion: 7,
+    afterCatalogCommit: async () => {},
     ...overrides
   }
 }
@@ -323,6 +324,25 @@ for (const kind of ['scan', 'rebuild']) {
   assert.equal(visible.fixtureName, 'new-catalog')
   assert.deepEqual(visible.projectedPaths, context.sourcePaths)
   assert.equal(visible.basis, 'stashes')
+}
+
+// Catalog reconciliation belongs to committed refreshes, never cached reads.
+{
+  const events = []
+  const service = new CollectionService(collectionDependencies({
+    cache: { read: async () => collectionSnapshot(), write: async () => { events.push('cache-commit') } },
+    afterCatalogCommit: async () => { events.push('reconcile') }
+  }))
+  const context = { sourcePaths: [], basis: 'archive' }
+  await service.getCached(context)
+  await service.getCached(context)
+  assert.deepEqual(events, [])
+  await service.scan(context)
+  assert.deepEqual(events, ['cache-commit', 'reconcile'])
+  await service.getCached(context)
+  assert.equal(events.length, 2)
+  await service.rebuild(context)
+  assert.deepEqual(events, ['cache-commit', 'reconcile', 'cache-commit', 'reconcile'])
 }
 
 // Discovery and character enumeration are concrete collection service methods,

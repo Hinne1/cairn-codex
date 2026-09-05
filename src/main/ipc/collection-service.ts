@@ -103,6 +103,7 @@ export interface CollectionServiceDependencies {
   discovery: CollectionDiscoveryService
   preferences: CollectionPreferenceStore
   catalogPresentationVersion: number
+  afterCatalogCommit(snapshot: CollectionSnapshot): Promise<void>
 }
 
 export type CollectionRequest = CollectionRequestContext
@@ -439,6 +440,7 @@ export class CollectionService {
     // A failed durable write therefore cannot masquerade as a completed refresh.
     await this.dependencies.cache.write(persisted)
     this.latest = persisted
+    await this.dependencies.afterCatalogCommit(persisted)
     return persisted
   }
 }

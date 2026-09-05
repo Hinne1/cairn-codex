@@ -12,6 +12,7 @@ assert.deepEqual(BACKGROUND_JOB_KINDS, [
   'collection-scan',
   'game-data-rebuild',
   'roll-hydration',
+  'quarantine-reconciliation',
   'item-assistant-import',
   'archive-backup',
   'icon-extraction',

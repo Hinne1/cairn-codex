@@ -9,7 +9,13 @@ send archive/catalog snapshots as progress events.
 Every job has a UUID identity and correlation ID, a closed job kind and stage union, normalized
 progress, a bounded result summary, a bounded structured error, and cancellation state. The current
 kinds cover collection scans, game-data rebuilds, roll hydration, Item Assistant imports, archive
-backups, icon extraction, and map indexing.
+backups, icon extraction, map indexing, and quarantine metadata reconciliation.
+
+Quarantine reconciliation coalesces by installation and resolves bounded batches
+outside the write queue. Each metadata commit enters the shared archive operation
+queue and schedules a backup when records changed. Only counts and stages are
+published. Cancellation and shutdown stop between batches; completed metadata stays
+durable and unresolved records are rediscovered on a future catalog/import refresh.
 
 `dedupeKey` identifies equivalent work. A second request for an active key deliberately coalesces
 onto the first promise, so the helper and durable stores see one operation. Keys must not combine

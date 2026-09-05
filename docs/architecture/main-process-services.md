@@ -50,6 +50,28 @@ flush workflow can run, and isolates single-instance focus, activation, and plat
 
 ## Testing and extension
 
+Collection presentation is a read capability in `collection-presentation.ts`.
+It accepts only archive read methods, a committed catalog, basis and roll-model
+version; it cannot invoke the helper or resolve quarantine metadata. Repeated
+cached collection reads therefore do not hide metadata writes.
+
+`QuarantineReconciliationService` runs after a committed catalog scan/rebuild and
+after a completed Item Assistant import. It classifies at most 256 records per
+helper request and commits each validated batch through `MainOperationCoordinator`.
+Changed metadata queues a protective archive backup. The presenting refresh reads
+that committed metadata afterward; reads during the job see the most recently
+committed batch. There is no extra full-snapshot progress broadcast or cached
+projection to invalidate.
+
+Helper failure or an incomplete/mismatched result batch leaves that batch untouched;
+earlier commits and backups remain valid. The job reports failure while the original
+scan/import remains successful. Missing records remain unresolved and retry on a
+later refresh. Resolved generic records retain quarantine eligibility and are not
+updated again; exact vault payloads and mode/receipt/journal identity are untouched.
+Shutdown stops admission, allows the active helper batch and serialized commit to
+finish, then stops before another batch. Pending records are recovered from the
+database after restart, without resuming an in-memory job promise.
+
 `npm run test:ipc-services` and `npm run test:domain-services` use fake IPC, storage, helper,
 diagnostics, window, and application adapters; neither imports Electron nor boots the app. Together
 they verify channel ownership, validation-before-delegation, one-call delegation, error translation

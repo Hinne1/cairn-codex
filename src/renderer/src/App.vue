@@ -3450,10 +3450,11 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
       />
 
       <CollectionMaterialsWorkspace
-        v-if="snapshot && (activeView === 'collection' || activeView === 'materials')"
+        v-if="activeView === 'materials' || (snapshot && activeView === 'collection')"
         v-model:controls="activeCollectionMaterialsControls"
         :mode="activeView === 'materials' ? 'materials' : 'collection'"
-        :items="activeView === 'materials' ? (snapshot.materials ?? []) : snapshot.items"
+        :available="Boolean(snapshot)"
+        :items="activeView === 'materials' ? (snapshot?.materials ?? []) : (snapshot?.items ?? [])"
         :double-rare-mi-base-records="doubleRareMiBaseRecords"
         :favorite-records="favoriteRecords"
         :search-document-for-item="itemStructuredSearchDocument"

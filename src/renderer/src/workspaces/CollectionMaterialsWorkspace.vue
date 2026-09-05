@@ -8,6 +8,7 @@ import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
 import RollCategoryProfile from '../components/RollCategoryProfile.vue'
 import { rollCategoryLabel, rollCategoryScores } from '../roll-rating'
+import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import {
   collectionRollSortOptions,
@@ -20,8 +21,9 @@ import {
   type CollectionRollSummaries
 } from './collection-materials'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   mode: 'collection' | 'materials'
+  available?: boolean
   items: readonly CollectionItem[]
   doubleRareMiBaseRecords: ReadonlySet<string>
   favoriteRecords?: ReadonlySet<string>
@@ -32,7 +34,7 @@ const props = defineProps<{
   rollSummaries?: CollectionRollSummaries
   liveReady: boolean
   retrievalBusy: boolean
-}>()
+}>(), { available: true })
 
 const emit = defineEmits<{
   'open-roll-help': []
@@ -153,6 +155,12 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
 
 <template>
   <section class="collection-materials-workspace" :aria-label="mode === 'materials' ? 'Components and consumables' : 'Item collection'">
+    <ToolHeader
+      v-if="mode === 'materials'"
+      eyebrow="Crafting supplies"
+      title="Components & Consumables"
+      description="Browse your components, crafting materials, and learned potion formulas."
+    />
     <nav v-if="mode === 'collection'" class="category-tabs" aria-label="Item categories">
       <button v-for="option in collectionCategories" :key="option" type="button" :class="{ active: option === category }" @click="category = option">
         <span>{{ option }}</span><small>{{ categoryProgress(option) }}</small>
@@ -160,6 +168,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
     </nav>
 
     <ExplorerToolbar
+      v-if="available"
       v-model="query"
       v-bind="mode === 'materials' ? searchGuidance.materials : searchGuidance.collection"
       class="collection-explorer-toolbar"
@@ -190,8 +199,8 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
       :items="rows"
       :get-key="item => item.record"
       :page-size="48"
-      :empty-title="mode === 'materials' ? 'No matching components or consumables' : 'No matching collection items'"
-      empty-detail="Try changing the current search or filters."
+      :empty-title="!available ? 'Collection is unavailable' : mode === 'materials' ? 'No matching components or consumables' : 'No matching collection items'"
+      :empty-detail="available ? 'Try changing the current search or filters.' : 'Refresh your collection to load components and consumables.'"
       :label="mode === 'materials' ? 'Components and consumables' : `${category} collection items`"
       layout="grid"
       interactive

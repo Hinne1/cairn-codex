@@ -145,7 +145,9 @@ active-adapter gate, queue locking, item-delivery logic, payloads, and receipt h
 
 On 2026-09-06 the patch applied cleanly to the pinned upstream commit and compiled with MSVC
 14.43, Windows SDK 10.0.22621.0, and Boost 1.78.0. The compile-only candidate SHA-256 was
-`e4280ad827bff8533f30e9f0cac46afe88be6cf3e2a3599c49b57a86341c1aa4`.
+`44933d664ebb4ded600f8a3cac2ce12022068663539f1cf2e9eac322eeba4ca5`.
+Independent source review corrected empty events to pass the string's valid buffer to the
+upstream `DataItem` constructor, which calls `memcpy` even for a zero-byte message.
 It was not injected, copied into release resources, or added to the allowlist. The standard build
 script requested SDK 10.0.26100.0, which was unavailable on the host; the direct compile used the
 installed SDK documented above. This is compile evidence, not binary compatibility evidence.

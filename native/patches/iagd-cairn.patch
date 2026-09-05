@@ -232,7 +232,7 @@ index ee3b0ed..8758e00 100644
 +			DataItemPtr characterEvent(new DataItem(
 +				TYPE_CAIRN_ACTIVE_CHARACTER,
 +				(unsigned int)(currentName.size() * sizeof(wchar_t)),
-+				currentName.empty() ? nullptr : (char*)currentName.data()));
++				(char*)currentName.c_str()));
 +			m_dataQueue->push(characterEvent);
 +			SetEvent(m_hEvent);
 +		};

@@ -98,6 +98,29 @@ diagnostic-only `measure-memory` request reports process, working-set, private, 
 managed-heap bytes for the installed-data performance gate; it does not inspect user
 items or game memory.
 
+## Live receipt correlation
+
+`inspect-live-retrieval` accepts a retained `queue` and an optional
+`allowHashFallback` flag, which defaults to false. The helper first checks the
+queue's exact operation filename in both terminal directories. One exact match
+determines the outcome; conflicting deposited and rejected matches stay unknown.
+An exact rejection cannot be displaced by another operation's identical payload.
+
+The pinned shared-stash hook renames receipts, while the personal-inventory patch
+preserves operation filenames. The helper never permits fallback for a personal
+queue, even if the caller requests it. For shared-stash compatibility, main permits hash
+fallback only when the payload and mode are unique among the complete known queue
+set. Recovery considers every pending retrieval; an incomplete queue journal
+disables fallback. The helper excludes baseline files and other operation-named
+receipts, and requires exactly one matching renamed receipt across both terminal
+directories. Multiple candidates remain unknown regardless of modification time.
+
+Each terminal receipt path may resolve only one queue. Main checks canonical path
+uniqueness before active finalization and observes all retained operations before
+recovery acknowledges any receipt. Identical payloads whose filenames were lost
+can therefore remain pending for an evidence audit; the adapter never guesses
+which copy succeeded. Hook fingerprints and SC/HC ownership checks still apply.
+
 ## Read-only transfer-stash scan
 
 ```json

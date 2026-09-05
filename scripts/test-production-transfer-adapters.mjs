@@ -262,8 +262,10 @@ try {
   for (const kind of ['augment', 'memento']) {
     for (const outcome of ['deposited', 'rejected', 'pending']) {
       await fixture(async ({ dependencies, handlers, collection, calls, reopen }) => {
-        handlers.set('inspect-live-retrieval', ({ queue }) => ({ state: outcome,
-          receiptPath: outcome === 'pending' ? null : `${queue.outgoingPath}.${outcome}` }))
+        handlers.set('inspect-live-retrieval', ({ queue, allowHashFallback }) => {
+          assert.equal(allowHashFallback, false, 'personal delivery always requires its exact operation receipt')
+          return { state: outcome, receiptPath: outcome === 'pending' ? null : `${queue.outgoingPath}.${outcome}` }
+        })
         const result = kind === 'augment'
           ? executeLiveAugmentDispense(dependencies, collection, [record], 'Synthetic')
           : executeSahdinasMementoRecovery(dependencies, collection, 'character-inventory', 'Synthetic')
@@ -470,6 +472,119 @@ try {
         detail: { adapter: 'cairn-live-v1', record: 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr',
           isHardcore: true, queues: [retained] } })
       assert.equal(await reconcileLiveRecoveryOperations(dependencies), 1, 'known old and current single-item queue IDs remain supported')
+    })
+  }
+  for (const generated of [true, false]) {
+    await fixture(async ({ dependencies, handlers, seed, collection, calls, path, reopen }) => {
+      seed(['vault-a', 'vault-b'])
+      const secondRecord = 'records/synthetic/second.dbr'
+      collection.supplies.push({ ...structuredClone(collection.supplies[0]), record: secondRecord })
+      handlers.set('inspect-live-retrieval', ({ queue, allowHashFallback }) => {
+        assert.equal(allowHashFallback, false, 'identical payloads must use operation-specific evidence')
+        return { state: 'deposited', receiptPath: queue.operationId.endsWith('-0')
+          ? `${path}.shared-receipt` : (process.platform === 'win32' ? `${path}.shared-receipt`.toUpperCase() : `${path}.shared-receipt`) }
+      })
+      const submission = generated ? executeLiveAugmentDispense(dependencies, collection, [record, secondRecord])
+        : createLiveTransferService(dependencies).retrieveVaultItems(['vault-a', 'vault-b'])
+      await assert.rejects(submission, /reused a terminal receipt/)
+      const database = reopen()
+      assert.equal(database.getRecoveryOperationCount(), 1)
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0)
+      assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false)
+      if (!generated) assert.deepEqual(database.getVaultItems(['vault-a', 'vault-b'], false).map(item => item.state), ['retrieval_pending', 'retrieval_pending'])
+    })
+  }
+  for (const cached of [true, false]) {
+    await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
+      seed(['vault-a', 'vault-b'])
+      for (const [index, id] of ['vault-a', 'vault-b'].entries()) {
+        const operationId = `separate-${index}`
+        const retained = queue(`${operationId}-0`)
+        dependencies.database.prepareRetrievalOperation({ operationId, stashPath: 'live://gdia/sc',
+          sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: [id],
+          detail: { vaultItemIds: [id], queues: [retained], ...(cached ? { recoveryResolution: { entries: [{
+            operationId: retained.operationId, state: 'rejected', receiptPath: `${path}.same`,
+            semanticSha256: sourceHash, copiedReceiptPath: `${path}.same-copy`
+          }] } } : {}) } })
+      }
+      handlers.set('inspect-live-retrieval', ({ allowHashFallback }) => {
+        assert.equal(allowHashFallback, false, 'fallback uniqueness spans separate retained operations')
+        return { state: 'rejected', receiptPath: `${path}.same` }
+      })
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0)
+      assert.equal(dependencies.database.getRecoveryOperationCount(), 2)
+      assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false, 'neither operation may consume shared evidence')
+    })
+  }
+  await fixture(async ({ dependencies, seed, queue, calls, path }) => {
+    seed(['vault-a', 'vault-b', 'vault-c'])
+    for (const [index, ids] of [['vault-a'], ['vault-b', 'vault-c']].entries()) {
+      const operationId = `cached-incomplete-${index}`
+      const retained = queue(`${operationId}-0`)
+      dependencies.database.prepareRetrievalOperation({ operationId, stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ids,
+        detail: { vaultItemIds: ids, queues: [retained], recoveryResolution: { entries: [{
+          operationId: retained.operationId, state: 'rejected', receiptPath: `${path}.same`,
+          semanticSha256: sourceHash, copiedReceiptPath: `${path}.same-copy`
+        }] } } })
+    }
+    assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0, 'incomplete legacy journals reserve their cached evidence')
+    assert.equal(dependencies.database.getRecoveryOperationCount(), 2)
+    assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false)
+    assert.deepEqual(dependencies.database.getVaultItems(['vault-a', 'vault-b', 'vault-c'], false).map(item => item.state),
+      ['retrieval_pending', 'retrieval_pending', 'retrieval_pending'])
+  })
+  for (const malformed of ['missing-copy', 'invalid-sibling']) await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
+    seed(['vault-a', 'vault-b'])
+    for (const [index, id] of ['vault-a', 'vault-b'].entries()) {
+      const operationId = `legacy-claim-${index}`
+      const retained = queue(`${operationId}-0`)
+      const entry = { operationId: retained.operationId, state: 'rejected', receiptPath: `${path}.same`,
+        semanticSha256: sourceHash, copiedReceiptPath: `${path}.same-copy` }
+      if (index === 1 && malformed === 'missing-copy') delete entry.copiedReceiptPath
+      dependencies.database.prepareRetrievalOperation({ operationId, stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: [id],
+        detail: { vaultItemIds: [id], queues: [retained], recoveryResolution: {
+          entries: index === 1 && malformed === 'invalid-sibling' ? [entry, null] : [entry]
+        } } })
+    }
+    handlers.set('inspect-live-retrieval', () => { throw new Error('Synthetic legacy evidence unavailable') })
+    assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0, 'individually readable legacy claims reserve evidence despite invalid finalization metadata')
+    assert.equal(dependencies.database.getRecoveryOperationCount(), 2)
+    assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false)
+  })
+  for (const unavailable of ['pending', 'error', 'null', 'invalid-path']) await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
+    seed(['vault-a', 'vault-b', 'vault-c'])
+    for (const [index, ids] of [['vault-a'], ['vault-b', 'vault-c']].entries()) {
+      const operationId = `partial-${index}`
+      dependencies.database.prepareRetrievalOperation({ operationId, stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ids,
+        detail: { vaultItemIds: ids, queues: ids.map((_id, index) => queue(`${operationId}-${index}`)) } })
+    }
+    handlers.set('inspect-live-retrieval', ({ queue }) => {
+      if (queue.operationId !== 'partial-1-0') return { state: 'deposited', receiptPath: `${path}.shared` }
+      if (unavailable === 'error') throw new Error('Synthetic receipt inspection failure')
+      if (unavailable === 'null') return null
+      if (unavailable === 'invalid-path') return { state: 'rejected', receiptPath: 42 }
+      return { state: 'pending', receiptPath: null }
+    })
+    assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0, 'partially terminal operations also reserve their observed evidence')
+    assert.equal(dependencies.database.getRecoveryOperationCount(), 2)
+  })
+  for (const incompletePeer of [false, true]) {
+    await fixture(async ({ dependencies, seed, queue, handlers }) => {
+      seed(['vault-a', 'vault-b'])
+      dependencies.database.prepareRetrievalOperation({ operationId: 'unique', stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ['vault-a'],
+        detail: { vaultItemIds: ['vault-a'], queues: [queue('unique-0')] } })
+      if (incompletePeer) dependencies.database.prepareRetrievalOperation({ operationId: 'lost-dispatch', stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ['vault-b'],
+        detail: { vaultItemIds: ['vault-b'], pendingDispatch: { operationId: 'lost-dispatch-0', item: payload } } })
+      handlers.set('inspect-live-retrieval', ({ queue, allowHashFallback }) => {
+        assert.equal(allowHashFallback, !incompletePeer)
+        return { state: 'deposited', receiptPath: `${queue.outgoingPath}.exact` }
+      })
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 1, 'unique exact evidence still resolves even with another uncertain dispatch')
     })
   }
   console.log('Production transfer adapter checks passed.')

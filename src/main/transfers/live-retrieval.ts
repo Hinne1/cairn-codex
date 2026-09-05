@@ -5,6 +5,7 @@ import type { LiveGameStatus } from '../../shared/contracts.ts';
 import type { LiveQueueReceipt, LiveRetrievalQueue, LiveRetrievalStatus } from './contracts.ts';
 import { LiveTransferDomainService } from '../ipc/live-transfer-service.ts';
 import { reconcileLiveRecoveryOperations, type RetainedReceiptsDependencies } from './retained-receipts.ts';
+import { hasUniqueLivePayload } from '../live-receipt-policy.ts'
 
 export type LiveRetrievalDependencies = RetainedReceiptsDependencies & {
   database: Pick<CollectionDatabase, 'listVaultItems' | 'getVaultItems' | 'prepareRetrievalOperation' | 'markRetrievalNeedsRecovery' | 'getRecoveryOperationCount'>
@@ -61,8 +62,8 @@ export function createLiveTransferService(dependencies: LiveRetrievalDependencie
     adapter: {
       inspectGame: () => helper.request<LiveGameStatus>('inspect-live-game'),
       enqueueRetrieval: (input) => helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', input),
-      inspectRetrieval: (queue) =>
-        helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }),
+      inspectRetrieval: (queue, batch) =>
+        helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue, allowHashFallback: hasUniqueLivePayload(queue, batch) }),
       copyRejectedReceipt: (input) => helper.request<LiveQueueReceipt>('copy-live-incoming', {
         ...input,
         receiptDirectory: join(paths.receipts, 'rejected-returns')

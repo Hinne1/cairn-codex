@@ -4,6 +4,7 @@ import type { TransferPorts } from './runtime.ts';
 import type { LiveQueueReceipt, LiveRetrievalQueue, LiveRetrievalStatus } from './contracts.ts';
 import type { RecoveryJournalOperation } from '../collection-database.ts';
 import type { DiagnosticLogger } from '../diagnostics.ts';
+import { hasUniqueLivePayload, haveDistinctLiveReceipts, liveReceiptPathKey } from '../live-receipt-policy.ts'
 
 export type RetainedReceiptsDependencies = TransferPorts & {
   database: Pick<CollectionDatabase, 'completeDeliveryOperation' | 'completePartialRetrievalOperation' | 'completeRetrievalOperation' | 'failDeliveryOperation' | 'failRetrievalOperation' | 'getVaultItems' | 'listRecoveryOperations' | 'updatePendingOperationDetail'>
@@ -94,6 +95,30 @@ export function retainedTerminalResolution(operation: RecoveryJournalOperation):
     : []
 }
 
+function receiptClaims(entries: readonly unknown[]): Array<{ receiptPath: string }> {
+  return entries.flatMap(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const path = (entry as Record<string, unknown>).receiptPath
+    return typeof path === 'string' && path.trim() ? [{ receiptPath: path }] : []
+  })
+}
+
+/** Legacy or damaged metadata can reserve evidence without authorizing finalization. */
+function retainedReceiptClaims(operation: RecoveryJournalOperation): Array<{ receiptPath: string }> {
+  const resolution = operation.detail.recoveryResolution
+  if (!resolution || typeof resolution !== 'object' || Array.isArray(resolution)) return []
+  const entries = (resolution as Record<string, unknown>).entries
+  if (!Array.isArray(entries)) return []
+  return receiptClaims(entries)
+}
+
+function isTerminalReceipt(status: unknown): status is LiveRetrievalStatus & { state: 'deposited' | 'rejected'; receiptPath: string } {
+  if (!status || typeof status !== 'object' || Array.isArray(status)) return false
+  const entry = status as Record<string, unknown>
+  return (entry.state === 'deposited' || entry.state === 'rejected') &&
+    typeof entry.receiptPath === 'string' && Boolean(entry.receiptPath.trim())
+}
+
 export async function finalizeLiveRecoveryOperation(
   dependencies: RetainedReceiptsDependencies,
   operation: RecoveryJournalOperation,
@@ -103,6 +128,7 @@ export async function finalizeLiveRecoveryOperation(
   const { helper, database, clock, diagnostics } = dependencies
   if (
     queues.length === 0 || entries.length !== queues.length ||
+    !haveDistinctLiveReceipts(entries) ||
     JSON.stringify(retainedRecoveryQueues(operation)) !== JSON.stringify(queues) ||
     entries.some((entry, index) =>
       entry.operationId !== queues[index]?.operationId ||
@@ -216,47 +242,72 @@ export async function reconcileLiveRecoveryOperations(
 ): Promise<number> {
   const { helper, database, paths, clock, diagnostics } = dependencies
   let resolved = 0
-  for (const operation of database.listRecoveryOperations()) {
+  const operations = database.listRecoveryOperations()
+  const retrievals = operations.filter(operation => operation.operation === 'retrieve')
+  const allQueuesKnown = retrievals.every(operation => retainedRecoveryQueues(operation).length > 0)
+  const allQueues = retrievals.flatMap(retainedRecoveryQueues)
+  const plans: Array<{ operation: RecoveryJournalOperation; queues: LiveRetrievalQueue[]; entries: TerminalRecoveryEntry[] }> = []
+  const owners = new Map<string, Set<string>>()
+  const observe = (operationId: string, entries: readonly unknown[]): void => {
+    for (const entry of receiptClaims(entries)) {
+      const key = liveReceiptPathKey(entry.receiptPath)
+      const set = owners.get(key) ?? new Set<string>()
+      set.add(operationId)
+      owners.set(key, set)
+    }
+  }
+  for (const operation of operations) {
     if (operation.operation !== 'retrieve') continue
+    let entries = retainedTerminalResolution(operation)
+    observe(operation.id, retainedReceiptClaims(operation))
     const queues = retainedRecoveryQueues(operation)
     if (queues.length === 0) continue
     try {
-      let entries = retainedTerminalResolution(operation)
       if (entries.length !== queues.length || entries.some(entry => entry.state === 'rejected' && !entry.copiedReceiptPath)) {
-        const inspected = await Promise.all(
-          queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }))
+        const inspections = await Promise.allSettled(
+          queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', {
+            queue, allowHashFallback: allQueuesKnown && hasUniqueLivePayload(queue, allQueues)
+          }))
         )
-        if (inspected.some((status) =>
-          (status.state !== 'deposited' && status.state !== 'rejected') || !status.receiptPath
-        )) continue
+        const inspected = inspections.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+        observe(operation.id, inspected)
+        const failed = inspections.find(result => result.status === 'rejected')
+        if (failed?.status === 'rejected') throw failed.reason
+        if (!inspected.every(isTerminalReceipt)) continue
+        if (!haveDistinctLiveReceipts(inspected)) continue
         entries = []
         for (const [index, status] of inspected.entries()) {
           const queue = queues[index]!
-          let copiedReceiptPath: string | null = null
-          if (status.state === 'rejected') {
-            const copied = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
-              path: status.receiptPath!,
-              expectedSha256: queue.semanticSha256,
-              receiptDirectory: join(paths.receipts, 'recovered-rejections')
-            })
-            copiedReceiptPath = copied.receiptPath
-          }
           entries.push({
             operationId: queue.operationId,
             state: status.state as 'deposited' | 'rejected',
             receiptPath: status.receiptPath!,
             semanticSha256: queue.semanticSha256,
-            copiedReceiptPath
+            copiedReceiptPath: null
           })
         }
-        database.updatePendingOperationDetail(operation.id, {
-          recoveryResolution: { recordedAtUtc: clock.nowUtc(), entries }
-        })
-        operation.detail = {
-          ...operation.detail,
-          recoveryResolution: { recordedAtUtc: clock.nowUtc(), entries }
-        }
       }
+      plans.push({ operation, queues, entries })
+    } catch (error) {
+      diagnostics.error('recovery', 'operation.inspect-failed', error, { operationId: operation.id })
+    }
+  }
+  // Observe the entire retained set before any acknowledgement: even a partial
+  // operation may already claim evidence another operation tries to reuse.
+  for (const { operation, queues, entries } of plans) {
+    if (!haveDistinctLiveReceipts(entries) || entries.some(entry => owners.get(liveReceiptPathKey(entry.receiptPath))!.size > 1)) continue
+    try {
+      for (const entry of entries) {
+        if (entry.state !== 'rejected' || entry.copiedReceiptPath) continue
+        const copied = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
+          path: entry.receiptPath, expectedSha256: entry.semanticSha256,
+          receiptDirectory: join(paths.receipts, 'recovered-rejections')
+        })
+        entry.copiedReceiptPath = copied.receiptPath
+      }
+      const recoveryResolution = { recordedAtUtc: clock.nowUtc(), entries }
+      database.updatePendingOperationDetail(operation.id, { recoveryResolution })
+      operation.detail = { ...operation.detail, recoveryResolution }
       if (await finalizeLiveRecoveryOperation(
         dependencies, operation, queues, entries
       )) resolved += 1

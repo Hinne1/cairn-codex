@@ -1,0 +1,2 @@
+export const CATALOG_PRESENTATION_VERSION = 33
+export const ROLL_ANALYSIS_VERSION = 9

@@ -311,7 +311,7 @@ shutdownPlacementReadable = false
 await shutdownPlacement.flush()
 assert.equal(shutdownPlacementWrites, 1, 'terminal close must not enqueue work after finalization')
 
-const mainSource = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
+const mainSource = await readFile(new URL('../src/main/bootstrap.ts', import.meta.url), 'utf8')
 assert.equal(mainSource.includes('ipcMain.handle('), false, 'index.ts must not register raw IPC handlers')
 for (const [domain, channels] of Object.entries(MAIN_IPC_CHANNELS)) {
   for (const channel of channels) {

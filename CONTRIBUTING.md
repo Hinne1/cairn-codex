@@ -78,6 +78,10 @@ npm.cmd run smoke:desktop
 ```
 
 This smoke suite uses an in-memory database and disposable transaction fixtures.
+UI verification uses `npm.cmd run build:verification`; production builds exclude
+its fixture factories and interaction drivers. See the
+[Electron verification boundary](docs/architecture/verification.md) for launch
+commands, isolated profiles, and installed-package diagnostics.
 Never point test code at a writable personal stash unless the test is explicitly
 part of the documented manual live matrix.
 

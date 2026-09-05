@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-import { presentScreenshotCollection } from '../src/main/screenshot-collection.ts'
+import { presentScreenshotCollection } from '../src/verification/screenshot-collection.ts'
 
 const copies = Object.freeze(Array.from({ length: 72 }, (_, index) => Object.freeze({
   instanceKey: `fixture-mi-${index}`, seed: 1000000 + index, sourcePath: 'synthetic-sc',
@@ -32,9 +31,4 @@ assert.equal(creations, 0)
 assert.strictEqual(presentScreenshotCollection(snapshot, 'archive', 'capture.png', 'skill-explorer', createFixture).items, skillItems)
 assert.equal(creations, 1)
 assert.equal(snapshot.basis, 'stashes')
-const main = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
-const projector = main.slice(main.indexOf('projector: {'), main.indexOf('hydration: {'))
-assert.match(projector, /presentScreenshotCollection/)
-assert.match(projector, /\?\? presentCollection\(database, snapshot, basis, ROLL_ANALYSIS_VERSION\)/)
-assert.doesNotMatch(projector, /VERIFY_GLOSSARY/)
 console.log('Screenshot collection passed: named MI fixture, exact/source-filtered copies, immutable presentation, and normal-startup fallback.')

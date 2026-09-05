@@ -521,7 +521,7 @@ onBeforeUnmount(() => continuousObserver?.disconnect())
 .bounded-results-collection.is-table { display: grid; }
 .bounded-results-collection.is-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--cc-result-card-min-width, 260px), 100%), 1fr));
   gap: var(--cc-space-5);
 }
 .bounded-results-row,

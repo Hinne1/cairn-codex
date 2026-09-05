@@ -761,6 +761,38 @@ export class CollectionDatabase {
     }
   }
 
+  prepareLiveIngestOperation(input: PreparedIngestOperation): void {
+    if (!input.stashPath.startsWith('live://gdia/') ||
+        (input.detail as Record<string, unknown>)?.adapter !== 'gdia-live-v1') {
+      throw new Error('Only retained live incoming operations can resume preparation.')
+    }
+    const previous = this.database.prepare(`
+      SELECT operation, state, stash_path, source_sha256, detail_json
+      FROM operation_journal WHERE id = ?
+    `).get(input.operationId) as {
+      operation: string; state: string; stash_path: string; source_sha256: string; detail_json: string
+    } | undefined
+    if (!previous) return this.prepareIngestOperation(input)
+    const items = this.database.prepare(`
+      SELECT vault_item_id, base_record, payload_json FROM pending_ingest_item
+      WHERE operation_id = ? ORDER BY ordinal
+    `).all(input.operationId) as Array<{ vault_item_id: string; base_record: string; payload_json: string }>
+    if (
+      previous.operation !== 'ingest' || !['prepared', 'needs_recovery', 'failed'].includes(previous.state) ||
+      previous.stash_path !== input.stashPath || previous.source_sha256 !== input.sourceSha256 ||
+      JSON.parse(previous.detail_json).adapter !== 'gdia-live-v1' ||
+      items.length !== input.items.length || items.some((item, index) =>
+        item.vault_item_id !== input.items[index]!.vaultItemId ||
+        item.base_record !== input.items[index]!.baseRecord ||
+        item.payload_json !== JSON.stringify(input.items[index]!.payload)
+      )
+    ) throw new Error('Retained live ingest does not match the original exact payload and mode.')
+    this.database.prepare(`
+      UPDATE operation_journal SET state = 'prepared', completed_at_utc = NULL, detail_json = ?
+      WHERE id = ?
+    `).run(JSON.stringify(input.detail), input.operationId)
+  }
+
   completeIngestOperation(input: CompletedIngestOperation): string[] {
     const infiniteSupplies = this.getInfiniteSupplies()
     this.database.exec('BEGIN IMMEDIATE')

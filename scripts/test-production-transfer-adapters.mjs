@@ -6,7 +6,7 @@ import { CollectionDatabase } from '../src/main/collection-database.ts'
 import { ArchiveDomainService } from '../src/main/ipc/archive-service.ts'
 import { MainOperationCoordinator } from '../src/main/operation-coordinator.ts'
 import { executeIngestCommand, executeRetrievalCommand, planRetrievalCommand } from '../src/main/transfers/offline-transactions.ts'
-import { syncLiveIncoming } from '../src/main/transfers/live-incoming.ts'
+import { reconcileLiveIncomingOperations, syncLiveIncoming } from '../src/main/transfers/live-incoming.ts'
 import { executeLiveAugmentDispense, executeSahdinasMementoRecovery } from '../src/main/transfers/live-delivery.ts'
 import { createLiveTransferService } from '../src/main/transfers/live-retrieval.ts'
 import { reconcileLiveRecoveryOperations } from '../src/main/transfers/retained-receipts.ts'
@@ -268,6 +268,110 @@ try {
       })
     }
   }
+  // A first or later dispatch with a lost response must never be inferred from
+  // only the queues whose responses arrived, nor be automatically submitted again.
+  for (const lostAt of [1, 2]) {
+    await fixture(async ({ dependencies, handlers, collection, calls, queue, reopen }) => {
+      const secondRecord = 'records/synthetic/second.dbr'
+      collection.supplies.push({ ...structuredClone(collection.supplies[0]), record: secondRecord })
+      let dispatched = 0
+      handlers.set('enqueue-live-retrieval', input => {
+        if (++dispatched === lostAt) throw new Error('Synthetic dispatch response lost')
+        return queue(input.operationId, input.isHardcore)
+      })
+      await assert.rejects(executeLiveAugmentDispense(dependencies, collection, [record, secondRecord]), /response lost/)
+      const database = reopen()
+      const operation = database.listRecoveryOperations()[0]
+      assert.equal(operation.state, 'needs_recovery')
+      assert.equal(operation.detail.expectedQueueCount, 2)
+      assert.deepEqual(operation.detail.pendingDispatch.item, operation.detail.payloads[lostAt - 1])
+      assert.equal(operation.detail.pendingDispatch.isHardcore, false)
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0)
+      assert.equal(database.getRecoveryOperationCount(), 1)
+      const coordinator = new MainOperationCoordinator({ diagnostics: quietDiagnostics,
+        reconcileTransfers: () => reconcileLiveRecoveryOperations(dependencies),
+        unresolvedTransferCount: () => database.getRecoveryOperationCount() })
+      await assert.rejects(coordinator.runTransferExclusive(() => executeLiveAugmentDispense(dependencies, collection, [record])), /recovery attention/)
+      assert.equal(calls.filter(call => call.method === 'enqueue-live-retrieval').length, lostAt)
+    })
+  }
+  await fixture(async ({ dependencies, handlers, collection, reopen }) => {
+    handlers.set('enqueue-live-retrieval', () => { throw new Error('Synthetic first response lost') })
+    await assert.rejects(executeSahdinasMementoRecovery(dependencies, collection, 'shared-stash'), /response lost/)
+    const operation = reopen().listRecoveryOperations()[0]
+    assert.equal(operation.state, 'needs_recovery')
+    assert.equal(operation.detail.pendingDispatch.destination, 'shared-stash')
+    assert.equal(operation.detail.pendingDispatch.item.seed, 123456)
+  })
+  for (const generated of [true, false]) {
+    await fixture(async ({ dependencies, handlers, collection, seed, calls, reopen }) => {
+      seed()
+      handlers.set('inspect-live-retrieval', ({ queue }) => ({ state: 'rejected', receiptPath: `${queue.outgoingPath}.rejected` }))
+      handlers.set('ack-live-incoming', () => { throw new Error('Synthetic permission failure') })
+      const submission = generated ? executeLiveAugmentDispense(dependencies, collection, [record])
+        : createLiveTransferService(dependencies).retrieveVaultItems(['vault-a'])
+      await assert.rejects(submission, /permission failure/)
+      const database = reopen()
+      const operation = database.listRecoveryOperations()[0]
+      assert.ok(operation.detail.recoveryResolution.entries[0].copiedReceiptPath)
+      const inspectedBefore = calls.filter(call => call.method === 'inspect-live-retrieval').length
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0, 'a copy alone does not prove acknowledgement')
+      assert.equal(database.getRecoveryOperationCount(), 1)
+      if (!generated) assert.equal(database.getVaultItems(['vault-a'], false)[0].state, 'retrieval_pending')
+      // The real helper may now prove a prior lost acknowledgement by hashing
+      // its retained file. No native reinspection or enqueue is needed.
+      handlers.set('ack-live-incoming', () => ({ sha256: sourceHash, receiptPath: 'verified-retained.csv' }))
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 1)
+      assert.equal(calls.filter(call => call.method === 'inspect-live-retrieval').length, inspectedBefore)
+      assert.equal(database.getRecoveryOperationCount(), 0)
+      if (!generated) assert.equal(database.getVaultItems(['vault-a'], false)[0].state, 'ingested')
+    })
+  }
+  await fixture(async ({ dependencies, handlers, collection, calls, reopen }) => {
+    const secondRecord = 'records/synthetic/second.dbr'
+    collection.supplies.push({ ...structuredClone(collection.supplies[0]), record: secondRecord })
+    handlers.set('inspect-live-retrieval', ({ queue }) => ({ state: queue.operationId.endsWith('-0') ? 'rejected' : 'pending',
+      receiptPath: queue.operationId.endsWith('-0') ? `${queue.outgoingPath}.rejected` : null }))
+    await assert.rejects(executeLiveAugmentDispense(dependencies, collection, [record, secondRecord]), /Timed out/)
+    assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false, 'do not consume rejection evidence from a partially terminal batch')
+    reopen()
+    handlers.set('inspect-live-retrieval', ({ queue }) => ({ state: 'rejected', receiptPath: `${queue.outgoingPath}.rejected` }))
+    assert.equal(await reconcileLiveRecoveryOperations(dependencies), 1)
+    assert.equal(dependencies.database.getRecoveryOperationCount(), 0)
+  })
+  await fixture(async ({ dependencies, handlers, path, reopen }) => {
+    const incoming = [{ path: `${path}.incoming`, sha256: sourceHash, isHardcore: true,
+      item: payload, createdAtUtc: dependencies.clock.nowUtc() }]
+    handlers.set('poll-live-incoming', () => incoming)
+    dependencies.database.completeIngestOperation = () => { throw new Error('Synthetic transient database failure') }
+    assert.match((await syncLiveIncoming(dependencies)).issues[0], /database failure/)
+    let database = reopen()
+    assert.equal(database.getRecoveryOperationCount(), 1)
+    incoming.push({ ...incoming[0], path: `${path}.unrelated` })
+    const coordinator = new MainOperationCoordinator({ diagnostics: quietDiagnostics,
+      reconcileTransfers: () => reconcileLiveIncomingOperations(dependencies),
+      unresolvedTransferCount: () => database.getRecoveryOperationCount() })
+    await coordinator.runTransferExclusive(async () => {
+      assert.equal(database.getRecoveryOperationCount(), 0)
+      assert.equal(database.listVaultItems(true).length, 1, 'recovery only consumes the previously journaled incoming item')
+    })
+    database = reopen()
+    const stored = database.listVaultItems(true)
+    assert.deepEqual(database.getVaultItems([stored[0].id], true)[0].payload, payload)
+    await syncLiveIncoming(dependencies)
+    assert.equal(database.listVaultItems(true).length, 2, 'normal sync may now consume the unrelated queue exactly once')
+    await syncLiveIncoming(dependencies)
+    assert.equal(database.listVaultItems(true).length, 2)
+  })
+  await fixture(async ({ dependencies, handlers, seed, queue, calls }) => {
+    seed(['vault-a', 'vault-b'])
+    dependencies.database.prepareRetrievalOperation({ operationId: 'malformed-mapping', stashPath: 'live://gdia/sc',
+      sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ['vault-a', 'vault-b'],
+      detail: { vaultItemIds: ['vault-a', 'vault-b'], queues: [queue('only-one')] } })
+    handlers.set('inspect-live-retrieval', ({ queue }) => ({ state: 'rejected', receiptPath: `${queue.outgoingPath}.rejected` }))
+    assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0)
+    assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false, 'validate complete selection correspondence before consuming receipts')
+  })
   console.log('Production transfer adapter checks passed.')
 } finally {
   await rm(root, { recursive: true, force: true })

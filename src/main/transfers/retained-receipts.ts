@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { CollectionDatabase } from '../collection-database.ts';
 import type { TransferPorts } from './runtime.ts';
 import type { LiveQueueReceipt, LiveRetrievalQueue, LiveRetrievalStatus } from './contracts.ts';
@@ -18,6 +18,7 @@ export interface TerminalRecoveryEntry {
 }
 
 export function retainedRecoveryQueues(operation: RecoveryJournalOperation): LiveRetrievalQueue[] {
+  if (operation.detail.pendingDispatch || operation.detail.dispatchComplete === false) return []
   const queues = operation.detail.queues
   if (!Array.isArray(queues)) return []
   const parsed = queues.flatMap((candidate) => {
@@ -85,9 +86,9 @@ export async function finalizeLiveRecoveryOperation(
   queues: LiveRetrievalQueue[],
   entries: TerminalRecoveryEntry[]
 ): Promise<boolean> {
-  const { helper, database, paths, clock, diagnostics } = dependencies
+  const { helper, database, clock, diagnostics } = dependencies
   if (
-    entries.length !== queues.length ||
+    queues.length === 0 || entries.length !== queues.length ||
     entries.some((entry, index) =>
       entry.operationId !== queues[index]?.operationId ||
       entry.semanticSha256.toLowerCase() !== queues[index]?.semanticSha256.toLowerCase()
@@ -95,23 +96,27 @@ export async function finalizeLiveRecoveryOperation(
   ) return false
   const rejected = entries.filter((entry) => entry.state === 'rejected')
   const deposited = entries.filter((entry) => entry.state === 'deposited')
+  const generated = operation.detail.transferKind === 'generated_delivery'
+  const vaultItemIds = Array.isArray(operation.detail.vaultItemIds)
+    ? operation.detail.vaultItemIds.filter((value): value is string => typeof value === 'string')
+    : []
+  const expectedCount = generated
+    ? operation.detail.expectedQueueCount ?? (Array.isArray(operation.detail.records)
+      ? operation.detail.records.length : typeof operation.detail.record === 'string' ? 1 : undefined)
+    : vaultItemIds.length
+  if (
+    (!generated && (vaultItemIds.length === 0 || new Set(vaultItemIds).size !== vaultItemIds.length)) ||
+    (typeof expectedCount === 'number' && expectedCount !== queues.length) ||
+    rejected.some(entry => !entry.copiedReceiptPath)
+  ) return false
   for (const entry of rejected) {
-    try {
-      await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-        path: entry.receiptPath,
-        expectedSha256: entry.semanticSha256,
-        receiptDirectory: join(paths.receipts, 'recovered-rejections')
-      })
-    } catch (error) {
-      if (!entry.copiedReceiptPath) throw error
-      diagnostics.info('recovery', 'rejected-receipt.already-moved', {
-        operationId: operation.id,
-        queueOperationId: entry.operationId
-      })
-    }
+    await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+      path: entry.receiptPath,
+      expectedSha256: entry.semanticSha256,
+      receiptDirectory: dirname(entry.copiedReceiptPath!)
+    })
   }
 
-  const generated = operation.detail.transferKind === 'generated_delivery'
   const completedAtUtc = clock.nowUtc()
   if (generated) {
     if (deposited.length === 0) {
@@ -133,9 +138,6 @@ export async function finalizeLiveRecoveryOperation(
       })
     }
   } else {
-    const vaultItemIds = Array.isArray(operation.detail.vaultItemIds)
-      ? operation.detail.vaultItemIds.filter((value): value is string => typeof value === 'string')
-      : []
     if (vaultItemIds.length === 0 || vaultItemIds.length !== queues.length) return false
     if (deposited.length === entries.length) {
       database.completeRetrievalOperation({
@@ -201,7 +203,7 @@ export async function reconcileLiveRecoveryOperations(
     if (queues.length === 0) continue
     try {
       let entries = retainedTerminalResolution(operation)
-      if (entries.length !== queues.length) {
+      if (entries.length !== queues.length || entries.some(entry => entry.state === 'rejected' && !entry.copiedReceiptPath)) {
         const inspected = await Promise.all(
           queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }))
         )

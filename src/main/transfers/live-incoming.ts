@@ -7,12 +7,23 @@ import { createHash } from 'node:crypto';
 import { createVaultInstanceKey, type LiveVaultPayload } from '../collection-presentation.ts';
 
 export type LiveIncomingDependencies = TransferPorts & {
-  database: Pick<CollectionDatabase, 'completeIngestOperation' | 'ensureQuarantineCatalogItem' | 'failIngestOperation' | 'getCatalogNames' | 'hasCommittedOperation' | 'prepareIngestOperation' | 'setVaultRollAnalyses'>
+  database: Pick<CollectionDatabase, 'completeIngestOperation' | 'ensureQuarantineCatalogItem' | 'markIngestNeedsRecovery' | 'getCatalogNames' | 'hasCommittedOperation' | 'prepareLiveIngestOperation' | 'listRecoveryOperations' | 'setVaultRollAnalyses'>
+}
+
+/** Resume only journaled incoming payloads; never consume unrelated queues while recovery blocks writes. */
+export async function reconcileLiveIncomingOperations(dependencies: LiveIncomingDependencies): Promise<number> {
+  const pending = dependencies.database.listRecoveryOperations().filter(operation =>
+    operation.operation === 'ingest' && operation.detail.adapter === 'gdia-live-v1'
+  ).map(operation => operation.id)
+  if (pending.length === 0) return 0
+  await syncLiveIncoming(dependencies, undefined, new Set(pending))
+  return pending.filter(id => dependencies.database.hasCommittedOperation(id)).length
 }
 
 export async function syncLiveIncoming(
   dependencies: LiveIncomingDependencies,
-  installationPath?: string
+  installationPath?: string,
+  retainedOperationIds?: ReadonlySet<string>
 ): Promise<LiveGameSyncResult> {
   const { helper, database, paths, clock } = dependencies
   const status = await helper.request<LiveGameStatus>('inspect-live-game')
@@ -24,10 +35,6 @@ export async function syncLiveIncoming(
   const analysisInputs: Array<{ vaultItemId: string; item: LiveVaultPayload }> = []
   const issues: string[] = []
   for (const source of incoming) {
-    const catalogName = database.getCatalogNames([source.item.baseRecord]).get(
-      source.item.baseRecord.toLowerCase()
-    )
-    const name = catalogName ?? database.ensureQuarantineCatalogItem(source.item.baseRecord)
     const identity = createHash('sha256')
       .update(source.path.toLowerCase())
       .update('\0')
@@ -35,6 +42,11 @@ export async function syncLiveIncoming(
       .digest('hex')
     const operationId = `live-ingest-${identity}`
     const vaultItemId = `live-${identity}`
+    if (retainedOperationIds && !retainedOperationIds.has(operationId)) continue
+    const catalogName = database.getCatalogNames([source.item.baseRecord]).get(
+      source.item.baseRecord.toLowerCase()
+    )
+    const name = catalogName ?? database.ensureQuarantineCatalogItem(source.item.baseRecord)
     if (database.hasCommittedOperation(operationId)) {
       try {
         await helper.request<LiveQueueReceipt>('ack-live-incoming', {
@@ -55,7 +67,7 @@ export async function syncLiveIncoming(
         expectedSha256: source.sha256,
         receiptDirectory: join(paths.receipts, 'ingested')
       })
-      database.prepareIngestOperation({
+      database.prepareLiveIngestOperation({
         operationId,
         stashPath: `live://gdia/${source.isHardcore ? 'hc' : 'sc'}/${source.path.split(/[\\/]/).at(-1)}`,
         sourceSha256: source.sha256,
@@ -95,7 +107,7 @@ export async function syncLiveIncoming(
         )
       }
     } catch (error) {
-      if (prepared && !committed) database.failIngestOperation(operationId, error)
+      if (prepared && !committed) database.markIngestNeedsRecovery(operationId, error)
       issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }

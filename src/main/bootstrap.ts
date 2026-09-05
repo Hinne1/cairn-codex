@@ -1,6 +1,6 @@
 import { createLiveTransferService } from './transfers/live-retrieval.ts';
 import { executeIngestCommand, executeRetrievalCommand, planRetrievalCommand, type IngestCommand, type RetrievalCommand } from './transfers/offline-transactions.ts';
-import { syncLiveIncoming } from './transfers/live-incoming.ts';
+import { reconcileLiveIncomingOperations, syncLiveIncoming } from './transfers/live-incoming.ts';
 import { executeLiveAugmentDispense, executeSahdinasMementoRecovery } from './transfers/live-delivery.ts';
 import { reconcileLiveRecoveryOperations } from './transfers/retained-receipts.ts';
 import { systemTransferClock, isHardcoreStashPath, type HelperRequester } from './transfers/runtime.ts';
@@ -325,10 +325,16 @@ function registerIpcHandlers(
   const gdiaBackupDirectory = join(app.getPath('userData'), 'migrations', 'gdia')
   const preferenceStore = new PreferenceFileStore(join(app.getPath('userData'), 'preferences.json'))
   let gdiaImportProgress: GdiaImportProgress | null = null
+  const reconcileTransfers = async (): Promise<number> => {
+    const resolved = await reconcileLiveRecoveryOperations({ ...transfer, diagnostics })
+    const ingested = await reconcileLiveIncomingOperations(transfer)
+    if (ingested > 0) queueArchiveBackup('retained live ingest recovery')
+    return resolved + ingested
+  }
   const operations = new MainOperationCoordinator({
     diagnostics,
     transfersPermitted: () => !process.env.CAIRN_CODEX_SCREENSHOT_PATH,
-    reconcileTransfers: () => reconcileLiveRecoveryOperations({ ...transfer, diagnostics }),
+    reconcileTransfers,
     unresolvedTransferCount: () => database.getRecoveryOperationCount()
   })
   const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => operations.runExclusive(operation)
@@ -462,7 +468,7 @@ function registerIpcHandlers(
       await writeFile(selection.filePath, serialized, 'utf8')
       return selection.filePath
     },
-    reconcileRecovery: () => reconcileLiveRecoveryOperations({ ...transfer, diagnostics }),
+    reconcileRecovery: reconcileTransfers,
     runExclusive,
     recoveryOperations: () => database.getDiagnosticSummary().recoveryOperations,
     exporter: diagnosticExporter

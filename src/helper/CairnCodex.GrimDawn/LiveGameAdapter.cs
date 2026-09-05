@@ -144,6 +144,7 @@ internal sealed class LiveGameAdapter : IDisposable
             Directory.CreateDirectory(incoming);
             var bytes = Encoding.UTF8.GetBytes(serialized);
             var semanticHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            VerifyAcknowledgementRecovery(incoming, Path.Combine(recoveryRoot, "receipts"), bytes, semanticHash);
             var pendingPath = Path.Combine(outgoing, "cairn-self-test-pending.csv");
             var pendingQueue = new LiveRetrievalQueue(
                 "self-test-pending", pendingPath, semanticHash, true, [], []);
@@ -480,20 +481,94 @@ internal sealed class LiveGameAdapter : IDisposable
     {
         lock (sync)
         {
-            var incoming = DemandIncomingQueueOwnership();
-            var fullPath = ValidateIncomingPath(path, incoming);
-            var bytes = ReadStable(fullPath);
-            var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
-            if (!hash.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
+            return AcknowledgeIncomingFile(path, expectedSha256, receiptDirectory, DemandIncomingQueueOwnership());
+        }
+    }
+
+    private static void VerifyAcknowledgementRecovery(string incoming, string receipts, byte[] bytes, string hash)
+    {
+        var source = Path.Combine(incoming, "acknowledgement-self-test.csv");
+        File.WriteAllBytes(source, bytes);
+        var first = AcknowledgeIncomingFile(source, hash, receipts, incoming);
+        var repeated = AcknowledgeIncomingFile(source, hash, receipts, incoming);
+        if (first != repeated || File.Exists(source) || !File.ReadAllBytes(first.ReceiptPath).SequenceEqual(bytes))
+            throw new InvalidDataException("A lost acknowledgement response did not recover from its exact receipt.");
+
+        // A corrupt retained copy must not allow removal of a good incoming file.
+        File.WriteAllBytes(source, bytes);
+        File.WriteAllText(first.ReceiptPath, "corrupt retained receipt");
+        var corruptRejected = false;
+        try { AcknowledgeIncomingFile(source, hash, receipts, incoming); }
+        catch (SourceChangedException) { corruptRejected = true; }
+        if (!corruptRejected || !File.ReadAllBytes(source).SequenceEqual(bytes))
+            throw new InvalidDataException("A corrupt retained receipt consumed the original incoming item.");
+
+        // Changed incoming bytes are not evidence that acknowledgement already ran.
+        File.WriteAllBytes(first.ReceiptPath, bytes);
+        File.WriteAllText(source, "changed incoming receipt");
+        var changedRejected = false;
+        try { AcknowledgeIncomingFile(source, hash, receipts, incoming); }
+        catch (SourceChangedException) { changedRejected = true; }
+        if (!changedRejected || !File.Exists(source))
+            throw new InvalidDataException("A changed incoming item was accepted during acknowledgement.");
+
+        File.Delete(source);
+        using (var locked = new FileStream(first.ReceiptPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var lockedRejected = false;
+            try { AcknowledgeIncomingFile(source, hash, receipts, incoming); }
+            catch (IOException) { lockedRejected = true; }
+            if (!lockedRejected) throw new InvalidDataException("An unreadable receipt was accepted as proof.");
+        }
+        File.Delete(first.ReceiptPath);
+        var missingRejected = false;
+        try { AcknowledgeIncomingFile(source, hash, receipts, incoming); }
+        catch (FileNotFoundException) { missingRejected = true; }
+        if (!missingRejected) throw new InvalidDataException("Missing source and receipt were accepted as proof.");
+        var outsideRejected = false;
+        try { AcknowledgeIncomingFile(Path.Combine(receipts, "outside.csv"), hash, receipts, incoming); }
+        catch (UnauthorizedAccessException) { outsideRejected = true; }
+        if (!outsideRejected) throw new InvalidDataException("Acknowledgement escaped incoming queue ownership.");
+    }
+
+    private static LiveQueueReceipt AcknowledgeIncomingFile(
+        string path, string expectedSha256, string receiptDirectory, string incomingDirectory)
+    {
+        var fullPath = ValidateIncomingPath(path, incomingDirectory);
+        if (expectedSha256.Length != 64 || !expectedSha256.All(Uri.IsHexDigit))
+            throw new ArgumentException("A live receipt requires a SHA-256 hash.");
+        var hash = expectedSha256.ToLowerInvariant();
+        var target = Path.Combine(receiptDirectory, $"{hash}.{Path.GetFileName(fullPath)}");
+        void Verify(byte[] bytes)
+        {
+            if (!Convert.ToHexStringLower(SHA256.HashData(bytes)).Equals(hash, StringComparison.Ordinal))
+                throw new SourceChangedException("The live incoming item or retained receipt changed before acknowledgement.");
+        }
+
+        byte[] source;
+        try { source = ReadStable(fullPath); }
+        catch (FileNotFoundException)
+        {
+            // Only a missing source plus the exact verified receipt proves an
+            // earlier acknowledgement. Permission/ownership/hash errors propagate.
+            Verify(ReadStable(target));
+            try
             {
-                throw new SourceChangedException("The live incoming item changed before acknowledgement.");
+                File.GetAttributes(fullPath);
+                throw new IOException("The incoming item reappeared during acknowledgement recovery.");
             }
-            Directory.CreateDirectory(receiptDirectory);
-            var target = Path.Combine(receiptDirectory, $"{hash}.{Path.GetFileName(fullPath)}");
-            if (File.Exists(target)) File.Delete(fullPath);
-            else File.Move(fullPath, target);
+            catch (FileNotFoundException) { }
             return new LiveQueueReceipt(hash, target);
         }
+        Verify(source);
+        Directory.CreateDirectory(receiptDirectory);
+        if (File.Exists(target))
+        {
+            Verify(ReadStable(target));
+            File.Delete(fullPath);
+        }
+        else File.Move(fullPath, target);
+        return new LiveQueueReceipt(hash, target);
     }
 
     public LiveQueueReceipt CopyIncomingReceipt(string path, string expectedSha256, string receiptDirectory)

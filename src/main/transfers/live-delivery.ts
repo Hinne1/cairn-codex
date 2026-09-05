@@ -5,6 +5,7 @@ import type { LiveQueueReceipt, LiveRetrievalQueue, LiveRetrievalStatus } from '
 import type { CharacterSaveProfile, CollectionSnapshot, LiveGameStatus, LiveSupplyDispenseResult, SpecialRecoveryDestination, SpecialItemRecoveryResult } from '../../shared/contracts.ts';
 import type { LiveVaultPayload } from '../collection-presentation.ts';
 import { createHash } from 'node:crypto';
+import type { TerminalRecoveryEntry } from './retained-receipts.ts'
 
 export type LiveDeliveryDependencies = TransferPorts & {
   database: Pick<CollectionDatabase, 'completeDeliveryOperation' | 'failDeliveryOperation' | 'markDeliveryNeedsRecovery' | 'prepareDeliveryOperation' | 'updatePendingOperationDetail'>
@@ -58,13 +59,74 @@ export function createSupplyPayload(baseRecord: string, clock: TransferClock): L
   }
 }
 
+async function deliverGeneratedItems(
+  { helper, database, paths, clock }: LiveDeliveryDependencies,
+  operationId: string,
+  isHardcore: boolean,
+  destination: SpecialRecoveryDestination,
+  items: LiveVaultPayload[]
+): Promise<TerminalRecoveryEntry[]> {
+  const queues: LiveRetrievalQueue[] = []
+  for (const [index, item] of items.entries()) {
+    const dispatch = { operationId: `${operationId}-${index}`, isHardcore, destination, item }
+    database.updatePendingOperationDetail(operationId, { pendingDispatch: dispatch })
+    const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', dispatch)
+    if (
+      queue.operationId !== dispatch.operationId || queue.isHardcore !== isHardcore ||
+      !queue.outgoingPath || !/^[0-9a-f]{64}$/i.test(queue.semanticSha256) ||
+      !Array.isArray(queue.baselineDeleted) || !queue.baselineDeleted.every(path => typeof path === 'string') ||
+      !Array.isArray(queue.baselineIncoming) || !queue.baselineIncoming.every(path => typeof path === 'string')
+    ) throw new Error('The native adapter returned an invalid live delivery queue receipt.')
+    queues.push(queue)
+    database.updatePendingOperationDetail(operationId, {
+      phase: 'queued', pendingDispatch: null, queues: [...queues]
+    })
+  }
+  database.updatePendingOperationDetail(operationId, { dispatchComplete: true })
+  const terminal = new Map<string, TerminalRecoveryEntry>()
+  const deadline = clock.now() + 30_000
+  while (clock.now() < deadline && terminal.size !== queues.length) {
+    for (const queue of queues) {
+      if (terminal.has(queue.operationId)) continue
+      const status = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
+      if (status.state !== 'deposited' && status.state !== 'rejected') continue
+      if (!status.receiptPath?.trim()) throw new Error('The live delivery has no durable terminal receipt.')
+      terminal.set(queue.operationId, { operationId: queue.operationId, state: status.state,
+        receiptPath: status.receiptPath, semanticSha256: queue.semanticSha256, copiedReceiptPath: null })
+    }
+    if (terminal.size !== queues.length) await clock.wait(150)
+  }
+  if (terminal.size !== queues.length) {
+    throw new Error('Timed out waiting for Grim Dawn to acknowledge the live delivery. Do not retry until CC resolves the pending queue.')
+  }
+  const entries = queues.map(queue => terminal.get(queue.operationId)!)
+  const receiptDirectory = join(paths.receipts, 'rejected-generated-deliveries')
+  for (const entry of entries) {
+    if (entry.state !== 'rejected') continue
+    const copied = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
+      path: entry.receiptPath, expectedSha256: entry.semanticSha256, receiptDirectory
+    })
+    entry.copiedReceiptPath = copied.receiptPath
+  }
+  database.updatePendingOperationDetail(operationId, {
+    phase: 'terminal-receipts-copied', recoveryResolution: { recordedAtUtc: clock.nowUtc(), entries }
+  })
+  for (const entry of entries) {
+    if (entry.state !== 'rejected') continue
+    await helper.request<LiveQueueReceipt>('ack-live-incoming', {
+      path: entry.receiptPath, expectedSha256: entry.semanticSha256, receiptDirectory
+    })
+  }
+  return entries
+}
+
 export async function executeSahdinasMementoRecovery(
   dependencies: LiveDeliveryDependencies,
   collection: CollectionSnapshot,
   destination: SpecialRecoveryDestination,
   expectedCharacterName?: string
 ): Promise<SpecialItemRecoveryResult> {
-  const { helper, database, paths, clock } = dependencies
+  const { helper, database, clock } = dependencies
   if (destination !== 'shared-stash' && destination !== 'character-inventory') {
     throw new Error('Sahdina recovery only supports the shared stash or active character inventory.')
   }
@@ -108,69 +170,39 @@ export async function executeSahdinasMementoRecovery(
   const operationId = `sahdina-${clock.operationId()}`
   const item = createSupplyPayload(SAHDINAS_MEMENTO.record, clock)
   const payloadSha256 = createHash('sha256').update(JSON.stringify(item)).digest('hex')
-  let queued = false
   database.prepareDeliveryOperation({
     operationId,
     destination: `live://special-recovery/${destination}`,
     payloadSha256,
     startedAtUtc: clock.nowUtc(),
-    detail: { phase: 'prepared', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination, isHardcore: activeIsHardcore }
+    detail: { phase: 'prepared', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination,
+      isHardcore: activeIsHardcore, payloads: [item], expectedQueueCount: 1, dispatchComplete: false }
   })
   try {
-    const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
-      operationId,
-      isHardcore: activeIsHardcore,
-      destination,
-      item
-    })
-    queued = true
-    database.updatePendingOperationDetail(operationId, {
-      phase: 'queued',
-      queues: [queue]
-    })
-    const deadline = clock.now() + 30_000
-    while (clock.now() < deadline) {
-      const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
-      if (result.state === 'rejected') {
-        if (!result.receiptPath) {
-          throw new Error('The game rejected the recovery without returning a durable queue receipt.')
-        }
-        await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-          path: result.receiptPath,
-          expectedSha256: queue.semanticSha256,
-          receiptDirectory: join(paths.receipts, 'rejected-special-recoveries')
-        })
-        const target = destination === 'character-inventory' ? 'personal inventory' : status.depositTabDescription
-        const rejection = new Error(`The game rejected the recovery because the ${target} is full. No replacement was delivered.`)
-        database.failDeliveryOperation(operationId, rejection)
-        queued = false
-        throw rejection
-      }
-      if (result.state === 'deposited' && result.receiptPath) {
-        database.completeDeliveryOperation({
-          operationId,
-          receiptPath: result.receiptPath,
-          completedAtUtc: clock.nowUtc(),
-          detail: { phase: 'committed', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination, isHardcore: activeIsHardcore }
-        })
-        return {
-          operationId,
-          status: 'committed',
-          activeCharacter: activeCharacterName ?? 'Active character',
-          destination,
-          record: SAHDINAS_MEMENTO.record,
-          name: SAHDINAS_MEMENTO.name,
-          receiptPath: result.receiptPath
-        }
-      }
-      await clock.wait(150)
+    const result = (await deliverGeneratedItems(dependencies, operationId, activeIsHardcore, destination, [item]))[0]!
+    if (result.state === 'rejected') {
+      const target = destination === 'character-inventory' ? 'personal inventory' : status.depositTabDescription
+      const rejection = new Error(`The game rejected the recovery because the ${target} is full. No replacement was delivered.`)
+      database.failDeliveryOperation(operationId, rejection)
+      throw rejection
     }
-    throw new Error(
-      'Timed out waiting for Grim Dawn to acknowledge Sahdina\'s Memento. Do not click recovery again until the pending live queue has resolved.'
-    )
+    database.completeDeliveryOperation({
+      operationId,
+      receiptPath: result.receiptPath,
+      completedAtUtc: clock.nowUtc(),
+      detail: { phase: 'committed', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination, isHardcore: activeIsHardcore }
+    })
+    return {
+      operationId,
+      status: 'committed',
+      activeCharacter: activeCharacterName ?? 'Active character',
+      destination,
+      record: SAHDINAS_MEMENTO.record,
+      name: SAHDINAS_MEMENTO.name,
+      receiptPath: result.receiptPath
+    }
   } catch (error) {
-    if (queued) database.markDeliveryNeedsRecovery(operationId, error)
-    else database.failDeliveryOperation(operationId, error)
+    database.markDeliveryNeedsRecovery(operationId, error)
     throw error
   }
 }
@@ -181,7 +213,7 @@ export async function executeLiveAugmentDispense(
   records: string[],
   expectedCharacterName?: string
 ): Promise<LiveSupplyDispenseResult> {
-  const { helper, database, paths, clock } = dependencies
+  const { helper, database, clock } = dependencies
   const uniqueRecords = [...new Set(records.map((record) => record.toLocaleLowerCase()))]
   if (uniqueRecords.length === 0) throw new Error('Select at least one augment to dispense.')
 
@@ -274,7 +306,6 @@ export async function executeLiveAugmentDispense(
   const receiptPaths: string[] = []
   const dispensed: typeof selected = []
   const issues: string[] = []
-  const queued: Array<{ item: (typeof selected)[number]; queue: LiveRetrievalQueue }> = []
   const payloads = selected.map((item) => createSupplyPayload(item.record, clock))
   const payloadSha256 = createHash('sha256').update(JSON.stringify(payloads)).digest('hex')
   database.prepareDeliveryOperation({
@@ -282,52 +313,22 @@ export async function executeLiveAugmentDispense(
     destination: 'live://personal-inventory/augments',
     payloadSha256,
     startedAtUtc: clock.nowUtc(),
-    detail: { phase: 'prepared', adapter: 'cairn-live-v1', records: selected.map((item) => item.record), isHardcore: activeCharacter.isHardcore }
+    detail: { phase: 'prepared', adapter: 'cairn-live-v1', records: selected.map((item) => item.record),
+      isHardcore: activeCharacter.isHardcore, payloads, expectedQueueCount: payloads.length, dispatchComplete: false }
   })
   try {
-    for (const [index, item] of selected.entries()) {
-      const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
-        operationId: `${operationId}-${index}`,
-        isHardcore: activeIsHardcore,
-        destination: 'character-inventory',
-        item: payloads[index]
-      })
-      queued.push({ item, queue })
-      database.updatePendingOperationDetail(operationId, {
-        phase: 'queued',
-        queues: queued.map((entry) => entry.queue)
-      })
-    }
-
-    const pending = new Map(queued.map((entry) => [entry.queue.operationId, entry]))
-    const deadline = clock.now() + 30_000
-    while (clock.now() < deadline && pending.size > 0) {
-      for (const [pendingId, entry] of [...pending.entries()]) {
-        const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue: entry.queue })
-        if (result.state === 'rejected') {
-          if (!result.receiptPath) throw new Error('The game rejected an augment without returning a durable queue receipt.')
-          await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-            path: result.receiptPath,
-            expectedSha256: entry.queue.semanticSha256,
-            receiptDirectory: join(paths.receipts, 'rejected-personal-deliveries')
-          })
-          issues.push(`${activeCharacter.name}'s personal inventory is full. No rejected augment was lost.`)
-          pending.delete(pendingId)
-        } else if (result.state === 'deposited' && result.receiptPath) {
-          receiptPaths.push(result.receiptPath)
-          dispensed.push(entry.item)
-          pending.delete(pendingId)
-        }
+    const entries = await deliverGeneratedItems(dependencies, operationId, activeIsHardcore, 'character-inventory', payloads)
+    for (const [index, result] of entries.entries()) {
+      if (result.state === 'rejected') {
+        issues.push(`${activeCharacter.name}'s personal inventory is full. No rejected augment was lost.`)
+      } else {
+        receiptPaths.push(result.receiptPath)
+        dispensed.push(selected[index]!)
       }
-      if (pending.size > 0) await clock.wait(150)
-    }
-    if (pending.size > 0) {
-      throw new Error(`Timed out waiting for Grim Dawn to acknowledge ${pending.size} personal-inventory ${pending.size === 1 ? 'delivery' : 'deliveries'}. Do not retry until CC resolves the pending queue.`)
     }
     if (dispensed.length === 0) {
       const rejection = new Error(issues[0] ?? 'No augments were delivered.')
       database.failDeliveryOperation(operationId, rejection)
-      queued.length = 0
       throw rejection
     }
     database.completeDeliveryOperation({
@@ -353,8 +354,7 @@ export async function executeLiveAugmentDispense(
       issues
     }
   } catch (error) {
-    if (queued.length > 0) database.markDeliveryNeedsRecovery(operationId, error)
-    else database.failDeliveryOperation(operationId, error)
+    database.markDeliveryNeedsRecovery(operationId, error)
     throw error
   }
 }

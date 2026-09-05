@@ -59,7 +59,10 @@ function controlModel<K extends keyof MiWorkshopControls>(key: K, resetPage = tr
 
 const query = controlModel('query')
 const affix = controlModel('affix')
-const favoritesOnly = controlModel('favoritesOnly')
+const favoritesOnly = computed({
+  get: () => controls.value.favoritesOnly === true,
+  set: (value: boolean) => { controls.value = updateMiWorkshopControls(controls.value, { favoritesOnly: value }, true) }
+})
 const metric = controlModel('metric')
 const metricDirection = controlModel('metricDirection')
 const sort = controlModel('sort')
@@ -137,7 +140,7 @@ defineExpose({ syncNativeControls })
       :search-error="searchError"
     >
       <template #filters>
-        <label class="mi-favorite-filter"><span>Favorites</span><input v-model="favoritesOnly" type="checkbox" aria-label="Favorites only" /></label>
+        <label class="mi-favorite-filter"><span>Favorite status</span><select v-model="favoritesOnly" aria-label="Favorite status"><option :value="false">All copies</option><option :value="true">Favorites only</option></select></label>
         <label>
           <span>Affix quality</span>
           <select ref="affixSelect" v-model="affix" autocomplete="off">

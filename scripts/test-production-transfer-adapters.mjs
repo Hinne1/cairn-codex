@@ -83,7 +83,7 @@ async function fixture(run) {
       assert.equal(previousSchema, 12)
       const legacy = new DatabaseSync(databasePath)
       legacy.exec(`DROP TRIGGER vault_item_projection_insert; DROP TRIGGER vault_item_projection_update;
-        DROP TABLE vault_item_projection; DROP INDEX vault_item_group_idx;`)
+        DROP TABLE vault_item_projection; DROP INDEX vault_item_group_idx; DROP TABLE favorite_item;`)
       legacy.exec('PRAGMA user_version = 12')
       prepareLegacy(legacy)
       legacy.close()

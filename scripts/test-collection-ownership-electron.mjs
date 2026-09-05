@@ -176,14 +176,7 @@ if (!process.versions.electron) {
           collectionOwnerFixture.copies.value=collectionOwnerFixture.snapshot.value.items.map((item,index)=>({baseRecord:item.record,instanceKey:index.toString(16).padStart(64,'0'),sourcePath:'synthetic.gst',tabIndex:0,itemIndex:index,seed:index,prefixRecord:'',suffixRecord:'',isHardcore:false,isFavorite:index%10===0}));`)
         assert.equal(await run("document.querySelectorAll('.item-card').length"), 48)
         await act("collectionOwnerFixture.workspace.value='mi'")
-        await act("document.querySelector('.mi-favorite-filter input').focus()")
-        await key('Enter')
-        // Native checkboxes activate with Space rather than Enter.
-        if (!await run('collectionOwnerFixture.miControls.value.favoritesOnly === true')) {
-          await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32,text:' '})
-          await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32})
-          await settle()
-        }
+        await act(`{ const select=document.querySelector('.mi-favorite-filter select'); select.value='true'; select.dispatchEvent(new Event('change',{bubbles:true})); }`)
         assert.equal(await run('collectionOwnerFixture.miControls.value.favoritesOnly'), true)
         assert.equal(await run("document.querySelectorAll('.mi-table-row').length <= 100"), true)
         assert.equal(await run("document.querySelectorAll('.mi-table-row').length > 0"), true)

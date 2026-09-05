@@ -1,127 +1,48 @@
-import { join } from 'node:path'
-import { createHash, randomInt, randomUUID } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
-import { arch, platform, release } from 'node:os'
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron'
-import { isGlossarySourceUrl } from '../shared/glossary-sources'
-import type { ApplicationVerification } from './application-runtime.ts'
-import { captureDiagnosticScreenshot } from './screenshot-diagnostics.ts'
-import { CATALOG_PRESENTATION_VERSION, ROLL_ANALYSIS_VERSION } from './catalog-versions.ts'
-import {
-  IPC_CHANNELS,
-  type ArchiveBackupEntry,
-  type ArchiveBackupActionResult,
-  type ArchiveRollHydrationResult,
-  type AppStatus,
-  type CharacterSaveProfile,
-  type CollectionBasis,
-  type CollectionItem,
-  type CollectionSnapshot,
-  type DismantlingPreview,
-  type DebugLoggingStatus,
-  type DiagnosticExportResult,
-  type GrimDawnDiscovery,
-  type GdiaImportProgress,
-  type GdiaImportResult,
-  type IngestResult,
-  type ItemRollAnalysis,
-  type LiveGameStatus,
-  type LiveGameSyncResult,
-  type LiveRetrievalResult,
-  type LiveSupplyDispenseResult,
-  type OperationHistoryPage,
-  type OperationHistoryRequest,
-  type PreferenceLoadReport,
-  type SpecialItemRecoveryResult,
-  type SpecialRecoveryDestination,
-  type MapRegionLocation,
-  type RetrievalResult,
-  type RendererErrorReport,
-  type ObservedStashItem,
-  type StagingTabInspection,
-  type StartupPhaseEvent,
-  type StartupStatus,
-  type VaultListItem,
-  type VaultItemPage,
-  type VaultPageRequest,
-  type VaultSummary,
-  type WriteSafetyStatus
-} from '@shared/contracts'
-import {
-  isCollectionOwned,
-  withAwakeningAvailability
-} from '@shared/collection-availability'
-import { presentCollection, withRecipeCollection, createVaultInstanceKey, type LiveVaultPayload } from './collection-presentation.ts'
-import { QuarantineReconciliationService } from './quarantine-reconciliation.ts'
-import { GrimDawnHelperClient } from './grim-dawn/helper-client'
-import {
-  CollectionDatabase,
-  type RecoveryJournalOperation,
-  type ResolvedArchiveCatalogItem
-} from './collection-database'
-import { analyzeGdiaDatabase, migrateGdiaDatabase } from './gdia-migration'
-import { readLastGdiaImportResult, writeLastGdiaImportResult } from './gdia-import-receipt'
-import { ArchiveBackupService } from './archive-backup'
-import {
-  DiagnosticLogger
-} from './diagnostics'
-import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-recovery'
-import { PreferenceFileStore } from './preference-file-store.ts'
-import {
-  BackgroundJobCanceledError,
-  BackgroundJobCoordinator,
-  isBackgroundJobId,
-  runGlobalRollHydration,
-  TrailingJobQueue
-} from './background-jobs'
-import { createMainIpcDomains } from './ipc/domains.ts'
-import {
-  booleanField,
-  validateBackgroundJobId,
-  validateCollectionRequest,
-  validateNavigation,
-  validateOperationHistory,
-  validateOptionalMode,
-  validatePath,
-  validatePathAndVaultIds,
-  validatePinnedBest,
-  validatePreferenceBootstrap,
-  validatePreferenceLoad,
-  validateRendererError,
-  validateSerializedPreferences,
-  validateSourcePaths,
-  validateSpecialRecovery,
-  validateStartupPhase,
-  validateSupplyDispense,
-  validateVaultIds,
-  validateVaultPage,
-  validateZoomFactor
-} from './ipc/validation.ts'
-import {
-  registerManagedShutdown,
-  registerPrimaryWindowLifecycle,
-  registerWindowStatePersistence
-} from './window-lifecycle.ts'
-import { MainOperationCoordinator } from './operation-coordinator.ts'
-import { BackgroundJobService } from './ipc/background-job-service.ts'
-import { BackupService } from './ipc/backup-service.ts'
-import { WindowService } from './ipc/window-service.ts'
-import {
-  ItemAssistantImportCanceledError,
-  ItemAssistantImportService,
-  migrationOptionsFromRequest
-} from './ipc/import-service.ts'
-import { CollectionService } from './ipc/collection-service.ts'
-import { runCollectionRefresh } from './ipc/collection-refresh-jobs.ts'
-import { DiagnosticsService } from './ipc/diagnostics-service.ts'
-import { ArchiveDomainService } from './ipc/archive-service.ts'
-import { LiveTransferDomainService } from './ipc/live-transfer-service.ts'
-import { LiveGameDomainService } from './ipc/live-game-service.ts'
-import { DiagnosticExportService } from './ipc/diagnostic-export-service.ts'
-import {
-  readCollectionSnapshotCache,
-  writeCollectionSnapshotCache
-} from './collection-snapshot-cache.ts'
+import { createLiveTransferService } from './transfers/live-retrieval.ts';
+import { executeIngestCommand, executeRetrievalCommand, planRetrievalCommand, type IngestCommand, type RetrievalCommand } from './transfers/offline-transactions.ts';
+import { syncLiveIncoming } from './transfers/live-incoming.ts';
+import { executeLiveAugmentDispense, executeSahdinasMementoRecovery } from './transfers/live-delivery.ts';
+import { reconcileLiveRecoveryOperations } from './transfers/retained-receipts.ts';
+import { systemTransferClock, isHardcoreStashPath, type HelperRequester } from './transfers/runtime.ts';
+
+import { join } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { arch, platform, release } from 'node:os';
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, shell } from 'electron';
+import { isGlossarySourceUrl } from '../shared/glossary-sources';
+import type { ApplicationVerification } from './application-runtime.ts';
+import { captureDiagnosticScreenshot } from './screenshot-diagnostics.ts';
+import { CATALOG_PRESENTATION_VERSION, ROLL_ANALYSIS_VERSION } from './catalog-versions.ts';
+import { IPC_CHANNELS, type ArchiveBackupEntry, type ArchiveBackupActionResult, type CharacterSaveProfile, type CollectionBasis, type CollectionSnapshot, type DismantlingPreview, type GrimDawnDiscovery, type GdiaImportProgress, type GdiaImportResult, type IngestResult, type ItemRollAnalysis, type LiveGameStatus, type OperationHistoryPage, type OperationHistoryRequest, type PreferenceLoadReport, type SpecialRecoveryDestination, type MapRegionLocation, type RetrievalResult, type RendererErrorReport, type ObservedStashItem, type StagingTabInspection, type StartupPhaseEvent, type StartupStatus, type VaultListItem, type VaultItemPage, type VaultPageRequest, type VaultSummary, type WriteSafetyStatus } from '@shared/contracts';
+
+import { presentCollection, type LiveVaultPayload } from './collection-presentation.ts';
+import { QuarantineReconciliationService } from './quarantine-reconciliation.ts';
+import { GrimDawnHelperClient } from './grim-dawn/helper-client';
+import { CollectionDatabase, type ResolvedArchiveCatalogItem } from './collection-database';
+import { analyzeGdiaDatabase, migrateGdiaDatabase } from './gdia-migration';
+import { readLastGdiaImportResult, writeLastGdiaImportResult } from './gdia-import-receipt';
+import { ArchiveBackupService } from './archive-backup';
+import { DiagnosticLogger } from './diagnostics';
+import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-recovery';
+import { PreferenceFileStore } from './preference-file-store.ts';
+import { BackgroundJobCanceledError, BackgroundJobCoordinator, runGlobalRollHydration, TrailingJobQueue } from './background-jobs';
+import { createMainIpcDomains } from './ipc/domains.ts';
+import { booleanField, validateBackgroundJobId, validateCollectionRequest, validateNavigation, validateOperationHistory, validateOptionalMode, validatePath, validatePathAndVaultIds, validatePinnedBest, validatePreferenceBootstrap, validatePreferenceLoad, validateRendererError, validateSerializedPreferences, validateSourcePaths, validateSpecialRecovery, validateStartupPhase, validateSupplyDispense, validateVaultIds, validateVaultPage, validateZoomFactor } from './ipc/validation.ts';
+import { registerManagedShutdown, registerPrimaryWindowLifecycle, registerWindowStatePersistence } from './window-lifecycle.ts';
+import { MainOperationCoordinator } from './operation-coordinator.ts';
+import { BackgroundJobService } from './ipc/background-job-service.ts';
+import { BackupService } from './ipc/backup-service.ts';
+import { WindowService } from './ipc/window-service.ts';
+import { ItemAssistantImportCanceledError, ItemAssistantImportService, migrationOptionsFromRequest } from './ipc/import-service.ts';
+import { CollectionService } from './ipc/collection-service.ts';
+import { runCollectionRefresh } from './ipc/collection-refresh-jobs.ts';
+import { DiagnosticsService } from './ipc/diagnostics-service.ts';
+import { ArchiveDomainService } from './ipc/archive-service.ts';
+
+import { LiveGameDomainService } from './ipc/live-game-service.ts';
+import { DiagnosticExportService } from './ipc/diagnostic-export-service.ts';
+import { readCollectionSnapshotCache, writeCollectionSnapshotCache } from './collection-snapshot-cache.ts';
 
 function runArchiveBackupJob(
   jobs: BackgroundJobCoordinator,
@@ -190,10 +111,7 @@ let applicationRoot = app.getAppPath()
 let applicationStarted = false
 const DOUBLE_RARE_MI_BITMAP = 'character/item_doubleraremonsterinfrequent.tex'
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
-const SAHDINAS_MEMENTO = {
-  record: 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr',
-  name: "Sahdina's Memento"
-} as const
+
 const SAFE_MODE_ARGUMENT = '--cairn-safe-mode'
 const safeModeRequested = process.argv.includes(SAFE_MODE_ARGUMENT) ||
   (Boolean(process.env.CAIRN_CODEX_SCREENSHOT_PATH) && process.env.CAIRN_CODEX_SCREENSHOT_SAFE_MODE === '1')
@@ -270,12 +188,6 @@ function recordStartupPhase(phase: StartupPhaseEvent, diagnostics: DiagnosticLog
   return presentStartupStatus()
 }
 
-interface IngestCommand {
-  path: string
-  expectedSourceSha256: string
-  items: Array<{ tabIndex: number; itemIndex: number; expectedSeed: number }>
-}
-
 interface PersistedWindowState {
   x: number
   y: number
@@ -296,61 +208,10 @@ export interface MapLocationIndex {
   unlocatedMiBases: string[]
 }
 
-interface IngestPlan {
-  path: string
-  sourceSha256: string
-  sourceItemCount: number
-  replacementItemCount: number
-  replacementSha256: string
-  semanticallyValid: boolean
-  idempotent: boolean
-  items: Array<{ baseRecord: string; seed: number; [key: string]: unknown }>
-}
-
-interface CommittedIngest {
-  plan: IngestPlan
-  transaction: {
-    backupPath: string
-    rollbackPath: string
-    sourceSha256: string
-    committedSha256: string
-  }
-}
-
-interface RetrievalCommand {
-  path: string
-  expectedSourceSha256: string
-  targetTabIndex: number
-  vaultItemIds: string[]
-}
-
 interface RetrievalPlanCommand {
   path: string
   targetTabIndex: number
   vaultItemIds: string[]
-}
-
-interface RetrievalPlan {
-  path: string
-  sourceSha256: string
-  targetTabIndex: number
-  sourceItemCount: number
-  replacementItemCount: number
-  replacementSha256: string
-  restoredExactly: boolean
-  semanticallyValid: boolean
-  idempotent: boolean
-  items: Array<{ baseRecord: string; seed: number }>
-}
-
-interface CommittedRetrieval {
-  plan: RetrievalPlan
-  transaction: {
-    backupPath: string
-    rollbackPath: string
-    sourceSha256: string
-    committedSha256: string
-  }
 }
 
 interface TransferStashScan {
@@ -372,38 +233,6 @@ interface ItemIconExtractionResult {
   icons: Array<{ bitmap: string; key: string }>
   missing: string[]
   failures: Array<{ bitmap: string; error: string }>
-}
-
-
-export interface LiveIncomingItem {
-  path: string
-  sha256: string
-  isHardcore: boolean
-  item: LiveVaultPayload
-  createdAtUtc: string
-}
-
-interface LiveQueueReceipt {
-  sha256: string
-  receiptPath: string
-}
-
-export interface LiveRetrievalQueue {
-  operationId: string
-  outgoingPath: string
-  semanticSha256: string
-  isHardcore: boolean
-  baselineDeleted: string[]
-  baselineIncoming: string[]
-}
-
-export interface LiveRetrievalStatus {
-  state: 'pending' | 'deposited' | 'rejected' | 'unknown'
-  receiptPath: string | null
-}
-
-function isHardcoreStashPath(path: string): boolean {
-  return path.toLocaleLowerCase().endsWith('.gsh')
 }
 
 async function countFiles(directory: string): Promise<number> {
@@ -472,247 +301,11 @@ function createHelperClient(diagnostics?: DiagnosticLogger): GrimDawnHelperClien
   })
 }
 
-interface TerminalRecoveryEntry {
-  operationId: string
-  state: 'deposited' | 'rejected'
-  receiptPath: string
-  semanticSha256: string
-  copiedReceiptPath: string | null
-}
-
-export type HelperRequester = Pick<GrimDawnHelperClient, 'request'>
-
-function retainedRecoveryQueues(operation: RecoveryJournalOperation): LiveRetrievalQueue[] {
-  const queues = operation.detail.queues
-  if (!Array.isArray(queues)) return []
-  const parsed = queues.flatMap((candidate) => {
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
-    const queue = candidate as Record<string, unknown>
-    if (
-      typeof queue.operationId !== 'string' ||
-      typeof queue.outgoingPath !== 'string' ||
-      typeof queue.semanticSha256 !== 'string' ||
-      !/^[0-9a-f]{64}$/i.test(queue.semanticSha256) ||
-      typeof queue.isHardcore !== 'boolean' ||
-      !Array.isArray(queue.baselineDeleted) ||
-      !queue.baselineDeleted.every((value) => typeof value === 'string') ||
-      !Array.isArray(queue.baselineIncoming) ||
-      !queue.baselineIncoming.every((value) => typeof value === 'string')
-    ) return []
-    return [{
-      operationId: queue.operationId,
-      outgoingPath: queue.outgoingPath,
-      semanticSha256: queue.semanticSha256,
-      isHardcore: queue.isHardcore,
-      baselineDeleted: queue.baselineDeleted as string[],
-      baselineIncoming: queue.baselineIncoming as string[]
-    }]
-  })
-  return parsed.length === queues.length &&
-    new Set(parsed.map((queue) => queue.operationId)).size === parsed.length
-    ? parsed
-    : []
-}
-
-function retainedTerminalResolution(operation: RecoveryJournalOperation): TerminalRecoveryEntry[] {
-  const resolution = operation.detail.recoveryResolution
-  if (!resolution || typeof resolution !== 'object' || Array.isArray(resolution)) return []
-  const entries = (resolution as Record<string, unknown>).entries
-  if (!Array.isArray(entries)) return []
-  const parsed = entries.flatMap((candidate) => {
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
-    const entry = candidate as Record<string, unknown>
-    if (
-      typeof entry.operationId !== 'string' ||
-      (entry.state !== 'deposited' && entry.state !== 'rejected') ||
-      typeof entry.receiptPath !== 'string' ||
-      typeof entry.semanticSha256 !== 'string' ||
-      !/^[0-9a-f]{64}$/i.test(entry.semanticSha256) ||
-      (entry.copiedReceiptPath !== null && typeof entry.copiedReceiptPath !== 'string')
-    ) return []
-    return [{
-      operationId: entry.operationId,
-      state: entry.state as 'deposited' | 'rejected',
-      receiptPath: entry.receiptPath,
-      semanticSha256: entry.semanticSha256,
-      copiedReceiptPath: entry.copiedReceiptPath as string | null
-    }]
-  })
-  return parsed.length === entries.length &&
-    new Set(parsed.map((entry) => entry.operationId)).size === parsed.length
-    ? parsed
-    : []
-}
-
-async function finalizeLiveRecoveryOperation(
-  helper: HelperRequester,
-  database: CollectionDatabase,
-  operation: RecoveryJournalOperation,
-  queues: LiveRetrievalQueue[],
-  entries: TerminalRecoveryEntry[],
-  diagnostics: DiagnosticLogger
-): Promise<boolean> {
-  if (
-    entries.length !== queues.length ||
-    entries.some((entry, index) =>
-      entry.operationId !== queues[index]?.operationId ||
-      entry.semanticSha256.toLowerCase() !== queues[index]?.semanticSha256.toLowerCase()
-    )
-  ) return false
-  const rejected = entries.filter((entry) => entry.state === 'rejected')
-  const deposited = entries.filter((entry) => entry.state === 'deposited')
-  for (const entry of rejected) {
-    try {
-      await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-        path: entry.receiptPath,
-        expectedSha256: entry.semanticSha256,
-        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'recovered-rejections')
-      })
-    } catch (error) {
-      if (!entry.copiedReceiptPath) throw error
-      diagnostics.info('recovery', 'rejected-receipt.already-moved', {
-        operationId: operation.id,
-        queueOperationId: entry.operationId
-      })
-    }
-  }
-
-  const generated = operation.detail.transferKind === 'generated_delivery'
-  const completedAtUtc = new Date().toISOString()
-  if (generated) {
-    if (deposited.length === 0) {
-      database.failDeliveryOperation(
-        operation.id,
-        new Error('The game rejected every retained delivery; no generated item was delivered.')
-      )
-    } else {
-      database.completeDeliveryOperation({
-        operationId: operation.id,
-        receiptPath: deposited[0]!.receiptPath,
-        completedAtUtc,
-        detail: {
-          ...operation.detail,
-          phase: 'recovered_committed',
-          receiptPaths: deposited.map((entry) => entry.receiptPath),
-          rejectedCount: rejected.length
-        }
-      })
-    }
-  } else {
-    const vaultItemIds = Array.isArray(operation.detail.vaultItemIds)
-      ? operation.detail.vaultItemIds.filter((value): value is string => typeof value === 'string')
-      : []
-    if (vaultItemIds.length === 0 || vaultItemIds.length !== queues.length) return false
-    if (deposited.length === entries.length) {
-      database.completeRetrievalOperation({
-        operationId: operation.id,
-        backupPath: deposited[0]!.receiptPath,
-        completedAtUtc,
-        vaultItemIds,
-        detail: {
-          ...operation.detail,
-          phase: 'recovered_committed',
-          receiptPaths: deposited.map((entry) => entry.receiptPath),
-          vaultItemIds
-        }
-      })
-    } else if (rejected.length === entries.length) {
-      database.failRetrievalOperation(
-        operation.id,
-        vaultItemIds,
-        new Error('The game rejected the retained retrieval; every archive copy remains stored.')
-      )
-    } else {
-      const depositedVaultItemIds = entries.flatMap((entry, index) =>
-        entry.state === 'deposited' ? [vaultItemIds[index]!] : []
-      )
-      const rejectedVaultItemIds = entries.flatMap((entry, index) =>
-        entry.state === 'rejected' ? [vaultItemIds[index]!] : []
-      )
-      database.completePartialRetrievalOperation({
-        operationId: operation.id,
-        depositedVaultItemIds,
-        rejectedVaultItemIds,
-        receiptPaths: deposited.map((entry) => entry.receiptPath),
-        completedAtUtc,
-        detail: {
-          ...operation.detail,
-          phase: 'recovered_committed_partial',
-          receiptPaths: deposited.map((entry) => entry.receiptPath),
-          rejectedReceiptPaths: rejected.map((entry) => entry.receiptPath),
-          depositedVaultItemIds,
-          rejectedVaultItemIds,
-          vaultItemIds
-        }
-      })
-    }
-  }
-  diagnostics.info('recovery', 'operation.resolved', {
-    operationId: operation.id,
-    outcome: deposited.length > 0 ? 'committed' : 'rejected',
-    depositedItems: deposited.length,
-    rejectedItems: rejected.length
-  })
-  return true
-}
-
-export async function reconcileLiveRecoveryOperations(
-  helper: HelperRequester,
-  database: CollectionDatabase,
-  diagnostics: DiagnosticLogger
-): Promise<number> {
-  let resolved = 0
-  for (const operation of database.listRecoveryOperations()) {
-    if (operation.operation !== 'retrieve') continue
-    const queues = retainedRecoveryQueues(operation)
-    if (queues.length === 0) continue
-    try {
-      let entries = retainedTerminalResolution(operation)
-      if (entries.length !== queues.length) {
-        const inspected = await Promise.all(
-          queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }))
-        )
-        if (inspected.some((status) =>
-          (status.state !== 'deposited' && status.state !== 'rejected') || !status.receiptPath
-        )) continue
-        entries = []
-        for (const [index, status] of inspected.entries()) {
-          const queue = queues[index]!
-          let copiedReceiptPath: string | null = null
-          if (status.state === 'rejected') {
-            const copied = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
-              path: status.receiptPath!,
-              expectedSha256: queue.semanticSha256,
-              receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'recovered-rejections')
-            })
-            copiedReceiptPath = copied.receiptPath
-          }
-          entries.push({
-            operationId: queue.operationId,
-            state: status.state as 'deposited' | 'rejected',
-            receiptPath: status.receiptPath!,
-            semanticSha256: queue.semanticSha256,
-            copiedReceiptPath
-          })
-        }
-        database.updatePendingOperationDetail(operation.id, {
-          recoveryResolution: { recordedAtUtc: new Date().toISOString(), entries }
-        })
-        operation.detail = {
-          ...operation.detail,
-          recoveryResolution: { recordedAtUtc: new Date().toISOString(), entries }
-        }
-      }
-      if (await finalizeLiveRecoveryOperation(
-        helper, database, operation, queues, entries, diagnostics
-      )) resolved += 1
-    } catch (error) {
-      diagnostics.error('recovery', 'operation.reconcile-failed', error, {
-        operationId: operation.id
-      })
-    }
-  }
-  return resolved
+function transferDependencies(helper: HelperRequester, database: CollectionDatabase) {
+  return { helper, database, clock: systemTransferClock, paths: {
+    backups: join(app.getPath('userData'), 'backups'),
+    receipts: join(app.getPath('userData'), 'live-receipts')
+  } }
 }
 
 function registerIpcHandlers(
@@ -723,6 +316,7 @@ function registerIpcHandlers(
   startupRecovery: StartupRecoveryService,
   jobs: BackgroundJobCoordinator
 ): () => Promise<void> {
+  const transfer = transferDependencies(helper, database)
   const ipcDomains = createMainIpcDomains(ipcMain)
   const backgroundJobService = new BackgroundJobService(jobs)
   let latestCollection: CollectionSnapshot | null = null
@@ -734,7 +328,7 @@ function registerIpcHandlers(
   const operations = new MainOperationCoordinator({
     diagnostics,
     transfersPermitted: () => !process.env.CAIRN_CODEX_SCREENSHOT_PATH,
-    reconcileTransfers: () => reconcileLiveRecoveryOperations(helper, database, diagnostics),
+    reconcileTransfers: () => reconcileLiveRecoveryOperations({ ...transfer, diagnostics }),
     unresolvedTransferCount: () => database.getRecoveryOperationCount()
   })
   const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => operations.runExclusive(operation)
@@ -868,7 +462,7 @@ function registerIpcHandlers(
       await writeFile(selection.filePath, serialized, 'utf8')
       return selection.filePath
     },
-    reconcileRecovery: () => reconcileLiveRecoveryOperations(helper, database, diagnostics),
+    reconcileRecovery: () => reconcileLiveRecoveryOperations({ ...transfer, diagnostics }),
     runExclusive,
     recoveryOperations: () => database.getDiagnosticSummary().recoveryOperations,
     exporter: diagnosticExporter
@@ -1359,10 +953,8 @@ function registerIpcHandlers(
       scan: (path) => helper.request<TransferStashScan>('scan-transfer-stash', { path })
     },
     transactions: {
-      commitIngest: (input) => executeStagingTabIngest(helper, database, input.path),
-      commitRetrieval: (input) => executeLastTabRetrieval(
-        helper, database, input.path, input.vaultItemIds
-      )
+      commitIngest: (input) => executeIngestCommand(transfer, input),
+      commitRetrieval: (input) => executeRetrievalCommand(transfer, input)
     },
     enqueueArchiveBackup: queueArchiveBackup,
     reportBackupSchedulingFailure: (reason, error) => diagnostics.error(
@@ -1441,69 +1033,7 @@ function registerIpcHandlers(
     },
     validatePathAndVaultIds
   )
-  const liveTransferService = new LiveTransferDomainService({
-    journal: {
-      readVaultItems: (vaultItemIds, isHardcore) => {
-        const summaries = new Map(
-          database.listVaultItems(isHardcore).map((item) => [item.id, item])
-        )
-        const matchingIds = vaultItemIds.filter((id) => summaries.has(id))
-        if (matchingIds.length === 0) return []
-        return database.getVaultItems(matchingIds, isHardcore).map((item) => {
-          const summary = summaries.get(item.id)!
-          const payload = item.payload as LiveVaultPayload
-          return {
-            id: item.id,
-            baseRecord: item.baseRecord,
-            seed: payload.seed ?? summary.seed,
-            isHardcore,
-            state: item.state,
-            payload: item.payload
-          }
-        })
-      },
-      prepareRetrieval: (input) => database.prepareRetrievalOperation({
-        operationId: input.operationId,
-        stashPath: input.stashPath,
-        sourceSha256: input.sourceIdentity,
-        startedAtUtc: input.startedAtUtc,
-        vaultItemIds: input.vaultItemIds,
-        detail: input.detail
-      }),
-      updatePendingDetail: (operationId, detail) =>
-        database.updatePendingOperationDetail(operationId, detail),
-      completeRetrieval: (input) => database.completeRetrievalOperation({
-        operationId: input.operationId,
-        vaultItemIds: input.vaultItemIds,
-        backupPath: input.receiptPaths[0]!,
-        completedAtUtc: input.completedAtUtc,
-        detail: input.detail
-      }),
-      completePartialRetrieval: (input) => database.completePartialRetrievalOperation(input),
-      failRetrieval: (operationId, vaultItemIds, error) =>
-        database.failRetrievalOperation(operationId, [...vaultItemIds], error),
-      markRetrievalNeedsRecovery: (operationId, error) =>
-        database.markRetrievalNeedsRecovery(operationId, error)
-    },
-    adapter: {
-      inspectGame: () => helper.request<LiveGameStatus>('inspect-live-game'),
-      enqueueRetrieval: (input) => helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', input),
-      inspectRetrieval: (queue) =>
-        helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }),
-      copyRejectedReceipt: (input) => helper.request<LiveQueueReceipt>('copy-live-incoming', {
-        ...input,
-        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-returns')
-      }),
-      acknowledgeRejectedReceipt: (input) => helper.request<LiveQueueReceipt>('ack-live-incoming', {
-        ...input,
-        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-returns')
-      }).then(() => undefined)
-    },
-    recovery: {
-      reconcile: () => reconcileLiveRecoveryOperations(helper, database, diagnostics).then(() => undefined),
-      unresolvedCount: () => database.getRecoveryOperationCount()
-    }
-  })
+  const liveTransferService = createLiveTransferService({ ...transfer, diagnostics })
   const liveGameService = new LiveGameDomainService({
     visualDiagnosticsActive: () => Boolean(process.env.CAIRN_CODEX_SCREENSHOT_PATH),
     inspectWriteSafety: () => helper.request<WriteSafetyStatus>('inspect-write-safety'),
@@ -1514,8 +1044,7 @@ function registerIpcHandlers(
     syncIncoming: async () => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
       return syncLiveIncoming(
-        helper,
-        database,
+        transfer,
         latestCollection?.discovery.installations[0]?.path
       )
     },
@@ -1524,14 +1053,14 @@ function registerIpcHandlers(
       latestCollection ??= await readCollectionCache(collectionCachePath)
       if (!latestCollection) throw new Error('Build the game-data index before dispensing augments.')
       return executeLiveAugmentDispense(
-        helper, database, latestCollection, input.records, input.expectedCharacterName
+        transfer, latestCollection, input.records, input.expectedCharacterName
       )
     },
     recoverSpecialItem: async (input) => {
       latestCollection ??= await readCollectionCache(collectionCachePath)
       if (!latestCollection) throw new Error('Build the game-data index before recovering Sahdina\'s Memento.')
       return executeSahdinasMementoRecovery(
-        helper, database, latestCollection, input.destination, input.expectedCharacterName
+        transfer, latestCollection, input.destination, input.expectedCharacterName
       )
     },
     runTransferExclusive,
@@ -1591,631 +1120,6 @@ function registerIpcHandlers(
     await archiveBackups.flush()
     diagnostics.info('startup', 'application.shutdown')
     await diagnostics.flush()
-  }
-}
-
-
-
-
-
-export async function syncLiveIncoming(
-  helper: HelperRequester,
-  database: CollectionDatabase,
-  installationPath?: string
-): Promise<LiveGameSyncResult> {
-  const status = await helper.request<LiveGameStatus>('inspect-live-game')
-  const incoming = await helper.request<LiveIncomingItem[]>('poll-live-incoming')
-  if (status.state !== 'ready' && incoming.length === 0) {
-    return { status, ingested: [], issues: [] }
-  }
-  const ingested: LiveGameSyncResult['ingested'] = []
-  const analysisInputs: Array<{ vaultItemId: string; item: LiveVaultPayload }> = []
-  const issues: string[] = []
-  for (const source of incoming) {
-    const catalogName = database.getCatalogNames([source.item.baseRecord]).get(
-      source.item.baseRecord.toLowerCase()
-    )
-    const name = catalogName ?? database.ensureQuarantineCatalogItem(source.item.baseRecord)
-    const identity = createHash('sha256')
-      .update(source.path.toLowerCase())
-      .update('\0')
-      .update(source.sha256)
-      .digest('hex')
-    const operationId = `live-ingest-${identity}`
-    const vaultItemId = `live-${identity}`
-    if (database.hasCommittedOperation(operationId)) {
-      try {
-        await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-          path: source.path,
-          expectedSha256: source.sha256,
-          receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'ingested')
-        })
-      } catch (error) {
-        issues.push(`${name}: committed earlier, but queue acknowledgement still failed: ${error instanceof Error ? error.message : String(error)}`)
-      }
-      continue
-    }
-    let prepared = false
-    let committed = false
-    try {
-      const receipt = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
-        path: source.path,
-        expectedSha256: source.sha256,
-        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'ingested')
-      })
-      database.prepareIngestOperation({
-        operationId,
-        stashPath: `live://gdia/${source.isHardcore ? 'hc' : 'sc'}/${source.path.split(/[\\/]/).at(-1)}`,
-        sourceSha256: source.sha256,
-        startedAtUtc: new Date().toISOString(),
-        items: [{ vaultItemId, baseRecord: source.item.baseRecord, payload: source.item }],
-        detail: { phase: 'receipt_verified', adapter: 'gdia-live-v1', receiptPath: receipt.receiptPath }
-      })
-      prepared = true
-      database.completeIngestOperation({
-        operationId,
-        backupPath: receipt.receiptPath,
-        completedAtUtc: new Date().toISOString(),
-        isHardcore: source.isHardcore,
-        detail: { phase: 'committed', adapter: 'gdia-live-v1', receiptPath: receipt.receiptPath }
-      })
-      committed = true
-      await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-        path: source.path,
-        expectedSha256: source.sha256,
-        receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'ingested')
-      })
-      ingested.push({
-        vaultItemId,
-        baseRecord: source.item.baseRecord,
-        prefixRecord: source.item.prefixRecord,
-        suffixRecord: source.item.suffixRecord,
-        name,
-        seed: source.item.seed,
-        instanceKey: createVaultInstanceKey(source.item),
-        rollAnalysis: null
-      })
-      analysisInputs.push({ vaultItemId, item: source.item })
-      if (!catalogName) {
-        issues.push(
-          `${name} was safely stored outside the Epic/Legendary/MI collection. ` +
-            'It is available in Vault quarantine for an immediate live return.'
-        )
-      }
-    } catch (error) {
-      if (prepared && !committed) database.failIngestOperation(operationId, error)
-      issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-  if (installationPath && analysisInputs.length > 0) {
-    try {
-      const analyzed = await helper.request<{ items: ItemRollAnalysis[] }>('analyze-item-rolls', {
-        installationPath,
-        items: analysisInputs.map(({ item }) => ({
-          baseRecord: item.baseRecord,
-          prefixRecord: item.prefixRecord,
-          suffixRecord: item.suffixRecord,
-          seed: item.seed
-        }))
-      })
-      const updates = analysisInputs.flatMap(({ vaultItemId }, index) => {
-        const rollAnalysis = analyzed.items[index]
-        const result = ingested.find((item) => item.vaultItemId === vaultItemId)
-        if (!rollAnalysis || !result) return []
-        result.rollAnalysis = rollAnalysis
-        return [{ id: vaultItemId, rollAnalysis }]
-      })
-      database.setVaultRollAnalyses(updates)
-    } catch (error) {
-      issues.push(`Roll analysis will retry in the background: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-  return {
-    status: await helper.request<LiveGameStatus>('inspect-live-game'),
-    ingested,
-    issues
-  }
-}
-
-async function executeLiveRetrieval(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  vaultItemIds: string[]
-): Promise<LiveRetrievalResult> {
-  if (vaultItemIds.length === 0) throw new Error('Select at least one vault item to retrieve.')
-  if (new Set(vaultItemIds).size !== vaultItemIds.length) {
-    throw new Error('The live retrieval selection contains a duplicate archive item.')
-  }
-  const listed = new Map(database.listVaultItems().map((item) => [item.id, item]))
-  const selected = vaultItemIds.map((id) => {
-    const item = listed.get(id)
-    if (!item) throw new Error(`Vault item does not exist: ${id}`)
-    return item
-  })
-  const modes = new Set(selected.map((item) => item.isHardcore))
-  if (modes.size !== 1) throw new Error('A live retrieval cannot mix Hardcore and Softcore items.')
-  const unavailable = selected.filter((item) => item.state !== 'ingested')
-  if (unavailable.length > 0) {
-    throw new Error('Vault items are not available: ' + unavailable.map((item) => item.id).join(', '))
-  }
-
-  const retrieved: LiveRetrievalResult['retrieved'] = []
-  const receiptPaths: string[] = []
-  const issues: string[] = []
-  for (const vaultItemId of vaultItemIds) {
-    try {
-      const result = await executeSingleLiveRetrieval(helper, database, vaultItemId)
-      retrieved.push(...result.retrieved)
-      receiptPaths.push(...result.receiptPaths)
-    } catch (error) {
-      if (retrieved.length === 0) throw error
-      issues.push(error instanceof Error ? error.message : String(error))
-      break
-    }
-  }
-  return {
-    operationId: randomUUID(),
-    status: 'committed',
-    retrieved,
-    receiptPaths,
-    issues
-  }
-}
-
-const reputationThresholds: Record<string, number> = {
-  tolerated: 0,
-  friendly: 1_500,
-  respected: 5_000,
-  honored: 10_000,
-  revered: 25_000
-}
-
-function normalizedFactionName(value: string): string {
-  return value
-    .toLocaleLowerCase()
-    .replaceAll('’', "'")
-    .replace(/[^a-z0-9]/g, '')
-}
-
-function createSupplyPayload(baseRecord: string): LiveVaultPayload {
-  return {
-    stashVersion: 11,
-    sourceTabIndex: -1,
-    sourceItemIndex: -1,
-    baseRecord,
-    prefixRecord: '',
-    suffixRecord: '',
-    modifierRecord: '',
-    transmuteRecord: '',
-    seed: randomInt(1, 0xffff_ffff),
-    materiaRecord: '',
-    relicCompletionBonusRecord: '',
-    relicSeed: 0,
-    enchantmentRecord: '',
-    ascendantRecord: '',
-    ascendantRecord2H: '',
-    unknown: 0,
-    enchantmentSeed: 0,
-    materiaCombines: 0,
-    stackCount: 1,
-    rerolls: 0,
-    affixRerolls: 0,
-    xOffset: 0,
-    yOffset: 0
-  }
-}
-
-async function executeSahdinasMementoRecovery(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  collection: CollectionSnapshot,
-  destination: SpecialRecoveryDestination,
-  expectedCharacterName?: string
-): Promise<SpecialItemRecoveryResult> {
-  if (destination !== 'shared-stash' && destination !== 'character-inventory') {
-    throw new Error('Sahdina recovery only supports the shared stash or active character inventory.')
-  }
-
-  const status = await helper.request<LiveGameStatus>('inspect-live-game')
-  if (status.state !== 'ready') throw new Error(status.detail)
-  const confirmedCharacterName = expectedCharacterName?.trim() || null
-  if (
-    status.activeCharacterName &&
-    confirmedCharacterName &&
-    status.activeCharacterName.localeCompare(confirmedCharacterName, undefined, { sensitivity: 'base' }) !== 0
-  ) {
-    throw new Error(
-      `The active character changed from “${confirmedCharacterName}” to “${status.activeCharacterName}”. Review the character and try again.`
-    )
-  }
-  const activeCharacterName = status.activeCharacterName ?? confirmedCharacterName
-  let activeIsHardcore = status.isHardcore
-  if (activeIsHardcore === null) {
-    if (!activeCharacterName) {
-      throw new Error('CC could not identify the active character well enough to resolve Hardcore or Softcore mode.')
-    }
-    const installationPath = collection.discovery.installations[0]?.path
-    if (!installationPath) throw new Error('No Grim Dawn installation is available.')
-    const profiles = await helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
-    const matchingProfiles = profiles
-      .filter((profile) => !profile.error)
-      .filter((profile) => profile.name.localeCompare(activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
-    const matchingModes = [...new Set(matchingProfiles.map((profile) => profile.isHardcore))]
-    if (matchingModes.length > 1) {
-      throw new Error(
-        `CC found both Hardcore and Softcore saves named “${activeCharacterName}”. Rename one before using live recovery.`
-      )
-    }
-    activeIsHardcore = matchingModes[0] ?? null
-    if (activeIsHardcore === null) {
-      throw new Error(`The active character “${activeCharacterName}” was not found in the parsed saves.`)
-    }
-  }
-
-  const operationId = `sahdina-${randomUUID()}`
-  const item = createSupplyPayload(SAHDINAS_MEMENTO.record)
-  const payloadSha256 = createHash('sha256').update(JSON.stringify(item)).digest('hex')
-  let queued = false
-  database.prepareDeliveryOperation({
-    operationId,
-    destination: `live://special-recovery/${destination}`,
-    payloadSha256,
-    startedAtUtc: new Date().toISOString(),
-    detail: { phase: 'prepared', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination, isHardcore: activeIsHardcore }
-  })
-  try {
-    const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
-      operationId,
-      isHardcore: activeIsHardcore,
-      destination,
-      item
-    })
-    queued = true
-    database.updatePendingOperationDetail(operationId, {
-      phase: 'queued',
-      queues: [queue]
-    })
-    const deadline = Date.now() + 30_000
-    while (Date.now() < deadline) {
-      const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
-      if (result.state === 'rejected') {
-        if (!result.receiptPath) {
-          throw new Error('The game rejected the recovery without returning a durable queue receipt.')
-        }
-        await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-          path: result.receiptPath,
-          expectedSha256: queue.semanticSha256,
-          receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-special-recoveries')
-        })
-        const target = destination === 'character-inventory' ? 'personal inventory' : status.depositTabDescription
-        const rejection = new Error(`The game rejected the recovery because the ${target} is full. No replacement was delivered.`)
-        database.failDeliveryOperation(operationId, rejection)
-        queued = false
-        throw rejection
-      }
-      if (result.state === 'deposited' && result.receiptPath) {
-        database.completeDeliveryOperation({
-          operationId,
-          receiptPath: result.receiptPath,
-          completedAtUtc: new Date().toISOString(),
-          detail: { phase: 'committed', adapter: 'cairn-live-v1', record: SAHDINAS_MEMENTO.record, destination, isHardcore: activeIsHardcore }
-        })
-        return {
-          operationId,
-          status: 'committed',
-          activeCharacter: activeCharacterName ?? 'Active character',
-          destination,
-          record: SAHDINAS_MEMENTO.record,
-          name: SAHDINAS_MEMENTO.name,
-          receiptPath: result.receiptPath
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 150))
-    }
-    throw new Error(
-      'Timed out waiting for Grim Dawn to acknowledge Sahdina\'s Memento. Do not click recovery again until the pending live queue has resolved.'
-    )
-  } catch (error) {
-    if (queued) database.markDeliveryNeedsRecovery(operationId, error)
-    else database.failDeliveryOperation(operationId, error)
-    throw error
-  }
-}
-
-async function executeLiveAugmentDispense(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  collection: CollectionSnapshot,
-  records: string[],
-  expectedCharacterName?: string
-): Promise<LiveSupplyDispenseResult> {
-  const uniqueRecords = [...new Set(records.map((record) => record.toLocaleLowerCase()))]
-  if (uniqueRecords.length === 0) throw new Error('Select at least one augment to dispense.')
-
-  let status = await helper.request<LiveGameStatus>('inspect-live-game')
-  if (status.state !== 'ready') throw new Error(status.detail)
-  for (let attempt = 0; attempt < 25 && !status.activeCharacterName; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    status = await helper.request<LiveGameStatus>('inspect-live-game')
-    if (status.state !== 'ready') throw new Error(status.detail)
-  }
-  const confirmedCharacterName = expectedCharacterName?.trim() || null
-  if (
-    status.activeCharacterName &&
-    confirmedCharacterName &&
-    status.activeCharacterName.localeCompare(confirmedCharacterName, undefined, { sensitivity: 'base' }) !== 0
-  ) {
-    throw new Error(
-      `The active character changed from “${confirmedCharacterName}” to “${status.activeCharacterName}”. Review the character and try again.`
-    )
-  }
-  const activeCharacterName = status.activeCharacterName ?? confirmedCharacterName
-  if (!activeCharacterName) {
-    throw new Error('CC could not identify the active character. Reopen the Supplies view and try again.')
-  }
-
-  const installationPath = collection.discovery.installations[0]?.path
-  if (!installationPath) throw new Error('No Grim Dawn installation is available.')
-  let activeCharacter: CharacterSaveProfile | undefined
-  let activeIsHardcore = status.isHardcore
-  for (let attempt = 0; attempt < 2 && !activeCharacter; attempt += 1) {
-    const profiles = await helper.request<CharacterSaveProfile[]>('list-characters', { installationPath })
-    const matchingProfiles = profiles
-      .filter((profile) => !profile.error)
-      .filter((profile) => profile.name.localeCompare(activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
-
-    if (activeIsHardcore === null) {
-      const matchingModes = [...new Set(matchingProfiles.map((profile) => profile.isHardcore))]
-      if (matchingModes.length > 1) {
-        throw new Error(
-          `CC found both Hardcore and Softcore saves named “${activeCharacterName}”. Wait for the game-mode handshake or rename one before dispensing.`
-        )
-      }
-      activeIsHardcore = matchingModes[0] ?? null
-    }
-
-    if (activeIsHardcore !== null) {
-      const expectedMode = activeIsHardcore
-      activeCharacter = matchingProfiles
-        .filter((profile) => profile.isHardcore === expectedMode)
-        .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))[0]
-    }
-    if (!activeCharacter) await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  if (!activeCharacter) {
-    throw new Error(`The active character “${activeCharacterName}” was not found in the parsed saves.`)
-  }
-  if (activeIsHardcore === null) {
-    throw new Error(`CC could not resolve whether “${activeCharacterName}” is Hardcore or Softcore.`)
-  }
-
-  const catalog = new Map(
-    (collection.supplies ?? [])
-      .filter((item) => item.slot === 'augment')
-      .map((item) => [item.record.toLocaleLowerCase(), item])
-  )
-  const selected = uniqueRecords.map((record) => {
-    const item = catalog.get(record)
-    if (!item) throw new Error(`The selected record is not a catalogued faction augment: ${record}`)
-    const requirements = (item.acquisition?.factions ?? [])
-      .filter((requirement) => requirement.kind !== 'blueprint')
-    if (requirements.length === 0) {
-      throw new Error(`${item.name} has no verified faction-vendor requirement and cannot be injected.`)
-    }
-    const authorized = requirements.some((requirement) => {
-      const threshold = reputationThresholds[requirement.reputation.toLocaleLowerCase()]
-      if (threshold === undefined) return false
-      const faction = activeCharacter.factions.find(
-        (candidate) => normalizedFactionName(candidate.name) === normalizedFactionName(requirement.faction)
-      )
-      return Boolean(faction?.isUnlocked && faction.value >= threshold)
-    })
-    if (!authorized) {
-      const needed = requirements.map((requirement) => `${requirement.faction} ${requirement.reputation}`).join(' or ')
-      throw new Error(`${activeCharacter.name} cannot buy ${item.name}; requires ${needed}.`)
-    }
-    return item
-  })
-
-  const operationId = randomUUID()
-  const receiptPaths: string[] = []
-  const dispensed: typeof selected = []
-  const issues: string[] = []
-  const queued: Array<{ item: (typeof selected)[number]; queue: LiveRetrievalQueue }> = []
-  const payloads = selected.map((item) => createSupplyPayload(item.record))
-  const payloadSha256 = createHash('sha256').update(JSON.stringify(payloads)).digest('hex')
-  database.prepareDeliveryOperation({
-    operationId,
-    destination: 'live://personal-inventory/augments',
-    payloadSha256,
-    startedAtUtc: new Date().toISOString(),
-    detail: { phase: 'prepared', adapter: 'cairn-live-v1', records: selected.map((item) => item.record), isHardcore: activeCharacter.isHardcore }
-  })
-  try {
-    for (const [index, item] of selected.entries()) {
-      const queue = await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
-        operationId: `${operationId}-${index}`,
-        isHardcore: activeIsHardcore,
-        destination: 'character-inventory',
-        item: payloads[index]
-      })
-      queued.push({ item, queue })
-      database.updatePendingOperationDetail(operationId, {
-        phase: 'queued',
-        queues: queued.map((entry) => entry.queue)
-      })
-    }
-
-    const pending = new Map(queued.map((entry) => [entry.queue.operationId, entry]))
-    const deadline = Date.now() + 30_000
-    while (Date.now() < deadline && pending.size > 0) {
-      for (const [pendingId, entry] of [...pending.entries()]) {
-        const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue: entry.queue })
-        if (result.state === 'rejected') {
-          if (!result.receiptPath) throw new Error('The game rejected an augment without returning a durable queue receipt.')
-          await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-            path: result.receiptPath,
-            expectedSha256: entry.queue.semanticSha256,
-            receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-personal-deliveries')
-          })
-          issues.push(`${activeCharacter.name}'s personal inventory is full. No rejected augment was lost.`)
-          pending.delete(pendingId)
-        } else if (result.state === 'deposited' && result.receiptPath) {
-          receiptPaths.push(result.receiptPath)
-          dispensed.push(entry.item)
-          pending.delete(pendingId)
-        }
-      }
-      if (pending.size > 0) await new Promise((resolve) => setTimeout(resolve, 150))
-    }
-    if (pending.size > 0) {
-      throw new Error(`Timed out waiting for Grim Dawn to acknowledge ${pending.size} personal-inventory ${pending.size === 1 ? 'delivery' : 'deliveries'}. Do not retry until CC resolves the pending queue.`)
-    }
-    if (dispensed.length === 0) {
-      const rejection = new Error(issues[0] ?? 'No augments were delivered.')
-      database.failDeliveryOperation(operationId, rejection)
-      queued.length = 0
-      throw rejection
-    }
-    database.completeDeliveryOperation({
-      operationId,
-      receiptPath: receiptPaths[0]!,
-      completedAtUtc: new Date().toISOString(),
-      detail: {
-        phase: 'committed',
-        adapter: 'cairn-live-v1',
-        records: dispensed.map((item) => item.record),
-        isHardcore: activeCharacter.isHardcore,
-        receiptPaths,
-        rejectedCount: issues.length
-      }
-    })
-
-    return {
-      operationId,
-      status: 'committed',
-      activeCharacter: activeCharacter.name,
-      dispensed: dispensed.map((item) => ({ record: item.record, name: item.name })),
-      receiptPaths,
-      issues
-    }
-  } catch (error) {
-    if (queued.length > 0) database.markDeliveryNeedsRecovery(operationId, error)
-    else database.failDeliveryOperation(operationId, error)
-    throw error
-  }
-}
-
-async function executeSingleLiveRetrieval(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  vaultItemId: string
-): Promise<LiveRetrievalResult> {
-  const vaultItemIds = [vaultItemId]
-  const listed = new Map(database.listVaultItems().map((item) => [item.id, item]))
-  const selected = vaultItemIds.map((id) => {
-    const item = listed.get(id)
-    if (!item) throw new Error(`Vault item does not exist: ${id}`)
-    return item
-  })
-  const isHardcore = selected[0]!.isHardcore
-  const status = await helper.request<LiveGameStatus>('inspect-live-game')
-  if (status.state !== 'ready') throw new Error(status.detail)
-  if (status.isHardcore !== null && status.isHardcore !== isHardcore) {
-    throw new Error(
-      `The running character is ${status.isHardcore ? 'Hardcore' : 'Softcore'}, but the selection is ${isHardcore ? 'Hardcore' : 'Softcore'}.`
-    )
-  }
-  const vaultItems = database.getVaultItems(vaultItemIds, isHardcore)
-  const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
-  if (unavailable.length > 0) {
-    throw new Error('Vault items are not available: ' + unavailable.map((item) => item.id).join(', '))
-  }
-  const operationId = randomUUID()
-  const sourceIdentity = createHash('sha256')
-    .update(JSON.stringify(vaultItems.map((item) => item.payload)))
-    .digest('hex')
-  let prepared = false
-  let queued = false
-  try {
-    database.prepareRetrievalOperation({
-      operationId,
-      stashPath: `live://gdia/${isHardcore ? 'hc' : 'sc'}`,
-      sourceSha256: sourceIdentity,
-      startedAtUtc: new Date().toISOString(),
-      vaultItemIds,
-      detail: { phase: 'prepared', adapter: 'gdia-live-v1', vaultItemIds }
-    })
-    prepared = true
-    const queues: LiveRetrievalQueue[] = []
-    for (const [index, item] of vaultItems.entries()) {
-      queues.push(
-        await helper.request<LiveRetrievalQueue>('enqueue-live-retrieval', {
-          operationId: `${operationId}-${index}`,
-          isHardcore,
-          item: item.payload
-        })
-      )
-      queued = true
-      database.updatePendingOperationDetail(operationId, {
-        phase: 'queued',
-        queues
-      })
-    }
-    const deadline = Date.now() + 45_000
-    const receipts = new Map<number, string>()
-    while (Date.now() < deadline && receipts.size < queues.length) {
-      for (const [index, queue] of queues.entries()) {
-        if (receipts.has(index)) continue
-        const result = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
-        if (result.state === 'rejected') {
-          if (!result.receiptPath) {
-            throw new Error('The game rejected the item without returning a durable queue receipt.')
-          }
-          await helper.request<LiveQueueReceipt>('ack-live-incoming', {
-            path: result.receiptPath,
-            expectedSha256: queue.semanticSha256,
-            receiptDirectory: join(app.getPath('userData'), 'live-receipts', 'rejected-returns')
-          })
-          const rejection = new Error(
-            `The ${status.depositTabDescription} is full. The item remains safely stored in the Codex Archive.`
-          )
-          database.failRetrievalOperation(operationId, vaultItemIds, rejection)
-          prepared = false
-          throw rejection
-        }
-        if (result.state === 'deposited' && result.receiptPath) receipts.set(index, result.receiptPath)
-      }
-      if (receipts.size < queues.length) await new Promise((resolve) => setTimeout(resolve, 250))
-    }
-    if (receipts.size !== queues.length) {
-      throw new Error('Timed out waiting for the live hook to acknowledge the in-game deposit.')
-    }
-    const receiptPaths = [...receipts.entries()].sort(([left], [right]) => left - right).map(([, path]) => path)
-    database.completeRetrievalOperation({
-      operationId,
-      vaultItemIds,
-      backupPath: receiptPaths[0]!,
-      completedAtUtc: new Date().toISOString(),
-      detail: { phase: 'committed', adapter: 'gdia-live-v1', receiptPaths, vaultItemIds }
-    })
-    return {
-      operationId,
-      status: 'committed',
-      retrieved: vaultItems.map((item, index) => ({
-        vaultItemId: item.id,
-        baseRecord: item.baseRecord,
-        seed: (item.payload as { seed?: number }).seed ?? selected[index]!.seed
-      })),
-      receiptPaths,
-      issues: []
-    }
-  } catch (error) {
-    if (prepared) {
-      if (queued) database.markRetrievalNeedsRecovery(operationId, error)
-      else database.failRetrievalOperation(operationId, vaultItemIds, error)
-    }
-    throw error
   }
 }
 
@@ -2585,9 +1489,6 @@ function withProjectedAffixes(
   }
 }
 
-
-
-
 function registerItemIconProtocol(): void {
   const iconDirectory = join(app.getPath('userData'), 'item-icons')
   protocol.handle('cairn-icon', async (request) => {
@@ -2606,8 +1507,6 @@ function registerItemIconProtocol(): void {
   })
 }
 
-
-
 async function runIngestCommand(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase,
@@ -2616,7 +1515,7 @@ async function runIngestCommand(
   try {
     const snapshot = await helper.request<CollectionSnapshot>('scan-collection')
     database.persistSnapshot(snapshot)
-    console.log(JSON.stringify(await executeIngestCommand(helper, database, command)))
+    console.log(JSON.stringify(await executeIngestCommand(transferDependencies(helper, database), command)))
     helper.dispose()
     database.close()
     app.exit(0)
@@ -2628,162 +1527,13 @@ async function runIngestCommand(
   }
 }
 
-async function executeIngestCommand(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  command: IngestCommand
-): Promise<IngestResult> {
-  const operationId = randomUUID()
-  let prepared = false
-  try {
-    const safety = await helper.request<WriteSafetyStatus>('inspect-write-safety')
-    if (!safety.permitted) {
-      throw new Error('Write safety gate refused permission: ' + safety.reasons.join(' '))
-    }
-
-    const selectors = command.items.map(({ tabIndex, itemIndex }) => ({ tabIndex, itemIndex }))
-    const plan = await helper.request<IngestPlan>('plan-ingest-items', {
-      path: command.path,
-      items: selectors
-    })
-    if (
-      plan.sourceSha256.toLowerCase() !== command.expectedSourceSha256.toLowerCase() ||
-      !plan.semanticallyValid ||
-      !plan.idempotent ||
-      plan.replacementItemCount !== plan.sourceItemCount - command.items.length
-    ) {
-      throw new Error('Ingest plan no longer matches the approved source and transformation.')
-    }
-    const actualSeeds = plan.items.map((item) => item.seed)
-    const expectedSeeds = command.items.map((item) => item.expectedSeed)
-    if (
-      actualSeeds.length !== expectedSeeds.length ||
-      actualSeeds.some((seed, index) => seed !== expectedSeeds[index])
-    ) {
-      throw new Error('The selected stash items no longer match the approved roll seeds.')
-    }
-
-    const vaultItems = plan.items.map((item) => ({
-      vaultItemId: randomUUID(),
-      baseRecord: item.baseRecord,
-      payload: item
-    }))
-    database.prepareIngestOperation({
-      operationId,
-      stashPath: plan.path,
-      sourceSha256: plan.sourceSha256,
-      startedAtUtc: new Date().toISOString(),
-      items: vaultItems,
-      detail: {
-        phase: 'prepared',
-        replacementSha256: plan.replacementSha256,
-        sourceItemCount: plan.sourceItemCount,
-        replacementItemCount: plan.replacementItemCount,
-        vaultItemIds: vaultItems.map((item) => item.vaultItemId)
-      }
-    })
-    prepared = true
-
-    const committed = await helper.request<CommittedIngest>('commit-ingest-items', {
-      operationId,
-      path: plan.path,
-      expectedSourceSha256: plan.sourceSha256,
-      items: selectors,
-      backupDirectory: join(app.getPath('userData'), 'backups')
-    })
-    if (
-      committed.transaction.sourceSha256.toLowerCase() !== plan.sourceSha256.toLowerCase() ||
-      committed.transaction.committedSha256.toLowerCase() !== plan.replacementSha256.toLowerCase()
-    ) {
-      throw new Error('Committed ingest hashes do not match the persisted plan.')
-    }
-
-    const completedAtUtc = new Date().toISOString()
-    const vaultItemIds = database.completeIngestOperation({
-      operationId,
-      backupPath: committed.transaction.backupPath,
-      completedAtUtc,
-      isHardcore: isHardcoreStashPath(plan.path),
-      detail: {
-        phase: 'committed',
-        replacementSha256: committed.transaction.committedSha256,
-        rollbackPath: committed.transaction.rollbackPath,
-        vaultItemIds: vaultItems.map((item) => item.vaultItemId)
-      }
-    })
-    const verified = await helper.request<{
-      sha256: string
-      itemCount: number
-      tabs: Array<{ items: unknown[] }>
-    }>('scan-transfer-stash', { path: plan.path })
-    if (
-      verified.sha256.toLowerCase() !== committed.transaction.committedSha256.toLowerCase() ||
-      verified.itemCount !== plan.replacementItemCount
-    ) {
-      throw new Error('Post-commit stash verification did not match the committed ingest.')
-    }
-
-    return {
-      operationId,
-      status: 'committed',
-      ingested: plan.items.map((item, index) => ({
-        vaultItemId: vaultItemIds[index]!,
-        baseRecord: item.baseRecord,
-        seed: item.seed
-      })),
-      sourceItems: plan.sourceItemCount,
-      remainingItems: verified.itemCount,
-      lastTabItems: verified.tabs.at(-1)?.items.length ?? 0,
-      sourceSha256: plan.sourceSha256,
-      committedSha256: committed.transaction.committedSha256,
-      backupPath: committed.transaction.backupPath,
-      rollbackPath: committed.transaction.rollbackPath
-    }
-  } catch (error) {
-    if (prepared) {
-      database.failIngestOperation(operationId, error)
-    }
-    throw error
-  }
-}
-
 async function runRetrievalPlanCommand(
   helper: GrimDawnHelperClient,
   database: CollectionDatabase,
   command: RetrievalPlanCommand
 ): Promise<void> {
   try {
-    const vaultItems = database.getVaultItems(
-      command.vaultItemIds,
-      isHardcoreStashPath(command.path)
-    )
-    const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
-    if (unavailable.length > 0) {
-      throw new Error(
-        'Vault items are not available for retrieval: ' + unavailable.map((item) => item.id).join(', ')
-      )
-    }
-    const plan = await helper.request<RetrievalPlan>('plan-retrieve-items', {
-      path: command.path,
-      targetTabIndex: command.targetTabIndex,
-      items: vaultItems.map((item) => item.payload)
-    })
-    if (
-      !plan.restoredExactly ||
-      !plan.semanticallyValid ||
-      !plan.idempotent ||
-      plan.replacementItemCount !== plan.sourceItemCount + vaultItems.length
-    ) {
-      throw new Error('Retrieval plan failed its item and serializer invariants.')
-    }
-
-    console.log(
-      JSON.stringify({
-        status: 'planned',
-        vaultItemIds: command.vaultItemIds,
-        ...plan
-      })
-    )
+    console.log(JSON.stringify(await planRetrievalCommand(transferDependencies(helper, database), command)))
     helper.dispose()
     database.close()
     app.exit(0)
@@ -2801,7 +1551,7 @@ async function runRetrievalCommand(
   command: RetrievalCommand
 ): Promise<void> {
   try {
-    console.log(JSON.stringify(await executeRetrievalCommand(helper, database, command)))
+    console.log(JSON.stringify(await executeRetrievalCommand(transferDependencies(helper, database), command)))
     helper.dispose()
     database.close()
     app.exit(0)
@@ -2811,213 +1561,6 @@ async function runRetrievalCommand(
     database.close()
     app.exit(1)
   }
-}
-
-async function executeRetrievalCommand(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  command: RetrievalCommand
-): Promise<RetrievalResult> {
-  const operationId = randomUUID()
-  let prepared = false
-  let commitAttempted = false
-  try {
-    const safety = await helper.request<WriteSafetyStatus>('inspect-write-safety')
-    if (!safety.permitted) {
-      throw new Error('Write safety gate refused permission: ' + safety.reasons.join(' '))
-    }
-
-    const vaultItems = database.getVaultItems(
-      command.vaultItemIds,
-      isHardcoreStashPath(command.path)
-    )
-    const unavailable = vaultItems.filter((item) => item.state !== 'ingested')
-    if (unavailable.length > 0) {
-      throw new Error(
-        'Vault items are not available for retrieval: ' + unavailable.map((item) => item.id).join(', ')
-      )
-    }
-    const payloads = vaultItems.map((item) => item.payload)
-    const plan = await helper.request<RetrievalPlan>('plan-retrieve-items', {
-      path: command.path,
-      targetTabIndex: command.targetTabIndex,
-      items: payloads
-    })
-    if (
-      plan.sourceSha256.toLowerCase() !== command.expectedSourceSha256.toLowerCase() ||
-      !plan.restoredExactly ||
-      !plan.semanticallyValid ||
-      !plan.idempotent ||
-      plan.replacementItemCount !== plan.sourceItemCount + vaultItems.length
-    ) {
-      throw new Error('Retrieval plan no longer matches the approved source and transformation.')
-    }
-
-    database.prepareRetrievalOperation({
-      operationId,
-      stashPath: plan.path,
-      sourceSha256: plan.sourceSha256,
-      startedAtUtc: new Date().toISOString(),
-      vaultItemIds: command.vaultItemIds,
-      detail: {
-        phase: 'prepared',
-        targetTabIndex: command.targetTabIndex,
-        replacementSha256: plan.replacementSha256,
-        sourceItemCount: plan.sourceItemCount,
-        replacementItemCount: plan.replacementItemCount,
-        vaultItemIds: command.vaultItemIds
-      }
-    })
-    prepared = true
-
-    commitAttempted = true
-    const committed = await helper.request<CommittedRetrieval>('commit-retrieve-items', {
-      operationId,
-      path: plan.path,
-      expectedSourceSha256: plan.sourceSha256,
-      targetTabIndex: command.targetTabIndex,
-      items: payloads,
-      backupDirectory: join(app.getPath('userData'), 'backups')
-    })
-    if (
-      committed.transaction.sourceSha256.toLowerCase() !== plan.sourceSha256.toLowerCase() ||
-      committed.transaction.committedSha256.toLowerCase() !== plan.replacementSha256.toLowerCase()
-    ) {
-      throw new Error('Committed retrieval hashes do not match the persisted plan.')
-    }
-
-    const verified = await helper.request<{
-      sha256: string
-      itemCount: number
-      tabs: Array<{ items: Array<{ baseRecord: string; seed: number }> }>
-    }>('scan-transfer-stash', { path: plan.path })
-    const targetItems = verified.tabs[command.targetTabIndex]?.items ?? []
-    if (
-      verified.sha256.toLowerCase() !== committed.transaction.committedSha256.toLowerCase() ||
-      verified.itemCount !== plan.replacementItemCount ||
-      targetItems.length !== plan.items.length ||
-      !targetItems.every((item, index) => {
-        const planned = plan.items[index]
-        return planned !== undefined && item.baseRecord === planned.baseRecord && item.seed === planned.seed
-      })
-    ) {
-      throw new Error('Post-commit stash verification did not match the committed retrieval.')
-    }
-
-    const completedAtUtc = new Date().toISOString()
-    database.completeRetrievalOperation({
-      operationId,
-      backupPath: committed.transaction.backupPath,
-      completedAtUtc,
-      vaultItemIds: command.vaultItemIds,
-      detail: {
-        phase: 'committed',
-        targetTabIndex: command.targetTabIndex,
-        replacementSha256: committed.transaction.committedSha256,
-        rollbackPath: committed.transaction.rollbackPath,
-        vaultItemIds: command.vaultItemIds
-      }
-    })
-
-    return {
-      operationId,
-      status: 'committed',
-      retrieved: plan.items.map((item, index) => ({
-        vaultItemId: command.vaultItemIds[index]!,
-        baseRecord: item.baseRecord,
-        seed: item.seed
-      })),
-      sourceItems: plan.sourceItemCount,
-      remainingItems: verified.itemCount,
-      targetTabItems: targetItems.length,
-      sourceSha256: plan.sourceSha256,
-      committedSha256: committed.transaction.committedSha256,
-      backupPath: committed.transaction.backupPath,
-      rollbackPath: committed.transaction.rollbackPath
-    }
-  } catch (error) {
-    if (prepared) {
-      if (commitAttempted) {
-        database.markRetrievalNeedsRecovery(operationId, error)
-      } else {
-        database.failRetrievalOperation(operationId, command.vaultItemIds, error)
-      }
-    }
-    throw error
-  }
-}
-
-async function inspectStagingTab(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  path: string
-): Promise<StagingTabInspection> {
-  const scan = await helper.request<TransferStashScan>('scan-transfer-stash', { path })
-  const lastTab = scan.tabs.at(-1)
-  if (!lastTab) throw new Error('The selected transfer stash has no tabs.')
-  const names = database.getCatalogNames(lastTab.items.map((item) => item.baseRecord))
-  return {
-    path: scan.path,
-    sha256: scan.sha256,
-    tabIndex: lastTab.index,
-    tabCount: scan.tabs.length,
-    itemCount: lastTab.items.length,
-    totalItemCount: scan.itemCount,
-    items: lastTab.items.map((item) => ({
-      tabIndex: item.tabIndex,
-      itemIndex: item.itemIndex,
-      baseRecord: item.baseRecord,
-      name: names.get(item.baseRecord.toLowerCase()) ?? item.baseRecord,
-      seed: item.seed,
-      supported: names.has(item.baseRecord.toLowerCase())
-    }))
-  }
-}
-
-async function executeStagingTabIngest(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  path: string
-): Promise<IngestResult> {
-  const staging = await inspectStagingTab(helper, database, path)
-  if (staging.items.length === 0) {
-    throw new Error('The final stash tab is empty; there is nothing staged for ingest.')
-  }
-  const unsupported = staging.items.filter((item) => !item.supported)
-  if (unsupported.length > 0) {
-    throw new Error(
-      'The staging tab contains items that CC cannot archive: ' +
-        unsupported.map((item) => item.name).join(', ')
-    )
-  }
-  return executeIngestCommand(helper, database, {
-    path: staging.path,
-    expectedSourceSha256: staging.sha256,
-    items: staging.items.map((item) => ({
-      tabIndex: item.tabIndex,
-      itemIndex: item.itemIndex,
-      expectedSeed: item.seed
-    }))
-  })
-}
-
-async function executeLastTabRetrieval(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  path: string,
-  vaultItemIds: string[]
-): Promise<RetrievalResult> {
-  if (vaultItemIds.length === 0) throw new Error('Select at least one vault item to retrieve.')
-  const staging = await inspectStagingTab(helper, database, path)
-  if (staging.itemCount !== 0) {
-    throw new Error('The final stash tab must be empty before retrieving an item.')
-  }
-  return executeRetrievalCommand(helper, database, {
-    path: staging.path,
-    expectedSourceSha256: staging.sha256,
-    targetTabIndex: staging.tabIndex,
-    vaultItemIds
-  })
 }
 
 async function readWindowState(): Promise<PersistedWindowState | null> {

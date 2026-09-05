@@ -138,6 +138,15 @@ if (!process.versions.electron) {
       }
 
       window.webContents.setZoomFactor(1)
+      for (const width of [1000, 900, 800]) {
+        window.setContentSize(width, 1000)
+        await act("collectionOwnerFixture.workspace.value='header'")
+        assert.equal(await run("document.querySelector('.tool-header-copy').getBoundingClientRect().right + 31 <= document.querySelector('.tool-heading-summary').getBoundingClientRect().left"), true,
+          'the nested Supplies summary must retain the header gap instead of overlapping its title')
+        assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
+        await capture('supplies-header-' + width)
+      }
+      await act("collectionOwnerFixture.workspace.value='sets'")
       await act('collectionOwnerFixture.setCount(1)')
       await act(`collectionOwnerFixture.openCopies(4); collectionOwnerFixture.copies.value = collectionOwnerFixture.copies.value.map((copy, index) => ({...copy, instanceKey:'identical-payload', sourcePath: index < 2 ? 'vault://copy-' + index : 'synthetic.gst', itemIndex: index < 2 ? 0 : index - 2})); collectionOwnerFixture.inspection.restore(collectionOwnerFixture.snapshot.value.items[0].record, 'identical-payload')`)
       assert.equal(await run("document.querySelectorAll('.copy-card').length"), 4, 'identical fingerprints must render distinct physical copies')

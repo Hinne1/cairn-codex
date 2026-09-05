@@ -2,6 +2,7 @@ import { computed, createApp, h, ref, shallowRef } from 'vue'
 import CollectionDashboard from '../../src/renderer/src/workspaces/CollectionDashboard.vue'
 import CollectionMaterials from '../../src/renderer/src/workspaces/CollectionMaterialsWorkspace.vue'
 import Sets from '../../src/renderer/src/workspaces/SetsWorkspace.vue'
+import ToolHeader from '../../src/renderer/src/components/ToolHeader.vue'
 import Drawer from '../../src/renderer/src/inspection/ItemInspectionDrawer.vue'
 import MiWorkshop from '../../src/renderer/src/workspaces/MiWorkshopWorkspace.vue'
 import { applyCopyFavorite, createCopyFavorites } from '../../src/renderer/src/inspection/copy-favorites'
@@ -84,6 +85,10 @@ createApp({ setup() {
       'onUpdate:controls': value => { materialsControls.value = value }, doubleRareMiBaseRecords: new Set(),
       searchDocumentForItem: itemDocument, categoryProgress: () => '', iconUrlForItem: () => null,
       bestStoredCopyForItem: () => null, liveReady: false, retrievalBusy: false, onOpenItem: openItem })
+      : workspace.value === 'header' ? h(ToolHeader, { eyebrow: 'Reusable supplies', title: 'Supplies',
+        description: 'Return unlocked boosts, merits, augments, and runes from your collection.' }, {
+        aside: () => h('div', { class: 'tool-heading-summary' }, [h('strong', '12,000 available supplies'),
+          h('small', 'Synthetic character has access to unlocked supplies from shared collection progress.')]) })
       : workspace.value === 'mi' ? h(MiWorkshop, { items: snapshot.value?.items ?? [], affixes: [], copies: copies.value,
       collected: 0, countingMode: 'base', affixesDiscovered: 0, session: miSession, controls: miControls.value,
       'onUpdate:controls': value => { miControls.value = value }, iconUrlForItem: () => null, onOpenItem: openItem })

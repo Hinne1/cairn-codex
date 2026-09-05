@@ -66,7 +66,7 @@ withDefaults(defineProps<{
 h2 { margin: var(--cc-space-1) 0 var(--cc-space-3); color: var(--tool-header-heading); font: 500 var(--cc-font-size-5xl)/1.08 var(--cc-font-display); }
 .tone-ember h2 { max-width: 790px; font-size: clamp(27px, 2.4vw, 40px); }
 .tool-header-copy > p:last-child { max-width: 820px; margin: 0; color: var(--tool-header-copy); font-size: var(--cc-font-size-lg); line-height: var(--cc-line-body); }
-.tool-header-aside { display: flex; flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; align-items: center; justify-content: flex-end; gap: var(--cc-space-5); }
+.tool-header-aside { display: flex; flex: 0 0 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; align-items: center; justify-content: flex-end; gap: var(--cc-space-5); }
 .tool-header-aside :deep(strong) { color: var(--tool-header-accent); font: 500 var(--cc-font-size-3xl) var(--cc-font-display); }
 .tool-header-aside :deep(small) { max-width: 320px; color: var(--cc-text-subtle); font-size: var(--cc-font-size-sm); }
 .tool-header-aside :deep(button) { min-height: var(--cc-control-height); padding: 0 var(--cc-space-5); border: 1px solid var(--cc-accent-border); border-radius: var(--cc-radius-sm); color: var(--cc-accent-soft); background: var(--cc-accent-surface); cursor: pointer; }

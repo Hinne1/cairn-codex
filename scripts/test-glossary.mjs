@@ -36,7 +36,7 @@ for (const url of ['file:///C:/secret', 'javascript:alert(1)', 'https://www.grim
 
 const [app, main, helper, sidebar, workspace] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/main/bootstrap.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/helper/CairnCodex.GrimDawn/ItemRollAnalyzer.cs', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/WorkspaceSidebar.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/GlossaryWorkspace.vue', import.meta.url), 'utf8')

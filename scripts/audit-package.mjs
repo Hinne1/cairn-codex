@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join, relative, resolve } from 'node:path'
 import { extractFile, listPackage } from '@electron/asar'
 import { readPeImports } from './pe-imports.mjs'
+import { assertReleaseEntry } from './release-entry-boundary.mjs'
 
 const root = resolve(process.argv[2] ?? '')
 if (!process.argv[2]) throw new Error('Usage: node scripts/audit-package.mjs <package-directory>')
@@ -52,10 +53,16 @@ try {
 
 for (const path of files) {
   const local = relative(root, path).replaceAll('\\', '/').toLowerCase()
+  assertReleaseEntry(local, /\.(js|cjs|mjs|map)$/.test(local) ? await readFile(path, 'utf8') : '')
   const extension = local.slice(local.lastIndexOf('.'))
   if (forbiddenExtensions.has(extension) || forbiddenSegments.some((part) => local.split('/').includes(part))) {
     throw new Error(`Personal or game-state data is present in the package: ${local}`)
   }
+}
+
+for (const path of archiveEntries) {
+  assertReleaseEntry(path, /\.(js|cjs|mjs|map)$/.test(path)
+    ? extractFile(archivePath, path.replace(/^\//, '')).toString('utf8') : '')
 }
 
 const expected = {

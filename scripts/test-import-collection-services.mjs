@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { BackgroundJobCoordinator } from '../src/main/background-jobs.ts'
+import { runCollectionRefresh } from '../src/main/ipc/collection-refresh-jobs.ts'
+import { CollectionSession } from '../src/renderer/src/collection-session.ts'
 import {
   ItemAssistantImportCanceledError,
   ItemAssistantImportInProgressError,
@@ -246,8 +249,100 @@ function collectionDependencies(overrides = {}) {
       queueArchiveBackup: () => undefined
     },
     catalogPresentationVersion: 7,
+    afterCatalogCommit: async () => {},
     ...overrides
   }
+}
+
+// Production job coalescing shares the committed raw catalog, never the first
+// caller's SC/HC selection or archive/stash presentation. Scan and rebuild stay distinct.
+for (const kind of ['collection-scan', 'game-data-rebuild']) {
+  const scanned = deferred()
+  let scans = 0
+  let writes = 0
+  const rebuildFlags = []
+  const dependencies = collectionDependencies({
+    scanner: { scanInstalledData: () => { scans++; return scanned.promise } },
+    cache: { read: async () => null, write: async () => { writes++ } },
+    maps: { attachLocations: async (snapshot, rebuild) => { rebuildFlags.push(rebuild); return snapshot } }
+  })
+  const service = new CollectionService(dependencies)
+  const jobs = new BackgroundJobCoordinator()
+  const refresh = kind === 'collection-scan' ? () => service.scanCatalog() : () => service.rebuildCatalog()
+  const callers = [
+    { sourcePaths: ['C:/fixtures/transfer.gst'], basis: 'archive' },
+    { sourcePaths: ['C:/fixtures/transfer.gsh'], basis: 'archive' },
+    { sourcePaths: ['C:/fixtures/transfer.gst'], basis: 'stashes' },
+    { sourcePaths: ['C:/fixtures/transfer.gsh'], basis: 'stashes' }
+  ]
+  const results = callers.map(caller => runCollectionRefresh(jobs, kind, refresh, snapshot => service.present(snapshot, caller)))
+  await new Promise(resolve => setImmediate(resolve))
+  const opposite = kind === 'collection-scan' ? 'game-data-rebuild' : 'collection-scan'
+  await assert.rejects(runCollectionRefresh(jobs, opposite,
+    () => opposite === 'collection-scan' ? service.scanCatalog() : service.rebuildCatalog(),
+    snapshot => service.present(snapshot, callers[0])), { code: 'collection.refresh-already-running' })
+  scanned.resolve(collectionSnapshot('shared-catalog'))
+  const presented = await Promise.all(results)
+  assert.equal(scans, 1)
+  assert.equal(writes, 1)
+  assert.deepEqual(rebuildFlags, [kind === 'game-data-rebuild'])
+  assert.deepEqual(presented.map(value => ({ basis: value.basis, sourcePaths: value.projectedPaths })), callers)
+  assert.equal(new Set(presented).size, callers.length, 'each caller receives its own presentation')
+}
+
+// A selected-source cache can complete before an older scan commits a new
+// catalog. The production session must request a fresh current-context projection.
+for (const kind of ['scan', 'rebuild']) {
+  const scanned = deferred()
+  const service = new CollectionService(collectionDependencies({
+    scanner: { scanInstalledData: () => scanned.promise }
+  }))
+  const jobs = new BackgroundJobCoordinator()
+  let context = { sourcePaths: ['C:/fixtures/transfer.gst'], basis: 'archive' }
+  let visible
+  let refreshed
+  const session = new CollectionSession({
+    context: () => context,
+    install: value => { visible = value },
+    pendingChanged: () => {}, reportError: error => { throw error },
+    reload: () => { refreshed = readCache() }
+  })
+  const readCache = () => session.run('cache', async read => read.install(await service.getCached(read.context)))
+  await readCache()
+  const scan = session.run(kind, async read => read.install(await runCollectionRefresh(
+    jobs, kind === 'scan' ? 'collection-scan' : 'game-data-rebuild',
+    () => kind === 'scan' ? service.scanCatalog() : service.rebuildCatalog(),
+    snapshot => service.present(snapshot, read.context)
+  )))
+  context = { sourcePaths: ['C:/fixtures/transfer.gsh'], basis: 'stashes' }
+  session.contextChanged()
+  await readCache()
+  assert.equal(visible.fixtureName, 'cached')
+  scanned.resolve(collectionSnapshot('new-catalog'))
+  await scan
+  await refreshed
+  assert.equal(visible.fixtureName, 'new-catalog')
+  assert.deepEqual(visible.projectedPaths, context.sourcePaths)
+  assert.equal(visible.basis, 'stashes')
+}
+
+// Catalog reconciliation belongs to committed refreshes, never cached reads.
+{
+  const events = []
+  const service = new CollectionService(collectionDependencies({
+    cache: { read: async () => collectionSnapshot(), write: async () => { events.push('cache-commit') } },
+    afterCatalogCommit: async () => { events.push('reconcile') }
+  }))
+  const context = { sourcePaths: [], basis: 'archive' }
+  await service.getCached(context)
+  await service.getCached(context)
+  assert.deepEqual(events, [])
+  await service.scan(context)
+  assert.deepEqual(events, ['cache-commit', 'reconcile'])
+  await service.getCached(context)
+  assert.equal(events.length, 2)
+  await service.rebuild(context)
+  assert.deepEqual(events, ['cache-commit', 'reconcile', 'cache-commit', 'reconcile'])
 }
 
 // Discovery and character enumeration are concrete collection service methods,

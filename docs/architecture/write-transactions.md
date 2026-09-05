@@ -53,11 +53,96 @@ making the items available twice. This conservative state is also used when a
 commit request was sent but its response was lost, because the file outcome is
 then unknown until hashes and stash contents are audited.
 
-Live multi-selection uses the same invariant at item granularity. The desktop
-queues one copy, waits for the game's durable deposited/rejected receipt, and
-commits that journal operation before queueing the next copy. If the destination
-fills or the hook stops responding, the batch stops: acknowledged items remain
-retrieved and every not-yet-queued copy remains `ingested` in the Archive.
+Live multi-selection prepares one operation and marks its selected archive copies
+pending before enqueueing them. The service retains each returned queue receipt,
+waits for terminal outcomes for the batch, and commits mixed deposited/rejected
+outcomes atomically. Deposited copies become retrieved; rejected copies become
+available only through receipt finalization. An uncertain batch stays pending
+and prevents another transfer. The older per-item orchestration has no callers
+and has been removed.
+
+Terminal evidence must also identify a distinct queue. Exact operation filenames
+take precedence over payload matching. Hash-only matching supports the pinned
+shared-stash hook's renamed receipts only for a unique payload/mode and one new
+candidate across both terminal directories. Identical payloads cannot borrow
+another operation's named receipt or share the same canonical receipt path.
+Recovery observes the entire retained set, including partially terminal batches,
+before copying or acknowledging evidence, so a later operation can block a
+conflicting earlier claim. Ambiguous renamed receipts keep copies pending and
+write-blocking until audited. Generated helper and SQLite adapter tests cover
+mixed deposited/rejected identical copies, repeated recovery and collisions
+within and across operations.
+
+## Concrete desktop adapters
+
+`src/main/transfers/` contains the production adapters, independently importable
+without Electron startup: offline transactions, incoming ingestion, generated
+deliveries, live retrieval service bindings, and retained-receipt recovery.
+Their dependencies name the helper request capability, narrow repository methods,
+backup/receipt directories, clock and diagnostic sink. Bootstrap supplies platform
+paths and owns process lifetime; the adapters do not discover app directories.
+
+The offline writer receives the complete approval from `ArchiveDomainService`:
+source path/hash, selected indexes/seeds, and target tab or vault IDs. It snapshots
+that approval and validates the helper plan against it before dispatch. It does
+not run another staging-tab policy path that could silently approve newer data.
+The explicit operational ingest, retrieval and planning commands use these same
+adapters and retain their console result formats.
+
+Both offline ingest and retrieval retain `needs_recovery` after a dispatched
+commit loses its response or fails subsequent verification/finalization. Ingest
+keeps exact payloads in `pending_ingest_item`; retrieval keeps archive copies
+unavailable in `retrieval_pending`. A received commit transaction is persisted
+before rescanning, including backup and rollback paths. Archive finalization
+occurs after that rescan succeeds. Recovery requires an audit of retained hashes,
+payloads and receipts; it never automatically repeats the save write.
+
+`npm run test:transfer-adapters` exercises the actual adapters, domain policies
+and SQLite implementation using generated payloads, disposable databases and
+an injected helper/clock. It covers stale approvals, rejected writes, lost
+responses, post-commit failures, repeated submission, mixed receipts, restart
+and coordinator shutdown. Helper self-tests separately exercise atomic file
+replacement. These checks do not replace the live release matrix in issue #8.
+
+## Live dispatch and receipt recovery
+
+Every live enqueue first persists its operation ID, mode, destination (for
+generated items) and exact payload as `pendingDispatch`. The returned queue is
+validated and journaled before that intent is cleared. `dispatchComplete` is set
+only after every selected item has a persisted queue. Missing responses therefore
+retain uncertainty even when earlier items have already reached the game. Recovery
+never resolves an incomplete batch from those earlier receipts or repeats an
+uncertain enqueue.
+
+Generated deliveries and archive retrievals retain every terminal outcome and
+copy rejected receipts before acknowledging them. Reconciliation checks the
+complete queue/selection mapping before consuming a rejection. An acknowledgement
+exception remains an error; a copied path alone is not proof that the incoming
+file was removed. The helper supports a retry only when the source is absent and
+the exact expected retained receipt exists and passes its SHA-256 check. Ownership,
+changed bytes, missing evidence and unreadable files still fail closed. A retained
+copy is verified before removing an existing source as well.
+
+Incoming ingestion can resume its deterministic operation after a database
+failure only when its original stash identity, mode and complete pending payload
+match. The shared coordinator first resumes specifically journaled incoming
+operations, allowing them to complete before applying the unresolved-operation
+gate. This restricted recovery pass cannot consume unrelated incoming items.
+Ordinary sync may do so after recovery clears, and already committed IDs only
+retry acknowledgement. Recovery commits schedule an archive backup.
+
+Recovery also emits a payload-free `archive:recovery-changed` event, whether it
+was triggered by ordinary sync, another transfer or Settings diagnostics. The
+renderer invalidates its installed collection projection and reloads the selected
+context and vault. Until that authoritative projection arrives, a concurrent
+ordinary ingest cannot apply an optimistic delta to the pre-recovery snapshot.
+This keeps recovered copies visible without replaying deltas across modes.
+
+The adapter suite covers first/later dispatch loss, terminal/acknowledgement
+failures, restricted incoming recovery and repeated submission. The helper's
+live-queue self-test uses disposable files to check lost-ack retry, corrupted
+copies, changed sources, locked/missing evidence and queue ownership. No test
+relaxes native build fingerprints or connects to a running game.
 
 The matching two-item v11 retrieval has now also been accepted by Grim Dawn.
 The game displayed both exact retrieved instances in the designated tab and

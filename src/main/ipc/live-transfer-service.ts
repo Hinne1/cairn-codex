@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { LiveGameStatus, LiveRetrievalResult, VaultItemState } from '../../shared/contracts.ts'
 import { SerializedServiceQueue } from './service-registry.ts'
+import { haveDistinctLiveReceipts } from '../live-receipt-policy.ts'
 
 export interface LiveTransferVaultItem {
   id: string
@@ -62,7 +63,7 @@ export interface LiveTransferAdapter {
     isHardcore: boolean
     item: unknown
   }): Promise<LiveTransferQueue>
-  inspectRetrieval(queue: LiveTransferQueue): Promise<LiveTransferQueueStatus>
+  inspectRetrieval(queue: LiveTransferQueue, batch: readonly LiveTransferQueue[]): Promise<LiveTransferQueueStatus>
   copyRejectedReceipt(input: {
     path: string
     expectedSha256: string
@@ -235,26 +236,30 @@ export class LiveTransferDomainService {
         sourceIdentity: selected.map((item) => `${item.id}:${item.seed}`).join('|'),
         startedAtUtc: new Date(this.clock.now()).toISOString(),
         vaultItemIds,
-        detail: { phase: 'prepared', adapter: 'gdia-live-v1', vaultItemIds }
+        detail: { phase: 'prepared', adapter: 'gdia-live-v1', vaultItemIds, dispatchComplete: false }
       })
       prepared = true
 
       const queues: LiveTransferQueue[] = []
       for (const [index, item] of selected.entries()) {
-        enqueueAttempted = true
         const requestedOperationId = `${operationId}-${index}`
-        const queue = await this.dependencies.adapter.enqueueRetrieval({
+        const dispatch = {
           operationId: requestedOperationId,
           isHardcore,
           item: item.payload
-        })
+        }
+        this.dependencies.journal.updatePendingDetail(operationId, { pendingDispatch: dispatch })
+        enqueueAttempted = true
+        const queue = await this.dependencies.adapter.enqueueRetrieval(dispatch)
         this.assertQueue(queue, requestedOperationId, isHardcore)
         queues.push(queue)
         this.dependencies.journal.updatePendingDetail(operationId, {
           phase: 'queued',
+          pendingDispatch: null,
           queues: queues.map((entry) => ({ ...entry }))
         })
       }
+      this.dependencies.journal.updatePendingDetail(operationId, { dispatchComplete: true })
 
       const terminal = await this.awaitTerminalReceipts(queues)
       this.dependencies.journal.updatePendingDetail(operationId, {
@@ -265,7 +270,8 @@ export class LiveTransferDomainService {
             operationId: queues[index]!.operationId,
             state: entry.state,
             receiptPath: entry.receiptPath,
-            semanticSha256: queues[index]!.semanticSha256
+            semanticSha256: queues[index]!.semanticSha256,
+            copiedReceiptPath: null
           }))
         }
       })
@@ -403,7 +409,7 @@ export class LiveTransferDomainService {
     const deadline = this.clock.now() + this.timeoutMs
     while (this.clock.now() < deadline) {
       const statuses = await Promise.all(
-        queues.map((queue) => this.dependencies.adapter.inspectRetrieval(queue))
+        queues.map((queue) => this.dependencies.adapter.inspectRetrieval(queue, queues))
       )
       const invalidTerminal = statuses.find((entry) =>
         (entry.state === 'deposited' || entry.state === 'rejected') && !entry.receiptPath?.trim()
@@ -417,10 +423,14 @@ export class LiveTransferDomainService {
       if (statuses.every((entry) =>
         (entry.state === 'deposited' || entry.state === 'rejected') && Boolean(entry.receiptPath)
       )) {
-        return statuses.map((entry) => ({
+        const terminal = statuses.map((entry) => ({
           state: entry.state as 'deposited' | 'rejected',
           receiptPath: entry.receiptPath!
         }))
+        if (!haveDistinctLiveReceipts(terminal)) {
+          throw new LiveTransferServiceError('The live batch reused a terminal receipt for multiple copies.', 'live-transfer.outcome-uncertain')
+        }
+        return terminal
       }
       await this.clock.wait(this.pollIntervalMs)
     }

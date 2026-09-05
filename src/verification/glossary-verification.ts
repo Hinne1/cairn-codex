@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import type { WebContents } from 'electron'
 
-// Used only by the isolated screenshot benchmark, never by normal startup.
+// Used only by the dedicated verification entry.
 export async function verifyGlossary(contents: WebContents): Promise<void> {
   const evaluate = (source: string) => contents.executeJavaScript(source)
   const settle = () => new Promise(resolve => setTimeout(resolve, 100))

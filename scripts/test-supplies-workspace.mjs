@@ -180,10 +180,9 @@ const lockedAugment = createSupplyOptions({
 }).find((item) => item.id.startsWith('augment:'))
 assert.equal(lockedAugment?.eligible, false)
 
-const [app, workspace, model] = await Promise.all([
+const [app, workspace] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/renderer/src/workspaces/SuppliesWorkspace.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/renderer/src/workspaces/supplies.ts', import.meta.url), 'utf8')
+  readFile(new URL('../src/renderer/src/workspaces/SuppliesWorkspace.vue', import.meta.url), 'utf8')
 ])
 
 assert.match(app, /<SuppliesWorkspace[\s\S]*?v-else-if="activeView === 'supplies'"/)
@@ -199,7 +198,8 @@ assert.match(workspace, /function showFocusedTooltip[\s\S]*?emit\('queue-tooltip
 assert.match(workspace, /@item-focus="showFocusedTooltip"/)
 assert.doesNotMatch(workspace, /show-tooltip/)
 assert.doesNotMatch(workspace, /window\.cairnCodex/)
-assert.match(model, /export function createSupplyOptions/)
-assert.match(model, /export function buildReusableSupplySummary/)
+assert.doesNotMatch(workspace, /createSupplyOptions|vaultItems/)
+assert.doesNotMatch(app, /refreshFullVaultItems|cairnCodex\.listVaultItems\(/)
+assert.match(workspace, /:remote="true"/)
 
 console.log('Supplies workspace passed: reusable-unlock counting, archived-copy identity, faction access, structured search, slot filtering, typed control ownership, delayed global tooltips, and a bounded 60-card result surface.')

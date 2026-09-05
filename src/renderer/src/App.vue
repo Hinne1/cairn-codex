@@ -64,14 +64,16 @@ import TransfersWorkspace from './workspaces/TransfersWorkspace.vue'
 import { createTransfersSession } from './workspaces/transfers'
 import SuppliesWorkspace from './workspaces/SuppliesWorkspace.vue'
 import {
-  buildReusableSupplySummary,
   createSupplyAccessSummary,
   createSupplySession,
-  type SupplyControls,
-  type SupplyOption
+  type SupplyControls
 } from './workspaces/supplies'
+import type { SupplySelectionItem } from '@shared/workspace-query-contracts'
+import { useArchiveCopySession } from './archive-copy-session'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { preferredScrollBehavior } from './motion-preference'
+import { CollectionSession, type CollectionPendingReads } from './collection-session'
+import { collectionRequestKey } from '@shared/collection-request'
 import {
   resetUiPreferences,
   type RendererFailureReport
@@ -255,9 +257,10 @@ const enabledStashPaths = computed<string[]>({
     else indexStashPaths.value = paths
   }
 })
-const scanning = ref(false)
+const collectionPending = ref<CollectionPendingReads>({ cache: 0, scan: 0, rebuild: 0, hydration: 0 })
+const scanning = computed(() => collectionPending.value.cache + collectionPending.value.scan + collectionPending.value.rebuild > 0)
 const appInitializing = ref(true)
-const archiveRollHydrating = ref(false)
+const archiveRollHydrating = computed(() => collectionPending.value.hydration > 0)
 const archiveRollHydrationCompleted = ref(0)
 const archiveRollHydrationTotal = ref(0)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
@@ -266,11 +269,26 @@ const activeBackgroundJob = computed(() => backgroundJobs.value
   .filter((job) => job.status === 'queued' || job.status === 'running')
   .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0] ?? null)
 let stopBackgroundJobUpdates: (() => void) | null = null
+let stopArchiveRecoveryUpdates: (() => void) | null = null
 const startupPhaseStatus = ref<StartupStatus | null>(null)
 const notifications = createNotificationService()
 const currentNotification = notifications.current
 const notificationAnnouncement = notifications.announcement
 const cacheIssue = ref<string | null>(null)
+const collectionContext = () => ({ basis: collectionBasis.value, sourcePaths: [...enabledStashPaths.value] })
+const collectionSession = new CollectionSession({
+  context: collectionContext,
+  install: applySnapshot,
+  reload: () => { void reloadCollection() },
+  pendingChanged: pending => { collectionPending.value = pending },
+  reportError: (error, kind) => {
+    if (kind === 'cache') cacheIssue.value = readableError(error)
+    else if (kind === 'scan') reportScanProblem(readableError(error))
+    else if (kind === 'rebuild') reportTransferProblem(readableError(error))
+    else console.warn('Archived item rolls could not be hydrated in the background.', error)
+  }
+})
+watch(() => collectionRequestKey(collectionContext()), () => collectionSession.contextChanged(), { flush: 'sync' })
 const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
   appInitializing.value && !snapshot.value
     ? 'opening-cache'
@@ -352,8 +370,23 @@ const selectedRecord = ref<string | null>(null)
 const selectedReferenceInstanceKey = ref<string | null>(null)
 const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
 const pinning = ref(false)
-const vaultItems = ref<VaultListItem[]>([])
-const vaultItemsLoaded = ref(false)
+const archiveQueryRevision = ref(0)
+const { items: vaultItems, loaded: vaultItemsLoaded } = useArchiveCopySession({
+  enabled: () => Boolean(snapshot.value) && collectionBasis.value === 'stashes' &&
+    ['collection', 'sets', 'planner', 'skills', 'oracle', 'mi-workshop', 'farming'].includes(activeView.value),
+  context: () => ({ isHardcore: snapshot.value?.isHardcore, revision: archiveQueryRevision.value,
+    source: JSON.stringify([collectionBasis.value, snapshot.value?.scannedStashes.map(stash => stash.path)]) }),
+  query: request => window.cairnCodex.queryVaultItems(request),
+  reportError: error => console.warn('Archive comparison copies could not be refreshed.', error)
+})
+const querySupplyItems = window.cairnCodex.querySupplies
+const selectSupplyBoosts = window.cairnCodex.selectSupplyBoosts
+const queryDismantlingItems = window.cairnCodex.queryDismantling
+const selectDismantlingDuplicates = window.cairnCodex.selectDismantlingDuplicates
+watch(snapshot, () => {
+  archiveQueryRevision.value++
+  void refreshSupplySummary().catch(error => console.warn('Supply summary could not be refreshed.', error))
+})
 const vaultSummary = ref<VaultSummary>({
   total: 0,
   ingested: 0,
@@ -470,10 +503,8 @@ const transferableVaultItems = computed(() => storedVaultPage.value.items)
 const availableVaultItems = computed(() => storedVaultPage.value.items)
 const vaultPageCount = computed(() => Math.max(1, Math.ceil(storedVaultPage.value.total / vaultPageSize)))
 const visibleAvailableVaultItems = computed(() => availableVaultItems.value)
-const reusableSupplySummary = computed<CollectionRaritySummary>(() => buildReusableSupplySummary(
-  snapshot.value?.supplies ?? [],
-  vaultItems.value
-))
+const reusableSupplySummary = ref<CollectionRaritySummary>({ rarity: 'supply', total: 0, collected: 0, availableCopies: 0 })
+let supplySummaryGeneration = 0
 const supplyAccessSummary = computed(() => createSupplyAccessSummary(
   snapshot.value?.supplies ?? [],
   activeCharacter.value
@@ -1459,6 +1490,10 @@ onMounted(async () => {
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   stopBackgroundJobUpdates = window.cairnCodex.onBackgroundJobChanged(retainBackgroundJob)
+  stopArchiveRecoveryUpdates = window.cairnCodex.onArchiveRecoveryChanged(() => {
+    collectionSession.invalidate()
+    void refreshVault()
+  })
   try {
     backgroundJobs.value = await window.cairnCodex.getBackgroundJobs()
   } catch (error) {
@@ -1508,19 +1543,15 @@ onMounted(async () => {
     await pollLiveLifecycle()
     liveSyncTimer = setInterval(() => void syncLiveMode(), 1000)
     liveLifecycleTimer = setInterval(() => void pollLiveLifecycle(), 10_000)
-    let cached: CollectionSnapshot | null = null
-    try {
-      cached = await window.cairnCodex.getCachedCollection(
-        [...enabledStashPaths.value],
-        collectionBasis.value
-      )
-    } catch (error) {
-      cacheIssue.value = readableError(error)
-      console.warn('Cached collection was unavailable; falling back to a full scan.', error)
-    }
+    const startupCache: { snapshot: CollectionSnapshot | null } = { snapshot: null }
+    const cacheCurrent = await collectionSession.run('cache', async (read) => {
+      const value = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
+      if (read.install(value)) startupCache.snapshot = value
+    })
+    const cached = startupCache.snapshot
+    if (!cacheCurrent) return
     if (cached) {
       await reportStartupPhase('cache-hit')
-      applySnapshot(cached)
       await waitForPaint()
       await reportStartupPhase('cached-paint')
       await reportStartupPhase('interactive')
@@ -1549,8 +1580,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  collectionSession.dispose()
   stopBackgroundJobUpdates?.()
   stopBackgroundJobUpdates = null
+  stopArchiveRecoveryUpdates?.()
+  stopArchiveRecoveryUpdates = null
   document.body.classList.remove('onboarding-active')
   window.removeEventListener('popstate', handleAppHistory)
   window.removeEventListener('pageshow', handlePageShow)
@@ -1569,58 +1603,29 @@ onBeforeUnmount(() => {
 })
 
 async function scanCollection(startupRun = false, hydrateAfter = true): Promise<void> {
-  const requestedSources = [...enabledStashPaths.value]
-  const requestedBasis = collectionBasis.value
-  const requestedKey = JSON.stringify({
-    basis: requestedBasis,
-    paths: requestedSources.map((path) => path.toLocaleLowerCase()).sort()
-  })
   scanActivity.value = 'collection'
-  scanning.value = true
   clearScanProblem()
   let shouldHydrate = false
   if (startupRun) await reportStartupPhase('scan-started')
-  try {
-    const result = await window.cairnCodex.scanCollection(requestedSources, requestedBasis)
-    const currentKey = JSON.stringify({
-      basis: collectionBasis.value,
-      paths: enabledStashPaths.value.map((path) => path.toLocaleLowerCase()).sort()
-    })
-    if (requestedKey === currentKey) {
-      applySnapshot(result)
+  await collectionSession.run('scan', async (read) => {
+    const result = await window.cairnCodex.scanCollection(read.context.sourcePaths, read.context.basis)
+    if (read.install(result)) {
       shouldHydrate = liveStatus.value?.state !== 'ready'
-    } else {
-      const current = await window.cairnCodex.getCachedCollection(
-        [...enabledStashPaths.value],
-        collectionBasis.value
-      )
-      if (current) applySnapshot(current)
     }
-  } catch (error) {
-    reportScanProblem(error instanceof Error ? error.message : 'Collection scan failed.')
-  } finally {
-    scanning.value = false
-    if (startupRun) await reportStartupPhase('scan-settled')
-  }
+  })
+  if (startupRun) await reportStartupPhase('scan-settled')
   if (hydrateAfter && shouldHydrate) void hydrateArchiveRolls(startupRun)
   else if (hydrateAfter && startupRun) await reportStartupPhase('roll-analysis-skipped')
 }
 
 async function rebuildGameDataIndex(): Promise<void> {
   scanActivity.value = 'game-data'
-  scanning.value = true
-  try {
+  await collectionSession.run('rebuild', async (read) => {
     const result = await window.cairnCodex.rebuildGameDataIndex(
-      [...enabledStashPaths.value],
-      collectionBasis.value
+      read.context.sourcePaths, read.context.basis
     )
-    applySnapshot(result)
-    reportSuccess('Game-data and map location indexes rebuilt from the installed Grim Dawn files.')
-  } catch (error) {
-    reportTransferProblem(readableError(error))
-  } finally {
-    scanning.value = false
-  }
+    if (read.install(result)) reportSuccess('Game-data and map location indexes rebuilt from the installed Grim Dawn files.')
+  })
 }
 
 async function exportDiagnostics(): Promise<void> {
@@ -2292,21 +2297,25 @@ async function selectSourceMode(isHardcore: boolean): Promise<void> {
 async function loadSelectedSources(): Promise<void> {
   hideTooltip()
   selectedRecord.value = null
-  const cached = await window.cairnCodex.getCachedCollection(
-    [...enabledStashPaths.value],
-    collectionBasis.value
-  )
-  if (cached) {
-    applySnapshot(cached)
-    void hydrateArchiveRolls()
-  }
-  else await scanCollection()
+  if (!await reloadCollection()) return
+  void hydrateArchiveRolls()
   await refreshVault()
+}
+
+async function reloadCollection(): Promise<boolean> {
+  let needsScan = false
+  const current = await collectionSession.run('cache', async (read) => {
+    const cached = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
+    if (read.install(cached)) needsScan = cached === null
+  })
+  if (!current) return false
+  if (needsScan) await scanCollection()
+  return true
 }
 
 async function hydrateArchiveRolls(startupRun = false): Promise<void> {
   if (
-    archiveRollHydrating.value ||
+    scanning.value ||
     collectionBasis.value !== 'archive' ||
     !snapshot.value ||
     liveGameIsReady()
@@ -2314,40 +2323,28 @@ async function hydrateArchiveRolls(startupRun = false): Promise<void> {
     if (startupRun) await reportStartupPhase('roll-analysis-skipped')
     return
   }
-  archiveRollHydrating.value = true
   archiveRollHydrationCompleted.value = 0
   archiveRollHydrationTotal.value = 0
-  const requestedSources = [...enabledStashPaths.value]
-  const requestedSourceKey = JSON.stringify([...requestedSources].sort())
   if (startupRun) await reportStartupPhase('roll-analysis-started')
-  try {
+  await collectionSession.run('hydration', async (read) => {
     let pending = 1
-    while (pending > 0 && collectionBasis.value === 'archive' && !liveGameIsReady()) {
-      const result = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
-      if (
-        !result ||
-        collectionBasis.value !== 'archive' ||
-        JSON.stringify([...enabledStashPaths.value].sort()) !== requestedSourceKey
-      ) break
+    while (pending > 0 && read.isCurrent() && !liveGameIsReady()) {
+      const result = await window.cairnCodex.hydrateArchiveRolls(read.context.sourcePaths)
+      if (!result || liveGameIsReady() || !read.install(result.snapshot)) break
       archiveRollHydrationCompleted.value += result.processed
       pending = result.pending
       archiveRollHydrationTotal.value = Math.max(
         archiveRollHydrationTotal.value,
         archiveRollHydrationCompleted.value + pending
       )
-      if (result.snapshot) applySnapshot(result.snapshot)
       if (result.processed === 0 && pending > 0) {
         console.warn('Archived roll hydration made no progress; stopping this background run.')
         break
       }
       if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
     }
-  } catch (error) {
-    console.warn('Archived item rolls could not be hydrated in the background.', error)
-  } finally {
-    archiveRollHydrating.value = false
-    if (startupRun) await reportStartupPhase('roll-analysis-settled')
-  }
+  })
+  if (startupRun) await reportStartupPhase('roll-analysis-settled')
 }
 
 function liveGameIsReady(): boolean {
@@ -2507,12 +2504,15 @@ function preferredStashPath(value: CollectionSnapshot): string {
 }
 
 async function refreshVault(): Promise<void> {
+  archiveQueryRevision.value++
   try {
-    const [summary, safety, live] = await Promise.allSettled([
+    const [summary, safety, live, supplies] = await Promise.allSettled([
       window.cairnCodex.getVaultSummary(),
       window.cairnCodex.inspectWriteSafety(),
-      window.cairnCodex.inspectLiveGame()
+      window.cairnCodex.inspectLiveGame(),
+      refreshSupplySummary()
     ])
+    if (supplies.status === 'rejected') console.warn('Supply summary could not be refreshed.', supplies.reason)
     if (summary.status === 'fulfilled') {
       vaultSummary.value = summary.value
       vaultSummaryStatus.value = 'ready'
@@ -2532,22 +2532,16 @@ async function refreshVault(): Promise<void> {
       activeView.value === 'vault' &&
       (transferSection.value === 'ingest-history' || transferSection.value === 'dispense-history')
     ) await refreshOperationHistory()
-    if (activeView.value === 'supplies' || activeView.value === 'dismantling') {
-      await refreshFullVaultItems()
-    }
   } catch (error) {
     reportTransferProblem(readableError(error))
   }
 }
 
-async function refreshFullVaultItems(): Promise<void> {
-  const items = await window.cairnCodex.listVaultItems()
-  vaultItems.value = items
-  vaultItemsLoaded.value = true
-  supplySession.selectedIds.value = supplySession.selectedIds.value.filter((id) =>
-    id.startsWith('augment:') ||
-    items.some((item) => item.id === id && item.state === 'ingested' && item.rarity === 'supply')
-  )
+async function refreshSupplySummary(): Promise<void> {
+  const generation = ++supplySummaryGeneration
+  const result = await window.cairnCodex.querySupplies({ source: 'archive', category: 'writs', slot: 'all', query: '',
+    activeCharacter: null, liveReady: false, offset: 0, limit: 1 })
+  if (generation === supplySummaryGeneration) reusableSupplySummary.value = result.summary
 }
 
 function scheduleVaultPageRefresh(): void {
@@ -2779,10 +2773,12 @@ async function syncLiveMode(): Promise<void> {
   }
 }
 
-async function retrieveSelectedLive(): Promise<void> {
+type ArchiveConfirmationMetadata = ReadonlyMap<string, Pick<VaultListItem, 'reusable' | 'rarity'>>
+
+async function retrieveSelectedLive(metadata?: ArchiveConfirmationMetadata): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
   const count = selectedVaultIds.value.length
-  const selected = selectedVaultIds.value.map(vaultItemForId)
+  const selected = selectedVaultIds.value.map(id => metadata?.get(id) ?? vaultItemForId(id))
   const reusable = selected.every((item) => item?.reusable)
   const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(
@@ -2811,7 +2807,7 @@ async function retrieveSelectedLive(): Promise<void> {
   }
 }
 
-async function retrieveSupplies(selected: SupplyOption[], mode: TransferMode): Promise<void> {
+async function retrieveSupplies(selected: SupplySelectionItem[], mode: TransferMode): Promise<void> {
   if (selected.length === 0 || vaultBusy.value) return
   const factionAugments = selected.filter((item) => item.source === 'faction')
   const archived = selected.filter((item) => item.source === 'archive')
@@ -2847,8 +2843,9 @@ async function retrieveSupplies(selected: SupplyOption[], mode: TransferMode): P
   }
   if (archived.length > 0) {
     selectedVaultIds.value = archived.map((item) => item.id)
-    if (mode === 'live') await retrieveSelectedLive()
-    else await retrieveSelected()
+    const metadata: ArchiveConfirmationMetadata = new Map(archived.map(item => [item.id, { reusable: item.reusable, rarity: 'supply' }]))
+    if (mode === 'live') await retrieveSelectedLive(metadata)
+    else await retrieveSelected(metadata)
   }
   supplySession.selectedIds.value = []
 }
@@ -2947,7 +2944,7 @@ function applyLiveIngests(
         }))
       ]
     : snapshot.value.observedItems
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
+  collectionSession.commit(withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies }))
 }
 
 function applyLiveRetrievals(
@@ -2993,7 +2990,7 @@ function applyLiveRetrievals(
       ? item
       : { ...item, availableCount: Math.max(0, item.availableCount - removed) }
   })
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
+  collectionSession.commit(withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies }))
 }
 
 function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
@@ -3054,9 +3051,9 @@ async function refreshStaging(): Promise<void> {
   }
 }
 
-async function retrieveSelected(): Promise<void> {
+async function retrieveSelected(metadata?: ArchiveConfirmationMetadata): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
-  const selected = selectedVaultIds.value.map(vaultItemForId)
+  const selected = selectedVaultIds.value.map(id => metadata?.get(id) ?? vaultItemForId(id))
   const reusable = selected.every((item) => item?.reusable)
   const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(reusable
@@ -4749,8 +4746,10 @@ function formatRollValue(value: number): string {
       <SuppliesWorkspace
         v-else-if="activeView === 'supplies'"
         v-model:controls="supplyControls"
-        :catalog-items="snapshot?.supplies ?? []"
-        :vault-items="vaultItems"
+        :query-items="querySupplyItems"
+        :select-boosts="selectSupplyBoosts"
+        :archive-revision="archiveQueryRevision"
+        :format-error="readableError"
         :active-character="activeCharacter"
         :active-transfer-hardcore="activeTransferHardcore"
         :live-ready="liveStatus?.state === 'ready'"
@@ -4772,7 +4771,9 @@ function formatRollValue(value: number): string {
       <DismantlingWorkspace
         v-else-if="activeView === 'dismantling'"
         v-model:controls="dismantlingControls"
-        :items="vaultItems"
+        :query-items="queryDismantlingItems"
+        :select-duplicates="selectDismantlingDuplicates"
+        :archive-revision="archiveQueryRevision"
         :session="dismantlingSession"
         :preview-dismantling="previewDismantling"
         :format-error="readableError"
@@ -4875,8 +4876,8 @@ function formatRollValue(value: number): string {
         @refresh-vault="refreshVault"
         @start-live-mode="startLiveMode"
         @stop-live-mode="stopLiveMode"
-        @retrieve-selected-live="retrieveSelectedLive"
-        @retrieve-selected="retrieveSelected"
+        @retrieve-selected-live="retrieveSelectedLive()"
+        @retrieve-selected="retrieveSelected()"
       />
 
       <section v-else-if="!snapshot && (appInitializing || scanning)" class="empty-state">

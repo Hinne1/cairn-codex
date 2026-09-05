@@ -1,5 +1,40 @@
 # Release test matrix
 
+## Quarantine command ownership (#155, 2026-09-05)
+
+Synthetic on-disk archive tests verify unchanged SQLite data versions across cached
+read APIs, including during delayed resolution. Explicit reconciliation coalesces
+duplicate requests, uses 256-record batches, serializes with an archive operation,
+queues backups only for changed metadata, and leaves exact serialized payloads,
+SC/HC flags and vault states unchanged. Helper rejection after a committed batch,
+incomplete/mismatched results, absent-record retry, repeated generic resolution,
+shutdown and database reopen are covered. Production service lifecycle tests assert
+reconciliation follows catalog cache publication and never runs on cached loads.
+Focused service/background-job gates and typechecks passed; full integration
+verification is recorded in the PR. No personal data or live game was used.
+
+## Collection request ownership (#154, 2026-09-05)
+
+Deferred-promise gates exercise the production job coordinator and raw collection
+refresh service with four concurrent SC/HC and archive/stash callers. One scan and
+cache write produce four separate caller presentations; opposite scan/rebuild
+requests reject during refresh. Renderer session gates cover reversed completion,
+A → B → A selection, stale errors after success, busy counts for outstanding work,
+unmount and committed updates superseding every earlier read kind. Focused gates
+and TypeScript/Vue typechecks passed. Full integration evidence is recorded in the
+PR; all fixtures are synthetic.
+
+## Helper protocol review (#153, 2026-09-05)
+
+Synthetic subprocess gates cover invalid/null/missing/ambiguous responses, UTF-8
+fragmentation, unknown/duplicate IDs, version/capability mismatch, one handshake
+per generation, bounded admission/output, worker eviction, process exit and
+disposal. A generated commit completes exactly once after timeout and disposal,
+beyond the prior two-second kill fallback. Read-only recovery retains the original
+process for late completion; uncertain failures survive IPC wrapping. Focused
+gates and Node typechecking passed. No personal data or live game was used. Full
+integration verification is recorded in the PR.
+
 The CI suite is intentionally independent of a Grim Dawn installation. Before a
 public tag, the maintainer additionally runs `npm.cmd run test:release-local` on
 a supported game installation and records the manual live-transfer results here.
@@ -105,7 +140,9 @@ withheld no roll scores as untrusted. The same run completed the isolated archiv
 backup/restore round trip without touching the user archive or game files.
 
 The UI benchmark enforces the warm-start budget with
-`node scripts/benchmark-ui.mjs --warm-budget-ms 5000`. Cold or stale-cache indexing is
+`node scripts/benchmark-ui.mjs --app <executable> --diagnostic-only --base-profile <disposable-profile> --warm-budget-ms 5000`.
+Fixture/interaction scenarios use `--electron-source` after `npm run build:verification`.
+See the [verification boundary](architecture/verification.md). Cold or stale-cache indexing is
 measured as a separate scan phase and is not presented as cached startup latency.
 Automated Electron gates opt into a Windows-only test fallback: when the first sandboxed
 renderer exits specifically with `reason=launch-failed`, the harness records the exit details
@@ -215,6 +252,26 @@ per workspace, about 280ms Planner and 295ms Explorer including 100ms settle in 
 initial local run. Screenshots are saved under a disposable local-cache directory;
 none contain game assets or personal data. The gate is part of `npm run verify`.
 Existing session/history and full-application tooltip checks remain required.
+
+## Bounded archive workspace queries (#159)
+
+Windows x64, Node 22.14, generated temporary SQLite archive: 20,000 equipment copies split
+evenly between SC/HC, 145 supply copies and 15 malformed legacy payloads (including integers
+outside SQLite and JavaScript safe ranges). One measured run backfilled schema 14 in 335 ms;
+the first 120-copy page took 84 ms, whole-group SC duplicate selection 88 ms and a 60-option
+supply page 92 ms. The full query assertion batch took 828 ms.
+The 120-copy IPC response was 52,368 bytes. Instrumented queries read no exact payload columns
+and parsed zero exact payloads; SHA-256 comparison preserved every migrated payload byte.
+The query batch increased JS heap by 3.6 MB; process RSS was 88.7 MB and process peak RSS was
+96,252 KiB. Peak RSS includes fixture generation and migration, not only paging.
+
+The isolated Electron 20k fixture mounted 120 Dismantling rows and 60 Supply cards at 1440×1000
+and 520×1000. Page two replaced the mounted window and retained selection; mode/query changes
+cleared it. All-mode, SC/HC, rarity, compatible-slot, normal/empty states and keyboard selection
+passed without horizontal document overflow or changing an archive row or operation journal.
+Reproduce with `npm run test:workspace-queries` and, after the verification/helper builds,
+`npm run test:workspace-queries:electron`. Captures and reports are generated under
+`local-cache/workspace-query-verification`; no personal profile or live transfer is exercised.
 
 ## Sidebar edge and icon regression
 

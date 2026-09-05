@@ -225,12 +225,27 @@ global tooltip and item drawer. A restored route preserves its requested page, w
 search or filters reset the workspace to page one.
 
 Dismantling Lab keeps its read-only safety boundary while following the same ownership model.
-`DismantlingWorkspace.vue` owns query and filter edits, transient copy selection, safe-duplicate
-selection, progressive disclosure, preview state, and result/preview markup; `dismantling.ts` owns
-pure eligibility, structured filtering, and duplicate-preservation policy. `App.vue` supplies the
-typed route-control snapshot, immutable vault-item input, a narrow preview adapter, and the shared
-redacted-error formatter. The workspace never reaches the preload API directly, and no destructive
-dismantling path is introduced by the extraction.
+`DismantlingWorkspace.vue` owns query/filter edits, transient selection and read-only preview state.
+The main-process `ArchiveWorkspaceQueries` owns eligibility, structured filtering and duplicate
+preservation. Queries return 120 metadata rows per page; `BoundedResultSurface` keeps that DOM bound
+while paging. Duplicate selection ranks the whole eligible base/mode group before applying search,
+protects its best-scored (otherwise newest) copy, excludes attached extras and caps results at 10,000
+IDs. Preview resolves only requested IDs, rejecting duplicates, missing copies and changed eligibility.
+`App.vue` supplies typed query/selection/preview adapters and an archive revision, never full-vault
+input. The workspace does not reach preload directly or introduce a destructive dismantling path.
+
+Both archive-query workspaces preserve selection across pages and clear it when search, filters,
+transfer/character context or archive revision changes. They retain compact selected metadata,
+not unseen archive payloads. The remote-page owner discards late results and errors after a new
+request, revision or unmount; preview and bulk-selection callbacks have equivalent lifetime guards.
+
+Legacy stash-basis Collection, Planner, Explorer, Oracle and MI comparisons retain their archive
+ownership/copy augmentation through `archive-copy-session.ts`. It reads the existing vault API in
+250-row pages only while a comparison consumer is active, publishes a complete set, and discards
+stale batches on source/mode/revision changes or disposal. Supplies and Dismantling never start
+this reader. Those legacy comparison consumers still aggregate all their copies; #158 owns their
+further extraction. Supplies carries compact reusable metadata into transfer confirmations so
+confirmation wording does not depend on whether a comparison workspace was visited first.
 
 Skill Explorer owns its complete typed route-control snapshot, subject picker, suggestions,
 structured result search, availability/rarity/slot filters, sort controls, and paging in
@@ -306,14 +321,14 @@ Keyboard users use Page Up/Down while the describing item retains focus. Hoverin
 pending dismissal, and horizontal table containment never blocks vertical workspace scrolling.
 
 Supplies owns its typed category, compatible-slot, query, transfer-mode, and page controls plus
-its transient keyed selection in `SuppliesWorkspace.vue`. `supplies.ts` owns reusable-unlock
-counting, catalog presentation indexing, archived-copy identity, faction-reputation access,
-structured search, and deterministic option projection. `App.vue` supplies immutable catalog and
-archive inputs, active-character and transfer readiness, one global-tooltip adapter, and one
-narrow dispense callback; the workspace never reaches the preload API directly. Category and slot
-changes clear selection, query edits preserve selection while resetting page one, transfer-mode
-changes clear selection, and Back/Forward restores the complete typed control snapshot. Supplies
-retains its established delayed tooltip behavior for both pointer and keyboard focus.
+its transient keyed selection in `SuppliesWorkspace.vue`. The shared pure `supply-presentation.ts`
+owns catalog indexing, faction access and option presentation. Main-process queries group archived
+unlocks by record/mode, keep individual potion copies and return 60 options per page plus compact
+counts. Bulk boost selection returns only eligible active-mode IDs and metadata. `App.vue` supplies
+narrow query/selection/dispense adapters, active-character/transfer readiness and the global tooltip
+adapter; the workspace never reaches preload directly. Back/Forward restores typed controls, and
+Supplies retains delayed tooltips for pointer and keyboard focus. Exact transfer payloads remain
+authoritative in the existing main-process transfer services.
 
 MI Workshop owns its typed query, affix-quality filter, selected comparison metric, sort, direction,
 page, reserve disclosure, shared toolbar, and complete bounded comparison table in

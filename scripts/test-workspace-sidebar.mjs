@@ -31,12 +31,11 @@ assert.equal(migratedRepository.value.appearance.tooltipBoundaryScroll, 'page')
 migratedRepository.update('appearance', { navigationCollapsed: true })
 assert.equal(JSON.parse(migratedStorage.getItem(PREFERENCE_STORAGE_KEY)).appearance.navigationCollapsed, true)
 
-const [app, sidebar, icons, styles, main, modalFocus, benchmark, electronGate, systemNavigationGate] = await Promise.all([
+const [app, sidebar, icons, styles, modalFocus, benchmark, electronGate, systemNavigationGate] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/WorkspaceSidebar.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/WorkspaceNavIcon.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/modal-focus.ts', import.meta.url), 'utf8'),
   readFile(new URL('./benchmark-ui.mjs', import.meta.url), 'utf8'),
   readFile(new URL('./test-sets-bounded-results-electron.mjs', import.meta.url), 'utf8'),
@@ -86,12 +85,6 @@ assert.match(icons, /stroke="currentColor"/)
 assert.match(icons, /\.workspace-nav-svg \{[^}]*width: 22px;[^}]*height: 22px;/)
 assert.match(styles, /\.workspace-layout\.has-sidebar\s*\{[\s\S]*?width:\s*100%;[\s\S]*?margin:\s*0;/)
 
-assert.match(main, /workspace-sidebar \[data-destination-id\]/)
-assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_SIDEBAR/)
-assert.doesNotMatch(main, /workspace-switcher|workspace-tool-rail/)
-assert.match(main, /openCollectionWorkspace[\s\S]*?!collection\.isConnected[\s\S]*?collection\.click\(\)/)
-assert.match(main, /Collection destination was not stable on the dashboard\./)
-assert.match(main, /Specialist workspace lost its persistent application navigation\./)
 assert.match(modalFocus, /\.workspace-sidebar button:not\(\[disabled\]\)/)
 assert.match(benchmark, /--verify-workspace-sidebar/)
 assert.match(electronGate, /normal[\s\S]*?--verify-workspace-sidebar/)

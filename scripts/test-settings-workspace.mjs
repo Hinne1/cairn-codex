@@ -52,12 +52,5 @@ assert.match(workspace, /Export redacted support bundle/)
 assert.match(workspace, /Tooltip edge scrolling[\s\S]*?Continue into the page[\s\S]*?Keep scrolling in the tooltip/)
 assert.equal((workspace.match(/<article\b/g) ?? []).length, 14, 'all fourteen Settings cards must remain workspace-owned')
 
-const electronGate = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
-assert.match(electronGate, /VERIFY_SETTINGS_WORKSPACE[\s\S]*?MI counting v-model did not update the persisted parent ref/)
-assert.match(electronGate, /Contained tooltip-edge scrolling did not persist through Settings/)
-assert.match(electronGate, /Retrieval-target v-model did not update the persisted parent ref/)
-assert.match(electronGate, /Experimental-tools emit did not update the persisted shell preference/)
-assert.match(electronGate, /Disabling one archive mode did not protect the remaining mode/)
-assert.match(electronGate, /Safe mode did not disable auto-connect and experimental tools/)
 
 console.log('Settings workspace passed: pure status/scope model, fourteen owned cards, and executable model/event/safety integration gates.')

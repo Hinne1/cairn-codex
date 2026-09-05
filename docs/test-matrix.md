@@ -238,6 +238,21 @@ fingerprints: hook SHA-256
 `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`. Exact published
 portable and installer hashes are carried by the release's `.sha256` and manifest assets.
 
+## Research toolbar regression (#138)
+
+`npm run test:research-toolbars:electron` builds and mounts the production Planner,
+Skill Explorer and shared toolbar against synthetic data and a memory-only
+preference repository. It verifies 1,440px/520px control containment (including
+compact 125% zoom), the same
+context/search/filter/result structure, inline add/remove skills with native Enter,
+keyboard sort direction, Explorer picker Escape, and Planner view-switch focus
+with independent item/map queries. It checks data-empty and filter-empty results,
+shared loading/error semantics, and generated 20,000-item catalogs: 50 mounted rows
+per workspace, 341ms Planner and 359ms Explorer including 100ms settle in the
+architecture integration run. Screenshots are saved under a disposable local-cache directory;
+none contain game assets or personal data. The gate is part of `npm run verify`.
+Existing session/history and full-application tooltip checks remain required.
+
 ## Bounded archive workspace queries (#159)
 
 Windows x64, Node 22.14, generated temporary SQLite archive: 20,000 equipment copies split

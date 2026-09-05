@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<{
   tone?: 'gold' | 'green' | 'blue' | 'ember'
   loading?: boolean
   searchError?: string | null
+  layout?: 'standard' | 'research'
 }>(), {
   searchLabel: 'Search',
   placeholder: 'Search…',
@@ -22,7 +23,8 @@ const props = withDefaults(defineProps<{
   resultLabel: 'results',
   tone: 'gold',
   loading: false,
-  searchError: null
+  searchError: null,
+  layout: 'standard'
 })
 
 const emit = defineEmits<{
@@ -115,7 +117,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div :class="['explorer-toolbar', `tone-${tone}`]" :aria-busy="loading">
+  <div :class="['explorer-toolbar', `tone-${tone}`, { 'research-toolbar': layout === 'research' }]" :aria-busy="loading">
     <div v-if="$slots.before" class="explorer-toolbar-before">
       <slot name="before" />
     </div>
@@ -176,21 +178,25 @@ onBeforeUnmount(() => {
       <slot name="filters" />
     </div>
 
-    <div v-if="$slots.sort" class="explorer-toolbar-group explorer-toolbar-sort">
-      <slot name="sort" />
-    </div>
+    <div class="explorer-toolbar-results">
+      <output class="explorer-result-count" aria-live="polite">
+        <span class="explorer-result-value">
+          <span v-if="loading" class="explorer-result-spinner" aria-hidden="true" />
+          <strong>{{ resultCount.toLocaleString() }}</strong>
+        </span>
+        <span>{{ loading ? 'Updating…' : resultLabel }}</span>
+      </output>
+      <div v-if="$slots.sort" class="explorer-toolbar-group explorer-toolbar-sort">
+        <slot name="sort" />
+      </div>
 
-    <div v-if="$slots.actions" class="explorer-toolbar-actions">
-      <slot name="actions" />
-    </div>
+      <div v-if="$slots.actions" class="explorer-toolbar-actions">
+        <slot name="actions" />
+      </div>
 
-    <output class="explorer-result-count" aria-live="polite">
-      <span class="explorer-result-value">
-        <span v-if="loading" class="explorer-result-spinner" aria-hidden="true" />
-        <strong>{{ resultCount.toLocaleString() }}</strong>
-      </span>
-      <span>{{ loading ? 'Updating…' : resultLabel }}</span>
-    </output>
+      <div v-if="$slots.views" class="explorer-toolbar-views"><slot name="views" /></div>
+    </div>
+    <div v-if="$slots.summary" class="explorer-toolbar-summary"><slot name="summary" /></div>
   </div>
 </template>
 
@@ -239,6 +245,8 @@ onBeforeUnmount(() => {
 }
 
 .explorer-toolbar-before { flex: 1 0 100%; }
+.explorer-toolbar-results { display: contents; }
+.explorer-result-count { order: 1; }
 .explorer-search { position: relative; display: grid; min-width: 240px; flex: 1 1 280px; gap: var(--cc-space-1); }
 .explorer-search-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--cc-space-4); }
 .explorer-search-actions { display: flex; align-items: center; gap: var(--cc-space-2); }
@@ -412,5 +420,38 @@ onBeforeUnmount(() => {
 @media (max-width: 760px) {
   .explorer-toolbar { padding: var(--cc-space-4); }
   .explorer-toolbar-actions { align-items: stretch; flex-direction: column; }
+}
+
+/* Research composition is opt-in; other workspaces keep the standard layout. */
+.research-toolbar { display: grid; padding: 0; border: 0; background: transparent; gap: var(--cc-space-4); min-width: 0; }
+.research-toolbar .explorer-toolbar-before { min-width: 0; padding: var(--cc-space-5); border: 1px solid var(--cc-border-default); border-radius: var(--cc-radius-md); background: var(--cc-surface-1); }
+.research-toolbar .explorer-search { min-width: 0; width: 100%; }
+.research-toolbar .explorer-toolbar-filters { display: flex; width: 100%; }
+.research-toolbar .explorer-toolbar-filters :deep(label) { flex: 1 1 140px; min-width: 0; }
+.research-toolbar .explorer-toolbar-results { display: flex; flex-wrap: wrap; align-items: end; gap: var(--cc-space-3); padding-top: var(--cc-space-3); border-top: 1px solid var(--cc-border-default); min-width: 0; }
+.research-toolbar .explorer-result-count { order: 0; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--cc-space-2); margin: 0 auto 0 0; padding: 0; border: 0; min-height: var(--cc-control-height); }
+.research-toolbar .explorer-result-count strong { font: 500 var(--cc-font-size-md) var(--cc-font-interface); }
+.research-toolbar .explorer-result-count span { font-size: var(--cc-font-size-sm); text-transform: none; letter-spacing: normal; }
+.research-toolbar .explorer-toolbar-sort { display: flex; flex-wrap: nowrap; width: auto; min-width: 0; }
+.research-toolbar .explorer-toolbar-sort :deep(label),
+.research-toolbar .explorer-toolbar-sort :deep(label:first-child) { min-width: 0; width: auto; flex: 1 1 150px; }
+.research-toolbar .explorer-toolbar-summary { display: flex; flex-wrap: wrap; gap: var(--cc-space-4); color: var(--cc-text-muted); font-size: var(--cc-font-size-sm); }
+.research-toolbar :deep(.research-context-row) { display: flex; align-items: end; flex-wrap: wrap; gap: var(--cc-space-3); min-width: 0; }
+.research-toolbar :deep(.research-subject-field) { display: grid; flex: 1 1 220px; gap: var(--cc-space-2); min-width: 0; }
+.research-toolbar :deep(.research-context-label) { color: var(--cc-text-muted); font-size: var(--cc-font-size-xs); }
+.research-toolbar :deep(.research-context-input) { width: 100%; height: var(--cc-control-height); padding: 0 var(--cc-control-height) 0 var(--cc-space-3); border: 1px solid var(--cc-border-default); border-radius: var(--cc-radius-sm); color: var(--cc-text-primary); background: var(--cc-surface-input); font: var(--cc-font-size-md) var(--cc-font-interface); }
+.research-toolbar :deep(.research-context-button) { min-height: var(--cc-control-height); padding: var(--cc-space-2) var(--cc-space-3); border: 1px solid var(--cc-border-default); border-radius: var(--cc-radius-sm); color: var(--cc-text-primary); background: var(--cc-surface-input); cursor: pointer; font: var(--cc-font-size-md) var(--cc-font-interface); }
+.research-toolbar :deep(.research-context-button:hover:not(:disabled)) { border-color: var(--cc-accent-border); background: var(--cc-accent-surface); }
+.research-toolbar :deep(.research-context-button:disabled) { opacity: .45; cursor: default; }
+.research-toolbar :deep(.research-context-input:focus-visible),
+.research-toolbar :deep(.research-context-button:focus-visible) { outline: 2px solid var(--cc-focus); outline-offset: 2px; }
+.research-toolbar :deep(.research-context-note) { margin: var(--cc-space-2) 0 0; color: var(--cc-text-muted); font-size: var(--cc-font-size-xs); }
+.research-toolbar :deep(.research-view-switch) { display: flex; flex-wrap: wrap; gap: var(--cc-space-1); }
+.research-toolbar :deep(.research-view-switch button[aria-pressed='true']) { border-color: var(--cc-accent-border); color: var(--cc-accent); background: var(--cc-accent-surface); }
+@media (max-width: 760px) {
+  .research-toolbar .explorer-toolbar-before { padding: var(--cc-space-4); }
+  .research-toolbar .explorer-result-count { flex-basis: 100%; }
+  .research-toolbar .explorer-toolbar-sort { flex: 1 1 180px; }
+  .research-toolbar .explorer-search-heading { flex-wrap: wrap; gap: var(--cc-space-2); }
 }
 </style>

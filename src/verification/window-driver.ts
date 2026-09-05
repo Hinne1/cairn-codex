@@ -827,7 +827,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               if (!(list instanceof HTMLButtonElement) || !(grid instanceof HTMLButtonElement)) {
                 throw new Error('Planner scrolling verification could not find Table and Journey views.')
               }
-              if (!list.classList.contains('active')) list.click()
+              if (list.getAttribute('aria-pressed') !== 'true') list.click()
               await frames()
               let surface = document.querySelector('.research-item-table')
               if (!(surface instanceof HTMLElement)) throw new Error('Planner table surface was not rendered.')
@@ -942,7 +942,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               const gridFocusRect = gridFocus instanceof HTMLElement ? gridFocus.getBoundingClientRect() : null
               if (
                 gridCards !== listCount ||
-                !grid.classList.contains('active') ||
+                grid.getAttribute('aria-pressed') !== 'true' ||
                 !(gridFocus instanceof HTMLElement) ||
                 gridFocus.dataset.resultKey !== focusedKey ||
                 !gridFocusRect ||
@@ -950,7 +950,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
                 gridFocusRect.top >= innerHeight + viewportTolerance
               ) {
                 throw new Error('Planner Journey view did not preserve the focused visible result and continuous window: ' + JSON.stringify({
-                  gridCards, listCount, active: grid.classList.contains('active'), focusedKey,
+                  gridCards, listCount, active: grid.getAttribute('aria-pressed') === 'true', focusedKey,
                   gridFocusKey: gridFocus instanceof HTMLElement ? gridFocus.dataset.resultKey : null,
                   top: gridFocusRect?.top, bottom: gridFocusRect?.bottom, unobscuredTop: unobscuredTop(), innerHeight
                 }))
@@ -962,7 +962,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               const restoredFocusRect = restoredFocus instanceof HTMLElement ? restoredFocus.getBoundingClientRect() : null
               if (
                 !(restoredSurface instanceof HTMLElement) ||
-                !list.classList.contains('active') ||
+                list.getAttribute('aria-pressed') !== 'true' ||
                 !(restoredFocus instanceof HTMLElement) ||
                 restoredFocus.dataset.resultKey !== focusedKey ||
                 !restoredFocusRect ||
@@ -1857,11 +1857,10 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               const originalTotal = resultCount()
               const originalFirst = rows()[0]?.textContent?.replace(/\s+/g, ' ').trim()
               if (!Number.isFinite(originalTotal) || originalTotal < rows().length) throw new Error('Skill Explorer result count was invalid.')
-              const toolbarSelects = [...document.querySelectorAll('.skill-explorer-toolbar select')]
-              const sortSelect = toolbarSelects.at(-2)
-              const directionSelect = toolbarSelects.at(-1)
+              const sortSelect = document.querySelector('.skill-explorer-toolbar .explorer-toolbar-sort select')
+              const directionButton = document.querySelector('.skill-explorer-toolbar .sort-direction-button')
               if (!(sortSelect instanceof HTMLSelectElement) || sortSelect.value !== 'level' ||
-                  !(directionSelect instanceof HTMLSelectElement) || directionSelect.value !== 'asc') {
+                  !(directionButton instanceof HTMLButtonElement) || directionButton.getAttribute('aria-label') !== 'Sort ascending') {
                 throw new Error('Skill Explorer did not start with level ascending sorting.')
               }
               const initialLevels = rows().map((row) => Number(row.querySelector('.research-level')?.textContent?.trim()))
@@ -1927,10 +1926,12 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               }
               if (!(resultCounter instanceof HTMLElement)) throw new Error('Skill Explorer result count was unavailable.')
               const resultCounterStyle = getComputedStyle(resultCounter)
-              if (window.innerWidth > 1180
-                ? resultCounterStyle.borderLeftStyle === 'none' || resultCounterStyle.textAlign === 'right'
-                : resultCounterStyle.flexDirection !== 'row' || resultCounterStyle.borderTopStyle === 'none') {
-                throw new Error('Skill Explorer result count did not use the balanced wide/compact treatment.')
+              const resultBar = resultCounter.closest('.explorer-toolbar-results')
+              if (!(resultBar instanceof HTMLElement) ||
+                  resultCounterStyle.flexDirection !== 'row' || resultCounterStyle.borderLeftStyle !== 'none' ||
+                  resultCounterStyle.textAlign === 'right' || getComputedStyle(resultBar).borderTopStyle === 'none' ||
+                  resultCounter.getAttribute('aria-live') !== 'polite') {
+                throw new Error('Skill Explorer result count did not use the shared research results row.')
               }
               const first = rows()[0]
               const second = rows()[1]

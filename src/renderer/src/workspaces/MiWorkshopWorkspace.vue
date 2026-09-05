@@ -44,6 +44,7 @@ const emit = defineEmits<{
 const controls = defineModel<MiWorkshopControls>('controls', { required: true })
 const workspaceElement = ref<HTMLElement | null>(null)
 const affixSelect = ref<HTMLSelectElement | null>(null)
+const favoriteSelect = ref<HTMLSelectElement | null>(null)
 const metricSelect = ref<HTMLSelectElement | null>(null)
 const sortSelect = ref<HTMLSelectElement | null>(null)
 const directionSelect = ref<HTMLSelectElement | null>(null)
@@ -99,6 +100,7 @@ function syncNativeControls(): void {
   const input = workspaceElement.value?.querySelector('.explorer-search input')
   if (input instanceof HTMLInputElement) input.value = query.value
   if (affixSelect.value) affixSelect.value.value = affix.value
+  if (favoriteSelect.value) favoriteSelect.value.value = String(favoritesOnly.value)
   if (metricSelect.value) metricSelect.value.value = metric.value
   if (sortSelect.value) sortSelect.value.value = sort.value
   if (directionSelect.value) directionSelect.value.value = metricDirection.value
@@ -140,17 +142,17 @@ defineExpose({ syncNativeControls })
       :search-error="searchError"
     >
       <template #filters>
-        <label class="mi-favorite-filter"><span>Favorite status</span><select v-model="favoritesOnly" aria-label="Favorite status"><option :value="false">All copies</option><option :value="true">Favorites only</option></select></label>
+        <label class="mi-favorite-filter"><span>Favorite status</span><select ref="favoriteSelect" v-model="favoritesOnly" aria-label="Favorite status" autocomplete="off"><option :value="false">All copies</option><option :value="true">Favorites only</option></select></label>
         <label>
           <span>Affix quality</span>
-          <select ref="affixSelect" v-model="affix" autocomplete="off">
+          <select ref="affixSelect" v-model="affix" aria-label="Affix quality" autocomplete="off">
             <option value="all">All combinations</option>
             <option value="double-rare">Double rares only</option>
           </select>
         </label>
         <label>
           <span>Compare copies by</span>
-          <select ref="metricSelect" v-model="metric" autocomplete="off">
+          <select ref="metricSelect" v-model="metric" aria-label="Compare copies by" autocomplete="off">
             <optgroup label="Roll quality">
               <option v-for="option in metricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
             </optgroup>
@@ -166,7 +168,7 @@ defineExpose({ syncNativeControls })
       <template #sort>
         <label>
           <span>Sort by</span>
-          <select ref="sortSelect" v-model="sort" autocomplete="off">
+          <select ref="sortSelect" v-model="sort" aria-label="Sort by" autocomplete="off">
             <option value="metric">Selected comparison</option>
             <option value="level">Required level</option>
             <option value="name">MI name</option>
@@ -175,7 +177,7 @@ defineExpose({ syncNativeControls })
         </label>
         <label>
           <span>Order</span>
-          <select ref="directionSelect" v-model="metricDirection" autocomplete="off">
+          <select ref="directionSelect" v-model="metricDirection" aria-label="Order" autocomplete="off">
             <option value="desc">Highest first</option>
             <option value="asc">Lowest first</option>
           </select>

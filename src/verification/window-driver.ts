@@ -2552,7 +2552,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
                 input.value = ${JSON.stringify(miWorkshopQuery ?? '')}
                 if (!${JSON.stringify(miNativeRestore)}) input.dispatchEvent(new Event('input', { bubbles: true }))
               }
-              const select = document.querySelector('.mi-explorer-toolbar .explorer-toolbar-filters select')
+              const select = document.querySelector('.mi-explorer-toolbar select[aria-label="Affix quality"]')
               if (select && ${JSON.stringify(Boolean(miAffixFilter))}) {
                 select.value = ${JSON.stringify(miAffixFilter ?? 'all')}
                 if (!${JSON.stringify(miNativeRestore)}) select.dispatchEvent(new Event('change', { bubbles: true }))
@@ -2572,7 +2572,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               const resultRoot = document.querySelector('.mi-table-results')
               const rows = () => [...document.querySelectorAll('.mi-table-results .bounded-results-item')]
               const resultCount = () => Number((document.querySelector('.mi-explorer-toolbar .explorer-result-count')?.textContent ?? '').replace(/[^0-9]/g, ''))
-              const selects = () => [...document.querySelectorAll('.mi-explorer-toolbar select')]
+              const selects = () => ['Affix quality', 'Compare copies by', 'Sort by', 'Order'].map(label => document.querySelector('.mi-explorer-toolbar select[aria-label="' + label + '"]'))
               const setQuery = async (value) => {
                 const input = document.querySelector('.mi-explorer-toolbar .explorer-search input')
                 if (!(input instanceof HTMLInputElement)) throw new Error('MI Workshop search control was not rendered.')
@@ -2892,19 +2892,22 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               }
 
               const search = document.querySelector('.mi-explorer-toolbar .explorer-search input')
-              const affix = document.querySelector('.mi-explorer-toolbar .explorer-toolbar-filters select')
-              if (!(search instanceof HTMLInputElement) || !(affix instanceof HTMLSelectElement)) {
+              const affix = document.querySelector('.mi-explorer-toolbar select[aria-label="Affix quality"]')
+              const favorite = document.querySelector('.mi-explorer-toolbar select[aria-label="Favorite status"]')
+              if (!(search instanceof HTMLInputElement) || !(affix instanceof HTMLSelectElement) || !(favorite instanceof HTMLSelectElement)) {
                 throw new Error('MI route controls were not rendered for native restoration verification.')
               }
               const restoredWorkshopState = assertTypedEntry('mi-workshop', false)
               search.value = 'native-restoration-disagreement'
               affix.value = 'double-rare'
+              favorite.value = restoredWorkshopState.route.controls.favoritesOnly === true ? 'false' : 'true'
               window.dispatchEvent(new PageTransitionEvent('pageshow'))
               await frames()
               await new Promise((resolve) => setTimeout(resolve, 20))
               if (
                 search.value !== restoredWorkshopState.route.controls.query ||
-                affix.value !== restoredWorkshopState.route.controls.affix
+                affix.value !== restoredWorkshopState.route.controls.affix ||
+                favorite.value !== String(restoredWorkshopState.route.controls.favoritesOnly === true)
               ) {
                 throw new Error('Native form restoration disagreed with application route state.')
               }
@@ -3356,7 +3359,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
             suffixClass: row.children[3]?.className
           })),
           miQuery: document.querySelector('.mi-explorer-toolbar .explorer-search input')?.value,
-          miAffixFilter: document.querySelector('.mi-explorer-toolbar .explorer-toolbar-filters select')?.value,
+          miAffixFilter: document.querySelector('.mi-explorer-toolbar select[aria-label="Affix quality"]')?.value,
           drawer: document.querySelector('.item-drawer h2')?.textContent?.trim(),
           tooltip: document.querySelector('.game-tooltip')?.textContent?.trim(),
           tooltipRect: (() => {

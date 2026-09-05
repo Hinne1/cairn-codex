@@ -248,8 +248,8 @@ context/search/filter/result structure, inline add/remove skills with native Ent
 keyboard sort direction, Explorer picker Escape, and Planner view-switch focus
 with independent item/map queries. It checks data-empty and filter-empty results,
 shared loading/error semantics, and generated 20,000-item catalogs: 50 mounted rows
-per workspace, about 280ms Planner and 295ms Explorer including 100ms settle in the
-initial local run. Screenshots are saved under a disposable local-cache directory;
+per workspace, 341ms Planner and 359ms Explorer including 100ms settle in the
+architecture integration run. Screenshots are saved under a disposable local-cache directory;
 none contain game assets or personal data. The gate is part of `npm run verify`.
 Existing session/history and full-application tooltip checks remain required.
 

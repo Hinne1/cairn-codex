@@ -846,6 +846,7 @@ function registerIpcHandlers(
     error: (event, error) => diagnostics.error('diagnostics', event, error)
   })
   const diagnosticsService = new DiagnosticsService({
+    visualDiagnosticsActive: () => Boolean(process.env.CAIRN_CODEX_SCREENSHOT_PATH),
     appVersion: () => app.getVersion(),
     helperHealth: () => helper.request('health'),
     safeModeStatus: () => startupRecovery.getStatus(),

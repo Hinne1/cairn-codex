@@ -39,7 +39,8 @@ Visual diagnostics return a disabled live status without inspecting the native
 adapter. Periodic sync is a no-op; live mutation endpoints reject requests. The
 shared transfer coordinator also rejects diagnostic transfers before reconciling
 retained receipts, including requests arriving through offline IPC. Diagnostic
-launchers discard inherited operational commands and archive destination overrides;
+recovery-status reads return the committed summary without reconciling its receipts.
+Diagnostic launchers discard inherited operational commands and archive destination overrides;
 the installer restores its caller's environment after the isolated process exits.
 
 The installer lifecycle test still launches the actual installed executable. Its

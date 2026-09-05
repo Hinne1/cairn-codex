@@ -5,6 +5,7 @@ import { DiagnosticsService } from '../src/main/ipc/diagnostics-service.ts'
 import { DiagnosticExportService } from '../src/main/ipc/diagnostic-export-service.ts'
 import { LiveGameDomainService } from '../src/main/ipc/live-game-service.ts'
 import { WindowService } from '../src/main/ipc/window-service.ts'
+import { MainOperationCoordinator } from '../src/main/operation-coordinator.ts'
 
 const listed = [{ id: 'fixture' }]
 let canceledId = null
@@ -51,8 +52,16 @@ assert.equal(await backupService.openDirectory(), 'fixture/backups')
 
 let debugEnabled = false
 let recoveryChecks = 0
+let diagnosticCapture = false
+let coordinatorRecoveryChecks = 0
+const coordinator = new MainOperationCoordinator({
+  diagnostics: {}, transfersPermitted: () => !diagnosticCapture,
+  reconcileTransfers: async () => { coordinatorRecoveryChecks++ },
+  unresolvedTransferCount: () => 0
+})
 const diagnosticEvents = []
 const diagnostics = new DiagnosticsService({
+  visualDiagnosticsActive: () => diagnosticCapture,
   appVersion: () => 'fixture',
   helperHealth: async () => { throw new Error('helper unavailable') },
   safeModeStatus: () => ({ active: false, suggested: false, failedStarts: 0, threshold: 3 }),
@@ -65,7 +74,7 @@ const diagnostics = new DiagnosticsService({
   error: (...event) => { diagnosticEvents.push(event) },
   selectPreferenceExport: async () => 'fixture/preferences.json',
   reconcileRecovery: async () => { recoveryChecks += 1 },
-  runExclusive: async (operation) => operation(),
+  runExclusive: operation => coordinator.runExclusive(operation),
   recoveryOperations: () => [{
     id: 'recovery-1', operation: 'retrieve', state: 'needs_recovery',
     startedAtUtc: new Date(0).toISOString(), hasBackup: true
@@ -85,6 +94,13 @@ assert.deepEqual(await diagnostics.exportDiagnostics(), {
   canceled: false, path: 'fixture/support.zip'
 })
 assert.equal(diagnosticEvents.length, 1)
+diagnosticCapture = true
+assert.deepEqual(await diagnostics.getRecoveryStatus(), recovery, 'diagnostic startup reads the retained summary without reconciliation')
+assert.deepEqual(await diagnostics.getRecoveryStatus(), recovery)
+await assert.rejects(coordinator.runTransferExclusive(async () => { throw new Error('Must not execute') }), /disabled during visual diagnostics/)
+await coordinator.flush()
+assert.equal(recoveryChecks, 1, 'plain queued recovery-status reads must not reconcile under visual diagnostics')
+assert.equal(coordinatorRecoveryChecks, 0, 'transfer guard must run before reconciliation')
 
 const liveEvents = []
 const liveStatus = {

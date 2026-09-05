@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { LiveGameStatus, LiveRetrievalResult, VaultItemState } from '../../shared/contracts.ts'
 import { SerializedServiceQueue } from './service-registry.ts'
+import { haveDistinctLiveReceipts } from '../live-receipt-policy.ts'
 
 export interface LiveTransferVaultItem {
   id: string
@@ -62,7 +63,7 @@ export interface LiveTransferAdapter {
     isHardcore: boolean
     item: unknown
   }): Promise<LiveTransferQueue>
-  inspectRetrieval(queue: LiveTransferQueue): Promise<LiveTransferQueueStatus>
+  inspectRetrieval(queue: LiveTransferQueue, batch: readonly LiveTransferQueue[]): Promise<LiveTransferQueueStatus>
   copyRejectedReceipt(input: {
     path: string
     expectedSha256: string
@@ -408,7 +409,7 @@ export class LiveTransferDomainService {
     const deadline = this.clock.now() + this.timeoutMs
     while (this.clock.now() < deadline) {
       const statuses = await Promise.all(
-        queues.map((queue) => this.dependencies.adapter.inspectRetrieval(queue))
+        queues.map((queue) => this.dependencies.adapter.inspectRetrieval(queue, queues))
       )
       const invalidTerminal = statuses.find((entry) =>
         (entry.state === 'deposited' || entry.state === 'rejected') && !entry.receiptPath?.trim()
@@ -422,10 +423,14 @@ export class LiveTransferDomainService {
       if (statuses.every((entry) =>
         (entry.state === 'deposited' || entry.state === 'rejected') && Boolean(entry.receiptPath)
       )) {
-        return statuses.map((entry) => ({
+        const terminal = statuses.map((entry) => ({
           state: entry.state as 'deposited' | 'rejected',
           receiptPath: entry.receiptPath!
         }))
+        if (!haveDistinctLiveReceipts(terminal)) {
+          throw new LiveTransferServiceError('The live batch reused a terminal receipt for multiple copies.', 'live-transfer.outcome-uncertain')
+        }
+        return terminal
       }
       await this.clock.wait(this.pollIntervalMs)
     }

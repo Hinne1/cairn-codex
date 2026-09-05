@@ -4,6 +4,7 @@ import type { TransferPorts } from './runtime.ts';
 import type { LiveQueueReceipt, LiveRetrievalQueue, LiveRetrievalStatus } from './contracts.ts';
 import type { RecoveryJournalOperation } from '../collection-database.ts';
 import type { DiagnosticLogger } from '../diagnostics.ts';
+import { hasUniqueLivePayload, haveDistinctLiveReceipts, liveReceiptPathKey } from '../live-receipt-policy.ts'
 
 export type RetainedReceiptsDependencies = TransferPorts & {
   database: Pick<CollectionDatabase, 'completeDeliveryOperation' | 'completePartialRetrievalOperation' | 'completeRetrievalOperation' | 'failDeliveryOperation' | 'failRetrievalOperation' | 'getVaultItems' | 'listRecoveryOperations' | 'updatePendingOperationDetail'>
@@ -103,6 +104,7 @@ export async function finalizeLiveRecoveryOperation(
   const { helper, database, clock, diagnostics } = dependencies
   if (
     queues.length === 0 || entries.length !== queues.length ||
+    !haveDistinctLiveReceipts(entries) ||
     JSON.stringify(retainedRecoveryQueues(operation)) !== JSON.stringify(queues) ||
     entries.some((entry, index) =>
       entry.operationId !== queues[index]?.operationId ||
@@ -216,47 +218,72 @@ export async function reconcileLiveRecoveryOperations(
 ): Promise<number> {
   const { helper, database, paths, clock, diagnostics } = dependencies
   let resolved = 0
-  for (const operation of database.listRecoveryOperations()) {
+  const operations = database.listRecoveryOperations()
+  const retrievals = operations.filter(operation => operation.operation === 'retrieve')
+  const allQueuesKnown = retrievals.every(operation => retainedRecoveryQueues(operation).length > 0)
+  const allQueues = retrievals.flatMap(retainedRecoveryQueues)
+  const plans: Array<{ operation: RecoveryJournalOperation; queues: LiveRetrievalQueue[]; entries: TerminalRecoveryEntry[] }> = []
+  const owners = new Map<string, Set<string>>()
+  const observe = (operationId: string, entries: Array<{ receiptPath: string | null }>): void => {
+    for (const entry of entries) {
+      if (!entry.receiptPath) continue
+      const key = liveReceiptPathKey(entry.receiptPath)
+      const set = owners.get(key) ?? new Set<string>()
+      set.add(operationId)
+      owners.set(key, set)
+    }
+  }
+  for (const operation of operations) {
     if (operation.operation !== 'retrieve') continue
     const queues = retainedRecoveryQueues(operation)
     if (queues.length === 0) continue
     try {
       let entries = retainedTerminalResolution(operation)
+      observe(operation.id, entries)
       if (entries.length !== queues.length || entries.some(entry => entry.state === 'rejected' && !entry.copiedReceiptPath)) {
         const inspected = await Promise.all(
-          queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue }))
+          queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', {
+            queue, allowHashFallback: allQueuesKnown && hasUniqueLivePayload(queue, allQueues)
+          }))
         )
+        observe(operation.id, inspected)
         if (inspected.some((status) =>
           (status.state !== 'deposited' && status.state !== 'rejected') || !status.receiptPath
         )) continue
+        if (!haveDistinctLiveReceipts(inspected as Array<LiveRetrievalStatus & { receiptPath: string }>)) continue
         entries = []
         for (const [index, status] of inspected.entries()) {
           const queue = queues[index]!
-          let copiedReceiptPath: string | null = null
-          if (status.state === 'rejected') {
-            const copied = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
-              path: status.receiptPath!,
-              expectedSha256: queue.semanticSha256,
-              receiptDirectory: join(paths.receipts, 'recovered-rejections')
-            })
-            copiedReceiptPath = copied.receiptPath
-          }
           entries.push({
             operationId: queue.operationId,
             state: status.state as 'deposited' | 'rejected',
             receiptPath: status.receiptPath!,
             semanticSha256: queue.semanticSha256,
-            copiedReceiptPath
+            copiedReceiptPath: null
           })
         }
-        database.updatePendingOperationDetail(operation.id, {
-          recoveryResolution: { recordedAtUtc: clock.nowUtc(), entries }
-        })
-        operation.detail = {
-          ...operation.detail,
-          recoveryResolution: { recordedAtUtc: clock.nowUtc(), entries }
-        }
       }
+      plans.push({ operation, queues, entries })
+    } catch (error) {
+      diagnostics.error('recovery', 'operation.inspect-failed', error, { operationId: operation.id })
+    }
+  }
+  // Observe the entire retained set before any acknowledgement: even a partial
+  // operation may already claim evidence another operation tries to reuse.
+  for (const { operation, queues, entries } of plans) {
+    if (!haveDistinctLiveReceipts(entries) || entries.some(entry => owners.get(liveReceiptPathKey(entry.receiptPath))!.size > 1)) continue
+    try {
+      for (const entry of entries) {
+        if (entry.state !== 'rejected' || entry.copiedReceiptPath) continue
+        const copied = await helper.request<LiveQueueReceipt>('copy-live-incoming', {
+          path: entry.receiptPath, expectedSha256: entry.semanticSha256,
+          receiptDirectory: join(paths.receipts, 'recovered-rejections')
+        })
+        entry.copiedReceiptPath = copied.receiptPath
+      }
+      const recoveryResolution = { recordedAtUtc: clock.nowUtc(), entries }
+      database.updatePendingOperationDetail(operation.id, { recoveryResolution })
+      operation.detail = { ...operation.detail, recoveryResolution }
       if (await finalizeLiveRecoveryOperation(
         dependencies, operation, queues, entries
       )) resolved += 1

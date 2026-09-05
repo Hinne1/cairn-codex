@@ -177,7 +177,7 @@ HelperResponse InspectLiveRetrieval(HelperRequest request)
 {
     var parameters = request.Params?.Deserialize<InspectLiveRetrievalRequest>(jsonOptions)
         ?? throw new JsonException("inspect-live-retrieval requires queue.");
-    return HelperResponse.Success(request.Id, liveGame.InspectRetrieval(parameters.Queue));
+    return HelperResponse.Success(request.Id, liveGame.InspectRetrieval(parameters.Queue, parameters.AllowHashFallback));
 }
 
 HelperResponse BuildItemCatalog(HelperRequest request)
@@ -458,7 +458,7 @@ internal sealed record EnqueueLiveRetrievalRequest(
     bool IsHardcore,
     VaultItemPayload Item,
     string Destination = "shared-stash");
-internal sealed record InspectLiveRetrievalRequest(LiveRetrievalQueue Queue);
+internal sealed record InspectLiveRetrievalRequest(LiveRetrievalQueue Queue, bool AllowHashFallback = false);
 
 internal sealed record HelperRequest(string Id, string Method, JsonElement? Params);
 

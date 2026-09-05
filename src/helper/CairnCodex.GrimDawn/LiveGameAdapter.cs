@@ -145,6 +145,7 @@ internal sealed class LiveGameAdapter : IDisposable
             var bytes = Encoding.UTF8.GetBytes(serialized);
             var semanticHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             VerifyAcknowledgementRecovery(incoming, Path.Combine(recoveryRoot, "receipts"), bytes, semanticHash);
+            VerifyIdenticalPayloadReceipts(Path.Combine(recoveryRoot, "identical"), bytes, semanticHash);
             var pendingPath = Path.Combine(outgoing, "cairn-self-test-pending.csv");
             var pendingQueue = new LiveRetrievalQueue(
                 "self-test-pending", pendingPath, semanticHash, true, [], []);
@@ -536,6 +537,44 @@ internal sealed class LiveGameAdapter : IDisposable
         if (!outsideRejected) throw new InvalidDataException("Acknowledgement escaped incoming queue ownership.");
     }
 
+    private static void VerifyIdenticalPayloadReceipts(string root, byte[] bytes, string hash)
+    {
+        var outgoing = Path.Combine(root, "outgoing", "sc");
+        var deleted = Path.Combine(root, "deleted", "sc");
+        var incoming = Path.Combine(root, "ingoing");
+        Directory.CreateDirectory(outgoing);
+        Directory.CreateDirectory(deleted);
+        Directory.CreateDirectory(incoming);
+        var first = new LiveRetrievalQueue("identical-0", Path.Combine(outgoing, "cairn-identical-0.csv"), hash, false, [], []);
+        var second = new LiveRetrievalQueue("identical-1", Path.Combine(outgoing, "cairn-identical-1.csv"), hash, false, [], []);
+        var deposited = Path.Combine(deleted, "cairn-identical-0.csv");
+        var rejected = Path.Combine(incoming, "cairn-identical-1.csv");
+        File.WriteAllBytes(deposited, bytes);
+        File.WriteAllBytes(rejected, bytes);
+        if (InspectRetrievalFiles(first, root).State != "deposited" || InspectRetrievalFiles(second, root).State != "rejected")
+            throw new InvalidDataException("Two identical payloads did not retain distinct deposited and rejected outcomes.");
+        File.Delete(rejected);
+        if (InspectRetrievalFiles(second, root).State != "unknown")
+            throw new InvalidDataException("An unresolved identical copy reused another operation's receipt.");
+        if (InspectRetrievalFiles(second, root, true).State != "unknown")
+            throw new InvalidDataException("Hash fallback consumed another operation's exact filename.");
+
+        var renamedDeposit = Path.Combine(deleted, "native-renamed-deposit.csv");
+        var renamedRejection = Path.Combine(incoming, "native-renamed-rejection.csv");
+        File.Move(deposited, renamedDeposit);
+        if (InspectRetrievalFiles(first, root).State != "unknown" || InspectRetrievalFiles(second, root).State != "unknown")
+            throw new InvalidDataException("An identical-payload batch allowed hash-only fallback.");
+        if (InspectRetrievalFiles(first, root, true).State != "deposited")
+            throw new InvalidDataException("A uniquely permitted renamed shared-stash receipt could not resolve.");
+        File.WriteAllBytes(renamedRejection, bytes);
+        if (InspectRetrievalFiles(first, root, true).State != "unknown")
+            throw new InvalidDataException("Conflicting renamed outcomes were guessed from identical bytes.");
+        File.Delete(renamedRejection);
+        File.WriteAllBytes(Path.Combine(deleted, "another-renamed-deposit.csv"), bytes);
+        if (InspectRetrievalFiles(first, root, true).State != "unknown")
+            throw new InvalidDataException("Multiple renamed receipts were guessed from identical bytes.");
+    }
+
     private static LiveQueueReceipt AcknowledgeIncomingFile(
         string path, string expectedSha256, string receiptDirectory, string incomingDirectory)
     {
@@ -651,19 +690,20 @@ internal sealed class LiveGameAdapter : IDisposable
         }
     }
 
-    public LiveRetrievalStatus InspectRetrieval(LiveRetrievalQueue queue)
+    public LiveRetrievalStatus InspectRetrieval(LiveRetrievalQueue queue, bool allowHashFallback = false)
     {
         lock (sync)
         {
             return InspectRetrievalFiles(
                 queue,
-                Path.Combine(LiveDataDirectory(), "itemqueue"));
+                Path.Combine(LiveDataDirectory(), "itemqueue"), allowHashFallback);
         }
     }
 
     private static LiveRetrievalStatus InspectRetrievalFiles(
         LiveRetrievalQueue queue,
-        string queueRoot)
+        string queueRoot,
+        bool allowHashFallback = false)
     {
         if (!Regex.IsMatch(queue.SemanticSha256, "^[0-9a-f]{64}$", RegexOptions.IgnoreCase))
         {
@@ -681,27 +721,28 @@ internal sealed class LiveGameAdapter : IDisposable
         var deleted = Path.Combine(queueRoot, "deleted", queue.IsHardcore ? "hc" : "sc");
         var queueName = Path.GetFileName(outgoingPath);
         var exactDeposited = Path.Combine(deleted, queueName);
-        var deposited = FileMatchesSemanticHash(exactDeposited, queue.SemanticSha256)
-            ? exactDeposited
-            : MatchingFiles(deleted, queue.SemanticSha256)
-            .Except(queue.BaselineDeleted, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
-        if (deposited is not null)
-        {
-            return new LiveRetrievalStatus("deposited", deposited);
-        }
         var incoming = Path.Combine(queueRoot, "ingoing");
         var exactRejected = Path.Combine(incoming, queueName);
-        var rejected = FileMatchesSemanticHash(exactRejected, queue.SemanticSha256)
-            ? exactRejected
-            : MatchingFiles(incoming, queue.SemanticSha256)
+        var depositedMatches = FileMatchesSemanticHash(exactDeposited, queue.SemanticSha256);
+        var rejectedMatches = FileMatchesSemanticHash(exactRejected, queue.SemanticSha256);
+        if (depositedMatches && rejectedMatches) return new LiveRetrievalStatus("unknown", null);
+        if (depositedMatches) return new LiveRetrievalStatus("deposited", exactDeposited);
+        if (rejectedMatches) return new LiveRetrievalStatus("rejected", exactRejected);
+        if (!allowHashFallback) return new LiveRetrievalStatus("unknown", null);
+
+        // Shared-stash receipts may be renamed by the pinned hook. The caller
+        // permits this only for a payload unique across the complete queue set.
+        // An exact Cairn filename always belongs to its own operation, and
+        // multiple candidates (including across outcomes) remain ambiguous.
+        static bool IsRenamed(string path) => !Path.GetFileName(path).StartsWith("cairn-", StringComparison.OrdinalIgnoreCase);
+        var deposited = MatchingFiles(deleted, queue.SemanticSha256)
+            .Except(queue.BaselineDeleted, StringComparer.OrdinalIgnoreCase).Where(IsRenamed).ToArray();
+        var rejected = MatchingFiles(incoming, queue.SemanticSha256)
             .Except(queue.BaselineIncoming, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
-        return rejected is null
-            ? new LiveRetrievalStatus("unknown", null)
-            : new LiveRetrievalStatus("rejected", rejected);
+            .Where(IsRenamed).ToArray();
+        if (deposited.Length + rejected.Length != 1) return new LiveRetrievalStatus("unknown", null);
+        return deposited.Length == 1 ? new LiveRetrievalStatus("deposited", deposited[0])
+            : new LiveRetrievalStatus("rejected", rejected[0]);
     }
 
     private static string ValidateQueueFilePath(string path, string expectedDirectory)

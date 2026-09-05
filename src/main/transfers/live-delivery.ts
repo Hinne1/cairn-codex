@@ -6,6 +6,7 @@ import type { CharacterSaveProfile, CollectionSnapshot, LiveGameStatus, LiveSupp
 import type { LiveVaultPayload } from '../collection-presentation.ts';
 import { createHash } from 'node:crypto';
 import type { TerminalRecoveryEntry } from './retained-receipts.ts'
+import { hasUniqueLivePayload, haveDistinctLiveReceipts } from '../live-receipt-policy.ts'
 
 export type LiveDeliveryDependencies = TransferPorts & {
   database: Pick<CollectionDatabase, 'completeDeliveryOperation' | 'failDeliveryOperation' | 'markDeliveryNeedsRecovery' | 'prepareDeliveryOperation' | 'updatePendingOperationDetail'>
@@ -88,7 +89,9 @@ async function deliverGeneratedItems(
   while (clock.now() < deadline && terminal.size !== queues.length) {
     for (const queue of queues) {
       if (terminal.has(queue.operationId)) continue
-      const status = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', { queue })
+      const status = await helper.request<LiveRetrievalStatus>('inspect-live-retrieval', {
+        queue, allowHashFallback: hasUniqueLivePayload(queue, queues)
+      })
       if (status.state !== 'deposited' && status.state !== 'rejected') continue
       if (!status.receiptPath?.trim()) throw new Error('The live delivery has no durable terminal receipt.')
       terminal.set(queue.operationId, { operationId: queue.operationId, state: status.state,
@@ -100,6 +103,7 @@ async function deliverGeneratedItems(
     throw new Error('Timed out waiting for Grim Dawn to acknowledge the live delivery. Do not retry until CC resolves the pending queue.')
   }
   const entries = queues.map(queue => terminal.get(queue.operationId)!)
+  if (!haveDistinctLiveReceipts(entries)) throw new Error('The live batch reused a terminal receipt for multiple copies.')
   const receiptDirectory = join(paths.receipts, 'rejected-generated-deliveries')
   for (const entry of entries) {
     if (entry.state !== 'rejected') continue

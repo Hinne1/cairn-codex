@@ -61,6 +61,18 @@ available only through receipt finalization. An uncertain batch stays pending
 and prevents another transfer. The older per-item orchestration has no callers
 and has been removed.
 
+Terminal evidence must also identify a distinct queue. Exact operation filenames
+take precedence over payload matching. Hash-only matching supports the pinned
+shared-stash hook's renamed receipts only for a unique payload/mode and one new
+candidate across both terminal directories. Identical payloads cannot borrow
+another operation's named receipt or share the same canonical receipt path.
+Recovery observes the entire retained set, including partially terminal batches,
+before copying or acknowledging evidence, so a later operation can block a
+conflicting earlier claim. Ambiguous renamed receipts keep copies pending and
+write-blocking until audited. Generated helper and SQLite adapter tests cover
+mixed deposited/rejected identical copies, repeated recovery and collisions
+within and across operations.
+
 ## Concrete desktop adapters
 
 `src/main/transfers/` contains the production adapters, independently importable

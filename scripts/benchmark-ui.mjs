@@ -167,7 +167,7 @@ const env = {
   CAIRN_CODEX_SCREENSHOT_PATH: screenshotPath,
   CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN: waitForBackgroundJobs ? '1' : '0',
   CAIRN_CODEX_SCREENSHOT_QUERY: query,
-  CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture ?? '',
+  CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture ?? (diagnosticOnly ? process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE ?? '' : ''),
   ...(openSearchHelp ? { CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP: '1' } : {}),
   ...(collapseTrackers ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
   ...(enableAllTools ? { CAIRN_CODEX_SCREENSHOT_ENABLE_ALL_TOOLS: '1' } : {}),

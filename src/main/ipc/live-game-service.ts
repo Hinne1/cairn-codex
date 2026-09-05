@@ -39,6 +39,21 @@ export interface LiveGameDomainDependencies {
   queueArchiveBackup(reason: string): void
 }
 
+const visualDiagnosticsMessage = 'Live transfers are disabled during visual diagnostics.'
+
+function visualDiagnosticsStatus(): LiveGameStatus {
+  return {
+    state: 'unavailable', detail: visualDiagnosticsMessage,
+    grimDawnProcessIds: [], itemAssistantProcessIds: [], hookAvailable: false,
+    adapterDirectory: null, hookVersion: null, connectedProcessId: null,
+    isHardcore: null, activeCharacterName: null, ingestTabSetting: 0, depositTabSetting: 0,
+    ingestTabDescription: visualDiagnosticsMessage, depositTabDescription: visualDiagnosticsMessage,
+    hostWindowReady: false, injectorOutput: null, messages: [], gameVersion: null,
+    gameBuildId: null, gameDllSha256: null, gameDllLastWriteUtc: null, hookSha256: null,
+    recommendation: null
+  }
+}
+
 /** Owns the live-game IPC policy while native helper/database work stays injected. */
 export class LiveGameDomainService {
   private readonly dependencies: LiveGameDomainDependencies
@@ -48,29 +63,38 @@ export class LiveGameDomainService {
   }
 
   inspect(): Promise<LiveGameStatus> {
+    if (this.dependencies.visualDiagnosticsActive()) return Promise.resolve(visualDiagnosticsStatus())
     return this.dependencies.inspect()
   }
 
   inspectWriteSafety(): Promise<WriteSafetyStatus> {
+    if (this.dependencies.visualDiagnosticsActive()) {
+      return Promise.resolve({ permitted: false, reasons: [visualDiagnosticsMessage] })
+    }
     return this.dependencies.inspectWriteSafety()
   }
 
   approveBuild(): Promise<LiveGameStatus> {
+    if (this.dependencies.visualDiagnosticsActive()) return Promise.reject(new Error(visualDiagnosticsMessage))
     return this.dependencies.approveBuild()
   }
 
   start(): Promise<LiveGameStatus> {
     if (this.dependencies.visualDiagnosticsActive()) {
-      return Promise.reject(new Error('Live transfers are disabled during visual diagnostics.'))
+      return Promise.reject(new Error(visualDiagnosticsMessage))
     }
     return this.dependencies.start()
   }
 
   stop(): Promise<LiveGameStatus> {
+    if (this.dependencies.visualDiagnosticsActive()) return Promise.reject(new Error(visualDiagnosticsMessage))
     return this.dependencies.stop()
   }
 
   sync(): Promise<LiveGameSyncResult> {
+    if (this.dependencies.visualDiagnosticsActive()) {
+      return Promise.resolve({ status: visualDiagnosticsStatus(), ingested: [], issues: [] })
+    }
     return this.dependencies.diagnostics.run('live-sync', async () => {
       const result = await this.dependencies.runTransferExclusive(
         () => this.dependencies.syncIncoming()
@@ -81,6 +105,7 @@ export class LiveGameDomainService {
   }
 
   retrieve(vaultItemIds: readonly string[]): Promise<LiveRetrievalResult> {
+    if (this.dependencies.visualDiagnosticsActive()) return Promise.reject(new Error(visualDiagnosticsMessage))
     return this.dependencies.diagnostics.run('live-retrieval', async () => {
       const result = await this.dependencies.runTransferExclusive(
         () => this.dependencies.retrieveVaultItems(vaultItemIds)
@@ -96,6 +121,7 @@ export class LiveGameDomainService {
     records: string[]
     expectedCharacterName?: string
   }): Promise<LiveSupplyDispenseResult> {
+    if (this.dependencies.visualDiagnosticsActive()) return Promise.reject(new Error(visualDiagnosticsMessage))
     return this.dependencies.diagnostics.run('supply-dispense', async () => {
       const result = await this.dependencies.runTransferExclusive(
         () => this.dependencies.dispenseAugments(input)
@@ -111,6 +137,7 @@ export class LiveGameDomainService {
     destination: SpecialRecoveryDestination
     expectedCharacterName?: string
   }): Promise<SpecialItemRecoveryResult> {
+    if (this.dependencies.visualDiagnosticsActive()) return Promise.reject(new Error(visualDiagnosticsMessage))
     return this.dependencies.diagnostics.run('special-item-recovery', async () => {
       const result = await this.dependencies.runTransferExclusive(
         () => this.dependencies.recoverSpecialItem(input)

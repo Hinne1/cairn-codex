@@ -8,11 +8,18 @@ import { readCollectionSnapshotCache, writeCollectionSnapshotCache } from '../sr
 import { CATALOG_PRESENTATION_VERSION } from '../src/main/catalog-versions.ts'
 import { assertReleaseEntry, releaseVerificationBoundary } from './release-entry-boundary.mjs'
 import { verificationEnvironment } from './verification-environment.mjs'
+import { MainOperationCoordinator } from '../src/main/operation-coordinator.ts'
 
 const expected = { 'search-help': 1, onboarding: 1, settings: 1, 'bounded-grid-a11y': 120,
   'farming-routes': 226, planner: 120, 'sets-bounded': 404, 'sets-semantics': 7,
   'mi-workshop': 6, 'skill-explorer': 120 }
 const root = await mkdtemp(join(tmpdir(), 'cairn-verification-boundary-'))
+let externalWrites = 0
+const operations = new MainOperationCoordinator({ diagnostics: {}, transfersPermitted: () => false,
+  reconcileTransfers: async () => { externalWrites++ }, unresolvedTransferCount: () => 0 })
+await assert.rejects(operations.runTransferExclusive(async () => { externalWrites++ }), /disabled during visual diagnostics/)
+await operations.flush()
+assert.equal(externalWrites, 0, 'the shared transfer coordinator must reject before reconciling retained receipts')
 assert.deepEqual(verificationEnvironment({ PATH: 'runtime', CAIRN_CODEX_DATABASE_PATH: 'must-not-inherit',
   CAIRN_CODEX_INGEST_REQUEST: '{}', cairn_codex_retrieve_request: '{}', CAIRN_CODEX_SCREENSHOT_VERIFY_GLOSSARY: '1' }),
 { PATH: 'runtime', CAIRN_CODEX_SCREENSHOT_VERIFY_GLOSSARY: '1' })

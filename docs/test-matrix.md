@@ -140,7 +140,9 @@ withheld no roll scores as untrusted. The same run completed the isolated archiv
 backup/restore round trip without touching the user archive or game files.
 
 The UI benchmark enforces the warm-start budget with
-`node scripts/benchmark-ui.mjs --warm-budget-ms 5000`. Cold or stale-cache indexing is
+`node scripts/benchmark-ui.mjs --app <executable> --diagnostic-only --base-profile <disposable-profile> --warm-budget-ms 5000`.
+Fixture/interaction scenarios use `--electron-source` after `npm run build:verification`.
+See the [verification boundary](architecture/verification.md). Cold or stale-cache indexing is
 measured as a separate scan phase and is not presented as cached startup latency.
 Automated Electron gates opt into a Windows-only test fallback: when the first sandboxed
 renderer exits specifically with `reason=launch-failed`, the harness records the exit details

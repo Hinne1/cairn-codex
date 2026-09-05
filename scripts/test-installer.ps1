@@ -66,7 +66,19 @@ try {
 $oldScreenshotPath = $env:CAIRN_CODEX_SCREENSHOT_PATH
 $oldScreenshotRoute = $env:CAIRN_CODEX_SCREENSHOT_ROUTE_HASH
 $oldScreenshotWait = $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN
+$operationalVariables = @(
+  'CAIRN_CODEX_DATABASE_PATH', 'CAIRN_CODEX_ARCHIVE_BACKUP_DIR', 'CAIRN_CODEX_MIGRATION_BACKUP_DIR',
+  'CAIRN_CODEX_INGEST_REQUEST', 'CAIRN_CODEX_IMPORT_GDIA', 'CAIRN_CODEX_RETRIEVAL_PLAN_REQUEST',
+  'CAIRN_CODEX_RETRIEVE_REQUEST', 'CAIRN_CODEX_SMOKE_TEST'
+)
+$oldOperationalEnvironment = @{}
+foreach ($name in $operationalVariables) {
+  $oldOperationalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
 try {
+  foreach ($name in $operationalVariables) {
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+  }
   $env:CAIRN_CODEX_SCREENSHOT_PATH = $screenshotPath
   $env:CAIRN_CODEX_SCREENSHOT_ROUTE_HASH = '#cc-route=1&view=settings'
   $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN = '0'
@@ -74,6 +86,9 @@ try {
   $application = Start-Process -FilePath $appPath -ArgumentList @("--user-data-dir=$profileRoot") -WindowStyle Hidden -Wait -PassThru
   if ($application.ExitCode -ne 0) { throw "Installed application exited with code $($application.ExitCode)." }
 } finally {
+  foreach ($name in $operationalVariables) {
+    [Environment]::SetEnvironmentVariable($name, $oldOperationalEnvironment[$name], 'Process')
+  }
   $env:CAIRN_CODEX_SCREENSHOT_PATH = $oldScreenshotPath
   $env:CAIRN_CODEX_SCREENSHOT_ROUTE_HASH = $oldScreenshotRoute
   $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN = $oldScreenshotWait

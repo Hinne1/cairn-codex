@@ -141,13 +141,15 @@ const privacyExporter = new DiagnosticExportService({
 await assert.rejects(privacyExporter.export(), /failed its privacy check/)
 assert.equal(privacyWriteCalls, 0, 'privacy failure must stop before publication')
 
+let visualDiagnostics = false
+const liveNativeCalls = []
 const live = new LiveGameDomainService({
-  visualDiagnosticsActive: () => false,
+  visualDiagnosticsActive: () => visualDiagnostics,
   inspectWriteSafety: async () => ({ allowed: true, messages: [] }),
-  inspect: async () => liveStatus,
-  approveBuild: async () => liveStatus,
-  start: async () => liveStatus,
-  stop: async () => liveStatus,
+  inspect: async () => { liveNativeCalls.push('inspect'); return liveStatus },
+  approveBuild: async () => { liveNativeCalls.push('approve'); return liveStatus },
+  start: async () => { liveNativeCalls.push('start'); return liveStatus },
+  stop: async () => { liveNativeCalls.push('stop'); return liveStatus },
   syncIncoming: async () => ({ operationId: 'sync', status: 'committed', ingested: [], issues: [] }),
   retrieveVaultItems: async () => ({
     operationId: 'retrieve', status: 'committed',
@@ -179,6 +181,20 @@ assert.equal((await live.retrieve(['a'])).retrieved.length, 1)
 assert.deepEqual(liveEvents, [
   'diagnostic:live-retrieval', 'exclusive', 'backup:live retrieval'
 ])
+visualDiagnostics = true
+liveEvents.length = 0
+liveNativeCalls.length = 0
+assert.equal((await live.inspect()).state, 'unavailable')
+assert.equal((await live.inspectWriteSafety()).permitted, false)
+assert.equal((await live.sync()).status.state, 'unavailable')
+assert.deepEqual((await live.sync()).ingested, [])
+for (const operation of [() => live.approveBuild(), () => live.start(), () => live.stop(),
+  () => live.retrieve(['a']), () => live.dispense({ records: ['a'] }),
+  () => live.recover({ destination: 'shared-stash' })]) {
+  await assert.rejects(operation, /disabled during visual diagnostics/)
+}
+assert.deepEqual(liveEvents, [], 'diagnostics must not enter recovery, transfer queue, or backup scheduling')
+assert.deepEqual(liveNativeCalls, [], 'diagnostics must not inspect or control the native live adapter')
 
 const startup = {
   startedAtUtc: new Date(0).toISOString(), cacheOutcome: 'pending', cachedPaintMs: null,

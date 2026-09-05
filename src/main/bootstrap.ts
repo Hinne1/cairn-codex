@@ -733,6 +733,7 @@ function registerIpcHandlers(
   let gdiaImportProgress: GdiaImportProgress | null = null
   const operations = new MainOperationCoordinator({
     diagnostics,
+    transfersPermitted: () => !process.env.CAIRN_CODEX_SCREENSHOT_PATH,
     reconcileTransfers: () => reconcileLiveRecoveryOperations(helper, database, diagnostics),
     unresolvedTransferCount: () => database.getRecoveryOperationCount()
   })
@@ -1505,18 +1506,7 @@ function registerIpcHandlers(
   const liveGameService = new LiveGameDomainService({
     visualDiagnosticsActive: () => Boolean(process.env.CAIRN_CODEX_SCREENSHOT_PATH),
     inspectWriteSafety: () => helper.request<WriteSafetyStatus>('inspect-write-safety'),
-    inspect: async () => {
-      const status = await helper.request<LiveGameStatus>('inspect-live-game')
-      if (!process.env.CAIRN_CODEX_SCREENSHOT_PATH) return status
-      return {
-        ...status,
-        state: 'unavailable',
-        detail: 'Live transfers are disabled during visual diagnostics.',
-        connectedProcessId: null,
-        hostWindowReady: false,
-        messages: []
-      }
-    },
+    inspect: () => helper.request<LiveGameStatus>('inspect-live-game'),
     approveBuild: () => helper.request<LiveGameStatus>('approve-live-game-build'),
     start: () => helper.request<LiveGameStatus>('start-live-game'),
     stop: () => helper.request<LiveGameStatus>('stop-live-game'),

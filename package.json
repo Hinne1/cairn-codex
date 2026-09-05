@@ -14,7 +14,7 @@
     "build": "npm run typecheck && electron-vite build",
     "build:helper": "dotnet build ./src/helper/CairnCodex.GrimDawn/CairnCodex.GrimDawn.csproj",
     "test:helper": "node ./scripts/smoke-helper.mjs",
-    "test:helper-client": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-helper-client.mjs",
+    "test:helper-client": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-helper-client.mjs && node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-helper-protocol.mjs",
     "benchmark:helper-memory": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/benchmark-helper-memory.mjs",
     "test:native-dependencies": "node ./scripts/test-native-dependencies.mjs",
     "test:discovery": "node ./scripts/test-discovery.mjs",

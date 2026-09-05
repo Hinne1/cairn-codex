@@ -38,21 +38,24 @@ const request = computed<DismantlingQueryRequest>(() => ({
   source: 'archive', query: query.value, isHardcore: mode.value === 'all' ? undefined : mode.value === 'hardcore',
   rarity: rarity.value === 'all' ? undefined : rarity.value, offset: (page.value - 1) * 120, limit: 120
 }))
-const { data, loading, error: loadError } = useRemoteWorkspacePage({
+const { data, loading, error: loadError, reload } = useRemoteWorkspacePage({
   request: () => request.value, revision: () => props.archiveRevision, fetch: input => props.queryItems(input),
   empty: { items: [], total: 0, offset: 0, limit: 120 } as DismantlingPage,
   formatError: props.formatError, enabled: () => !structuredQuery.value.error
 })
 const visibleCandidates = computed(() => data.value.items)
+const pageReady = computed(() => !loading.value && !structuredQuery.value.error && !loadError.value)
 const selectedAttachments = computed(() => [...selectedItems.value.values()].filter(item => item.componentRecord || item.augmentRecord).length)
 const selectionBusy = ref(false)
 const selectionNotice = ref<string | null>(null)
 const contextKey = computed(() => JSON.stringify({ ...request.value, offset: 0, revision: props.archiveRevision }))
 let previewGeneration = 0
+let selectionGeneration = 0
 let disposed = false
 watch(contextKey, key => {
   if (props.session.contextKey.value === key) return
   props.session.contextKey.value = key
+  selectionGeneration++
   page.value = 1; selectedIds.value = []; selectedItems.value.clear(); selectionNotice.value = null
   previewGeneration++; preview.value = null; error.value = null
 }, { immediate: true, flush: 'sync' })
@@ -74,7 +77,7 @@ function rememberSelection(): void {
   selectedItems.value = known
 }
 function setSelection(keys: readonly (string | number)[]): void {
-  if (busy.value || selectionBusy.value || loading.value) return
+  if (busy.value || selectionBusy.value || !pageReady.value) return
   selectedIds.value = [...new Set(keys.map(String))].slice(0, ARCHIVE_SELECTION_LIMIT)
 }
 function toggleCandidate(id: string): void {
@@ -82,21 +85,22 @@ function toggleCandidate(id: string): void {
 }
 function selectVisible(): void { setSelection([...selectedIds.value, ...visibleCandidates.value.map(item => item.id)]) }
 async function selectSafeDuplicates(): Promise<void> {
-  if (busy.value || selectionBusy.value || loading.value) return
+  if (busy.value || selectionBusy.value || !pageReady.value) return
   const expectedContext = contextKey.value
+  const generation = selectionGeneration
   selectionBusy.value = true; error.value = null
   try {
     const result = await props.selectDuplicates(request.value)
-    if (disposed || contextKey.value !== expectedContext) return
+    if (disposed || generation !== selectionGeneration || contextKey.value !== expectedContext) return
     selectedIds.value = result.ids
     selectionNotice.value = result.total > result.limit
       ? 'Selected ' + result.limit.toLocaleString() + ' of ' + result.total.toLocaleString() + ' safe duplicates. Refine the filters for a smaller preview.'
       : null
-  } catch (problem) { if (!disposed && contextKey.value === expectedContext) error.value = props.formatError(problem) }
+  } catch (problem) { if (!disposed && generation === selectionGeneration && contextKey.value === expectedContext) error.value = props.formatError(problem) }
   finally { selectionBusy.value = false }
 }
 async function buildPreview(): Promise<void> {
-  if (busy.value || selectionBusy.value || loading.value || selectedIds.value.length === 0) return
+  if (busy.value || selectionBusy.value || !pageReady.value || selectedIds.value.length === 0) return
   const generation = ++previewGeneration
   busy.value = true; error.value = null
   try {
@@ -163,10 +167,10 @@ function formatPercentile(value: number | null | undefined): string { return val
         </label>
       </template>
       <template #actions>
-        <button type="button" :disabled="busy || loading || selectionBusy || !visibleCandidates.length" @click="selectVisible">Select visible</button>
+        <button type="button" :disabled="busy || !pageReady || selectionBusy || !visibleCandidates.length" @click="selectVisible">Select visible</button>
         <button
           type="button"
-          :disabled="busy || loading || selectionBusy || !data.total"
+          :disabled="busy || !pageReady || selectionBusy || !data.total"
           title="Keeps the highest-scored or newest copy of each base; skips socketed and augmented extras."
           @click="selectSafeDuplicates"
         >Select safe duplicates</button>
@@ -200,6 +204,7 @@ function formatPercentile(value: number | null | undefined): string { return val
           empty-title="No archived copies match these filters."
           selection-mode="multiple"
           @update:selected-keys="setSelection"
+          @retry="reload"
         >
           <template #item="{ item }">
           <label
@@ -226,7 +231,7 @@ function formatPercentile(value: number | null | undefined): string { return val
           <small v-if="preview">Rules: {{ preview.contentPack.toUpperCase() }}</small>
         </header>
         <p v-if="selectedAttachments" class="dismantling-warning">{{ selectedAttachments }} selected {{ selectedAttachments === 1 ? 'copy has' : 'copies have' }} a component or augment. A future destructive workflow must make their fate explicit.</p>
-        <button class="dismantling-run" type="button" :disabled="busy || loading || selectionBusy || selectedIds.length === 0" @click="buildPreview">
+        <button class="dismantling-run" type="button" :disabled="busy || !pageReady || selectionBusy || selectedIds.length === 0" @click="buildPreview">
           {{ busy ? 'Reading installed loot tables…' : `Preview ${selectedIds.length.toLocaleString()} selected` }}
         </button>
         <p v-if="error" class="vault-notice error">{{ error }}</p>

@@ -89,7 +89,8 @@ Schema version 14 adds `vault_item_projection`, a derived metadata table for bou
 Dismantling queries. A transactional backfill and insert/payload-or-roll-update triggers project
 seed, stack count, attachment/affix records and numeric roll percentile without changing exact
 `serialized_item` or `roll_json` bytes. Malformed legacy payloads remain stored and are excluded
-from these queries; malformed roll metadata becomes an absent score. Row state, mode, reusable
+from these queries, including integers outside JavaScript's safe range; malformed roll metadata
+becomes an absent score. Row state, mode, reusable
 status and catalog identity are joined from their authoritative tables on every query. The
 projection is removed with its vault row. Page and preview metadata lookups never read exact
 payload columns; migrations and authoritative transfer operations retain their existing ownership.

@@ -199,9 +199,10 @@ export class ArchiveWorkspaceQueries {
   supplyBoostSelection(input: SupplyQueryRequest, catalog: readonly CollectionItem[]): SupplySelection {
     const { parameters, cte, order } = this.supplyPlan(input, catalog, true)
     const { total } = this.database.prepare(`${cte} SELECT COUNT(*) AS total FROM options`).get(...parameters) as { total: number }
-    const rows = this.database.prepare(`${cte} SELECT id, record, name, slot, isHardcore, eligible, source FROM options
+    const rows = this.database.prepare(`${cte} SELECT id, record, name, slot, isHardcore, eligible, source,
+      (SELECT reusable FROM vault_item WHERE vault_item.id = options.id) AS reusable FROM options
       ORDER BY ${order} LIMIT ?`).all(...parameters, ARCHIVE_SELECTION_LIMIT) as unknown as SupplySelection['items']
-    return { items: rows.map(item => ({ ...item, isHardcore: Boolean(item.isHardcore), eligible: Boolean(item.eligible) })),
+    return { items: rows.map(item => ({ ...item, isHardcore: Boolean(item.isHardcore), eligible: Boolean(item.eligible), reusable: Boolean(item.reusable) })),
       total: Number(total), limit: ARCHIVE_SELECTION_LIMIT }
   }
 }

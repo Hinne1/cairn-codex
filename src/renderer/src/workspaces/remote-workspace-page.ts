@@ -19,11 +19,12 @@ export function useRemoteWorkspacePage<Q, P>(options: {
     const current = ++generation
     clearTimeout(timer)
     error.value = null
+    data.value = options.empty
     if (options.enabled?.() === false) { loading.value = false; return }
     const request = JSON.parse(JSON.stringify(options.request())) as Q
     loading.value = true
     timer = setTimeout(() => {
-      void options.fetch(request).then(result => {
+      void Promise.resolve().then(() => options.fetch(request)).then(result => {
         if (generation === current) data.value = result
       }).catch(problem => {
         if (generation === current) error.value = options.formatError(problem)

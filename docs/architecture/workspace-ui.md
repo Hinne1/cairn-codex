@@ -219,6 +219,14 @@ transfer/character context or archive revision changes. They retain compact sele
 not unseen archive payloads. The remote-page owner discards late results and errors after a new
 request, revision or unmount; preview and bulk-selection callbacks have equivalent lifetime guards.
 
+Legacy stash-basis Collection, Planner, Explorer, Oracle and MI comparisons retain their archive
+ownership/copy augmentation through `archive-copy-session.ts`. It reads the existing vault API in
+250-row pages only while a comparison consumer is active, publishes a complete set, and discards
+stale batches on source/mode/revision changes or disposal. Supplies and Dismantling never start
+this reader. Those legacy comparison consumers still aggregate all their copies; #158 owns their
+further extraction. Supplies carries compact reusable metadata into transfer confirmations so
+confirmation wording does not depend on whether a comparison workspace was visited first.
+
 Skill Explorer owns its complete typed route-control snapshot, subject picker, suggestions,
 structured result search, availability/rarity/slot filters, sort controls, and paging in
 `SkillExplorerWorkspace.vue`. It projects typed skill modifiers into the shared

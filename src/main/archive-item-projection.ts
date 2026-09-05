@@ -8,9 +8,10 @@ export function migrateArchiveItemProjection(database: DatabaseSync): void {
     const field = (name: string): string => `json_extract(${payload}, '$.${name}')`
     const kind = (name: string): string => `json_type(${payload}, '$.${name}')`
     const strings = ['prefixRecord', 'suffixRecord', 'materiaRecord', 'enchantmentRecord', 'ascendantRecord', 'ascendantRecord2H']
-    const validField = (name: string, type: string): string => `(${kind(name)} IS NULL OR ${kind(name)} IN ('null', '${type}'))`
+    const safeInteger = (name: string): string => `${kind(name)} = 'integer' AND typeof(${field(name)}) = 'integer' AND ${field(name)} BETWEEN -9007199254740991 AND 9007199254740991`
+    const validField = (name: string, type: string): string => `(${kind(name)} IS NULL OR ${kind(name)} = 'null' OR (${type === 'integer' ? safeInteger(name) : `${kind(name)} = '${type}'`}))`
     const text = (name: string): string => `CASE WHEN ${kind(name)} = 'text' THEN ${field(name)} ELSE '' END`
-    const integer = (name: string, fallback: number): string => `CASE WHEN ${kind(name)} = 'integer' THEN ${field(name)} ELSE ${fallback} END`
+    const integer = (name: string, fallback: number): string => `CASE WHEN ${safeInteger(name)} THEN ${field(name)} ELSE ${fallback} END`
     return `${row}.id,
       (json_type(${payload}) = 'object' AND json_valid(CAST(${row}.serialized_item AS TEXT))
         AND ${[...strings.map(name => validField(name, 'text')), validField('seed', 'integer'), validField('stackCount', 'integer')].join(' AND ')}),

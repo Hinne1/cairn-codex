@@ -79,6 +79,7 @@ import {
   type SupplyControls
 } from './workspaces/supplies'
 import type { SupplySelectionItem } from '@shared/workspace-query-contracts'
+import { useArchiveCopySession } from './archive-copy-session'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { preferredScrollBehavior } from './motion-preference'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
@@ -430,9 +431,15 @@ const selectedRecord = ref<string | null>(null)
 const selectedReferenceInstanceKey = ref<string | null>(null)
 const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
 const pinning = ref(false)
-const vaultItems = ref<VaultListItem[]>([])
-const vaultItemsLoaded = ref(false)
 const archiveQueryRevision = ref(0)
+const { items: vaultItems, loaded: vaultItemsLoaded } = useArchiveCopySession({
+  enabled: () => Boolean(snapshot.value) && collectionBasis.value === 'stashes' &&
+    ['collection', 'sets', 'planner', 'skills', 'oracle', 'mi-workshop', 'farming'].includes(activeView.value),
+  context: () => ({ isHardcore: snapshot.value?.isHardcore, revision: archiveQueryRevision.value,
+    source: JSON.stringify([collectionBasis.value, snapshot.value?.scannedStashes.map(stash => stash.path)]) }),
+  query: request => window.cairnCodex.queryVaultItems(request),
+  reportError: error => console.warn('Archive comparison copies could not be refreshed.', error)
+})
 const querySupplyItems = window.cairnCodex.querySupplies
 const selectSupplyBoosts = window.cairnCodex.selectSupplyBoosts
 const queryDismantlingItems = window.cairnCodex.queryDismantling
@@ -3306,10 +3313,12 @@ async function syncLiveMode(): Promise<void> {
   }
 }
 
-async function retrieveSelectedLive(): Promise<void> {
+type ArchiveConfirmationMetadata = ReadonlyMap<string, Pick<VaultListItem, 'reusable' | 'rarity'>>
+
+async function retrieveSelectedLive(metadata?: ArchiveConfirmationMetadata): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
   const count = selectedVaultIds.value.length
-  const selected = selectedVaultIds.value.map(vaultItemForId)
+  const selected = selectedVaultIds.value.map(id => metadata?.get(id) ?? vaultItemForId(id))
   const reusable = selected.every((item) => item?.reusable)
   const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(
@@ -3374,8 +3383,9 @@ async function retrieveSupplies(selected: SupplySelectionItem[], mode: TransferM
   }
   if (archived.length > 0) {
     selectedVaultIds.value = archived.map((item) => item.id)
-    if (mode === 'live') await retrieveSelectedLive()
-    else await retrieveSelected()
+    const metadata: ArchiveConfirmationMetadata = new Map(archived.map(item => [item.id, { reusable: item.reusable, rarity: 'supply' }]))
+    if (mode === 'live') await retrieveSelectedLive(metadata)
+    else await retrieveSelected(metadata)
   }
   supplySession.selectedIds.value = []
 }
@@ -3581,9 +3591,9 @@ async function refreshStaging(): Promise<void> {
   }
 }
 
-async function retrieveSelected(): Promise<void> {
+async function retrieveSelected(metadata?: ArchiveConfirmationMetadata): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
-  const selected = selectedVaultIds.value.map(vaultItemForId)
+  const selected = selectedVaultIds.value.map(id => metadata?.get(id) ?? vaultItemForId(id))
   const reusable = selected.every((item) => item?.reusable)
   const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(reusable
@@ -5725,8 +5735,8 @@ function formatRollValue(value: number): string {
         @refresh-vault="refreshVault"
         @start-live-mode="startLiveMode"
         @stop-live-mode="stopLiveMode"
-        @retrieve-selected-live="retrieveSelectedLive"
-        @retrieve-selected="retrieveSelected"
+        @retrieve-selected-live="retrieveSelectedLive()"
+        @retrieve-selected="retrieveSelected()"
       />
 
       <section v-else-if="!snapshot && (appInitializing || scanning)" class="empty-state">

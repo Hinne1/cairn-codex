@@ -87,7 +87,7 @@
     "test:release-entry:electron": "install-electron && node ./scripts/test-release-entry-electron.mjs",
     "test:transfer-adapters": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-production-transfer-adapters.mjs",
     "test:workspace-queries:electron": "install-electron && node --disable-warning=ExperimentalWarning ./scripts/test-workspace-queries-electron.mjs",
-    "test:workspace-queries": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-archive-workspace-queries.mjs && node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-remote-workspace-page.mjs"
+    "test:workspace-queries": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-archive-workspace-queries.mjs && node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-remote-workspace-page.mjs && node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-archive-copy-session.mjs"
   },
   "dependencies": {
     "vue": "^3.5.41"

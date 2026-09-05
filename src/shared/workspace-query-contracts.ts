@@ -49,6 +49,7 @@ export interface SupplyQueryRequest {
 }
 
 export interface SupplySelectionItem {
+  reusable: boolean
   id: string
   record: string
   name: string
@@ -60,7 +61,6 @@ export interface SupplySelectionItem {
 
 export interface SupplyOption extends SupplySelectionItem {
   slotFamilies: Array<Exclude<SupplySlotFilter, 'all'>>
-  reusable: boolean
   stackCount: number
   detail: string
   catalogItem: CollectionItem | null

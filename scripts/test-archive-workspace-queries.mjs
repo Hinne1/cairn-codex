@@ -42,7 +42,9 @@ try {
   add('rune-sc', 1, records[3]); add('rune-hc', 2, records[3], true)
   raw.exec('COMMIT')
 
-  const corruptPayloads = ['{broken', 'null', '[]', '{"seed":{}}', '{"prefixRecord":42}']
+  const corruptPayloads = ['{broken', 'null', '[]', '{"seed":{}}', '{"prefixRecord":42}',
+    ...['seed', 'stackCount'].flatMap(field => ['9223372036854775808', '-9223372036854775809',
+      '9223372036854775807', '9007199254740992', '-9007199254740992'].map(value => `{"${field}":${value}}`))]
   for (const [index, value] of corruptPayloads.entries()) insert.run(`corrupt-${index}`, records[0],
     Buffer.from(value), '2026-09-05T00:00:00.000Z', 0, 0, '{broken-roll')
   const payloadHash = () => {
@@ -68,8 +70,9 @@ try {
   insert = raw.prepare(insertSql)
   assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 14)
   assert.equal(payloadHash(), hashBefore, 'every exact payload remains byte-identical through migration')
-  assert.equal(raw.prepare('SELECT COUNT(*) AS count FROM vault_item_projection').get().count, 20_150)
-  assert.equal(raw.prepare('SELECT COUNT(*) AS count FROM vault_item_projection WHERE payload_valid=0').get().count, 5)
+  assert.equal(raw.prepare('SELECT COUNT(*) AS count FROM vault_item_projection').get().count, 20_145 + corruptPayloads.length)
+  assert.equal(raw.prepare('SELECT COUNT(*) AS count FROM vault_item_projection WHERE payload_valid=0').get().count, corruptPayloads.length)
+  assert.equal(database.workspaceQueries.itemsByIds(corruptPayloads.map((_, index) => `corrupt-${index}`)).length, corruptPayloads.length, 'malformed numeric metadata cannot poison a bounded read')
   database.close(); database = new CollectionDatabase(path)
 
   const statements = []
@@ -103,6 +106,7 @@ try {
     assert.equal(second.items.length, 60)
     assert.equal(second.items.some(item => supplyPage.items.some(first => first.id === item.id)), false)
     const boost = database.workspaceQueries.supplyBoostSelection(supplies, catalog)
+    assert.equal(boost.items[0].reusable, true, 'compact selection retains confirmation metadata')
     assert.deepEqual(boost.items.map(item => item.id), ['boost-sc-new'], 'active mode and newest reusable group representative')
     assert.equal(database.workspaceQueries.suppliesPage({ ...supplies, isHardcore: true }, catalog).total, 1)
     assert.equal(database.workspaceQueries.suppliesPage({ ...supplies, category: 'augments' }, catalog).total, 2)
@@ -154,7 +158,7 @@ try {
   assert.equal(changed.prefixRecord, 'updated'); assert.equal(changed.componentRecord, 'attached'); assert.equal(changed.rollPercentile, 99)
   raw.prepare("UPDATE vault_item SET state='retrieval_pending' WHERE id='gear-1'").run()
   await assert.rejects(service.previewDismantling(['gear-1']), /not eligible/)
-  console.log(JSON.stringify({ passed: true, measuredArchiveItems: 20_150, migrationMs: Math.round(migrationMs), queryBatchMs: Math.round(queryMs), timings,
+  console.log(JSON.stringify({ passed: true, measuredArchiveItems: 20_145 + corruptPayloads.length, migrationMs: Math.round(migrationMs), queryBatchMs: Math.round(queryMs), timings,
     ipcBytes: Buffer.byteLength(JSON.stringify(page)), returnedPageRows: page.items.length, payloadParses,
     heapDeltaBytes: memoryAfter.heapUsed - memoryBefore.heapUsed, rssBytes: memoryAfter.rss,
     processPeakRssKiB: process.resourceUsage().maxRSS }, null, 2))

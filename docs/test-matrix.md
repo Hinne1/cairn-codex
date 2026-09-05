@@ -232,13 +232,14 @@ portable and installer hashes are carried by the release's `.sha256` and manifes
 ## Bounded archive workspace queries (#159)
 
 Windows x64, Node 22.14, generated temporary SQLite archive: 20,000 equipment copies split
-evenly between SC/HC, 145 supply copies and five malformed legacy payloads. One measured run
-backfilled schema 14 in 250 ms; the first 120-copy page took 80 ms, whole-group SC duplicate
-selection 92 ms and a 60-option supply page 95 ms. The full query assertion batch took 846 ms.
+evenly between SC/HC, 145 supply copies and 15 malformed legacy payloads (including integers
+outside SQLite and JavaScript safe ranges). One measured run backfilled schema 14 in 335 ms;
+the first 120-copy page took 84 ms, whole-group SC duplicate selection 88 ms and a 60-option
+supply page 92 ms. The full query assertion batch took 828 ms.
 The 120-copy IPC response was 52,368 bytes. Instrumented queries read no exact payload columns
 and parsed zero exact payloads; SHA-256 comparison preserved every migrated payload byte.
-The query batch increased JS heap by 3.7 MB; process RSS was 89.1 MB and process peak RSS was
-96,512 KiB. Peak RSS includes fixture generation and migration, not only paging.
+The query batch increased JS heap by 3.6 MB; process RSS was 88.7 MB and process peak RSS was
+96,252 KiB. Peak RSS includes fixture generation and migration, not only paging.
 
 The isolated Electron 20k fixture mounted 120 Dismantling rows and 60 Supply cards at 1440×1000
 and 520×1000. Page two replaced the mounted window and retained selection; mode/query changes

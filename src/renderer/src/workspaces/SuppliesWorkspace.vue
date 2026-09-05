@@ -94,21 +94,24 @@ const request = computed<SupplyQueryRequest>(() => ({
   activeTransferHardcore: props.activeTransferHardcore,
   liveReady: props.liveReady, offset: (page.value - 1) * 60, limit: 60
 }))
-const { data, loading, error: loadError } = useRemoteWorkspacePage({
+const { data, loading, error: loadError, reload } = useRemoteWorkspacePage({
   request: () => request.value, revision: () => props.archiveRevision, fetch: input => props.queryItems(input),
   empty: { items: [], total: 0, offset: 0, limit: 60, summary: props.summary, accessSummary: '' } as SupplyPage,
   formatError: props.formatError, enabled: () => !structuredQuery.value.error
 })
 const options = computed(() => data.value.items)
+const pageReady = computed(() => !loading.value && !structuredQuery.value.error && !loadError.value)
 const accessSummary = computed(() => data.value.accessSummary)
 const selectionBusy = ref(false)
 const selectionError = ref<string | null>(null)
 let disposed = false
+let selectionGeneration = 0
 onScopeDispose(() => { disposed = true })
 const contextKey = computed(() => JSON.stringify({ ...request.value, offset: 0, transferMethod: mode.value, revision: props.archiveRevision }))
 watch(contextKey, key => {
   if (props.session.contextKey.value === key) return
   props.session.contextKey.value = key
+  selectionGeneration++
   selectedIds.value = []; selectionError.value = null
 }, { immediate: true, flush: 'sync' })
 watch(options, rememberSelection)
@@ -119,7 +122,7 @@ const searchError = computed(() => {
 })
 const visibleOptions = options
 const selectedOptions = computed(() => selectedIds.value.flatMap(id => props.session.selectedItems.value.get(id) ?? []))
-const dispenseDisabled = computed(() => props.busy || loading.value || selectionBusy.value || selectedOptions.value.length !== selectedIds.value.length || selectedIds.value.length === 0 || (
+const dispenseDisabled = computed(() => props.busy || !pageReady.value || selectionBusy.value || selectedOptions.value.length !== selectedIds.value.length || selectedIds.value.length === 0 || (
   category.value === 'augments' && selectedIds.value.some((id) => id.startsWith('augment:'))
     ? !props.liveReady
     : mode.value === 'live'
@@ -128,6 +131,7 @@ const dispenseDisabled = computed(() => props.busy || loading.value || selection
 ))
 
 function selectVisible(): void {
+  if (!pageReady.value || props.busy || selectionBusy.value) return
   selectedIds.value = visibleOptions.value.filter((item) => item.eligible).map((item) => item.id)
 }
 
@@ -135,8 +139,8 @@ function rememberSelection(): void {
   const known = new Map(props.session.selectedItems.value)
   for (const item of options.value) {
     if (!props.session.selectedIds.value.includes(item.id)) continue
-    const { id, record, name, slot, isHardcore, source, eligible } = item
-    known.set(id, { id, record, name, slot, isHardcore, source, eligible })
+    const { id, record, name, slot, isHardcore, source, eligible, reusable } = item
+    known.set(id, { id, record, name, slot, isHardcore, source, eligible, reusable })
   }
   props.session.selectedItems.value = new Map(props.session.selectedIds.value.flatMap(id => {
     const item = known.get(id); return item ? [[id, item] as const] : []
@@ -144,20 +148,22 @@ function rememberSelection(): void {
 }
 
 async function dispenseAllBoosts(): Promise<void> {
-  if (selectionBusy.value || props.busy || loading.value) return
+  if (selectionBusy.value || props.busy || !pageReady.value) return
   const expectedContext = contextKey.value
+  const generation = selectionGeneration
   selectionBusy.value = true; selectionError.value = null
   try {
     const result = await props.selectBoosts(request.value)
-    if (disposed || contextKey.value !== expectedContext) return
+    if (disposed || generation !== selectionGeneration || contextKey.value !== expectedContext) return
     props.session.selectedItems.value = new Map(result.items.map(item => [item.id, item]))
     selectedIds.value = result.items.map(item => item.id)
     emit('dispense', selectedOptions.value, mode.value)
-  } catch (error) { if (!disposed && contextKey.value === expectedContext) selectionError.value = props.formatError(error) }
+  } catch (error) { if (!disposed && generation === selectionGeneration && contextKey.value === expectedContext) selectionError.value = props.formatError(error) }
   finally { selectionBusy.value = false }
 }
 
 function dispenseSelected(): void {
+  if (dispenseDisabled.value) return
   emit('dispense', selectedOptions.value, mode.value)
 }
 
@@ -212,13 +218,13 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
         </label>
       </template>
       <template #actions>
-        <button type="button" :disabled="busy || loading || selectionBusy || !visibleOptions.length" @click="selectVisible">
+        <button type="button" :disabled="busy || !pageReady || selectionBusy || !visibleOptions.length" @click="selectVisible">
           Select visible
         </button>
         <button
           v-if="category === 'writs'"
           type="button"
-          :disabled="busy || loading || selectionBusy || !data.total"
+          :disabled="busy || !pageReady || selectionBusy || !data.total"
           @click="dispenseAllBoosts"
         >
           Dispense all unlocked boosts
@@ -255,6 +261,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
       item-described-by="item-tooltip"
       @item-focus="showFocusedTooltip"
       @item-blur="emit('hide-tooltip')"
+      @retry="reload"
     >
       <template #item="{ item, selected }">
         <article

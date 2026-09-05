@@ -137,6 +137,46 @@ if (!process.versions.electron) {
         await capture('header-actions-' + captureSize)
       }
 
+      for (const [width, zoom] of [[1440, 1], [520, 1], [520, 1.25]]) {
+        window.setContentSize(width, 1000)
+        window.webContents.setZoomFactor(zoom)
+        await act(`collectionOwnerFixture.workspace.value='collection'; collectionOwnerFixture.setCount(120);
+          collectionOwnerFixture.controls.value={...collectionOwnerFixture.controls.value,sort:'roll-fire',ownership:'owned',page:1};
+          { const template=collectionOwnerFixture.copies.value[0];
+            const scores=['fire','cold','lightning','defense','utility','pet','retaliation'].map((key,index)=>({key,category:index<3?'offense':key,damageType:index<3?key:null,qualityPercent:index===0?90:index===3?0:20+index,combinationPercentile:50,statCount:2}));
+            collectionOwnerFixture.copies.value=[{...template,instanceKey:'reference-fire',rollAnalysis:{...template.rollAnalysis,categoryScores:scores}},
+              {...template,instanceKey:'different-copy',itemIndex:1,rollAnalysis:{...template.rollAnalysis,categoryScores:scores.map(score=>({...score,qualityPercent:score.key==='fire'?40:99}))}}]; }
+          window.scrollTo(0,0)`)
+        const profile = '.item-card .card-roll-profile'
+        assert.equal(await run(`document.querySelectorAll('${profile} > .roll-category-profile > .roll-category-score').length`), 5)
+        assert.deepEqual(await run(`Array.from(document.querySelectorAll('${profile} > .roll-category-profile > .roll-category-score .roll-category-icon'),icon=>icon.dataset.category)`), ['offense','defense','pet','utility','retaliation'])
+        assert.match(await run(`document.querySelector('${profile} .category-defense strong').textContent`), /^0%/,
+          'all categories must belong to the chosen fire reference, not the 99% defense on another physical copy')
+        assert.deepEqual(await run("Array.from(document.querySelectorAll('.card-roll-profile, .card-roll-profile .roll-category-score')).filter(element=>element.checkVisibility() && element.scrollWidth>element.clientWidth).map(element=>({text:element.textContent,width:element.clientWidth,scroll:element.scrollWidth}))"), [])
+        await act("document.querySelector('.item-card').scrollIntoView({block:'start'})")
+        await capture('collection-rolls-' + width + (zoom === 1 ? '' : '-zoom125'))
+        await act(`document.querySelector('${profile} summary').focus()`)
+        await key('Enter')
+        assert.equal(await run(`document.querySelector('${profile} details').open`), true)
+        assert.equal(await run("document.querySelector('.item-drawer')===null"), true, 'expanding additional categories must not open the item')
+        assert.match(await run(`document.querySelector('${profile} .roll-category-overflow').innerText`), /Cold/i)
+        assert.equal(await run(`Array.from(document.querySelectorAll('${profile} .roll-category-score')).every(element=>element.scrollWidth<=element.clientWidth)`), true)
+        await act("document.querySelector('.catalog-results .bounded-results-item').focus()")
+        await key('Enter')
+        assert.equal(await run("collectionOwnerFixture.inspection.selectedReferenceInstanceKey.value"), 'reference-fire')
+        await act("collectionOwnerFixture.inspection.close(); collectionOwnerFixture.copies.value=collectionOwnerFixture.copies.value.map(copy=>({...copy,rollAnalysis:{...copy.rollAnalysis,trusted:false}}))")
+        assert.equal(await run(`document.querySelectorAll('${profile}').length`), 0)
+        assert.match(await run("document.querySelector('.card-roll-score.dim').textContent"), /Fire —/)
+        const start=Date.now()
+        await act(`collectionOwnerFixture.setCount(20000); collectionOwnerFixture.controls.value={...collectionOwnerFixture.controls.value,sort:'name'};
+          { const template=collectionOwnerFixture.copies.value[0];
+            collectionOwnerFixture.copies.value=collectionOwnerFixture.snapshot.value.items.map((item,index)=>({...template,baseRecord:item.record,instanceKey:'roll-'+index,itemIndex:index,rollAnalysis:{...template.rollAnalysis,categoryScores:['fire','defense','pet','utility'].map((key,i)=>({key,category:i===0?'offense':key,damageType:i===0?'fire':null,qualityPercent:70+i,combinationPercentile:90,statCount:2}))}})); }`)
+        assert.equal(await run("document.querySelectorAll('.item-card').length"), 48)
+        assert.equal(await run(`document.querySelectorAll('${profile}').length`), 48)
+        assert.equal(await run("document.documentElement.scrollWidth<=innerWidth"), true)
+        assert.ok(Date.now()-start<5000)
+        console.log('Roll profiles '+width+' zoom '+zoom+': 20k copies, 48 cards, '+(Date.now()-start)+'ms including settle')
+      }
       window.webContents.setZoomFactor(1)
       for (const width of [1000, 900, 800]) {
         window.setContentSize(width, 1000)

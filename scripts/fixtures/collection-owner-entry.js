@@ -7,6 +7,7 @@ import Drawer from '../../src/renderer/src/inspection/ItemInspectionDrawer.vue'
 import MiWorkshop from '../../src/renderer/src/workspaces/MiWorkshopWorkspace.vue'
 import { applyCopyFavorite, createCopyFavorites } from '../../src/renderer/src/inspection/copy-favorites'
 import { createCollectionDashboard } from '../../src/renderer/src/workspaces/collection-dashboard'
+import { buildCollectionRollSummaries, collectionRollFocusForSort } from '../../src/renderer/src/workspaces/collection-materials'
 import { createSetsSession } from '../../src/renderer/src/workspaces/sets'
 import { createItemInspectionSession } from '../../src/renderer/src/inspection/item-inspection'
 import { buildMiMetricOptions, createMiWorkshopSession } from '../../src/renderer/src/workspaces/mi-workshop'
@@ -45,6 +46,7 @@ createApp({ setup() {
     apply: (...args) => { copies.value = applyCopyFavorite(copies.value, ...args) },
     reportError: error => events.push(['favorite-error', error.message]) })
   const favoriteRecords = computed(() => new Set(copies.value.filter(copy => copy.isFavorite).map(copy => copy.baseRecord.toLowerCase())))
+  const rollSummaries = computed(() => buildCollectionRollSummaries(copies.value, collectionRollFocusForSort(controls.value.sort)))
   const miSession = createMiWorkshopSession()
   const miControls = ref({ query: '', affix: 'all', metric: 'overall', metricDirection: 'desc', sort: 'metric', page: 1 })
   const sets = createSetsSession({ items: () => snapshot.value?.items ?? [], itemSearchDocument: itemDocument, restoringHistory: () => false })
@@ -64,7 +66,7 @@ createApp({ setup() {
   window.collectionOwnerFixture = { workspace, snapshot, copies, sets, dashboard, inspection, controls, collapsed, busy, events,
     favoritesEnabled, favoriteFailure, favorites, miControls,
     setCount, openCopies: count => { copies.value = Array.from({ length: count }, (_, index) => makeCopy(index, snapshot.value.items[0].record)); inspection.open(snapshot.value.items[0]) } }
-  const openItem = item => inspection.open(item)
+  const openItem = (item, referenceInstanceKey) => inspection.open(item, referenceInstanceKey)
   return () => h('main', { style: 'padding:16px;min-width:0' }, [
     workspace.value === 'collection' ? [
       h(CollectionDashboard, { model: dashboard, available: Boolean(snapshot.value), installationFound: true,
@@ -79,7 +81,8 @@ createApp({ setup() {
       h(CollectionMaterials, { mode: 'collection', items: snapshot.value?.items ?? [], controls: controls.value,
         'onUpdate:controls': value => { controls.value = value }, doubleRareMiBaseRecords: new Set(), favoriteRecords: favoriteRecords.value,
         searchDocumentForItem: itemDocument, categoryProgress: category => dashboard.categoryProgressByName.value.get(category) ?? '0 / 0',
-        iconUrlForItem: () => null, bestStoredCopyForItem: () => null, liveReady: false, retrievalBusy: false, onOpenItem: openItem })
+        iconUrlForItem: () => null, bestStoredCopyForItem: () => null, rollSummaries: rollSummaries.value,
+        liveReady: false, retrievalBusy: false, onOpenItem: openItem })
     ] : workspace.value === 'materials' ? h(CollectionMaterials, { mode: 'materials', available: Boolean(snapshot.value),
       items: snapshot.value?.items.map(item => ({ ...item, rarity: 'component', slot: 'component' })) ?? [], controls: materialsControls.value,
       'onUpdate:controls': value => { materialsControls.value = value }, doubleRareMiBaseRecords: new Set(),

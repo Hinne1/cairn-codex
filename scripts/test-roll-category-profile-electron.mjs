@@ -23,7 +23,7 @@ if (!process.versions.electron) {
           import Profile from ${JSON.stringify(component)}
           import ${JSON.stringify(tokens)}
           import ${JSON.stringify(styles)}
-          const scores = ['fire', 'cold', 'lightning', 'elemental', 'defense', 'utility', 'pet'].map((key, index) => ({
+          const scores = ['fire', 'cold', 'lightning', 'elemental', 'defense', 'utility', 'pet', 'retaliation'].map((key, index) => ({
             key, category: index < 4 ? 'offense' : key, damageType: index < 4 ? key : null,
             qualityPercent: 70 + index, estimatedPercentile: 70 + index, combinationPercentile: 90 + index, statCount: 2
           }))
@@ -38,6 +38,7 @@ if (!process.versions.electron) {
             section('normal', { scores: scores.slice(0, 2) }),
             section('perfect', { scores: [{ ...scores[0], qualityPercent: 100, estimatedPercentile: 250 / 3, combinationPercentile: 250 / 3 }] }),
             section('overflow', { scores, maxVisible: 4 }),
+            section('families', { scores, maxVisible: 5, preferredKey: 'elemental', compact: true }),
             section('compact', { scores, maxVisible: 2, compact: true })
           ]) }).mount('#app')
         `)
@@ -116,6 +117,9 @@ if (!process.versions.electron) {
         assert.equal(await evaluate("document.querySelectorAll('#empty .roll-category-profile').length"), 0)
         assert.equal(await evaluate("document.querySelectorAll('#normal .roll-category-score').length"), 2)
         assert.equal(await evaluate("document.querySelectorAll('#normal details').length"), 0)
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#families .roll-category-profile > .roll-category-score .roll-category-icon'), icon=>icon.dataset.category)"), ['offense', 'defense', 'pet', 'utility', 'retaliation'])
+        assert.match(await evaluate("document.querySelector('#families .roll-category-score').textContent"), /Elemental/)
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('.roll-category-icon')).every(icon=>icon.getAttribute('aria-hidden')==='true' && icon.getAttribute('focusable')==='false')"), true, 'icons are decorative; the adjacent text supplies the category name')
         assert.match(await evaluate("document.querySelector('#perfect').innerText"), /100% \(83rd\)/,
           'a perfect discrete roll must show full quality, separately from rarity')
         for (const id of ['overflow', 'compact']) {

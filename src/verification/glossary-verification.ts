@@ -55,10 +55,10 @@ export async function verifyGlossary(contents: WebContents): Promise<void> {
     await back()
 
     // The populated fixture proves help does not overwrite the exact scored-copy reference.
-    const hasScoredCopy = await evaluate(`Boolean(document.querySelector('.card-roll-score strong'))`)
+    const hasScoredCopy = await evaluate(`Boolean(document.querySelector('.card-roll-profile .roll-category-score strong'))`)
     if (process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE === 'mi-workshop') assert.ok(hasScoredCopy, 'Populated fixture must exercise reference restoration: ' + await evaluate(`JSON.stringify({ state: history.state, cards: document.querySelectorAll('.item-card').length, text: document.querySelector('.collection-materials-workspace')?.innerText?.slice(-2000) })`))
     if (hasScoredCopy) {
-      await evaluate(`document.querySelector('.card-roll-score strong').closest('[data-result-key]').click()`)
+      await evaluate(`document.querySelector('.card-roll-profile .roll-category-score strong').closest('[data-result-key]').click()`)
       await settle()
       const source = await evaluate('JSON.stringify(history.state)')
       await check(`Boolean(history.state.referenceInstanceKey) && Boolean(document.querySelector('.copy-card.reference'))`, 'Fixture must open an exact scored reference')

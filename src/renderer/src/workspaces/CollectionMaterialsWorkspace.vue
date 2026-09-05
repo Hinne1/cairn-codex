@@ -6,8 +6,9 @@ import { compileSearchQuery, type SearchDocument } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
+import RollCategoryProfile from '../components/RollCategoryProfile.vue'
+import { rollCategoryLabel, rollCategoryScores } from '../roll-rating'
 import ToolHeader from '../components/ToolHeader.vue'
-import { formatCategoryScore, rollCategoryLabel } from '../roll-rating'
 import { searchGuidance } from '../search-guidance'
 import {
   collectionRollSortOptions,
@@ -144,7 +145,7 @@ function rollSummaryTitle(item: CollectionItem): string {
   const miCaveat = item.rarity === 'mi'
     ? ' This rates the variable values on that exact base, prefix, and suffix; it does not rate whether those affixes suit a build.'
     : ''
-  return `${context} among available copies. First value: average range quality (0% minimum, 100% maximum). Parentheses: percentile of that quality average for this exact item template. Opening the card uses that copy as the reference.${miCaveat}`
+  return `${context} among available copies. All shown categories belong to that same reference copy. First value: average range quality (0% minimum, 100% maximum). Parentheses: percentile of that quality average for this exact item template, not a drop chance. Opening the card uses that copy as the reference.${miCaveat}`
 }
 
 function showFocusedTooltip(_key: string | number, item: CollectionItem, element: HTMLElement): void {
@@ -189,7 +190,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
     </ExplorerToolbar>
 
     <p v-if="mode === 'collection'" class="roll-help-note">
-      Quality is not build suitability.
+      Each card shows rolls from one reference copy. Quality is not build suitability.
       <button type="button" class="roll-help-link" @click="emit('open-roll-help')">How item rolls are rated → Glossary</button>
     </p>
     <BoundedResultSurface
@@ -227,11 +228,16 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
             <small v-if="item.upgradeRecord" class="awakening-label">Awakenable</small>
             <small v-if="item.setName">{{ item.setName }}</small>
           </div>
-          <div class="card-result">
-            <span v-if="mode !== 'materials' && rollSummary(item)" class="card-roll-score" :title="rollSummaryTitle(item)">
-              <small>{{ rollCategoryLabel(rollSummary(item)!.score) }} roll</small>
-              <strong>{{ formatCategoryScore(rollSummary(item)!.score) }}</strong>
-            </span>
+          <div class="card-result" :class="{ 'has-roll-profile': mode !== 'materials' }">
+            <div v-if="mode !== 'materials' && rollSummary(item)" class="card-roll-profile" :title="rollSummaryTitle(item)">
+              <small class="card-roll-context">Reference · best {{ rollCategoryLabel(rollSummary(item)!.score) }}</small>
+              <RollCategoryProfile
+                :scores="rollCategoryScores(rollSummary(item)!.copy.rollAnalysis)"
+                :preferred-key="rollSummary(item)!.score.key"
+                :max-visible="5"
+                compact
+              />
+            </div>
             <span v-else-if="mode !== 'materials'" class="card-roll-score dim" :title="rollSummaryTitle(item)">{{ selectedRollLabel ?? 'Rolls' }} —</span>
             <strong v-if="item.availableCount > 0">{{ item.availableCount }} {{ mode === 'materials' ? (item.slot === 'potion-formula' ? 'learned' : 'stored') : item.availableCount === 1 ? 'copy' : 'copies' }}</strong>
             <strong v-else-if="itemAvailableByAwakeningOnly(item)" class="awakening-available">{{ awakeningAvailabilityLabel(item) }}</strong>

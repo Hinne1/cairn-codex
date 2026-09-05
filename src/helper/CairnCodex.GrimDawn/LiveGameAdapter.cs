@@ -154,6 +154,11 @@ internal sealed class LiveGameAdapter : IDisposable
             var depositedPath = Path.Combine(deleted, "cairn-self-test-pending.csv");
             File.WriteAllBytes(depositedPath, bytes);
             var deposited = InspectRetrievalFiles(pendingQueue, recoveryRoot);
+            var unrelatedOperationRejected = false;
+            try { InspectRetrievalFiles(pendingQueue with { OperationId = "another-operation" }, recoveryRoot); }
+            catch (UnauthorizedAccessException) { unrelatedOperationRejected = true; }
+            if (!unrelatedOperationRejected)
+                throw new InvalidDataException("A retained outgoing queue was accepted for another operation.");
 
             var rejectedPath = Path.Combine(incoming, "cairn-self-test-rejected.csv");
             var rejectedQueue = new LiveRetrievalQueue(
@@ -666,6 +671,9 @@ internal sealed class LiveGameAdapter : IDisposable
         }
         var outgoing = Path.Combine(queueRoot, "outgoing", queue.IsHardcore ? "hc" : "sc");
         var outgoingPath = ValidateQueueFilePath(queue.OutgoingPath, outgoing);
+        var expectedNames = new[] { $"cairn-{queue.OperationId}.csv", $"cairn-personal-{queue.OperationId}.csv" };
+        if (!expectedNames.Contains(Path.GetFileName(outgoingPath), StringComparer.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("The retained outgoing path does not belong to its operation.");
         if (File.Exists(outgoingPath))
         {
             return new LiveRetrievalStatus("pending", null);

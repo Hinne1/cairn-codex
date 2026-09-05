@@ -6,7 +6,7 @@ import type { RecoveryJournalOperation } from '../collection-database.ts';
 import type { DiagnosticLogger } from '../diagnostics.ts';
 
 export type RetainedReceiptsDependencies = TransferPorts & {
-  database: Pick<CollectionDatabase, 'completeDeliveryOperation' | 'completePartialRetrievalOperation' | 'completeRetrievalOperation' | 'failDeliveryOperation' | 'failRetrievalOperation' | 'listRecoveryOperations' | 'updatePendingOperationDetail'>
+  database: Pick<CollectionDatabase, 'completeDeliveryOperation' | 'completePartialRetrievalOperation' | 'completeRetrievalOperation' | 'failDeliveryOperation' | 'failRetrievalOperation' | 'getVaultItems' | 'listRecoveryOperations' | 'updatePendingOperationDetail'>
 } & { diagnostics: Pick<DiagnosticLogger, 'info' | 'error'> }
 
 export interface TerminalRecoveryEntry {
@@ -44,8 +44,22 @@ export function retainedRecoveryQueues(operation: RecoveryJournalOperation): Liv
       baselineIncoming: queue.baselineIncoming as string[]
     }]
   })
-  return parsed.length === queues.length &&
-    new Set(parsed.map((queue) => queue.operationId)).size === parsed.length
+  const generated = operation.detail.transferKind === 'generated_delivery'
+  const expectedMode = generated ? operation.detail.isHardcore
+    : operation.destination === 'live://gdia/hc' ? true : operation.destination === 'live://gdia/sc' ? false : undefined
+  const selection = generated ? operation.detail.records : operation.detail.vaultItemIds
+  const expectedCount = generated && typeof operation.detail.record === 'string' ? 1
+    : Array.isArray(selection) && selection.every(id => typeof id === 'string') ? selection.length : undefined
+  const legacySahdina = generated && operation.id.startsWith('sahdina-') &&
+    operation.detail.adapter === 'cairn-live-v1' &&
+    operation.detail.record === 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr' &&
+    operation.destination.startsWith('live://special-recovery/') && expectedCount === 1
+  return typeof expectedMode === 'boolean' && expectedCount === queues.length &&
+    (operation.detail.expectedQueueCount === undefined || operation.detail.expectedQueueCount === expectedCount) &&
+    parsed.length === queues.length &&
+    parsed.every((queue, index) => queue.isHardcore === expectedMode && (
+      queue.operationId === `${operation.id}-${index}` || (legacySahdina && queue.operationId === operation.id)
+    )) && new Set(parsed.map((queue) => queue.operationId)).size === parsed.length
     ? parsed
     : []
 }
@@ -89,6 +103,7 @@ export async function finalizeLiveRecoveryOperation(
   const { helper, database, clock, diagnostics } = dependencies
   if (
     queues.length === 0 || entries.length !== queues.length ||
+    JSON.stringify(retainedRecoveryQueues(operation)) !== JSON.stringify(queues) ||
     entries.some((entry, index) =>
       entry.operationId !== queues[index]?.operationId ||
       entry.semanticSha256.toLowerCase() !== queues[index]?.semanticSha256.toLowerCase()
@@ -109,6 +124,10 @@ export async function finalizeLiveRecoveryOperation(
     (typeof expectedCount === 'number' && expectedCount !== queues.length) ||
     rejected.some(entry => !entry.copiedReceiptPath)
   ) return false
+  if (!generated) {
+    const selected = database.getVaultItems(vaultItemIds, queues[0]!.isHardcore)
+    if (selected.some(item => item.state !== 'retrieval_pending')) return false
+  }
   for (const entry of rejected) {
     await helper.request<LiveQueueReceipt>('ack-live-incoming', {
       path: entry.receiptPath,

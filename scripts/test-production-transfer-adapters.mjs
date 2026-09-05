@@ -445,6 +445,33 @@ try {
       assert.equal(published, 1, 'unchanged recovery state must not repeatedly invalidate the renderer')
     })
   }
+  for (const change of ['operation-id', 'queue-mode', 'vault-mode']) {
+    await fixture(async ({ dependencies, seed, handlers, queue, calls, reopen }) => {
+      seed(['vault-a'], change === 'vault-mode')
+      const retained = queue(change === 'operation-id' ? 'unrelated-transfer-0' : 'original-transfer-0', change === 'queue-mode')
+      dependencies.database.prepareRetrievalOperation({ operationId: 'original-transfer', stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ['vault-a'],
+        detail: { vaultItemIds: ['vault-a'], queues: [retained], recoveryResolution: { entries: [{
+          operationId: retained.operationId, state: 'rejected', receiptPath: 'unrelated.csv',
+          semanticSha256: sourceHash, copiedReceiptPath: 'retained/unrelated.csv'
+        }] } } })
+      reopen()
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0)
+      assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false)
+      assert.equal(dependencies.database.getRecoveryOperationCount(), 1)
+    })
+  }
+  for (const legacy of [true, false]) {
+    await fixture(async ({ dependencies, queue }) => {
+      const operationId = 'sahdina-synthetic'
+      const retained = queue(legacy ? operationId : `${operationId}-0`, true)
+      dependencies.database.prepareDeliveryOperation({ operationId, destination: 'live://special-recovery/shared-stash',
+        payloadSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(),
+        detail: { adapter: 'cairn-live-v1', record: 'records/items/gearaccessories/necklaces/b100_necklace_sahdina.dbr',
+          isHardcore: true, queues: [retained] } })
+      assert.equal(await reconcileLiveRecoveryOperations(dependencies), 1, 'known old and current single-item queue IDs remain supported')
+    })
+  }
   console.log('Production transfer adapter checks passed.')
 } finally {
   await rm(root, { recursive: true, force: true })

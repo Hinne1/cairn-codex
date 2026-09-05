@@ -68,6 +68,7 @@ import {
 import type { SupplySelectionItem } from '@shared/workspace-query-contracts'
 import { useCollectionCopies } from './collection-copies'
 import { createNotificationService, type AppNotification } from './notification-service'
+import { resolveActiveCharacter } from './live-presence'
 import { preferredScrollBehavior } from './motion-preference'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
 import { collectionRequestKey } from '@shared/collection-request'
@@ -501,16 +502,7 @@ const connectionColorState = computed(() =>
       ? 'connecting'
       : 'offline'
 )
-const activeCharacter = computed(() => {
-  if (!liveStatus.value?.grimDawnProcessIds.length) return null
-  const matching = headerCharacters.value
-    .filter((character) => !character.error)
-    .filter((character) => liveStatus.value?.isHardcore == null || character.isHardcore === liveStatus.value.isHardcore)
-    .filter((character) => !liveStatus.value?.activeCharacterName ||
-      character.name.localeCompare(liveStatus.value.activeCharacterName, undefined, { sensitivity: 'base' }) === 0)
-    .sort((left, right) => Date.parse(right.lastWriteUtc) - Date.parse(left.lastWriteUtc))
-  return matching[0] ?? null
-})
+const activeCharacter = computed(() => resolveActiveCharacter(liveStatus.value, headerCharacters.value))
 const activeCharacterClass = computed(() => {
   const character = activeCharacter.value
   if (!character) return ''
@@ -2134,13 +2126,7 @@ async function pollLiveLifecycle(): Promise<void> {
       }
     }
     liveStatus.value = current
-    const currentCharacterResolved = Boolean(
-      current.activeCharacterName && headerCharacters.value.some((character) =>
-        !character.error &&
-        character.name.localeCompare(current.activeCharacterName!, undefined, { sensitivity: 'base' }) === 0 &&
-        (current.isHardcore == null || character.isHardcore === current.isHardcore)
-      )
-    )
+    const currentCharacterResolved = Boolean(resolveActiveCharacter(current, headerCharacters.value))
     if (current.state === 'ready' && (previousState !== 'ready' || !currentCharacterResolved)) {
       await refreshHeaderCharacters()
     }
@@ -3184,7 +3170,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
             <dl>
               <div><dt>State</dt><dd>{{ liveStatus?.state ?? 'checking' }}</dd></div>
               <div v-if="activeCharacter"><dt>Character</dt><dd>{{ activeCharacter.name }} · Lv{{ activeCharacter.level }} · {{ activeCharacterClass }}</dd></div>
-              <div v-if="activeCharacter"><dt>Detected by</dt><dd>Newest matching save file</dd></div>
+              <div v-if="activeCharacter"><dt>Detected by</dt><dd>Live hook; details from matching save</dd></div>
               <div><dt>Game</dt><dd>{{ liveStatus?.gameVersion ?? 'Not detected' }}</dd></div>
               <div v-if="liveStatus?.gameBuildId"><dt>Steam build</dt><dd>{{ liveStatus.gameBuildId }}</dd></div>
               <div v-if="connectionFingerprint"><dt>Game.dll</dt><dd><code>{{ connectionFingerprint }}</code></dd></div>

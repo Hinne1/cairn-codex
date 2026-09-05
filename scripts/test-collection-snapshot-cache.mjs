@@ -86,6 +86,33 @@ try {
   assert.equal(await readCollectionSnapshotCache(path), null)
 
   const rawScannerSnapshot = { ...snapshot }
+  const nullRecipeSnapshot = { ...snapshot, recipeSummary: null }
+  for (const legacy of [false, true]) {
+    const stored = legacy ? nullRecipeSnapshot : {
+      version: COLLECTION_SNAPSHOT_CACHE_VERSION,
+      savedAtUtc: '2026-09-03T12:01:30.000Z',
+      snapshotSha256: createHash('sha256').update(JSON.stringify(nullRecipeSnapshot)).digest('hex'),
+      snapshot: nullRecipeSnapshot
+    }
+    await writeFile(path, JSON.stringify(stored), 'utf8')
+    assert.deepEqual(await readCollectionSnapshotCache(path), snapshot,
+      'null derived totals normalize without changing the rest of the snapshot')
+  }
+  await writeCollectionSnapshotCache(path, nullRecipeSnapshot)
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')).snapshot, snapshot)
+  for (const invalidSummary of [0, [], {}, { total: 1, collected: 'wrong', unlockedItems: 0 }]) {
+    const invalid = { ...snapshot, recipeSummary: invalidSummary }
+    await writeFile(path, JSON.stringify({ version: COLLECTION_SNAPSHOT_CACHE_VERSION,
+      savedAtUtc: '2026-09-03T12:01:30.000Z',
+      snapshotSha256: createHash('sha256').update(JSON.stringify(invalid)).digest('hex'), snapshot: invalid
+    }), 'utf8')
+    assert.equal(await readCollectionSnapshotCache(path), null, 'malformed non-null totals stay invalid')
+  }
+  await writeFile(path, JSON.stringify({ version: COLLECTION_SNAPSHOT_CACHE_VERSION,
+    savedAtUtc: '2026-09-03T12:01:30.000Z', snapshotSha256: envelope.snapshotSha256,
+    snapshot: nullRecipeSnapshot
+  }), 'utf8')
+  assert.equal(await readCollectionSnapshotCache(path), null, 'hash verification precedes normalization')
   delete rawScannerSnapshot.recipeSummary
   await writeFile(path, JSON.stringify({
     version: COLLECTION_SNAPSHOT_CACHE_VERSION,

@@ -122,6 +122,19 @@ Cairn Codex notification wording, but still requires a live delivery round trip
 before personal delivery on this build is considered fully verified. Live mode
 remains explicitly opt-in because it mutates the running game process.
 
+## Active-character presence
+
+The renderer displays only a hook-confirmed character in the confirmed SC/HC mode while the
+connection is ready and a game process is present. It never chooses the newest save as a live
+identity. The helper clears identity on connection loss and decodes an explicit empty character
+message as no active character; malformed UTF-16 also clears it.
+
+These reader-side corrections do not change the verified hook or its hashes. The existing hook
+reports nonempty name changes, so immediate world-exit reporting while the process remains alive
+still requires the native transition patch and a separately qualified replacement binary (#107).
+That unqualified source draft is preserved outside the shipping patch. Synthetic presence and
+helper self-tests validate the reader behavior without injecting or running a personal game.
+
 ## Planned local compatibility approval
 
 A future "Compatibility Lab" may let an advanced user approve an exact new

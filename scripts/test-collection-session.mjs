@@ -31,6 +31,26 @@ function fixture() {
 const sc = { basis: 'archive', sourcePaths: ['C:/fixtures/transfer.gst'] }
 const hc = { basis: 'archive', sourcePaths: ['C:/fixtures/transfer.gsh'] }
 const stashes = { basis: 'stashes', sourcePaths: ['C:/fixtures/transfer.gst'] }
+{
+  const state = fixture(), initial = deferred(), stale = deferred(), recovery = deferred(), final = deferred()
+  const installed = state.read('cache', initial)
+  initial.resolve({ name: 'before recovery' }); await installed
+  const oldRead = state.read('hydration', stale)
+  state.session.invalidate()
+  const recoveryRead = state.read('cache', recovery)
+  // A regular ingest finishes while recovery's authoritative reload is pending.
+  state.session.commit({ name: 'delta based on stale archive' })
+  assert.equal(state.visible.name, 'before recovery', 'do not install a delta on an invalidated projection')
+  assert.equal(state.reloads.length, 2)
+  const finalRead = state.read('cache', final)
+  final.resolve({ name: 'recovered plus regular ingest' }); await finalRead
+  stale.resolve({ name: 'stale hydration' }); await oldRead
+  recovery.resolve({ name: 'recovered only' }); await recoveryRead
+  assert.equal(state.visible.name, 'recovered plus regular ingest')
+  state.session.dispose()
+  state.session.invalidate()
+  assert.equal(state.reloads.length, 2, 'disposed sessions do not reload')
+}
 assert.equal(collectionRequestKey(sc), collectionRequestKey({ basis: 'archive', sourcePaths: ['c:\\fixtures\\TRANSFER.gst', 'C:/fixtures/transfer.gst'] }))
 assert.notEqual(collectionRequestKey(sc), collectionRequestKey(hc))
 assert.notEqual(collectionRequestKey(sc), collectionRequestKey(stashes))

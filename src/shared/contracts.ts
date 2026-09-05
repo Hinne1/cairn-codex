@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   getBackgroundJobs: 'jobs:list',
   cancelBackgroundJob: 'jobs:cancel',
   backgroundJobChanged: 'jobs:changed',
+  archiveRecoveryChanged: 'archive:recovery-changed',
   getAppStatus: 'app:get-status',
   setZoomFactor: 'app:set-zoom-factor',
   exportDiagnostics: 'app:export-diagnostics',
@@ -231,6 +232,7 @@ export interface CairnCodexApi {
   getBackgroundJobs: () => Promise<AnyBackgroundJobSnapshot[]>
   cancelBackgroundJob: (id: string) => Promise<AnyBackgroundJobSnapshot | null>
   onBackgroundJobChanged: (listener: (job: AnyBackgroundJobSnapshot) => void) => () => void
+  onArchiveRecoveryChanged: (listener: () => void) => () => void
   getAppStatus: () => Promise<AppStatus>
   setZoomFactor: (factor: number) => Promise<number>
   exportDiagnostics: () => Promise<DiagnosticExportResult>

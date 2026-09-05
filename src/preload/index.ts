@@ -49,6 +49,11 @@ const ipcRenderer = {
 }
 
 const api: CairnCodexApi = {
+  onArchiveRecoveryChanged: (listener) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(IPC_CHANNELS.archiveRecoveryChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.archiveRecoveryChanged, handler)
+  },
   getBackgroundJobs: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getBackgroundJobs) as Promise<AnyBackgroundJobSnapshot[]>,
   cancelBackgroundJob: (id) =>

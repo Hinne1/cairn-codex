@@ -90,6 +90,12 @@ export class CollectionSession {
   }
 
   /** A committed change invalidates every read captured before that change. */
+  invalidate(): void {
+    this.generation++
+    this.installedContextKey = null
+    if (!this.disposed) this.options.reload()
+  }
+
   commit(snapshot: CollectionSnapshot): void {
     this.contextChanged()
     this.generation++

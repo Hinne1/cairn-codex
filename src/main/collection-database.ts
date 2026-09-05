@@ -17,7 +17,7 @@ import type {
 } from '@shared/contracts'
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 12
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 13
 
 interface SqlSearchFragment {
   sql: string
@@ -2157,6 +2157,30 @@ export class CollectionDatabase {
         COMMIT;
       `)
       version = 12
+    }
+    if (version === 12) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        UPDATE operation_journal
+        SET state = 'needs_recovery', completed_at_utc = NULL,
+            detail_json = json_set(detail_json, '$.adapter', 'gdia-live-v1', '$.phase', 'legacy_incoming_recovery')
+        WHERE operation = 'ingest' AND state = 'failed'
+          AND length(id) = 76 AND substr(id, 1, 12) = 'live-ingest-'
+          AND substr(id, 13) NOT GLOB '*[^0-9a-f]*'
+          AND length(source_sha256) = 64 AND lower(source_sha256) NOT GLOB '*[^0-9a-f]*'
+          AND (stash_path LIKE 'live://gdia/sc/%' OR stash_path LIKE 'live://gdia/hc/%')
+          AND json_type(detail_json, '$.error') = 'text'
+          AND json_extract(detail_json, '$.adapter') IS NULL
+          AND (SELECT COUNT(*) FROM pending_ingest_item WHERE operation_id = operation_journal.id) = 1
+          AND EXISTS (
+            SELECT 1 FROM pending_ingest_item
+            WHERE operation_id = operation_journal.id
+              AND vault_item_id = 'live-' || substr(operation_journal.id, 13)
+              AND NOT EXISTS (SELECT 1 FROM vault_item WHERE id = pending_ingest_item.vault_item_id)
+          );
+        PRAGMA user_version = 13;
+        COMMIT;
+      `)
     }
   }
 

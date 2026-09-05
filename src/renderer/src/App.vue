@@ -294,6 +294,7 @@ const activeBackgroundJob = computed(() => backgroundJobs.value
   .filter((job) => job.status === 'queued' || job.status === 'running')
   .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0] ?? null)
 let stopBackgroundJobUpdates: (() => void) | null = null
+let stopArchiveRecoveryUpdates: (() => void) | null = null
 const startupPhaseStatus = ref<StartupStatus | null>(null)
 const notifications = createNotificationService()
 const currentNotification = notifications.current
@@ -2010,6 +2011,10 @@ onMounted(async () => {
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   stopBackgroundJobUpdates = window.cairnCodex.onBackgroundJobChanged(retainBackgroundJob)
+  stopArchiveRecoveryUpdates = window.cairnCodex.onArchiveRecoveryChanged(() => {
+    collectionSession.invalidate()
+    void refreshVault()
+  })
   try {
     backgroundJobs.value = await window.cairnCodex.getBackgroundJobs()
   } catch (error) {
@@ -2099,6 +2104,8 @@ onBeforeUnmount(() => {
   collectionSession.dispose()
   stopBackgroundJobUpdates?.()
   stopBackgroundJobUpdates = null
+  stopArchiveRecoveryUpdates?.()
+  stopArchiveRecoveryUpdates = null
   document.body.classList.remove('onboarding-active')
   window.removeEventListener('popstate', handleAppHistory)
   window.removeEventListener('pageshow', handlePageShow)

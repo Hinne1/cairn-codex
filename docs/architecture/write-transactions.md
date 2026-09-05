@@ -119,6 +119,13 @@ gate. This restricted recovery pass cannot consume unrelated incoming items.
 Ordinary sync may do so after recovery clears, and already committed IDs only
 retry acknowledgement. Recovery commits schedule an archive backup.
 
+Recovery also emits a payload-free `archive:recovery-changed` event, whether it
+was triggered by ordinary sync, another transfer or Settings diagnostics. The
+renderer invalidates its installed collection projection and reloads the selected
+context and vault. Until that authoritative projection arrives, a concurrent
+ordinary ingest cannot apply an optimistic delta to the pre-recovery snapshot.
+This keeps recovered copies visible without replaying deltas across modes.
+
 The adapter suite covers first/later dispatch loss, terminal/acknowledgement
 failures, restricted incoming recovery and repeated submission. The helper's
 live-queue self-test uses disposable files to check lost-ack retry, corrupted

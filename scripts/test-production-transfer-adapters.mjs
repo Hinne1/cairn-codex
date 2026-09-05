@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CollectionDatabase } from '../src/main/collection-database.ts'
 import { ArchiveDomainService } from '../src/main/ipc/archive-service.ts'
 import { MainOperationCoordinator } from '../src/main/operation-coordinator.ts'
+import { LiveGameDomainService } from '../src/main/ipc/live-game-service.ts'
+import { reconcileTransferOperations } from '../src/main/transfers/recovery.ts'
 import { executeIngestCommand, executeRetrievalCommand, planRetrievalCommand } from '../src/main/transfers/offline-transactions.ts'
 import { reconcileLiveIncomingOperations, syncLiveIncoming } from '../src/main/transfers/live-incoming.ts'
 import { executeLiveAugmentDispense, executeSahdinasMementoRecovery } from '../src/main/transfers/live-delivery.ts'
@@ -73,7 +77,16 @@ async function fixture(run) {
       startedAtUtc: clock.nowUtc(), items: ids.map(vaultItemId => ({ vaultItemId, baseRecord: record, payload: structuredClone(payload) })), detail: {} })
     database.completeIngestOperation({ operationId: id, backupPath: 'synthetic-seed', completedAtUtc: clock.nowUtc(), isHardcore: hardcore, detail: {} })
   }
-  const reopen = () => { database.close(); database = new CollectionDatabase(databasePath); dependencies.database = database; return database }
+  const reopen = (previousSchema) => {
+    database.close()
+    if (previousSchema !== undefined) {
+      assert.equal(previousSchema, 12)
+      const legacy = new DatabaseSync(databasePath)
+      legacy.exec('PRAGMA user_version = 12')
+      legacy.close()
+    }
+    database = new CollectionDatabase(databasePath); dependencies.database = database; return database
+  }
   try { await run({ dependencies, handlers, calls, path, ingest, plan, seed, reopen, retrieval, retrievalPlan, game, collection, queue }) }
   finally { database.close() }
 }
@@ -372,6 +385,59 @@ try {
     assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0)
     assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false, 'validate complete selection correspondence before consuming receipts')
   })
+  await fixture(async ({ dependencies, handlers, path, reopen }) => {
+    const source = { path: `${path}.legacy`, sha256: sourceHash, isHardcore: true,
+      item: payload, createdAtUtc: dependencies.clock.nowUtc() }
+    const identity = createHash('sha256').update(source.path.toLowerCase()).update('\0').update(sourceHash).digest('hex')
+    const operationId = `live-ingest-${identity}`
+    const input = { operationId, stashPath: `live://gdia/hc/${source.path.split(/[\\/]/).at(-1)}`,
+      sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(),
+      items: [{ vaultItemId: `live-${identity}`, baseRecord: record, payload }],
+      detail: { adapter: 'gdia-live-v1', receiptPath: `${path}.copy` } }
+    dependencies.database.prepareIngestOperation(input)
+    dependencies.database.failIngestOperation(operationId, new Error('Legacy failed database commit'))
+    for (const [id, stashPath] of [['offline-failure', path], ['malformed-live-id', input.stashPath]]) {
+      dependencies.database.prepareIngestOperation({ ...input, operationId: id, stashPath,
+        items: [{ vaultItemId: id, baseRecord: record, payload }] })
+      dependencies.database.failIngestOperation(id, new Error('Must remain failed'))
+    }
+    let database = reopen(12)
+    assert.deepEqual(database.listRecoveryOperations().map(operation => operation.id), [operationId])
+    assert.equal(database.getRecoveryOperationCount(), 1)
+    database = reopen()
+    assert.equal(database.getRecoveryOperationCount(), 1, 'migration is idempotent')
+    handlers.set('poll-live-incoming', () => [source])
+    assert.equal(await reconcileLiveIncomingOperations(dependencies), 1)
+    assert.deepEqual(database.getVaultItems([`live-${identity}`], true)[0].payload, payload)
+    assert.equal(reopen().getRecoveryOperationCount(), 0)
+  })
+  // Recovery can run before ordinary sync or from Settings/another transfer.
+  // A commit notification must survive even when normal sync has no new deltas.
+  for (const trigger of ['sync', 'diagnostics', 'other-transfer']) {
+    await fixture(async ({ dependencies, handlers, path, reopen }) => {
+      let pending = [{ path: `${path}.recover`, sha256: sourceHash, isHardcore: false,
+        item: payload, createdAtUtc: dependencies.clock.nowUtc() }]
+      handlers.set('poll-live-incoming', () => pending)
+      handlers.set('ack-live-incoming', () => { pending = []; return { sha256: sourceHash, receiptPath: `${path}.ack` } })
+      dependencies.database.completeIngestOperation = () => { throw new Error('Synthetic transient database failure') }
+      await syncLiveIncoming(dependencies)
+      reopen()
+      let published = 0
+      const reconcile = () => reconcileTransferOperations({ ...dependencies, committed: () => { published++ } })
+      const coordinator = new MainOperationCoordinator({ diagnostics: quietDiagnostics,
+        reconcileTransfers: reconcile, unresolvedTransferCount: () => dependencies.database.getRecoveryOperationCount() })
+      const service = new LiveGameDomainService({ visualDiagnosticsActive: () => false,
+        diagnostics: { run: (_event, work) => work() }, runTransferExclusive: work => coordinator.runTransferExclusive(work),
+        syncIncoming: () => syncLiveIncoming(dependencies), queueArchiveBackup() {} })
+      if (trigger === 'sync') assert.equal((await service.sync()).ingested.length, 0)
+      else if (trigger === 'diagnostics') await coordinator.runExclusive(reconcile)
+      else await coordinator.runTransferExclusive(async () => {})
+      assert.equal(published, 1, 'renderer must learn of the committed recovery even without a sync delta')
+      assert.equal(dependencies.database.listVaultItems(false).length, 1)
+      await service.sync()
+      assert.equal(published, 1, 'unchanged recovery state must not repeatedly invalidate the renderer')
+    })
+  }
   console.log('Production transfer adapter checks passed.')
 } finally {
   await rm(root, { recursive: true, force: true })

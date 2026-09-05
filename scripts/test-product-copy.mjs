@@ -9,7 +9,7 @@ const ignoredDirectories = new Set(['bin', 'obj'])
 
 const allowedLoreLines = new Set([
   "src/renderer/src/App.vue::<h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>",
-  'src/renderer/src/App.vue::<section class="planner-world-map" aria-label="Cairn item source map">'
+  'src/renderer/src/workspaces/LevelingPlannerWorkspace.vue::<section class="planner-world-map" aria-label="Cairn item source map">'
 ])
 
 const allowedProductNameLines = new Set([

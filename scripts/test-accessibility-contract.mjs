@@ -64,7 +64,10 @@ assert.match(controller, /previouslyFocused/u)
 assert.match(controller, /connectedModalFocusTarget\(target, fallback\)/u)
 
 const legacyAppDialogCount = (app.match(/role="dialog"/gu) ?? []).length
-assert.equal(legacyAppDialogCount, 4, 'App.vue dialog debt changed; migrate or document it instead of adding another private modal.')
+const legacyTrivia = await readFile(new URL('../src/renderer/src/workspaces/CollectionTriviaDialog.vue', import.meta.url), 'utf8')
+assert.equal(legacyAppDialogCount, 3, 'App retains three legacy dialogs after trivia extraction.')
+assert.equal(legacyAppDialogCount + (legacyTrivia.match(/role="dialog"/gu) ?? []).length, 4,
+  'The extracted trivia dialog remains tracked accessibility debt; extraction must not disguise it as a focus migration.')
 assert.doesNotMatch(app, /behavior:\s*['"]smooth['"]/u, 'JavaScript scrolling must honor reduced motion.')
 assert.match(app, /behavior: preferredScrollBehavior\(\)/u)
 

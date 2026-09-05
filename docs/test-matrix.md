@@ -273,6 +273,32 @@ Reproduce with `npm run test:workspace-queries` and, after the verification/help
 `npm run test:workspace-queries:electron`. Captures and reports are generated under
 `local-cache/workspace-query-verification`; no personal profile or live transfer is exercised.
 
+## Collection, Sets and inspection ownership (#158)
+
+The direct production-owner gates (`test:collection-ownership` and `test:roll-rating`) cover
+dashboard medians and readiness, typed Sets route restoration with pending query work,
+archive augmentation and mode isolation, exact comparison/reference identity, and pin rejection,
+overlap, navigation, disposal and catalog replacement. A generated 20,000-item catalog projected
+4,000 sets in 13 ms; comparison setup for 20,000 copies plus the first 50 rows took 41 ms.
+The gate also enforces the extracted owners' dependency direction and typed effect boundaries.
+
+`test:collection-ownership:electron`, included in full verification, builds the actual Vue owners
+with synthetic fixtures and a memory-only pin port in a disposable, sandboxed Electron profile.
+It checks 1440px and 520px, compact 125% zoom, dashboard disclosure and refresh state, keyboard
+card activation, exact copy pinning and close, Sets page restoration, invalid/empty searches,
+and empty catalogs. Large fixtures mount 48 Collection cards, 50 Sets cards, and 50 copy cards;
+copy page two retains the explicit reference. Measured 20k renders including 100 ms settling:
+
+| Surface | 1440px | 520px | Mounted cards |
+| --- | --- | --- | --- |
+| Collection | 172 ms | 188 ms | 48 |
+| Sets | 122 ms | 124 ms | 50 |
+| Copy inspection | 156 ms | 140 ms | 50 |
+
+Captures are generated under `local-cache/collection-owner-test-*`. No personal profile, save,
+archive, game asset, live process or transfer is used. Legacy trivia/modal focus debt remains
+tracked by #16; this extraction does not claim that migration.
+
 ## Sidebar edge and icon regression
 
 The focused workspace shell is exercised at wide and compact widths. The gate requires the

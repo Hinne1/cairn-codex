@@ -128,7 +128,7 @@ assert.deepEqual(setItemBadges(missing).map(({ label, tone }) => ({ label, tone 
 ])
 
 const tokenSource = readFileSync(new URL('../src/renderer/src/semantic-tokens.css', import.meta.url), 'utf8')
-const appSource = readFileSync(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8')
+const appSource = readFileSync(new URL('../src/renderer/src/workspaces/SetsWorkspace.vue', import.meta.url), 'utf8')
 const styleSource = readFileSync(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8')
 assert.match(appSource, /class="set-roll-rating"/,
   'Every set card must render its aggregate roll-rating state')

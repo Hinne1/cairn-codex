@@ -335,7 +335,7 @@ page, reserve disclosure, shared toolbar, and complete bounded comparison table 
 `MiWorkshopWorkspace.vue`. `mi-workshop.ts` owns exact base/prefix/suffix grouping, the affix rarity
 index, strict rare-prefix plus rare-suffix filtering, structured base/affix/stat/skill matching,
 metric leadership, and deterministic group sorting. `App.vue` retains one typed Back/Forward
-control snapshot, the shared comparison drawer, and narrow catalog/icon/global-tooltip/item-drawer
+control snapshot, the shared inspection session, and narrow catalog/icon/global-tooltip/item-drawer
 adapters. Keyboard focus opens the affixed copy tooltip immediately; pointer hover keeps the
 established delay. Changing a user-facing query, filter, metric, or sort resets paging, while route
 restoration replaces the complete snapshot without a watcher erasing the restored page. Page-only
@@ -347,11 +347,36 @@ rarity filters, sort, page reset, category rail, 48-card bounded result surface,
 `collection-materials.ts` owns deterministic category, ownership, recipe, strict double-rare,
 structured-query, and sorting projection. `App.vue` keeps two complete typed control snapshots so
 switching between Collection, Materials, and Sets cannot leak filters or paging across tools. The
-shell retains Collection's dashboard, completion trackers, and tool launcher plus narrow adapters
-for search documents, category progress, global tooltips, item drawers, and live retrieval. Route
+shell composes `CollectionDashboard.vue` and its typed `collection-dashboard.ts` projection for
+completion trackers, category progress and trivia. It retains tool launching and narrow adapters
+for search documents, global tooltips, item inspection, and live retrieval. Route
 restoration replaces the appropriate snapshot, while user edits reset only that route to page one.
 Raw query edits enter typed route history immediately, while the expensive catalog projection uses
 a workspace-owned 120 ms debounce and cancels pending work on unmount.
+
+`SetsWorkspace.vue` owns the Sets toolbar and 50-card grid; `sets.ts` owns the typed shell-lifetime
+session, grouping, discovery/readiness projection, query debounce, filters, sort and page. Route
+restoration applies one complete control snapshot and cancels pending query work without erasing
+the restored page. Discovery, physical storage, recipe crafting and qualified awakening remain
+distinct. The legacy trivia dialog moved to `CollectionTriviaDialog.vue`; its focus-management
+debt remains tracked by #16, and extraction is not counted as an accessibility migration.
+
+`inspection/item-inspection.ts` owns selected item/reference, affix disclosure, copy ordering and
+pin-in-flight state. `ItemInspectionDrawer.vue` receives that typed session and narrow icon,
+catalog, stored-copy and action ports. It renders at most 50 copy cards through the shared bounded
+surface; the explicit reference remains first on page one and remains the comparison reference
+on later pages. `inspection-presentation.ts` owns pure roll and delta projection, computing the
+cross-copy stat universe once and caching each displayed copy's rows. A pending pin captures its
+item, source mode and selection revision: success updates that item's pin after catalog refresh,
+but cannot redirect a newer selection or a disposed session. Rejection leaves the pin unchanged.
+
+`collection-copies.ts` owns the legacy archive augmentation through `archive-copy-session.ts`.
+That reader still aggregates all comparison copies after 250-row reads and publishes only a
+complete set for the current source/mode/revision. Its exact identity, archive deduplication and
+SC/HC filtering are preserved; it is not a claim that comparison now uses compact remote DTOs.
+Supplies and Dismantling retain their separate bounded queries. The Collection ownership gate
+rejects imports back into App/main/preload/verification, direct bridge/storage effects and untyped
+shell injection in these owners. Shell adapters remain responsible for navigation and persistence.
 
 Category roll sorts keep unrated items after rated items in either direction;
 among unrated entries, collected items precede missing items. An exact reference

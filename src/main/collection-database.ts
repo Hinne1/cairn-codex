@@ -2169,8 +2169,10 @@ export class CollectionDatabase {
           AND substr(id, 13) NOT GLOB '*[^0-9a-f]*'
           AND length(source_sha256) = 64 AND lower(source_sha256) NOT GLOB '*[^0-9a-f]*'
           AND (stash_path LIKE 'live://gdia/sc/%' OR stash_path LIKE 'live://gdia/hc/%')
-          AND json_type(detail_json, '$.error') = 'text'
-          AND json_extract(detail_json, '$.adapter') IS NULL
+          AND CASE WHEN json_valid(detail_json) THEN
+            json_type(detail_json, '$.error') = 'text'
+            AND json_extract(detail_json, '$.adapter') IS NULL
+          ELSE 0 END
           AND (SELECT COUNT(*) FROM pending_ingest_item WHERE operation_id = operation_journal.id) = 1
           AND EXISTS (
             SELECT 1 FROM pending_ingest_item

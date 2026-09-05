@@ -77,12 +77,13 @@ async function fixture(run) {
       startedAtUtc: clock.nowUtc(), items: ids.map(vaultItemId => ({ vaultItemId, baseRecord: record, payload: structuredClone(payload) })), detail: {} })
     database.completeIngestOperation({ operationId: id, backupPath: 'synthetic-seed', completedAtUtc: clock.nowUtc(), isHardcore: hardcore, detail: {} })
   }
-  const reopen = (previousSchema) => {
+  const reopen = (previousSchema, prepareLegacy = () => {}) => {
     database.close()
     if (previousSchema !== undefined) {
       assert.equal(previousSchema, 12)
       const legacy = new DatabaseSync(databasePath)
       legacy.exec('PRAGMA user_version = 12')
+      prepareLegacy(legacy)
       legacy.close()
     }
     database = new CollectionDatabase(databasePath); dependencies.database = database; return database
@@ -401,7 +402,13 @@ try {
         items: [{ vaultItemId: id, baseRecord: record, payload }] })
       dependencies.database.failIngestOperation(id, new Error('Must remain failed'))
     }
-    let database = reopen(12)
+    const corruptId = `live-ingest-${'d'.repeat(64)}`
+    dependencies.database.prepareIngestOperation({ ...input, operationId: corruptId,
+      items: [{ vaultItemId: `live-${'d'.repeat(64)}`, baseRecord: record, payload }] })
+    dependencies.database.failIngestOperation(corruptId, new Error('Corrupt legacy detail negative control'))
+    let database = reopen(12, legacy => {
+      legacy.prepare('UPDATE operation_journal SET detail_json = ? WHERE id = ?').run('{malformed', corruptId)
+    })
     assert.deepEqual(database.listRecoveryOperations().map(operation => operation.id), [operationId])
     assert.equal(database.getRecoveryOperationCount(), 1)
     database = reopen()

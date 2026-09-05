@@ -91,8 +91,46 @@ an injected helper/clock. It covers stale approvals, rejected writes, lost
 responses, post-commit failures, repeated submission, mixed receipts, restart
 and coordinator shutdown. Helper self-tests separately exercise atomic file
 replacement. These checks do not replace the live release matrix in issue #8.
-Additional pre-existing live dispatch/acknowledgement failure windows identified
-during extraction are tracked in issue #165.
+
+## Live dispatch and receipt recovery
+
+Every live enqueue first persists its operation ID, mode, destination (for
+generated items) and exact payload as `pendingDispatch`. The returned queue is
+validated and journaled before that intent is cleared. `dispatchComplete` is set
+only after every selected item has a persisted queue. Missing responses therefore
+retain uncertainty even when earlier items have already reached the game. Recovery
+never resolves an incomplete batch from those earlier receipts or repeats an
+uncertain enqueue.
+
+Generated deliveries and archive retrievals retain every terminal outcome and
+copy rejected receipts before acknowledging them. Reconciliation checks the
+complete queue/selection mapping before consuming a rejection. An acknowledgement
+exception remains an error; a copied path alone is not proof that the incoming
+file was removed. The helper supports a retry only when the source is absent and
+the exact expected retained receipt exists and passes its SHA-256 check. Ownership,
+changed bytes, missing evidence and unreadable files still fail closed. A retained
+copy is verified before removing an existing source as well.
+
+Incoming ingestion can resume its deterministic operation after a database
+failure only when its original stash identity, mode and complete pending payload
+match. The shared coordinator first resumes specifically journaled incoming
+operations, allowing them to complete before applying the unresolved-operation
+gate. This restricted recovery pass cannot consume unrelated incoming items.
+Ordinary sync may do so after recovery clears, and already committed IDs only
+retry acknowledgement. Recovery commits schedule an archive backup.
+
+Recovery also emits a payload-free `archive:recovery-changed` event, whether it
+was triggered by ordinary sync, another transfer or Settings diagnostics. The
+renderer invalidates its installed collection projection and reloads the selected
+context and vault. Until that authoritative projection arrives, a concurrent
+ordinary ingest cannot apply an optimistic delta to the pre-recovery snapshot.
+This keeps recovered copies visible without replaying deltas across modes.
+
+The adapter suite covers first/later dispatch loss, terminal/acknowledgement
+failures, restricted incoming recovery and repeated submission. The helper's
+live-queue self-test uses disposable files to check lost-ack retry, corrupted
+copies, changed sources, locked/missing evidence and queue ownership. No test
+relaxes native build fingerprints or connects to a running game.
 
 The matching two-item v11 retrieval has now also been accepted by Grim Dawn.
 The game displayed both exact retrieved instances in the designated tab and

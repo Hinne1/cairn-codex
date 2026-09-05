@@ -45,7 +45,7 @@ const registrar = {
 const domains = createMainIpcDomains(registrar)
 const ownedChannels = Object.values(MAIN_IPC_CHANNELS).flat()
 assert.equal(new Set(ownedChannels).size, ownedChannels.length, 'domain channel ownership must be unique')
-const eventOnlyChannels = new Set([IPC_CHANNELS.backgroundJobChanged, IPC_CHANNELS.gdiaImportProgress])
+const eventOnlyChannels = new Set([IPC_CHANNELS.backgroundJobChanged, IPC_CHANNELS.gdiaImportProgress, IPC_CHANNELS.archiveRecoveryChanged])
 const requestChannels = Object.values(IPC_CHANNELS).filter((channel) => !eventOnlyChannels.has(channel))
 assert.deepEqual([...ownedChannels].sort(), [...requestChannels].sort(), 'every request contract needs one domain owner')
 

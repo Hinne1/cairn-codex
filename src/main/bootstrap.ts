@@ -2,7 +2,7 @@ import { createLiveTransferService } from './transfers/live-retrieval.ts';
 import { executeIngestCommand, executeRetrievalCommand, planRetrievalCommand, type IngestCommand, type RetrievalCommand } from './transfers/offline-transactions.ts';
 import { syncLiveIncoming } from './transfers/live-incoming.ts';
 import { executeLiveAugmentDispense, executeSahdinasMementoRecovery } from './transfers/live-delivery.ts';
-import { reconcileLiveRecoveryOperations } from './transfers/retained-receipts.ts';
+import { reconcileTransferOperations } from './transfers/recovery.ts';
 import { systemTransferClock, isHardcoreStashPath, type HelperRequester } from './transfers/runtime.ts';
 
 import { join } from 'node:path';
@@ -325,10 +325,21 @@ function registerIpcHandlers(
   const gdiaBackupDirectory = join(app.getPath('userData'), 'migrations', 'gdia')
   const preferenceStore = new PreferenceFileStore(join(app.getPath('userData'), 'preferences.json'))
   let gdiaImportProgress: GdiaImportProgress | null = null
+  const reconcileTransfers = (): Promise<number> => reconcileTransferOperations({
+    ...transfer, diagnostics,
+    committed: () => {
+      queueArchiveBackup('retained transfer recovery')
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (window.webContents.isDestroyed() || window.webContents.isCrashed()) continue
+        try { window.webContents.send(IPC_CHANNELS.archiveRecoveryChanged) }
+        catch (error) { diagnostics.error('recovery', 'renderer-notification.failed', error) }
+      }
+    }
+  })
   const operations = new MainOperationCoordinator({
     diagnostics,
     transfersPermitted: () => !process.env.CAIRN_CODEX_SCREENSHOT_PATH,
-    reconcileTransfers: () => reconcileLiveRecoveryOperations({ ...transfer, diagnostics }),
+    reconcileTransfers,
     unresolvedTransferCount: () => database.getRecoveryOperationCount()
   })
   const runExclusive = <T>(operation: () => Promise<T>): Promise<T> => operations.runExclusive(operation)
@@ -462,7 +473,7 @@ function registerIpcHandlers(
       await writeFile(selection.filePath, serialized, 'utf8')
       return selection.filePath
     },
-    reconcileRecovery: () => reconcileLiveRecoveryOperations({ ...transfer, diagnostics }),
+    reconcileRecovery: reconcileTransfers,
     runExclusive,
     recoveryOperations: () => database.getDiagnosticSummary().recoveryOperations,
     exporter: diagnosticExporter

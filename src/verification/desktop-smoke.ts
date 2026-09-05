@@ -1213,7 +1213,8 @@ export async function runSmokeTest(
           phase: 'queued',
           smokeTest: true,
           queues: generatedQueues,
-          records: ['smoke-augment-a', 'smoke-augment-b']
+          records: ['smoke-augment-a', 'smoke-augment-b'],
+          isHardcore: true
         }
       })
       recoveryDatabase.markDeliveryNeedsRecovery(

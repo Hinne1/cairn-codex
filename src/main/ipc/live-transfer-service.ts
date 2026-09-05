@@ -235,26 +235,30 @@ export class LiveTransferDomainService {
         sourceIdentity: selected.map((item) => `${item.id}:${item.seed}`).join('|'),
         startedAtUtc: new Date(this.clock.now()).toISOString(),
         vaultItemIds,
-        detail: { phase: 'prepared', adapter: 'gdia-live-v1', vaultItemIds }
+        detail: { phase: 'prepared', adapter: 'gdia-live-v1', vaultItemIds, dispatchComplete: false }
       })
       prepared = true
 
       const queues: LiveTransferQueue[] = []
       for (const [index, item] of selected.entries()) {
-        enqueueAttempted = true
         const requestedOperationId = `${operationId}-${index}`
-        const queue = await this.dependencies.adapter.enqueueRetrieval({
+        const dispatch = {
           operationId: requestedOperationId,
           isHardcore,
           item: item.payload
-        })
+        }
+        this.dependencies.journal.updatePendingDetail(operationId, { pendingDispatch: dispatch })
+        enqueueAttempted = true
+        const queue = await this.dependencies.adapter.enqueueRetrieval(dispatch)
         this.assertQueue(queue, requestedOperationId, isHardcore)
         queues.push(queue)
         this.dependencies.journal.updatePendingDetail(operationId, {
           phase: 'queued',
+          pendingDispatch: null,
           queues: queues.map((entry) => ({ ...entry }))
         })
       }
+      this.dependencies.journal.updatePendingDetail(operationId, { dispatchComplete: true })
 
       const terminal = await this.awaitTerminalReceipts(queues)
       this.dependencies.journal.updatePendingDetail(operationId, {
@@ -265,7 +269,8 @@ export class LiveTransferDomainService {
             operationId: queues[index]!.operationId,
             state: entry.state,
             receiptPath: entry.receiptPath,
-            semanticSha256: queues[index]!.semanticSha256
+            semanticSha256: queues[index]!.semanticSha256,
+            copiedReceiptPath: null
           }))
         }
       })

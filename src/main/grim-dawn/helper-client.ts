@@ -226,6 +226,13 @@ class HelperProcessClient {
           if (response.error) request.reject(new HelperRequestError(response.error.code,
             `${response.error.code}: ${response.error.message}`, request.mutates))
           else request.resolve(response.result)
+          // A read may have expired behind a write that has now finished. Keep its
+          // queue budget until it replies or the generation can safely retire.
+          const pending = [...generation.pending.values()]
+          if (!pending.some(entry => entry.mutates) && pending.some(entry => entry.settled)) {
+            this.retire(generation, new HelperRequestError('HELPER_TIMEOUT', 'The helper read timed out.'))
+            return
+          }
           this.scheduleIdleStop(generation)
         }
         // Valid duplicate/unknown IDs cannot settle or change another request.
@@ -249,8 +256,9 @@ class HelperProcessClient {
     generation.pending.clear()
     generation.chunks = []
     generation.outputBytes = 0
-    // Close input gracefully; no replacement/forced kill may overlap an active write.
-    if (!hasWrite && this.current === generation) this.current = null
+    // The live lane owns a persistent native connection even between write requests.
+    // Neither that ownership nor an active write may overlap a replacement process.
+    if (!hasWrite && this.lane === 'worker' && this.current === generation) this.current = null
     generation.child.stdin.end()
     if (!hasWrite && generation.child.exitCode === null && generation.child.signalCode === null) {
       const fallback = setTimeout(() => generation.child.kill(), 2_000)

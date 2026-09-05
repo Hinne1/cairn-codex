@@ -62,12 +62,16 @@ or exit. New writes are rejected while a timed-out write remains unresolved;
 read-only recovery requests remain possible. Nothing is automatically replayed.
 Late completion releases transport resources without reporting a second success;
 journals and receipts decide the durable outcome.
+If a read expires behind a write and never replies, completion of the final write
+retires the generation so that the read cannot retain queue capacity indefinitely.
 
 Malformed output or disposal closes stdin gracefully. A generation with an
 outstanding write is never killed by the timeout/idle fallback, and a replacement
 cannot overlap that retiring generation. A permanently stuck write therefore
 leaves the lane unavailable pending explicit process recovery. For read-only
-retirement, a two-second kill fallback is allowed. A disposed client cannot start
+retirement, a two-second kill fallback is allowed. A retiring live generation keeps
+its lane occupied until process exit, including after read timeouts, because its
+native connection outlives individual requests. A disposed client cannot start
 another process. IPC translation preserves uncertainty through wrapped causes
 without exposing internal messages or offering an automatic retry.
 

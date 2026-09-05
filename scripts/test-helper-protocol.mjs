@@ -68,6 +68,30 @@ for (const behavior of ['null', 'array', 'missing', 'both', 'malformed', 'invali
 
 const directory = await mkdtemp(join(tmpdir(), 'cairn-helper-protocol-'))
 try {
+  const live = createClient({ requestTimeoutMs: 700 })
+  try {
+    const owner = await live.request('start-live-game')
+    await rejects(live.request('inspect-live-game', { delayMs: 1300 }), 'HELPER_TIMEOUT')
+    assert.doesNotThrow(() => process.kill(owner.processId, 0), 'the retiring live owner is still running')
+    await rejects(live.request('start-live-game'), 'HELPER_TIMEOUT')
+    await delay(850)
+    const replacement = await live.request('start-live-game')
+    assert.notEqual(replacement.processId, owner.processId)
+    assert.throws(() => process.kill(owner.processId, 0), 'replacement waits for the old live owner to exit')
+  } finally { live.dispose() }
+
+  const overlap = createClient({ requestTimeoutMs: 700, workerIdleTimeoutMs: 100 })
+  try {
+    const before = await overlap.request('scan-collection')
+    await Promise.all([
+      rejects(overlap.request('commit-ingest-items', { delayMs: 1100 }), 'HELPER_TIMEOUT', true),
+      rejects(overlap.request('scan-collection', { behavior: 'no-response' }), 'HELPER_TIMEOUT')
+    ])
+    await delay(700)
+    assert.notEqual((await overlap.request('scan-collection')).processId, before.processId,
+      'a timed-out read retained behind a completed write must release the worker and queue budget')
+  } finally { overlap.dispose() }
+
   // A worker commit outlives both its caller deadline and the old 2s kill fallback.
   const receipt = join(directory, 'commit.txt')
   const client = createClient({ requestTimeoutMs: 700 })

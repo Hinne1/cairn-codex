@@ -21,6 +21,7 @@ export interface OperationDiagnostics {
 
 export interface MainOperationDependencies {
   diagnostics: OperationDiagnostics
+  transfersPermitted?(): boolean
   reconcileTransfers(): Promise<unknown>
   unresolvedTransferCount(): number
 }
@@ -39,6 +40,10 @@ export class MainOperationCoordinator {
 
   runTransferExclusive<T>(operation: () => Promise<T>): Promise<T> {
     return this.runExclusive(async () => {
+      // Check before reconciliation: retained receipts are also external writes.
+      if (this.dependencies.transfersPermitted?.() === false) {
+        throw new Error('Transfers are disabled during visual diagnostics.')
+      }
       await this.dependencies.reconcileTransfers()
       const unresolved = this.dependencies.unresolvedTransferCount()
       if (unresolved > 0) {

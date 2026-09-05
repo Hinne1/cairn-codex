@@ -76,6 +76,25 @@ and may intentionally select a lower aggregate score.
 Schema version 5 separates lifetime discovery, pinned choices, and Vault items
 by Hardcore/Softcore mode. A retrieval cannot cross that boundary.
 
+Schema version 13 restores recovery attention for the narrowly identified legacy
+live-ingest failures whose error handler discarded adapter metadata. It requires
+the deterministic live operation ID, live SC/HC stash identity, source SHA-256,
+one matching pending payload and absence of its stored vault copy. The migration
+preserves the payload and error, marks the operation `needs_recovery`, and restores
+its live adapter marker. Ordinary offline failures and malformed identities remain
+unchanged. Resuming still requires the polled incoming source to match every
+persisted payload field and its original mode; reopening is idempotent.
+
+Schema version 14 adds `vault_item_projection`, a derived metadata table for bounded Supplies and
+Dismantling queries. A transactional backfill and insert/payload-or-roll-update triggers project
+seed, stack count, attachment/affix records and numeric roll percentile without changing exact
+`serialized_item` or `roll_json` bytes. Malformed legacy payloads remain stored and are excluded
+from these queries, including integers outside JavaScript's safe range; malformed roll metadata
+becomes an absent score. Row state, mode, reusable
+status and catalog identity are joined from their authoritative tables on every query. The
+projection is removed with its vault row. Page and preview metadata lookups never read exact
+payload columns; migrations and authoritative transfer operations retain their existing ownership.
+
 The UI exposes two projections over the same canonical catalog:
 
 - **Stash Scanner** uses selected stash snapshots for physical availability and

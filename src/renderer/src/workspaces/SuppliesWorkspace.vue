@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import type {
   CharacterSaveProfile,
   CollectionItem,
   CollectionRaritySummary,
-  VaultListItem
 } from '@shared/contracts'
+import { ARCHIVE_SELECTION_LIMIT, type SupplyPage, type SupplyQueryRequest, type SupplySelection,
+  type SupplySelectionItem } from '@shared/workspace-query-contracts'
+import { useRemoteWorkspacePage } from './remote-workspace-page'
 import { compileSearchQuery } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
@@ -13,10 +15,7 @@ import ExplorerToolbar from '../components/ExplorerToolbar.vue'
 import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import {
-  buildSupplyCatalogIndex,
   changeSupplyCategory,
-  createSupplyAccessSummary,
-  createSupplyOptions,
   type SupplyControls,
   type SupplyOption,
   type SupplySession,
@@ -24,8 +23,10 @@ import {
 } from './supplies'
 
 const props = defineProps<{
-  catalogItems: readonly CollectionItem[]
-  vaultItems: readonly VaultListItem[]
+  queryItems: (request: SupplyQueryRequest) => Promise<SupplyPage>
+  selectBoosts: (request: SupplyQueryRequest) => Promise<SupplySelection>
+  archiveRevision: number
+  formatError: (error: unknown) => string
   activeCharacter: CharacterSaveProfile | null
   activeTransferHardcore: boolean | undefined
   liveReady: boolean
@@ -44,7 +45,7 @@ const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement]
   'move-tooltip': [event: MouseEvent]
   'hide-tooltip': []
-  dispense: [items: SupplyOption[], mode: SupplyControls['mode']]
+  dispense: [items: SupplySelectionItem[], mode: SupplyControls['mode']]
 }>()
 
 const controls = defineModel<SupplyControls>('controls', { required: true })
@@ -79,32 +80,49 @@ const page = computed({
 })
 const selectedIds = computed({
   get: () => props.session.selectedIds.value,
-  set: (selectedIds: string[]) => { props.session.selectedIds.value = selectedIds }
+  set: (selectedIds: string[]) => {
+    props.session.selectedIds.value = selectedIds.slice(0, ARCHIVE_SELECTION_LIMIT)
+    rememberSelection()
+  }
 })
 const structuredQuery = computed(() => compileSearchQuery(query.value, searchQueryOptions(searchSchemas.supplies)))
-const catalogIndex = computed(() => buildSupplyCatalogIndex(props.catalogItems))
-const options = computed(() => createSupplyOptions({
-  catalogItems: props.catalogItems,
-  vaultItems: props.vaultItems,
-  controls: controls.value,
-  activeCharacter: props.activeCharacter,
+const request = computed<SupplyQueryRequest>(() => ({
+  source: 'all', category: category.value, slot: slot.value, query: query.value,
+  activeCharacter: props.activeCharacter && { name: props.activeCharacter.name,
+    isHardcore: props.activeCharacter.isHardcore,
+    factions: props.activeCharacter.factions.map(({ name, value, isUnlocked }) => ({ name, value, isUnlocked })) },
   activeTransferHardcore: props.activeTransferHardcore,
-  liveReady: props.liveReady,
-  query: structuredQuery.value,
-  catalogIndex: catalogIndex.value
+  liveReady: props.liveReady, offset: (page.value - 1) * 60, limit: 60
 }))
-const accessSummary = computed(() => createSupplyAccessSummary(props.catalogItems, props.activeCharacter))
+const { data, loading, error: loadError, reload } = useRemoteWorkspacePage({
+  request: () => request.value, revision: () => props.archiveRevision, fetch: input => props.queryItems(input),
+  empty: { items: [], total: 0, offset: 0, limit: 60, summary: props.summary, accessSummary: '' } as SupplyPage,
+  formatError: props.formatError, enabled: () => !structuredQuery.value.error
+})
+const options = computed(() => data.value.items)
+const pageReady = computed(() => !loading.value && !structuredQuery.value.error && !loadError.value)
+const accessSummary = computed(() => data.value.accessSummary)
+const selectionBusy = ref(false)
+const selectionError = ref<string | null>(null)
+let disposed = false
+let selectionGeneration = 0
+onScopeDispose(() => { disposed = true })
+const contextKey = computed(() => JSON.stringify({ ...request.value, offset: 0, transferMethod: mode.value, revision: props.archiveRevision }))
+watch(contextKey, key => {
+  if (props.session.contextKey.value === key) return
+  props.session.contextKey.value = key
+  selectionGeneration++
+  selectedIds.value = []; selectionError.value = null
+}, { immediate: true, flush: 'sync' })
+watch(options, rememberSelection)
 const searchError = computed(() => {
   const error = structuredQuery.value.error
   if (!error) return null
   return error.fragment ? `${error.message} Check “${error.fragment}”.` : error.message
 })
-const visibleOptions = computed(() => {
-  const start = (page.value - 1) * 60
-  return options.value.slice(start, start + 60)
-})
-const selectedOptions = computed(() => options.value.filter((item) => selectedIds.value.includes(item.id)))
-const dispenseDisabled = computed(() => props.busy || selectedIds.value.length === 0 || (
+const visibleOptions = options
+const selectedOptions = computed(() => selectedIds.value.flatMap(id => props.session.selectedItems.value.get(id) ?? []))
+const dispenseDisabled = computed(() => props.busy || !pageReady.value || selectionBusy.value || selectedOptions.value.length !== selectedIds.value.length || selectedIds.value.length === 0 || (
   category.value === 'augments' && selectedIds.value.some((id) => id.startsWith('augment:'))
     ? !props.liveReady
     : mode.value === 'live'
@@ -113,17 +131,39 @@ const dispenseDisabled = computed(() => props.busy || selectedIds.value.length =
 ))
 
 function selectVisible(): void {
+  if (!pageReady.value || props.busy || selectionBusy.value) return
   selectedIds.value = visibleOptions.value.filter((item) => item.eligible).map((item) => item.id)
 }
 
-function dispenseAllBoosts(): void {
-  selectedIds.value = options.value
-    .filter((item) => ['writ', 'mandate', 'warrant'].includes(item.slot))
-    .map((item) => item.id)
-  emit('dispense', selectedOptions.value, mode.value)
+function rememberSelection(): void {
+  const known = new Map(props.session.selectedItems.value)
+  for (const item of options.value) {
+    if (!props.session.selectedIds.value.includes(item.id)) continue
+    const { id, record, name, slot, isHardcore, source, eligible, reusable } = item
+    known.set(id, { id, record, name, slot, isHardcore, source, eligible, reusable })
+  }
+  props.session.selectedItems.value = new Map(props.session.selectedIds.value.flatMap(id => {
+    const item = known.get(id); return item ? [[id, item] as const] : []
+  }))
+}
+
+async function dispenseAllBoosts(): Promise<void> {
+  if (selectionBusy.value || props.busy || !pageReady.value) return
+  const expectedContext = contextKey.value
+  const generation = selectionGeneration
+  selectionBusy.value = true; selectionError.value = null
+  try {
+    const result = await props.selectBoosts(request.value)
+    if (disposed || generation !== selectionGeneration || contextKey.value !== expectedContext) return
+    props.session.selectedItems.value = new Map(result.items.map(item => [item.id, item]))
+    selectedIds.value = result.items.map(item => item.id)
+    emit('dispense', selectedOptions.value, mode.value)
+  } catch (error) { if (!disposed && generation === selectionGeneration && contextKey.value === expectedContext) selectionError.value = props.formatError(error) }
+  finally { selectionBusy.value = false }
 }
 
 function dispenseSelected(): void {
+  if (dispenseDisabled.value) return
   emit('dispense', selectedOptions.value, mode.value)
 }
 
@@ -155,7 +195,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
       v-bind="searchGuidance.supplies"
       search-label="Search supplies"
       placeholder="Name, effect, faction…"
-      :result-count="options.length"
+      :result-count="data.total"
       result-label="available supplies"
       :search-error="searchError"
     >
@@ -178,13 +218,13 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
         </label>
       </template>
       <template #actions>
-        <button type="button" :disabled="!visibleOptions.length" @click="selectVisible">
+        <button type="button" :disabled="busy || !pageReady || selectionBusy || !visibleOptions.length" @click="selectVisible">
           Select visible
         </button>
         <button
           v-if="category === 'writs'"
           type="button"
-          :disabled="busy || !options.length"
+          :disabled="busy || !pageReady || selectionBusy || !data.total"
           @click="dispenseAllBoosts"
         >
           Dispense all unlocked boosts
@@ -205,9 +245,13 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
       v-model:selected-keys="selectedIds"
       class="supply-results bounded-tooltip-results"
       :items="options"
+      :remote="true"
+      :total-count="loading ? Math.max(data.total, page * 60) : data.total"
+      :loading="loading"
+      :error="searchError || loadError"
       :get-key="item => item.id"
       :page-size="60"
-      :selection-disabled="busy"
+      :selection-disabled="busy || loading || selectionBusy"
       :is-item-disabled="item => !item.eligible"
       :empty-title="query ? 'No matching supplies' : 'No supplies unlocked'"
       :empty-detail="query ? 'No unlocked supplies match this search and category.' : 'No supplies are unlocked in this category yet.'"
@@ -217,6 +261,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
       item-described-by="item-tooltip"
       @item-focus="showFocusedTooltip"
       @item-blur="emit('hide-tooltip')"
+      @retry="reload"
     >
       <template #item="{ item, selected }">
         <article
@@ -232,7 +277,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
           <input
             type="checkbox"
             :checked="selected"
-            :disabled="busy || !item.eligible"
+            :disabled="busy || selectionBusy || !item.eligible"
             @click.stop
             @change="selectedIds = selected ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id]"
           />
@@ -260,6 +305,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
         </article>
       </template>
     </BoundedResultSurface>
+    <p v-if="selectionError" class="vault-notice error">{{ selectionError }}</p>
     <button
       class="supply-dispense"
       type="button"

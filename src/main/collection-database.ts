@@ -1,6 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
-import { compileSearchQuery, type SearchExpression } from '../shared/search-query.ts'
+import { migrateArchiveItemProjection } from './archive-item-projection.ts'
+import { ArchiveWorkspaceQueries } from './archive-workspace-queries.ts'
+import { compileSearchQuery } from '../shared/search-query.ts'
+import { numericSearchSql, searchExpressionSql, textSearchSql, type SqlSearchFragment } from './archive-search-sql.ts'
 import { searchQueryOptions, searchSchemas } from '../shared/search-schema.ts'
 import type {
   CollectionItem,
@@ -17,47 +20,7 @@ import type {
 } from '@shared/contracts'
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 12
-
-interface SqlSearchFragment {
-  sql: string
-  parameters: Array<string | number>
-}
-
-function escapedLike(value: string): string {
-  return `%${value.replace(/[\\%_]/g, '\\$&')}%`
-}
-
-function textSearchSql(expression: string, value: string): SqlSearchFragment {
-  return {
-    sql: `LOWER(COALESCE(${expression}, '')) LIKE ? ESCAPE char(92)`,
-    parameters: [escapedLike(value)]
-  }
-}
-
-function numericSearchSql(expression: string, value: string): SqlSearchFragment {
-  const match = /^(>=|<=|>|<|=)?\s*(-?\d+(?:\.\d+)?)$/.exec(value)
-  if (!match) return { sql: '0', parameters: [] }
-  const operator = match[1] ?? '='
-  return { sql: `CAST(${expression} AS REAL) ${operator} ?`, parameters: [Number(match[2])] }
-}
-
-function searchExpressionSql(
-  expression: SearchExpression,
-  resolveTerm: (term: Extract<SearchExpression, { kind: 'term' }>) => SqlSearchFragment
-): SqlSearchFragment {
-  if (expression.kind === 'term') return resolveTerm(expression)
-  if (expression.kind === 'not') {
-    const operand = searchExpressionSql(expression.operand, resolveTerm)
-    return { sql: `(NOT (${operand.sql}))`, parameters: operand.parameters }
-  }
-  const left = searchExpressionSql(expression.left, resolveTerm)
-  const right = searchExpressionSql(expression.right, resolveTerm)
-  return {
-    sql: `((${left.sql}) ${expression.kind === 'and' ? 'AND' : 'OR'} (${right.sql}))`,
-    parameters: [...left.parameters, ...right.parameters]
-  }
-}
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 14
 
 export interface ValidatedCollectionDatabase {
   schemaVersion: number
@@ -180,6 +143,7 @@ function vaultPayloadFingerprint(payload: unknown): string {
 export class CollectionDatabase {
   private readonly database: DatabaseSync
   private readonly path: string
+  readonly workspaceQueries: ArchiveWorkspaceQueries
 
   constructor(path: string) {
     this.path = path
@@ -194,6 +158,7 @@ export class CollectionDatabase {
       this.database.exec('PRAGMA wal_autocheckpoint = 0')
     }
     this.migrate()
+    this.workspaceQueries = new ArchiveWorkspaceQueries(this.database)
   }
 
   checkpointForArchiveBackup(): void {
@@ -570,6 +535,7 @@ export class CollectionDatabase {
           updated_at_utc = ?
       WHERE record = ?
         AND content_pack = 'cairn-quarantine'
+        AND name LIKE 'Quarantined item (%'
     `)
     let releasedRecords = 0
     let recoveryRecords = 0
@@ -760,6 +726,38 @@ export class CollectionDatabase {
     }
   }
 
+  prepareLiveIngestOperation(input: PreparedIngestOperation): void {
+    if (!input.stashPath.startsWith('live://gdia/') ||
+        (input.detail as Record<string, unknown>)?.adapter !== 'gdia-live-v1') {
+      throw new Error('Only retained live incoming operations can resume preparation.')
+    }
+    const previous = this.database.prepare(`
+      SELECT operation, state, stash_path, source_sha256, detail_json
+      FROM operation_journal WHERE id = ?
+    `).get(input.operationId) as {
+      operation: string; state: string; stash_path: string; source_sha256: string; detail_json: string
+    } | undefined
+    if (!previous) return this.prepareIngestOperation(input)
+    const items = this.database.prepare(`
+      SELECT vault_item_id, base_record, payload_json FROM pending_ingest_item
+      WHERE operation_id = ? ORDER BY ordinal
+    `).all(input.operationId) as Array<{ vault_item_id: string; base_record: string; payload_json: string }>
+    if (
+      previous.operation !== 'ingest' || !['prepared', 'needs_recovery', 'failed'].includes(previous.state) ||
+      previous.stash_path !== input.stashPath || previous.source_sha256 !== input.sourceSha256 ||
+      JSON.parse(previous.detail_json).adapter !== 'gdia-live-v1' ||
+      items.length !== input.items.length || items.some((item, index) =>
+        item.vault_item_id !== input.items[index]!.vaultItemId ||
+        item.base_record !== input.items[index]!.baseRecord ||
+        item.payload_json !== JSON.stringify(input.items[index]!.payload)
+      )
+    ) throw new Error('Retained live ingest does not match the original exact payload and mode.')
+    this.database.prepare(`
+      UPDATE operation_journal SET state = 'prepared', completed_at_utc = NULL, detail_json = ?
+      WHERE id = ?
+    `).run(JSON.stringify(input.detail), input.operationId)
+  }
+
   completeIngestOperation(input: CompletedIngestOperation): string[] {
     const infiniteSupplies = this.getInfiniteSupplies()
     this.database.exec('BEGIN IMMEDIATE')
@@ -805,11 +803,11 @@ export class CollectionDatabase {
           item.reusable === 1 && infiniteSupplies ? 1 : 0
         )
       }
-      this.database
+      const journal = this.database
         .prepare(`
           UPDATE operation_journal
           SET state = 'committed', backup_path = ?, completed_at_utc = ?, detail_json = ?
-          WHERE id = ? AND state = 'prepared'
+          WHERE id = ? AND operation = 'ingest' AND state IN ('prepared', 'needs_recovery')
         `)
         .run(
           input.backupPath,
@@ -817,6 +815,9 @@ export class CollectionDatabase {
           JSON.stringify(input.detail),
           input.operationId
         )
+      if (Number(journal.changes) !== 1) {
+        throw new Error('Prepared ingest journal entry is missing.')
+      }
       this.database
         .prepare('DELETE FROM pending_ingest_item WHERE operation_id = ?')
         .run(input.operationId)
@@ -837,6 +838,24 @@ export class CollectionDatabase {
         WHERE id = ? AND state = 'prepared'
       `)
       .run(new Date().toISOString(), JSON.stringify({ error: detail }), operationId)
+  }
+
+  markIngestNeedsRecovery(operationId: string, error: unknown): void {
+    const row = this.database
+      .prepare('SELECT detail_json FROM operation_journal WHERE id = ?')
+      .get(operationId) as { detail_json: string } | undefined
+    const previous = row ? (JSON.parse(row.detail_json) as Record<string, unknown>) : {}
+    this.database
+      .prepare(`
+        UPDATE operation_journal
+        SET state = 'needs_recovery', detail_json = ?
+        WHERE id = ? AND operation = 'ingest' AND state IN ('prepared', 'needs_recovery')
+      `)
+      .run(JSON.stringify({
+        ...previous,
+        error: error instanceof Error ? error.message : String(error),
+        phase: 'commit_outcome_unknown'
+      }), operationId)
   }
 
   hasCommittedOperation(operationId: string): boolean {
@@ -2104,6 +2123,34 @@ export class CollectionDatabase {
       `)
       version = 12
     }
+    if (version === 12) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        UPDATE operation_journal
+        SET state = 'needs_recovery', completed_at_utc = NULL,
+            detail_json = json_set(detail_json, '$.adapter', 'gdia-live-v1', '$.phase', 'legacy_incoming_recovery')
+        WHERE operation = 'ingest' AND state = 'failed'
+          AND length(id) = 76 AND substr(id, 1, 12) = 'live-ingest-'
+          AND substr(id, 13) NOT GLOB '*[^0-9a-f]*'
+          AND length(source_sha256) = 64 AND lower(source_sha256) NOT GLOB '*[^0-9a-f]*'
+          AND (stash_path LIKE 'live://gdia/sc/%' OR stash_path LIKE 'live://gdia/hc/%')
+          AND CASE WHEN json_valid(detail_json) THEN
+            json_type(detail_json, '$.error') = 'text'
+            AND json_extract(detail_json, '$.adapter') IS NULL
+          ELSE 0 END
+          AND (SELECT COUNT(*) FROM pending_ingest_item WHERE operation_id = operation_journal.id) = 1
+          AND EXISTS (
+            SELECT 1 FROM pending_ingest_item
+            WHERE operation_id = operation_journal.id
+              AND vault_item_id = 'live-' || substr(operation_journal.id, 13)
+              AND NOT EXISTS (SELECT 1 FROM vault_item WHERE id = pending_ingest_item.vault_item_id)
+          );
+        PRAGMA user_version = 13;
+        COMMIT;
+      `)
+      version = 13
+    }
+    if (version === 13) migrateArchiveItemProjection(this.database)
   }
 
   private persistCatalog(items: CollectionItem[]): void {

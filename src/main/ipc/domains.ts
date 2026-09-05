@@ -30,6 +30,8 @@ export const MAIN_IPC_CHANNELS = {
   archive: [
     IPC_CHANNELS.inspectStagingTab,
     IPC_CHANNELS.listVaultItems, IPC_CHANNELS.queryVaultItems,
+    IPC_CHANNELS.querySupplies, IPC_CHANNELS.selectSupplyBoosts,
+    IPC_CHANNELS.queryDismantling, IPC_CHANNELS.selectDismantlingDuplicates,
     IPC_CHANNELS.queryOperationHistory, IPC_CHANNELS.getVaultSummary,
     IPC_CHANNELS.previewDismantling, IPC_CHANNELS.ingestStagingTab,
     IPC_CHANNELS.retrieveVaultItems

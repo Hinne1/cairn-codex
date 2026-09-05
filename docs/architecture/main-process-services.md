@@ -1,7 +1,9 @@
 # Main-process services and IPC
 
 The Electron bootstrap is a composition root. Renderer requests still cross the existing typed
-preload contract, but raw `ipcMain.handle` registration is not permitted in `src/main/index.ts`.
+preload contract, but raw `ipcMain.handle` registration is not permitted in the entry
+or `src/main/bootstrap.ts`. The entry selects the production application; the
+[verification entry](verification.md) injects test hooks without entering release builds.
 Each request belongs to exactly one main-process domain service.
 
 ## Domain ownership
@@ -39,6 +41,20 @@ shapes are unchanged by this split.
 
 ## Persistence and native serialization
 
+Concrete transfer adapters live in `src/main/transfers/`, not the Electron
+composition root. Bootstrap injects helper, repository, clock, directories and
+diagnostics once and binds the resulting operations to the domain services.
+See [write transactions](write-transactions.md) for journal and approval rules.
+
+Queue ownership is outer-to-inner: the shared `MainOperationCoordinator`, then
+the archive/live service's private queue, then an adapter with no queue of its
+own. Recovery adapters run inside the caller's shared queue and never reacquire
+it. A service's private queue protects direct callers and deduplicates live
+submissions; it must not be replaced with the already-held shared queue.
+Shutdown drains the shared coordinator and service queues before closing SQLite
+or the helper. Operational command modes run one adapter and exit; they do not
+register a competing IPC writer.
+
 `MainOperationCoordinator` owns the rejection-safe write queue used by imports, collection writes,
 backups, and every offline/live transfer. A failed operation does not poison later queued work. Transfer writes first
 reconcile retained journals and receipts and fail closed while any earlier outcome still needs
@@ -49,6 +65,28 @@ closing the database or helper. `window-lifecycle.ts` deduplicates repeated quit
 flush workflow can run, and isolates single-instance focus, activation, and platform close behavior.
 
 ## Testing and extension
+
+Collection presentation is a read capability in `collection-presentation.ts`.
+It accepts only archive read methods, a committed catalog, basis and roll-model
+version; it cannot invoke the helper or resolve quarantine metadata. Repeated
+cached collection reads therefore do not hide metadata writes.
+
+`QuarantineReconciliationService` runs after a committed catalog scan/rebuild and
+after a completed Item Assistant import. It classifies at most 256 records per
+helper request and commits each validated batch through `MainOperationCoordinator`.
+Changed metadata queues a protective archive backup. The presenting refresh reads
+that committed metadata afterward; reads during the job see the most recently
+committed batch. There is no extra full-snapshot progress broadcast or cached
+projection to invalidate.
+
+Helper failure or an incomplete/mismatched result batch leaves that batch untouched;
+earlier commits and backups remain valid. The job reports failure while the original
+scan/import remains successful. Missing records remain unresolved and retry on a
+later refresh. Resolved generic records retain quarantine eligibility and are not
+updated again; exact vault payloads and mode/receipt/journal identity are untouched.
+Shutdown stops admission, allows the active helper batch and serialized commit to
+finish, then stops before another batch. Pending records are recovered from the
+database after restart, without resuming an in-memory job promise.
 
 `npm run test:ipc-services` and `npm run test:domain-services` use fake IPC, storage, helper,
 diagnostics, window, and application adapters; neither imports Electron nor boots the app. Together

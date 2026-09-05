@@ -137,12 +137,11 @@ const areaTargets = buildCollectionFarmingTargets(farmingItems, {
 assert.equal(areaTargets.length, 1)
 assert.equal(areaTargets[0].name, 'Kurnhold')
 
-const [app, workspace, viewModel, styles, main] = await Promise.all([
+const [app, workspace, viewModel, styles] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/CollectionFarmingWorkspace.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/collection-farming.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 ])
 
 assert.match(app, /<CollectionFarmingWorkspace[\s\S]*?v-else-if="activeView === 'farming'"/)
@@ -163,8 +162,5 @@ assert.match(workspace, /emit\('queue-tooltip', item, \$event\)[\s\S]*?emit\('op
 assert.doesNotMatch(workspace, /<article v-for="\(target, index\) in targets"/)
 assert.match(viewModel, /export function buildCollectionFarmingTargets/)
 assert.match(styles, /\.farm-list \.bounded-results-item > article/)
-assert.match(main, /name === 'farming-routes'/)
-assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING/)
-assert.match(main, /farmingRows: document\.querySelectorAll\('\.farm-list \.bounded-results-item > article'\)\.length/)
 
 console.log('Collection Farming workspace passed: extracted view-model grouping/filtering plus 214 bounded routes with 50 mounted per full page and 14 on the final page.')

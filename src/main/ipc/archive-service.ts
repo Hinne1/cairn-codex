@@ -11,6 +11,7 @@ import type {
   VaultSummary
 } from '../../shared/contracts.ts'
 import { SerializedServiceQueue } from './service-registry.ts'
+import { ARCHIVE_SELECTION_LIMIT, type ArchiveItemSummary } from '../../shared/workspace-query-contracts.ts'
 
 export interface OfflineStashItem {
   tabIndex: number
@@ -34,6 +35,7 @@ export interface OfflineStashScan {
 export interface ArchiveReadStore {
   findCatalogNames(baseRecords: readonly string[]): ReadonlyMap<string, string>
   readVaultItems(): VaultListItem[]
+  readDismantlingItems(ids: readonly string[]): ArchiveItemSummary[]
   readVaultPage(request: VaultPageRequest): VaultItemPage
   readOperationHistory(request: OperationHistoryRequest): OperationHistoryPage
   readVaultSummary(): VaultSummary
@@ -168,13 +170,16 @@ export class ArchiveDomainService {
   }
 
   async previewDismantling(vaultItemIds: readonly string[]): Promise<DismantlingPreview> {
+    if (vaultItemIds.length === 0 || vaultItemIds.length > ARCHIVE_SELECTION_LIMIT) {
+      throw new ArchiveServiceError('Dismantling selection is outside its safe bounds.', 'archive.dismantling-limit')
+    }
     if (new Set(vaultItemIds).size !== vaultItemIds.length) {
       throw new ArchiveServiceError(
         'Duplicate dismantling candidate IDs are not allowed.',
         'archive.dismantling-duplicate'
       )
     }
-    const byId = new Map(this.dependencies.reads.readVaultItems().map((item) => [item.id, item]))
+    const byId = new Map(this.dependencies.reads.readDismantlingItems(vaultItemIds).map((item) => [item.id, item]))
     const items = vaultItemIds.map((id) => {
       const item = byId.get(id)
       if (!item || item.state !== 'ingested' || !item.catalogued || item.reusable ||

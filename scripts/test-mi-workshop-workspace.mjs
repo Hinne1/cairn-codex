@@ -221,11 +221,10 @@ const largeProjectionMs = performance.now() - largeStarted
 assert.equal(largeRows.length, 4)
 assert.equal(largeRows.reduce((total, row) => total + row.copies.length, 0), 20_000)
 
-const [app, workspace, model, main] = await Promise.all([
+const [app, workspace, model] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/MiWorkshopWorkspace.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/mi-workshop.ts', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 ])
 
 assert.match(app, /<MiWorkshopWorkspace[\s\S]*?v-else-if="activeView === 'mi-workshop'"/)
@@ -248,7 +247,5 @@ assert.match(workspace, /does not judge whether the affixes fit a build/)
 assert.doesNotMatch(workspace, /window\.cairnCodex/)
 assert.match(model, /group\.prefixRarity === 'rare' && group\.suffixRarity === 'rare'/)
 assert.match(model, /export function createMiWorkshopRows/)
-assert.match(main, /miQuery: document\.querySelector\('\.mi-explorer-toolbar \.explorer-search input'\)\?\.value/)
-assert.match(main, /miAffixFilter: document\.querySelector\('\.mi-explorer-toolbar \.explorer-toolbar-filters select'\)\?\.value/)
 
 console.log(`MI Workshop workspace passed: typed control ownership, exact rare/rare filtering, grouping, structured affix search, metric leadership, level sorting, global tooltip adapters, and a bounded 50-row comparison surface. The generated 20k-copy projection completed in ${largeProjectionMs.toFixed(1)} ms.`)

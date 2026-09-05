@@ -5,6 +5,7 @@ import { DiagnosticsService } from '../src/main/ipc/diagnostics-service.ts'
 import { DiagnosticExportService } from '../src/main/ipc/diagnostic-export-service.ts'
 import { LiveGameDomainService } from '../src/main/ipc/live-game-service.ts'
 import { WindowService } from '../src/main/ipc/window-service.ts'
+import { MainOperationCoordinator } from '../src/main/operation-coordinator.ts'
 
 const listed = [{ id: 'fixture' }]
 let canceledId = null
@@ -51,8 +52,16 @@ assert.equal(await backupService.openDirectory(), 'fixture/backups')
 
 let debugEnabled = false
 let recoveryChecks = 0
+let diagnosticCapture = false
+let coordinatorRecoveryChecks = 0
+const coordinator = new MainOperationCoordinator({
+  diagnostics: {}, transfersPermitted: () => !diagnosticCapture,
+  reconcileTransfers: async () => { coordinatorRecoveryChecks++ },
+  unresolvedTransferCount: () => 0
+})
 const diagnosticEvents = []
 const diagnostics = new DiagnosticsService({
+  visualDiagnosticsActive: () => diagnosticCapture,
   appVersion: () => 'fixture',
   helperHealth: async () => { throw new Error('helper unavailable') },
   safeModeStatus: () => ({ active: false, suggested: false, failedStarts: 0, threshold: 3 }),
@@ -65,7 +74,7 @@ const diagnostics = new DiagnosticsService({
   error: (...event) => { diagnosticEvents.push(event) },
   selectPreferenceExport: async () => 'fixture/preferences.json',
   reconcileRecovery: async () => { recoveryChecks += 1 },
-  runExclusive: async (operation) => operation(),
+  runExclusive: operation => coordinator.runExclusive(operation),
   recoveryOperations: () => [{
     id: 'recovery-1', operation: 'retrieve', state: 'needs_recovery',
     startedAtUtc: new Date(0).toISOString(), hasBackup: true
@@ -85,6 +94,13 @@ assert.deepEqual(await diagnostics.exportDiagnostics(), {
   canceled: false, path: 'fixture/support.zip'
 })
 assert.equal(diagnosticEvents.length, 1)
+diagnosticCapture = true
+assert.deepEqual(await diagnostics.getRecoveryStatus(), recovery, 'diagnostic startup reads the retained summary without reconciliation')
+assert.deepEqual(await diagnostics.getRecoveryStatus(), recovery)
+await assert.rejects(coordinator.runTransferExclusive(async () => { throw new Error('Must not execute') }), /disabled during visual diagnostics/)
+await coordinator.flush()
+assert.equal(recoveryChecks, 1, 'plain queued recovery-status reads must not reconcile under visual diagnostics')
+assert.equal(coordinatorRecoveryChecks, 0, 'transfer guard must run before reconciliation')
 
 const liveEvents = []
 const liveStatus = {
@@ -141,13 +157,15 @@ const privacyExporter = new DiagnosticExportService({
 await assert.rejects(privacyExporter.export(), /failed its privacy check/)
 assert.equal(privacyWriteCalls, 0, 'privacy failure must stop before publication')
 
+let visualDiagnostics = false
+const liveNativeCalls = []
 const live = new LiveGameDomainService({
-  visualDiagnosticsActive: () => false,
+  visualDiagnosticsActive: () => visualDiagnostics,
   inspectWriteSafety: async () => ({ allowed: true, messages: [] }),
-  inspect: async () => liveStatus,
-  approveBuild: async () => liveStatus,
-  start: async () => liveStatus,
-  stop: async () => liveStatus,
+  inspect: async () => { liveNativeCalls.push('inspect'); return liveStatus },
+  approveBuild: async () => { liveNativeCalls.push('approve'); return liveStatus },
+  start: async () => { liveNativeCalls.push('start'); return liveStatus },
+  stop: async () => { liveNativeCalls.push('stop'); return liveStatus },
   syncIncoming: async () => ({ operationId: 'sync', status: 'committed', ingested: [], issues: [] }),
   retrieveVaultItems: async () => ({
     operationId: 'retrieve', status: 'committed',
@@ -179,6 +197,20 @@ assert.equal((await live.retrieve(['a'])).retrieved.length, 1)
 assert.deepEqual(liveEvents, [
   'diagnostic:live-retrieval', 'exclusive', 'backup:live retrieval'
 ])
+visualDiagnostics = true
+liveEvents.length = 0
+liveNativeCalls.length = 0
+assert.equal((await live.inspect()).state, 'unavailable')
+assert.equal((await live.inspectWriteSafety()).permitted, false)
+assert.equal((await live.sync()).status.state, 'unavailable')
+assert.deepEqual((await live.sync()).ingested, [])
+for (const operation of [() => live.approveBuild(), () => live.start(), () => live.stop(),
+  () => live.retrieve(['a']), () => live.dispense({ records: ['a'] }),
+  () => live.recover({ destination: 'shared-stash' })]) {
+  await assert.rejects(operation, /disabled during visual diagnostics/)
+}
+assert.deepEqual(liveEvents, [], 'diagnostics must not enter recovery, transfer queue, or backup scheduling')
+assert.deepEqual(liveNativeCalls, [], 'diagnostics must not inspect or control the native live adapter')
 
 const startup = {
   startedAtUtc: new Date(0).toISOString(), cacheOutcome: 'pending', cachedPaintMs: null,

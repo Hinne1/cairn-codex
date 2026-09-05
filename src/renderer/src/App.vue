@@ -303,6 +303,7 @@ const collectionContext = () => ({ basis: collectionBasis.value, sourcePaths: [.
 const collectionSession = new CollectionSession({
   context: collectionContext,
   install: applySnapshot,
+  reload: () => { void reloadCollection() },
   pendingChanged: pending => { collectionPending.value = pending },
   reportError: (error, kind) => {
     if (kind === 'cache') cacheIssue.value = readableError(error)
@@ -2063,10 +2064,8 @@ onMounted(async () => {
       const value = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
       if (read.install(value)) startupCache.snapshot = value
     })
-    // Another selection/request owns startup now. A default-source installation
-    // may itself populate the selection, so retain that successfully installed cache.
     const cached = startupCache.snapshot
-    if (!cacheCurrent && !cached) return
+    if (!cacheCurrent) return
     if (cached) {
       await reportStartupPhase('cache-hit')
       await waitForPaint()
@@ -2812,15 +2811,20 @@ async function selectSourceMode(isHardcore: boolean): Promise<void> {
 async function loadSelectedSources(): Promise<void> {
   hideTooltip()
   selectedRecord.value = null
+  if (!await reloadCollection()) return
+  void hydrateArchiveRolls()
+  await refreshVault()
+}
+
+async function reloadCollection(): Promise<boolean> {
   let needsScan = false
   const current = await collectionSession.run('cache', async (read) => {
     const cached = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
     if (read.install(cached)) needsScan = cached === null
   })
-  if (!current) return
+  if (!current) return false
   if (needsScan) await scanCollection()
-  else void hydrateArchiveRolls()
-  await refreshVault()
+  return true
 }
 
 async function hydrateArchiveRolls(startupRun = false): Promise<void> {

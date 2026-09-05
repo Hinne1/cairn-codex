@@ -28,9 +28,13 @@ The renderer's `CollectionSession` owns cached loads, scan/rebuild results and
 hydration. Selection identity includes basis and a normalized set of source paths;
 synchronous selection invalidation distinguishes A → B → A from the original A.
 Each new read supersedes older reads, and only the current read can install a
-snapshot or report a failure. Superseded work retains its busy count until it
-settles. Live/archive changes install through `commit`, invalidating all earlier
-reads so a delayed snapshot cannot erase a visible committed change. Responses
+snapshot or report a failure. A successful superseded scan/rebuild starts a fresh
+cached projection for the current selection, so its committed catalog becomes
+visible even when a selection load finished before the refresh. Superseded work
+retains its busy count until it settles. A first load adopts default source paths
+as part of its own installation. Live/archive changes install through `commit`,
+invalidating earlier reads; when the visible snapshot belongs to a previous
+selection, a new projection after the commit replaces the old-context delta. Responses
 are discarded after unmount. None of this cancels an in-flight durable main-process
 operation or replays a transfer.
 

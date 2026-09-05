@@ -12,14 +12,16 @@ function fixture() {
   let visible = null
   let pending = {}
   const errors = []
+  const reloads = []
   const session = new CollectionSession({
     context: () => context,
     install: snapshot => { visible = snapshot },
     pendingChanged: value => { pending = value },
-    reportError: (error, kind) => errors.push({ error, kind })
+    reportError: (error, kind) => errors.push({ error, kind }),
+    reload: () => reloads.push(true)
   })
   return {
-    session, errors,
+    session, errors, reloads,
     select: value => { context = value; session.contextChanged() },
     read: (kind, response) => session.run(kind, async read => read.install(await response.promise)),
     get visible() { return visible },
@@ -83,10 +85,38 @@ for (const changeSelection of [false, true]) {
 // A receipt-backed live/archive update wins over every older snapshot read.
 for (const kind of ['cache', 'scan', 'rebuild', 'hydration']) {
   const state = fixture(), delayed = deferred()
+  await state.session.run('cache', async read => read.install({ name: 'initial SC' }))
   const request = state.read(kind, delayed)
   state.session.commit({ name: 'committed item update' })
   delayed.resolve({ name: 'before item update' }); await request
   assert.equal(state.visible.name, 'committed item update')
+}
+for (const target of [hc, stashes]) {
+  const state = fixture(), beforeCommit = deferred(), afterCommit = deferred()
+  await state.session.run('cache', async read => read.install({ name: 'initial SC archive' }))
+  state.select(target)
+  const stale = state.read('cache', beforeCommit)
+  state.session.commit({ name: 'old-context delta' })
+  assert.equal(state.reloads.length, 1, 'a commit during selection change requests a fresh projection')
+  const fresh = state.read('cache', afterCommit)
+  afterCommit.resolve({ name: 'selected context after commit' }); await fresh
+  beforeCommit.resolve({ name: 'selected context before commit' }); await stale
+  assert.equal(state.visible.name, 'selected context after commit')
+}
+{
+  let context = { basis: 'archive', sourcePaths: [] }
+  const session = new CollectionSession({
+    context: () => context,
+    install: snapshot => {
+      context = { ...context, sourcePaths: snapshot.scannedStashes.map(stash => stash.path) }
+      session.contextChanged()
+    },
+    reportError: error => { throw error }, pendingChanged: () => {}, reload: () => {}
+  })
+  assert.equal(await session.run('cache', async read => {
+    assert.equal(read.install({ scannedStashes: [{ path: sc.sourcePaths[0] }] }), true)
+    assert.deepEqual(read.context.sourcePaths, sc.sourcePaths)
+  }), true, 'installing default sources must remain current for hydration and vault refresh')
 }
 {
   const state = fixture(), delayed = deferred()

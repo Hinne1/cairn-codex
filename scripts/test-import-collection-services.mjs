@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { BackgroundJobCoordinator } from '../src/main/background-jobs.ts'
 import { runCollectionRefresh } from '../src/main/ipc/collection-refresh-jobs.ts'
+import { CollectionSession } from '../src/renderer/src/collection-session.ts'
 import {
   ItemAssistantImportCanceledError,
   ItemAssistantImportInProgressError,
@@ -286,6 +287,42 @@ for (const kind of ['collection-scan', 'game-data-rebuild']) {
   assert.deepEqual(rebuildFlags, [kind === 'game-data-rebuild'])
   assert.deepEqual(presented.map(value => ({ basis: value.basis, sourcePaths: value.projectedPaths })), callers)
   assert.equal(new Set(presented).size, callers.length, 'each caller receives its own presentation')
+}
+
+// A selected-source cache can complete before an older scan commits a new
+// catalog. The production session must request a fresh current-context projection.
+for (const kind of ['scan', 'rebuild']) {
+  const scanned = deferred()
+  const service = new CollectionService(collectionDependencies({
+    scanner: { scanInstalledData: () => scanned.promise }
+  }))
+  const jobs = new BackgroundJobCoordinator()
+  let context = { sourcePaths: ['C:/fixtures/transfer.gst'], basis: 'archive' }
+  let visible
+  let refreshed
+  const session = new CollectionSession({
+    context: () => context,
+    install: value => { visible = value },
+    pendingChanged: () => {}, reportError: error => { throw error },
+    reload: () => { refreshed = readCache() }
+  })
+  const readCache = () => session.run('cache', async read => read.install(await service.getCached(read.context)))
+  await readCache()
+  const scan = session.run(kind, async read => read.install(await runCollectionRefresh(
+    jobs, kind === 'scan' ? 'collection-scan' : 'game-data-rebuild',
+    () => kind === 'scan' ? service.scanCatalog() : service.rebuildCatalog(),
+    snapshot => service.present(snapshot, read.context)
+  )))
+  context = { sourcePaths: ['C:/fixtures/transfer.gsh'], basis: 'stashes' }
+  session.contextChanged()
+  await readCache()
+  assert.equal(visible.fixtureName, 'cached')
+  scanned.resolve(collectionSnapshot('new-catalog'))
+  await scan
+  await refreshed
+  assert.equal(visible.fixtureName, 'new-catalog')
+  assert.deepEqual(visible.projectedPaths, context.sourcePaths)
+  assert.equal(visible.basis, 'stashes')
 }
 
 // Discovery and character enumeration are concrete collection service methods,

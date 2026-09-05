@@ -15,12 +15,14 @@ interface CollectionSessionOptions {
   install(snapshot: CollectionSnapshot): void
   reportError(error: unknown, kind: CollectionReadKind): void
   pendingChanged(pending: CollectionPendingReads): void
+  reload(): void
 }
 
 /** One owner for renderer snapshot reads, including failures and committed updates. */
 export class CollectionSession {
   private readonly options: CollectionSessionOptions
   private contextKey: string
+  private installedContextKey: string | null = null
   private generation = 0
   private disposed = false
   private readonly pending: CollectionPendingReads = { cache: 0, scan: 0, rebuild: 0, hydration: 0 }
@@ -42,7 +44,7 @@ export class CollectionSession {
   async run(kind: CollectionReadKind, operation: (read: CollectionRead) => Promise<void>): Promise<boolean> {
     if (this.disposed) return false
     this.contextChanged()
-    const generation = ++this.generation
+    let generation = ++this.generation
     const context = copyCollectionRequest(this.options.context())
     const isCurrent = (): boolean => {
       this.contextChanged()
@@ -51,9 +53,27 @@ export class CollectionSession {
     const read: CollectionRead = {
       context, isCurrent,
       install: snapshot => {
-        if (!isCurrent()) return false
-        if (snapshot) this.options.install(snapshot)
-        return true
+        if (!isCurrent()) {
+          // The catalog refresh still committed useful shared work. Project it
+          // again for the selection that now owns the view, using a new read.
+          if (snapshot && !this.disposed && (kind === 'scan' || kind === 'rebuild')) this.options.reload()
+          return false
+        }
+        if (snapshot) {
+          this.options.install(snapshot)
+          // Installing the first snapshot populates an empty selection with its
+          // sources. This is part of this read, not a competing user selection.
+          const selected = this.options.context()
+          if (context.sourcePaths.length === 0 && collectionRequestKey(selected) === collectionRequestKey({
+            basis: context.basis, sourcePaths: snapshot.scannedStashes?.map(stash => stash.path) ?? []
+          })) {
+            this.contextChanged()
+            context.sourcePaths = [...selected.sourcePaths]
+            generation = this.generation
+          }
+          this.installedContextKey = collectionRequestKey(context)
+        }
+        return isCurrent()
       }
     }
     this.pending[kind]++
@@ -71,8 +91,13 @@ export class CollectionSession {
 
   /** A committed change invalidates every read captured before that change. */
   commit(snapshot: CollectionSnapshot): void {
+    this.contextChanged()
     this.generation++
-    if (!this.disposed) this.options.install(snapshot)
+    if (this.disposed) return
+    if (this.installedContextKey === this.contextKey) this.options.install(snapshot)
+    // The visible snapshot may still belong to a previous SC/HC or basis
+    // selection. Re-read after the commit instead of applying that old delta.
+    else this.options.reload()
   }
 
   dispose(): void { this.disposed = true; this.generation++ }

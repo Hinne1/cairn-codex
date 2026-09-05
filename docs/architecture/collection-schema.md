@@ -106,6 +106,11 @@ The UI exposes two projections over the same canonical catalog:
 
 ## Offline snapshot cache
 
+Derived recipe summaries can be absent or explicitly null in older raw snapshots. The cache
+validates the original serialized envelope hash before normalizing either representation to
+empty recipe totals. Malformed non-null totals still reject the cache; normalized writes retain
+the existing atomic replacement and bounded lock retry behavior.
+
 The main process also keeps the latest complete collection projection in a
 versioned, atomically replaced `collection-snapshot.json` envelope. A stale map
 index or temporarily unavailable save source never makes that durable snapshot

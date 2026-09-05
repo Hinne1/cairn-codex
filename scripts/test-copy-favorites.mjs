@@ -109,7 +109,18 @@ try {
   const changed = applyCopyFavorite([...copies, { ...copies[0], isHardcore: true }], fingerprint, false, false)
   assert.equal(changed[0].isFavorite, false); assert.equal(changed[2].isFavorite, true)
   assert.equal(favorites.canToggle({ ...copies[0], isHardcore: undefined }), false)
+  const optimisticIngest = { ...payload, instanceKey: fingerprint, sourcePath: 'vault://sc-a', tabIndex: -1, itemIndex: 0 }
+  assert.equal(favorites.canToggle(optimisticIngest), false, 'partial live-ingest receipts cannot guess a favorite or its mode')
+  const writeCount = writes
+  await favorites.toggle(optimisticIngest)
+  assert.equal(writes, writeCount)
+  const authoritativeIngest = presented.observedItems.find(item => item.sourcePath === 'vault://sc-a')
+  assert.equal(favorites.canToggle(authoritativeIngest), true)
+  assert.equal(authoritativeIngest.isFavorite, true, 'reingest restores the saved favorite through authoritative projection')
+  assert.equal(applyCopyFavorite([authoritativeIngest], fingerprint, false, false)[0].isFavorite, false)
   scope.stop()
+  const app = await readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8')
+  assert.match(app, /applyLiveIngests\(result.ingested\)[\s\S]*?await reloadCollection\(\)[\s\S]*?reportSuccess\(`Live-ingested/)
   const preload = await readFile(new URL('../src/preload/index.ts', import.meta.url), 'utf8')
   assert.match(preload, /setFavoriteItem:[\s\S]*?IPC_CHANNELS\.setFavoriteItem/)
   console.log('Copy favorites passed: schema14 migration, exact bytes, real SQLite + validated domain service, SC/HC, identical/different fingerprints, restart/rescan, filters/routes, repeated/pending/failed writes and context changes.')

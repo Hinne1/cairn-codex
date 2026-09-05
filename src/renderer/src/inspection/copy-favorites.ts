@@ -12,7 +12,7 @@ export function createCopyFavorites(options: {
   let generation = 0
   watch(options.contextKey, () => { generation++ }, { flush: 'sync' })
   const canToggle = (copy: ObservedStashItem) => /^[a-f0-9]{64}$/i.test(copy.instanceKey ?? '') &&
-    typeof options.modeFor(copy) === 'boolean'
+    typeof copy.isFavorite === 'boolean' && typeof options.modeFor(copy) === 'boolean'
   async function toggle(copy: ObservedStashItem): Promise<void> {
     if (busy.value || !canToggle(copy)) return
     const epoch = generation

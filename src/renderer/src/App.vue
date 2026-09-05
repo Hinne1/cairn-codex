@@ -327,7 +327,7 @@ const favoriteRecords = computed(() => new Set(allOwnedCopies.value
   .filter(copy => copy.isFavorite).map(copy => copy.baseRecord.toLocaleLowerCase())))
 const copyFavorites = createCopyFavorites({
   contextKey: () => JSON.stringify([collectionRequestKey(collectionContext()), snapshot.value?.isHardcore, snapshot.value?.scannedAtUtc]),
-  modeFor: copy => copy.isHardcore ?? stashChoices.value.find(stash => stash.path === copy.sourcePath)?.isHardcore ?? snapshot.value?.isHardcore,
+  modeFor: copy => copy.isHardcore,
   write: (instanceKey, isHardcore, favorite) => window.cairnCodex.setFavoriteItem(instanceKey, isHardcore, favorite),
   apply: (instanceKey, isHardcore, favorite) => {
     vaultItems.value = applyCopyFavorite(vaultItems.value, instanceKey, isHardcore, favorite)
@@ -2171,6 +2171,9 @@ async function syncLiveMode(): Promise<void> {
     if (JSON.stringify(liveIssues.value) !== JSON.stringify(result.issues)) liveIssues.value = result.issues
     if (result.ingested.length > 0) {
       applyLiveIngests(result.ingested)
+      // The optimistic ingest receipt lacks preference/mode metadata. Reproject
+      // the committed batch before enabling favorite edits on those new copies.
+      await reloadCollection()
       reportSuccess(`Live-ingested ${result.ingested.map((item) => item.name).join(', ')}.`)
       await refreshVault()
       void hydrateArchiveRolls()

@@ -241,12 +241,15 @@ export async function reconcileLiveRecoveryOperations(
       let entries = retainedTerminalResolution(operation)
       observe(operation.id, entries)
       if (entries.length !== queues.length || entries.some(entry => entry.state === 'rejected' && !entry.copiedReceiptPath)) {
-        const inspected = await Promise.all(
+        const inspections = await Promise.allSettled(
           queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', {
             queue, allowHashFallback: allQueuesKnown && hasUniqueLivePayload(queue, allQueues)
           }))
         )
+        const inspected = inspections.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
         observe(operation.id, inspected)
+        const failed = inspections.find(result => result.status === 'rejected')
+        if (failed?.status === 'rejected') throw failed.reason
         if (inspected.some((status) =>
           (status.state !== 'deposited' && status.state !== 'rejected') || !status.receiptPath
         )) continue

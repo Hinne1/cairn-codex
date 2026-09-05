@@ -514,7 +514,7 @@ try {
       assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false, 'neither operation may consume shared evidence')
     })
   }
-  await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
+  for (const unavailable of ['pending', 'error']) await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
     seed(['vault-a', 'vault-b', 'vault-c'])
     for (const [index, ids] of [['vault-a'], ['vault-b', 'vault-c']].entries()) {
       const operationId = `partial-${index}`
@@ -522,8 +522,11 @@ try {
         sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ids,
         detail: { vaultItemIds: ids, queues: ids.map((_id, index) => queue(`${operationId}-${index}`)) } })
     }
-    handlers.set('inspect-live-retrieval', ({ queue }) => queue.operationId === 'partial-1-1'
-      ? { state: 'pending', receiptPath: null } : { state: 'deposited', receiptPath: `${path}.shared` })
+    handlers.set('inspect-live-retrieval', ({ queue }) => {
+      if (queue.operationId !== 'partial-1-1') return { state: 'deposited', receiptPath: `${path}.shared` }
+      if (unavailable === 'error') throw new Error('Synthetic receipt inspection failure')
+      return { state: 'pending', receiptPath: null }
+    })
     assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0, 'partially terminal operations also reserve their observed evidence')
     assert.equal(dependencies.database.getRecoveryOperationCount(), 2)
   })

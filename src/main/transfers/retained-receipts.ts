@@ -235,11 +235,11 @@ export async function reconcileLiveRecoveryOperations(
   }
   for (const operation of operations) {
     if (operation.operation !== 'retrieve') continue
+    let entries = retainedTerminalResolution(operation)
+    observe(operation.id, entries)
     const queues = retainedRecoveryQueues(operation)
     if (queues.length === 0) continue
     try {
-      let entries = retainedTerminalResolution(operation)
-      observe(operation.id, entries)
       if (entries.length !== queues.length || entries.some(entry => entry.state === 'rejected' && !entry.copiedReceiptPath)) {
         const inspections = await Promise.allSettled(
           queues.map((queue) => helper.request<LiveRetrievalStatus>('inspect-live-retrieval', {

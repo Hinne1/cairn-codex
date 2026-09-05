@@ -514,6 +514,24 @@ try {
       assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false, 'neither operation may consume shared evidence')
     })
   }
+  await fixture(async ({ dependencies, seed, queue, calls, path }) => {
+    seed(['vault-a', 'vault-b', 'vault-c'])
+    for (const [index, ids] of [['vault-a'], ['vault-b', 'vault-c']].entries()) {
+      const operationId = `cached-incomplete-${index}`
+      const retained = queue(`${operationId}-0`)
+      dependencies.database.prepareRetrievalOperation({ operationId, stashPath: 'live://gdia/sc',
+        sourceSha256: sourceHash, startedAtUtc: dependencies.clock.nowUtc(), vaultItemIds: ids,
+        detail: { vaultItemIds: ids, queues: [retained], recoveryResolution: { entries: [{
+          operationId: retained.operationId, state: 'rejected', receiptPath: `${path}.same`,
+          semanticSha256: sourceHash, copiedReceiptPath: `${path}.same-copy`
+        }] } } })
+    }
+    assert.equal(await reconcileLiveRecoveryOperations(dependencies), 0, 'incomplete legacy journals reserve their cached evidence')
+    assert.equal(dependencies.database.getRecoveryOperationCount(), 2)
+    assert.equal(calls.some(call => call.method === 'ack-live-incoming'), false)
+    assert.deepEqual(dependencies.database.getVaultItems(['vault-a', 'vault-b', 'vault-c'], false).map(item => item.state),
+      ['retrieval_pending', 'retrieval_pending', 'retrieval_pending'])
+  })
   for (const unavailable of ['pending', 'error']) await fixture(async ({ dependencies, handlers, seed, queue, calls, path }) => {
     seed(['vault-a', 'vault-b', 'vault-c'])
     for (const [index, ids] of [['vault-a'], ['vault-b', 'vault-c']].entries()) {

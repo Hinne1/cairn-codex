@@ -740,7 +740,7 @@ internal sealed class LiveGameAdapter : IDisposable
 
         // Shared-stash receipts may be renamed by the pinned hook. The caller
         // permits this only for a payload unique across the complete queue set.
-        // An exact Cairn filename always belongs to its own operation, and
+        // An exact operation filename always belongs to its own operation, and
         // multiple candidates (including across outcomes) remain ambiguous.
         static bool IsRenamed(string path) => !Path.GetFileName(path).StartsWith("cairn-", StringComparison.OrdinalIgnoreCase);
         var deposited = MatchingFiles(deleted, queue.SemanticSha256)

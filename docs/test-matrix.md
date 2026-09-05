@@ -1,5 +1,16 @@
 # Release test matrix
 
+## Collection request ownership (#154, 2026-09-05)
+
+Deferred-promise gates exercise the production job coordinator and raw collection
+refresh service with four concurrent SC/HC and archive/stash callers. One scan and
+cache write produce four separate caller presentations; opposite scan/rebuild
+requests reject during refresh. Renderer session gates cover reversed completion,
+A → B → A selection, stale errors after success, busy counts for outstanding work,
+unmount and committed updates superseding every earlier read kind. Focused gates
+and TypeScript/Vue typechecks passed. Full integration evidence is recorded in the
+PR; all fixtures are synthetic.
+
 ## Helper protocol review (#153, 2026-09-05)
 
 Synthetic subprocess gates cover invalid/null/missing/ambiguous responses, UTF-8

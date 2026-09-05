@@ -109,6 +109,7 @@ import {
   migrationOptionsFromRequest
 } from './ipc/import-service.ts'
 import { CollectionService } from './ipc/collection-service.ts'
+import { runCollectionRefresh } from './ipc/collection-refresh-jobs.ts'
 import { DiagnosticsService } from './ipc/diagnostics-service.ts'
 import { ArchiveDomainService } from './ipc/archive-service.ts'
 import { LiveTransferDomainService } from './ipc/live-transfer-service.ts'
@@ -1301,58 +1302,34 @@ function registerIpcHandlers(
   ipcDomains.collection.handle(
     IPC_CHANNELS.scanCollection,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
-      const scan = jobs.run({
-        kind: 'collection-scan', dedupeKey: 'collection-scan:catalog', stage: 'queued',
-        progress: {
-          completed: 0, total: 4, percent: 0, unit: 'steps',
-          label: 'Refresh collection', detail: 'Preparing the catalog scan.'
-        },
-        canCancel: false, boundary: null,
-        completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
-      }, async (job) => runDiagnosticOperation('background-job', 'collection-scan', async () => {
+      return runCollectionRefresh(jobs, 'collection-scan', async (job) => runDiagnosticOperation('background-job', 'collection-scan', async () => {
         job.update({
           stage: 'scanning', canCancel: false, boundary: null,
           progress: { completed: 0, label: 'Scan collection', detail: 'Reading installed game data and configured item sources.' }
         })
-        return collectionService.scan(input)
+        return collectionService.scanCatalog()
       }, undefined, (result) => ({
         catalogItems: result.items.length,
         observedItems: result.observedItems.length,
         warningCount: result.warnings.length
-      }), job.correlationId), (result) => ({
-        summary: 'Collection scan complete.',
-        metrics: { catalogItems: result.items.length, observedItems: result.observedItems.length }
-      }))
-      return scan.result
+      }), job.correlationId), (result) => collectionService.present(result, input))
     },
     validateCollectionRequest
   )
   ipcDomains.collection.handle(
     IPC_CHANNELS.rebuildGameDataIndex,
     async (_event, input: { sourcePaths: string[]; basis: CollectionBasis }): Promise<CollectionSnapshot> => {
-      const rebuild = jobs.run({
-        kind: 'game-data-rebuild', dedupeKey: 'game-data-rebuild:catalog', stage: 'queued',
-        progress: {
-          completed: 0, total: 4, percent: 0, unit: 'steps',
-          label: 'Rebuild game-data index', detail: 'Preparing a complete catalog rebuild.'
-        },
-        canCancel: false, boundary: null,
-        completedStage: 'complete', failedStage: 'failed', canceledStage: 'canceled'
-      }, async (job) => runDiagnosticOperation('background-job', 'game-data-rebuild', async () => {
+      return runCollectionRefresh(jobs, 'game-data-rebuild', async (job) => runDiagnosticOperation('background-job', 'game-data-rebuild', async () => {
         job.update({
           stage: 'scanning', canCancel: false, boundary: null,
           progress: { label: 'Scan installed game data', detail: 'Building a fresh catalog from installed archives.' }
         })
-        return collectionService.rebuild(input)
+        return collectionService.rebuildCatalog()
       }, undefined, (result) => ({
         catalogItems: result.items.length,
         observedItems: result.observedItems.length,
         warningCount: result.warnings.length
-      }), job.correlationId), (result) => ({
-        summary: 'Game-data rebuild complete.',
-        metrics: { catalogItems: result.items.length, observedItems: result.observedItems.length }
-      }))
-      return rebuild.result
+      }), job.correlationId), (result) => collectionService.present(result, input))
     },
     validateCollectionRequest
   )

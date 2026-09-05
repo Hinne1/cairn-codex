@@ -20,7 +20,11 @@ import type {
 } from '@shared/contracts'
 
 const collectionRarities = ['epic', 'legendary', 'mi'] as const
-export const CURRENT_COLLECTION_SCHEMA_VERSION = 14
+export const CURRENT_COLLECTION_SCHEMA_VERSION = 15
+
+function favoriteItemKey(instanceKey: string, isHardcore: boolean): string {
+  return `${isHardcore ? 1 : 0}:${instanceKey.toLowerCase()}`
+}
 
 export interface ValidatedCollectionDatabase {
   schemaVersion: number
@@ -314,11 +318,14 @@ export class CollectionDatabase {
       throw error
     }
 
-    return this.withLifetimeState(snapshot)
+    return this.withFavoriteState(this.withLifetimeState(snapshot))
   }
 
   presentSnapshot(snapshot: CollectionSnapshot, isHardcore?: boolean): CollectionSnapshot {
-    const presented = this.withLifetimeState(snapshot, isHardcore)
+    const presented = this.withFavoriteState(
+      this.withLifetimeState(snapshot, isHardcore),
+      isHardcore
+    )
     return withAffixAvailability(presented, presented.observedItems)
   }
 
@@ -392,24 +399,23 @@ export class CollectionDatabase {
         availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
       }
     })
-    return withAffixAvailability(
-      {
-        ...snapshot,
-        basis: 'archive',
-        observedItems,
-        items,
-        supplies,
-        supplySummary: summarizeSupplies(supplies),
-        rarities
-      },
-      observedItems
-    )
+    const presented = this.withFavoriteState({
+      ...snapshot,
+      basis: 'archive',
+      observedItems,
+      items,
+      supplies,
+      supplySummary: summarizeSupplies(supplies),
+      rarities
+    }, isHardcore)
+    return withAffixAvailability(presented, presented.observedItems)
   }
 
   listAvailableArchiveItems(isHardcore?: boolean): ArchiveVaultItem[] {
     const rows = this.database
       .prepare(`
-        SELECT vault_item.id, vault_item.base_record, vault_item.serialized_item, vault_item.roll_json
+        SELECT vault_item.id, vault_item.base_record, vault_item.serialized_item,
+          vault_item.roll_json, vault_item.is_hardcore
         FROM vault_item
         JOIN catalog_item ON catalog_item.record = vault_item.base_record
         WHERE state = 'ingested'
@@ -423,12 +429,14 @@ export class CollectionDatabase {
       base_record: string
       serialized_item: Uint8Array
       roll_json: string | null
+      is_hardcore: number
     }>
     return rows.map((row) => ({
       id: row.id,
       baseRecord: row.base_record,
       payload: JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as unknown,
-      rollAnalysis: row.roll_json ? (JSON.parse(row.roll_json) as ItemRollAnalysis) : null
+      rollAnalysis: row.roll_json ? (JSON.parse(row.roll_json) as ItemRollAnalysis) : null,
+      isHardcore: row.is_hardcore === 1
     }))
   }
 
@@ -1313,6 +1321,7 @@ export class CollectionDatabase {
   }
 
   private presentVaultRows(rows: VaultListRow[]): VaultListItem[] {
+    const favorites = this.loadFavoriteItemKeys()
     return rows.map((row) => {
       const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as {
         seed?: number
@@ -1324,6 +1333,7 @@ export class CollectionDatabase {
         ascendantRecord?: string
         ascendantRecord2H?: string
       }
+      const instanceKey = vaultPayloadFingerprint(payload)
       return {
         id: row.id,
         baseRecord: row.base_record,
@@ -1343,7 +1353,8 @@ export class CollectionDatabase {
         componentRecord: payload.materiaRecord ?? '',
         augmentRecord: payload.enchantmentRecord ?? '',
         ascendant: Boolean(payload.ascendantRecord || payload.ascendantRecord2H),
-        instanceKey: vaultPayloadFingerprint(payload),
+        instanceKey,
+        isFavorite: favorites.has(favoriteItemKey(instanceKey, row.is_hardcore === 1)),
         rollAnalysis: row.roll_json ? JSON.parse(row.roll_json) as ItemRollAnalysis : null,
         ingestedAtUtc: row.ingested_at_utc,
         retrievedAtUtc: row.retrieved_at_utc
@@ -1704,6 +1715,23 @@ export class CollectionDatabase {
           pinned_at_utc = excluded.pinned_at_utc
       `)
       .run(record, isHardcore ? 1 : 0, instanceKey, new Date().toISOString())
+  }
+
+  setFavoriteItem(instanceKey: string, isHardcore: boolean, favorite: boolean): void {
+    if (!favorite) {
+      this.database
+        .prepare('DELETE FROM favorite_item WHERE instance_key = ? AND is_hardcore = ?')
+        .run(instanceKey.toLowerCase(), isHardcore ? 1 : 0)
+      return
+    }
+    this.database
+      .prepare(`
+        INSERT INTO favorite_item (instance_key, is_hardcore, favorited_at_utc)
+        VALUES (?, ?, ?)
+        ON CONFLICT(instance_key, is_hardcore) DO UPDATE SET
+          favorited_at_utc = excluded.favorited_at_utc
+      `)
+      .run(instanceKey.toLowerCase(), isHardcore ? 1 : 0, new Date().toISOString())
   }
 
   getInfiniteSupplies(): boolean {
@@ -2150,7 +2178,25 @@ export class CollectionDatabase {
       `)
       version = 13
     }
-    if (version === 13) migrateArchiveItemProjection(this.database)
+    if (version === 13) {
+      migrateArchiveItemProjection(this.database)
+      version = 14
+    }
+    if (version === 14) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE favorite_item (
+          instance_key TEXT NOT NULL,
+          is_hardcore INTEGER NOT NULL CHECK(is_hardcore IN (0, 1)),
+          favorited_at_utc TEXT NOT NULL,
+          PRIMARY KEY(instance_key, is_hardcore)
+        ) STRICT;
+        CREATE INDEX favorite_item_mode_time_idx
+          ON favorite_item(is_hardcore, favorited_at_utc DESC);
+        PRAGMA user_version = 15;
+        COMMIT;
+      `)
+    }
   }
 
   private persistCatalog(items: CollectionItem[]): void {
@@ -2383,6 +2429,37 @@ export class CollectionDatabase {
     return new Map(pinnedRows.map((row) => [row.record.toLowerCase(), row.instance_key]))
   }
 
+  private loadFavoriteItemKeys(): Set<string> {
+    const rows = this.database
+      .prepare('SELECT instance_key, is_hardcore FROM favorite_item')
+      .all() as Array<{ instance_key: string; is_hardcore: number }>
+    return new Set(rows.map((row) => favoriteItemKey(row.instance_key, row.is_hardcore === 1)))
+  }
+
+  private withFavoriteState(
+    snapshot: CollectionSnapshot,
+    fallbackIsHardcore?: boolean
+  ): CollectionSnapshot {
+    const favorites = this.loadFavoriteItemKeys()
+    const modesByPath = new Map(
+      snapshot.scannedStashes.map((stash) => [stash.path.toLowerCase(), stash.isHardcore])
+    )
+    return {
+      ...snapshot,
+      observedItems: snapshot.observedItems.map((item) => {
+        const isHardcore = item.isHardcore ?? modesByPath.get(item.sourcePath.toLowerCase()) ??
+          fallbackIsHardcore ?? snapshot.isHardcore ?? false
+        return {
+          ...item,
+          isHardcore,
+          isFavorite: Boolean(
+            item.instanceKey && favorites.has(favoriteItemKey(item.instanceKey, isHardcore))
+          )
+        }
+      })
+    }
+  }
+
   private withInstanceKeys(snapshot: CollectionSnapshot): CollectionSnapshot {
     return {
       ...snapshot,
@@ -2434,6 +2511,7 @@ export interface ArchiveVaultItem {
   baseRecord: string
   payload: unknown
   rollAnalysis: ItemRollAnalysis | null
+  isHardcore: boolean
 }
 
 export interface ArchiveRollAnalysisCandidate {

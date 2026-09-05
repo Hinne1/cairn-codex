@@ -86,12 +86,14 @@ export function createMiWorkshopProjectionControls(
   // page-only update preserves the projection input identity.
   const query = computed(() => controls.value.query)
   const affix = computed(() => controls.value.affix)
+  const favoritesOnly = computed(() => controls.value.favoritesOnly === true)
   const metric = computed(() => controls.value.metric)
   const metricDirection = computed(() => controls.value.metricDirection)
   const sort = computed(() => controls.value.sort)
   return computed(() => ({
     query: query.value,
     affix: affix.value,
+    ...(favoritesOnly.value ? { favoritesOnly: true } : {}),
     metric: metric.value,
     metricDirection: metricDirection.value,
     sort: sort.value,
@@ -155,6 +157,7 @@ export function createMiWorkshopRows(options: MiWorkshopViewOptions): MiWorkshop
   const affixByRecord = buildAffixIndex(options.affixes)
   const grouped = new Map<string, Omit<MiWorkshopRow, 'leader' | 'selectedMetric'>>()
   for (const copy of options.copies) {
+    if (options.controls.favoritesOnly && !copy.isFavorite) continue
     const base = bases.get(copy.baseRecord.toLocaleLowerCase())
     if (!base) continue
     const prefix = affixByRecord.get(copy.prefixRecord.toLocaleLowerCase())

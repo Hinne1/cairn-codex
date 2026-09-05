@@ -63,7 +63,7 @@ export type AppRoute =
   | RouteBase<'collection', {
       category: string
       query: string
-      ownership: OwnershipFilter
+      ownership: OwnershipFilter | 'favorite'
       rarity: RarityFilter
       sort: SortMode
       direction: SortDirection
@@ -126,6 +126,7 @@ export type AppRoute =
       page: number
     }>
   | RouteBase<'mi-workshop', {
+      favoritesOnly?: boolean
       query: string
       affix: MiAffixFilter
       metric: MiMetricKey
@@ -283,7 +284,7 @@ export function parseAppRoute(value: unknown): AppRoute | null {
   switch (workspace) {
     case 'collection': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
       category: stringValue(controls.category, 'All', 80), query: stringValue(controls.query),
-      ownership: enumValue(controls.ownership, ownershipFilters, 'all'), rarity: enumValue(controls.rarity, rarityFilters, 'all'),
+      ownership: enumValue(controls.ownership, [...ownershipFilters, 'favorite'] as const, 'all'), rarity: enumValue(controls.rarity, rarityFilters, 'all'),
       sort: sortModeValue(controls.sort), direction: enumValue(controls.direction, directions, 'desc'),
       page: integerValue(controls.page, 1, 1, 100_000)
     } }
@@ -322,6 +323,7 @@ export function parseAppRoute(value: unknown): AppRoute | null {
       page: integerValue(controls.page, 1, 1, 100_000)
     } }
     case 'mi-workshop': return { version: APP_ROUTE_VERSION, workspace, itemRecord, controls: {
+      ...(controls.favoritesOnly === true ? { favoritesOnly: true } : {}),
       query: stringValue(controls.query), affix: enumValue(controls.affix, miAffixes, 'all'), metric: metricValue(controls.metric),
       metricDirection: enumValue(controls.metricDirection, directions, 'desc'), sort: enumValue(controls.sort, miSortModes, 'metric'),
       page: integerValue(controls.page, 1, 1, 100_000)

@@ -44,6 +44,7 @@ export interface CollectionMaterialsProjectionOptions {
   mode: 'collection' | 'materials'
   query: Pick<CompiledSearchQuery, 'matches'>
   doubleRareMiBaseRecords?: ReadonlySet<string>
+  favoriteRecords?: ReadonlySet<string>
   searchDocument: (item: CollectionItem) => SearchDocument
   rollSummaries?: CollectionRollSummaries
 }
@@ -166,7 +167,8 @@ export function createCollectionMaterialsRows(
           ? item.rarity === 'mi' && Boolean(options.doubleRareMiBaseRecords?.has(item.record.toLocaleLowerCase()))
           : item.rarity === controls.rarity))
     .filter((item) => controls.ownership === 'all' ||
-      (controls.ownership === 'owned' ? isCollectionOwned(item) : !isCollectionOwned(item)))
+      (controls.ownership === 'favorite' ? Boolean(options.favoriteRecords?.has(item.record.toLocaleLowerCase())) :
+        controls.ownership === 'owned' ? isCollectionOwned(item) : !isCollectionOwned(item)))
     .filter((item) => options.query.matches(options.searchDocument(item)))
 
   return rows.sort((left, right) => compareCollectionItems(left, right, controls, options.rollSummaries))

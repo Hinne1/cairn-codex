@@ -24,7 +24,7 @@ export const MAIN_IPC_CHANNELS = {
     IPC_CHANNELS.discoverGrimDawn, IPC_CHANNELS.listCharacters,
     IPC_CHANNELS.getCachedCollection, IPC_CHANNELS.hydrateArchiveRolls,
     IPC_CHANNELS.scanCollection, IPC_CHANNELS.rebuildGameDataIndex,
-    IPC_CHANNELS.setPinnedBest, IPC_CHANNELS.getInfiniteSupplies,
+    IPC_CHANNELS.setPinnedBest, IPC_CHANNELS.setFavoriteItem, IPC_CHANNELS.getInfiniteSupplies,
     IPC_CHANNELS.setInfiniteSupplies
   ],
   archive: [

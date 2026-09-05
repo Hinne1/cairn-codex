@@ -63,6 +63,7 @@ export async function presentCollection(
     const payload = payloads[index]!
     return {
       sourcePath: `vault://${item.id}`,
+      isHardcore: item.isHardcore,
       tabIndex: -1,
       itemIndex: index,
       baseRecord: payload.baseRecord,

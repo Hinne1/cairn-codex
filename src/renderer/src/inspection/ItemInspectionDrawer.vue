@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { CollectionItem, ObservedStashItem, VaultListItem } from '../../../shared/contracts'
 import type { ItemInspectionSession } from './item-inspection'
+import type { CopyFavorites } from './copy-favorites'
 import { inspectionCopyKey } from './item-inspection'
 import type { MiWorkshopControls } from '../workspaces/mi-workshop'
 import { miMetricLabel, miMetricResult, buildMiMetricOptions } from '../workspaces/mi-workshop'
@@ -14,6 +15,7 @@ import { isAvailableViaAwakening } from '../../../shared/collection-availability
 
 const props = defineProps<{
   session: ItemInspectionSession
+  favorites?: CopyFavorites
   itemIconUrl: (item: CollectionItem) => string | null
   catalogItemByRecord: (record: string | null | undefined) => CollectionItem | null
   vaultCopyForObserved: (copy: ObservedStashItem) => VaultListItem | null
@@ -246,6 +248,11 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
               <p class="copy-provenance">{{ copySourceLabel(copy) }} · Seed {{ copy.seed }}</p>
             </div>
             <div class="copy-actions">
+              <button v-if="favorites" type="button" class="favorite-copy"
+                :aria-pressed="Boolean(copy.isFavorite)"
+                :disabled="favorites.busy.value || !favorites.canToggle(copy)"
+                @click="favorites.toggle(copy)"
+              >{{ copy.isFavorite ? '★ Favorited' : '☆ Favorite copy' }}</button>
               <span v-if="copy.instanceKey === comparisonReferenceCopy?.instanceKey" class="reference-badge">Reference</span>
               <button
                 v-if="vaultCopyForObserved(copy)"

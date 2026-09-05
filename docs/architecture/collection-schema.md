@@ -85,6 +85,12 @@ its live adapter marker. Ordinary offline failures and malformed identities rema
 unchanged. Resuming still requires the polled incoming source to match every
 persisted payload field and its original mode; reopening is idempotent.
 
+Schema version 15 adds `favorite_item`, keyed by the location-independent item fingerprint and
+SC/HC mode. Favorites are independent of saved comparison references. Identical fingerprints in
+the same mode share favorite state; other rolls and the other mode remain independent. The
+migration only adds preference metadata and does not rewrite exact item payloads. Favorites
+survive rescans, retrieval, and restart, and are included in verified archive backups.
+
 Schema version 14 adds `vault_item_projection`, a derived metadata table for bounded Supplies and
 Dismantling queries. A transactional backfill and insert/payload-or-roll-update triggers project
 seed, stack count, attachment/affix records and numeric roll percentile without changing exact

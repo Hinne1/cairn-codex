@@ -28,7 +28,7 @@ import { StartupRecoveryService, type StartupRecoveryStatus } from './startup-re
 import { PreferenceFileStore } from './preference-file-store.ts';
 import { BackgroundJobCanceledError, BackgroundJobCoordinator, runGlobalRollHydration, TrailingJobQueue } from './background-jobs';
 import { createMainIpcDomains } from './ipc/domains.ts';
-import { booleanField, validateBackgroundJobId, validateCollectionRequest, validateNavigation, validateOperationHistory, validateOptionalMode, validatePath, validatePathAndVaultIds, validatePinnedBest, validatePreferenceBootstrap, validatePreferenceLoad, validateRendererError, validateSerializedPreferences, validateSourcePaths, validateSpecialRecovery, validateStartupPhase, validateSupplyDispense, validateVaultIds, validateVaultPage, validateZoomFactor } from './ipc/validation.ts';
+import { booleanField, validateBackgroundJobId, validateCollectionRequest, validateFavoriteItem, validateNavigation, validateOperationHistory, validateOptionalMode, validatePath, validatePathAndVaultIds, validatePinnedBest, validatePreferenceBootstrap, validatePreferenceLoad, validateRendererError, validateSerializedPreferences, validateSourcePaths, validateSpecialRecovery, validateStartupPhase, validateSupplyDispense, validateVaultIds, validateVaultPage, validateZoomFactor } from './ipc/validation.ts';
 import { registerManagedShutdown, registerPrimaryWindowLifecycle, registerWindowStatePersistence } from './window-lifecycle.ts';
 import { MainOperationCoordinator } from './operation-coordinator.ts';
 import { BackgroundJobService } from './ipc/background-job-service.ts';
@@ -875,6 +875,7 @@ function registerIpcHandlers(
     preferences: {
       setPinnedBest: (record, instanceKey, isHardcore) =>
         database.setPinnedBest(record, instanceKey, isHardcore),
+      setFavoriteItem: (instanceKey, isHardcore, favorite) => database.setFavoriteItem(instanceKey, isHardcore, favorite),
       getInfiniteSupplies: () => database.getInfiniteSupplies(),
       setInfiniteSupplies: (enabled) => database.setInfiniteSupplies(enabled),
       runExclusive,
@@ -941,6 +942,11 @@ function registerIpcHandlers(
     (_event, input: { record: string; instanceKey: string | null; isHardcore: boolean }) =>
       collectionService.setPinnedBest(input),
     validatePinnedBest
+  )
+  ipcDomains.collection.handle(
+    IPC_CHANNELS.setFavoriteItem,
+    (_event, input: { instanceKey: string; isHardcore: boolean; favorite: boolean }) => collectionService.setFavoriteItem(input),
+    validateFavoriteItem
   )
   ipcDomains.collection.handle(
     IPC_CHANNELS.getInfiniteSupplies,

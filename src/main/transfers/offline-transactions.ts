@@ -1,19 +1,23 @@
 
+import { resolve } from 'node:path'
 import type { CollectionDatabase } from '../collection-database.ts';
 import type { TransferPorts } from './runtime.ts';
+import type { ApprovedOfflineIngest, ApprovedOfflineRetrieval } from '../ipc/archive-service.ts'
 
 import type { IngestResult, RetrievalResult, WriteSafetyStatus } from '../../shared/contracts.ts';
 import { isHardcoreStashPath } from './runtime.ts';
 
 export type OfflineTransactionsDependencies = TransferPorts & {
-  database: Pick<CollectionDatabase, 'completeIngestOperation' | 'completeRetrievalOperation' | 'failIngestOperation' | 'failRetrievalOperation' | 'getVaultItems' | 'markRetrievalNeedsRecovery' | 'prepareIngestOperation' | 'prepareRetrievalOperation'>
+  database: Pick<CollectionDatabase, 'completeIngestOperation' | 'completeRetrievalOperation' | 'failIngestOperation' | 'failRetrievalOperation' | 'getVaultItems' | 'markIngestNeedsRecovery' | 'markRetrievalNeedsRecovery' | 'prepareIngestOperation' | 'prepareRetrievalOperation' | 'updatePendingOperationDetail'>
 }
 
-export interface IngestCommand {
-  path: string
-  expectedSourceSha256: string
-  items: Array<{ tabIndex: number; itemIndex: number; expectedSeed: number }>
+function samePath(left: string, right: string): boolean {
+  const normalize = (path: string): string => process.platform === 'win32'
+    ? resolve(path).toLowerCase() : resolve(path)
+  return normalize(left) === normalize(right)
 }
+
+export type IngestCommand = ApprovedOfflineIngest
 
 export interface IngestPlan {
   path: string
@@ -36,12 +40,7 @@ export interface CommittedIngest {
   }
 }
 
-export interface RetrievalCommand {
-  path: string
-  expectedSourceSha256: string
-  targetTabIndex: number
-  vaultItemIds: string[]
-}
+export type RetrievalCommand = ApprovedOfflineRetrieval
 
 export interface RetrievalPlan {
   path: string
@@ -70,9 +69,11 @@ export async function executeIngestCommand(
   dependencies: OfflineTransactionsDependencies,
   command: IngestCommand
 ): Promise<IngestResult> {
+  command = structuredClone(command)
   const { helper, database, paths, clock } = dependencies
   const operationId = clock.operationId()
   let prepared = false
+  let commitAttempted = false
   try {
     const safety = await helper.request<WriteSafetyStatus>('inspect-write-safety')
     if (!safety.permitted) {
@@ -85,6 +86,7 @@ export async function executeIngestCommand(
       items: selectors
     })
     if (
+      !samePath(plan.path, command.path) ||
       plan.sourceSha256.toLowerCase() !== command.expectedSourceSha256.toLowerCase() ||
       !plan.semanticallyValid ||
       !plan.idempotent ||
@@ -122,6 +124,7 @@ export async function executeIngestCommand(
     })
     prepared = true
 
+    commitAttempted = true
     const committed = await helper.request<CommittedIngest>('commit-ingest-items', {
       operationId,
       path: plan.path,
@@ -136,18 +139,8 @@ export async function executeIngestCommand(
       throw new Error('Committed ingest hashes do not match the persisted plan.')
     }
 
-    const completedAtUtc = clock.nowUtc()
-    const vaultItemIds = database.completeIngestOperation({
-      operationId,
-      backupPath: committed.transaction.backupPath,
-      completedAtUtc,
-      isHardcore: isHardcoreStashPath(plan.path),
-      detail: {
-        phase: 'committed',
-        replacementSha256: committed.transaction.committedSha256,
-        rollbackPath: committed.transaction.rollbackPath,
-        vaultItemIds: vaultItems.map((item) => item.vaultItemId)
-      }
+    database.updatePendingOperationDetail(operationId, {
+      phase: 'verifying_commit', transaction: committed.transaction
     })
     const verified = await helper.request<{
       sha256: string
@@ -160,6 +153,19 @@ export async function executeIngestCommand(
     ) {
       throw new Error('Post-commit stash verification did not match the committed ingest.')
     }
+
+    const vaultItemIds = database.completeIngestOperation({
+      operationId,
+      backupPath: committed.transaction.backupPath,
+      completedAtUtc: clock.nowUtc(),
+      isHardcore: isHardcoreStashPath(plan.path),
+      detail: {
+        phase: 'committed',
+        replacementSha256: committed.transaction.committedSha256,
+        rollbackPath: committed.transaction.rollbackPath,
+        vaultItemIds: vaultItems.map((item) => item.vaultItemId)
+      }
+    })
 
     return {
       operationId,
@@ -179,7 +185,8 @@ export async function executeIngestCommand(
     }
   } catch (error) {
     if (prepared) {
-      database.failIngestOperation(operationId, error)
+      if (commitAttempted) database.markIngestNeedsRecovery(operationId, error)
+      else database.failIngestOperation(operationId, error)
     }
     throw error
   }
@@ -189,6 +196,7 @@ export async function executeRetrievalCommand(
   dependencies: OfflineTransactionsDependencies,
   command: RetrievalCommand
 ): Promise<RetrievalResult> {
+  command = structuredClone(command)
   const { helper, database, paths, clock } = dependencies
   const operationId = clock.operationId()
   let prepared = false
@@ -216,6 +224,8 @@ export async function executeRetrievalCommand(
       items: payloads
     })
     if (
+      !samePath(plan.path, command.path) ||
+      plan.targetTabIndex !== command.targetTabIndex ||
       plan.sourceSha256.toLowerCase() !== command.expectedSourceSha256.toLowerCase() ||
       !plan.restoredExactly ||
       !plan.semanticallyValid ||
@@ -257,6 +267,10 @@ export async function executeRetrievalCommand(
     ) {
       throw new Error('Committed retrieval hashes do not match the persisted plan.')
     }
+
+    database.updatePendingOperationDetail(operationId, {
+      phase: 'verifying_commit', transaction: committed.transaction
+    })
 
     const verified = await helper.request<{
       sha256: string
@@ -349,8 +363,8 @@ export async function planRetrievalCommand(
   }
 
   return {
-      status: 'planned',
-      vaultItemIds: command.vaultItemIds,
-      ...plan
+    status: 'planned',
+    vaultItemIds: command.vaultItemIds,
+    ...plan
   }
 }

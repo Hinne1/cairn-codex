@@ -41,6 +41,20 @@ shapes are unchanged by this split.
 
 ## Persistence and native serialization
 
+Concrete transfer adapters live in `src/main/transfers/`, not the Electron
+composition root. Bootstrap injects helper, repository, clock, directories and
+diagnostics once and binds the resulting operations to the domain services.
+See [write transactions](write-transactions.md) for journal and approval rules.
+
+Queue ownership is outer-to-inner: the shared `MainOperationCoordinator`, then
+the archive/live service's private queue, then an adapter with no queue of its
+own. Recovery adapters run inside the caller's shared queue and never reacquire
+it. A service's private queue protects direct callers and deduplicates live
+submissions; it must not be replaced with the already-held shared queue.
+Shutdown drains the shared coordinator and service queues before closing SQLite
+or the helper. Operational command modes run one adapter and exit; they do not
+register a competing IPC writer.
+
 `MainOperationCoordinator` owns the rejection-safe write queue used by imports, collection writes,
 backups, and every offline/live transfer. A failed operation does not poison later queued work. Transfer writes first
 reconcile retained journals and receipts and fail closed while any earlier outcome still needs

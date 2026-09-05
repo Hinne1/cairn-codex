@@ -329,6 +329,7 @@ const copyFavorites = createCopyFavorites({
   contextKey: () => JSON.stringify([collectionRequestKey(collectionContext()), snapshot.value?.isHardcore, snapshot.value?.scannedAtUtc]),
   modeFor: copy => copy.isHardcore,
   write: (instanceKey, isHardcore, favorite) => window.cairnCodex.setFavoriteItem(instanceKey, isHardcore, favorite),
+  reconcile: () => { void reloadCollection() },
   apply: (instanceKey, isHardcore, favorite) => {
     vaultItems.value = applyCopyFavorite(vaultItems.value, instanceKey, isHardcore, favorite)
     storedVaultPage.value = { ...storedVaultPage.value, items: applyCopyFavorite(storedVaultPage.value.items, instanceKey, isHardcore, favorite) }

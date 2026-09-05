@@ -38,6 +38,7 @@ createApp({ setup() {
   const favoritesEnabled = ref(false)
   const favoriteFailure = ref(false)
   const favorites = createCopyFavorites({ contextKey: () => 'fixture-sc', modeFor: copy => copy.isHardcore,
+    reconcile: () => events.push(['favorite-reconcile']),
     write: async (...args) => { if (favoriteFailure.value) throw new Error('Synthetic save failure'); events.push(['favorite', ...args]) },
     apply: (...args) => { copies.value = applyCopyFavorite(copies.value, ...args) },
     reportError: error => events.push(['favorite-error', error.message]) })

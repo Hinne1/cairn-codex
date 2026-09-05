@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
 import { effectScope, ref } from 'vue'
 import { CollectionDatabase } from '../src/main/collection-database.ts'
 import { createVaultInstanceKey, presentCollection } from '../src/main/collection-presentation.ts'
@@ -80,6 +81,20 @@ try {
   await invoke({ ...write, favorite: false })
   assert.deepEqual(page().filter(item => item.isFavorite).map(item => item.id), ['hc-a'])
   assert.equal(payloadHash(), before, 'favoriting never changes exact payloads')
+  raw.exec('BEGIN')
+  const remember = raw.prepare('INSERT OR IGNORE INTO favorite_item VALUES(?,0,?)')
+  for (let index = 0; index < 20_000; index++) remember.run(index.toString(16).padStart(64, '0'), '2026-09-05T00:00:00Z')
+  raw.exec('COMMIT')
+  const queries = []
+  const originalPrepare = DatabaseSync.prototype.prepare
+  DatabaseSync.prototype.prepare = function(sql, ...args) { queries.push(sql); return originalPrepare.call(this, sql, ...args) }
+  const queryStart = performance.now()
+  try {
+    for (let index = 0; index < 50; index++) database.queryVaultItems({ state: 'ingested', sort: 'recent', direction: 'desc', offset: 0, limit: 1 })
+  } finally { DatabaseSync.prototype.prepare = originalPrepare }
+  assert.ok(queries.filter(sql => sql.includes('FROM favorite_item')).every(sql => /WHERE instance_key = \? AND is_hardcore = \?/.test(sql)),
+    'bounded pages only look up their own fingerprints through the composite primary key')
+  console.log('50 single-row pages with 20k retained favorites: ' + (performance.now() - queryStart).toFixed(1) + 'ms')
   const item = { ...template.items[0], rarity: 'mi', availableCount: 3 }
   const copies = [{ ...payload, instanceKey: fingerprint, isHardcore: false, isFavorite: true },
     { ...payload, seed: 456, instanceKey: createVaultInstanceKey({ ...payload, seed: 456 }), isHardcore: false, isFavorite: false }]
@@ -94,16 +109,18 @@ try {
   const context = ref('sc-a')
   const scope = effectScope()
   let finish, reject, writes = 0
-  const applied = [], errors = []
+  const applied = [], errors = [], reconciled = []
   const favorites = scope.run(() => createCopyFavorites({ contextKey: () => context.value, modeFor: copy => copy.isHardcore,
     write: () => { writes++; return new Promise((resolve, fail) => { finish = resolve; reject = fail }) },
-    apply: (...args) => applied.push(args), reportError: error => errors.push(error) }))
+    apply: (...args) => applied.push(args), reconcile: () => reconciled.push(context.value), reportError: error => errors.push(error) }))
   const pending = favorites.toggle(copies[0]); await favorites.toggle(copies[0])
   assert.equal(writes, 1); assert.equal(favorites.busy.value, true)
   context.value = 'hc'; context.value = 'sc-a'; finish(); await pending
   assert.equal(applied.length, 0, 'ABA context changes reject stale completions')
+  assert.deepEqual(reconciled, ['sc-a'], 'a durable completion reloads the current context even after ABA')
   const failed = favorites.toggle(copies[0]); reject(new Error('disk unavailable')); await failed
   assert.equal(errors.length, 1); assert.equal(applied.length, 0); assert.equal(favorites.busy.value, false)
+  assert.equal(reconciled.length, 2, 'uncertain rejected responses also reconcile durable state')
   const retried = favorites.toggle(copies[0]); finish(); await retried
   assert.deepEqual(applied, [[fingerprint, false, false]])
   const changed = applyCopyFavorite([...copies, { ...copies[0], isHardcore: true }], fingerprint, false, false)
@@ -118,7 +135,11 @@ try {
   assert.equal(favorites.canToggle(authoritativeIngest), true)
   assert.equal(authoritativeIngest.isFavorite, true, 'reingest restores the saved favorite through authoritative projection')
   assert.equal(applyCopyFavorite([authoritativeIngest], fingerprint, false, false)[0].isFavorite, false)
-  scope.stop()
+  const beforeDispose = { applied: applied.length, reconciled: reconciled.length, errors: errors.length }
+  const disposedWrite = favorites.toggle(copies[0]); scope.stop(); finish(); await disposedWrite
+  assert.deepEqual({ applied: applied.length, reconciled: reconciled.length, errors: errors.length }, beforeDispose,
+    'disposed sessions cannot publish a late response or request reload')
+  await favorites.toggle(copies[0]); assert.equal(favorites.busy.value, false)
   const app = await readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8')
   assert.match(app, /applyLiveIngests\(result.ingested\)[\s\S]*?await reloadCollection\(\)[\s\S]*?reportSuccess\(`Live-ingested/)
   const preload = await readFile(new URL('../src/preload/index.ts', import.meta.url), 'utf8')

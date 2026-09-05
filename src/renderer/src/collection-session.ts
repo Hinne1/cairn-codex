@@ -56,7 +56,7 @@ export class CollectionSession {
         if (!isCurrent()) {
           // The catalog refresh still committed useful shared work. Project it
           // again for the selection that now owns the view, using a new read.
-          if (snapshot && !this.disposed && (kind === 'scan' || kind === 'rebuild')) this.options.reload()
+          if (snapshot && !this.disposed && (kind === 'scan' || kind === 'rebuild' || kind === 'hydration')) this.options.reload()
           return false
         }
         if (snapshot) {

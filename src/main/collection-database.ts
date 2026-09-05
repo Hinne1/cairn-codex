@@ -1321,7 +1321,8 @@ export class CollectionDatabase {
   }
 
   private presentVaultRows(rows: VaultListRow[]): VaultListItem[] {
-    const favorites = this.loadFavoriteItemKeys()
+    const favoriteLookup = this.database.prepare('SELECT 1 FROM favorite_item WHERE instance_key = ? AND is_hardcore = ?')
+    const favorites = new Map<string, boolean>()
     return rows.map((row) => {
       const payload = JSON.parse(Buffer.from(row.serialized_item).toString('utf8')) as {
         seed?: number
@@ -1334,6 +1335,8 @@ export class CollectionDatabase {
         ascendantRecord2H?: string
       }
       const instanceKey = vaultPayloadFingerprint(payload)
+      const favoriteKey = favoriteItemKey(instanceKey, row.is_hardcore === 1)
+      if (!favorites.has(favoriteKey)) favorites.set(favoriteKey, Boolean(favoriteLookup.get(instanceKey, row.is_hardcore)))
       return {
         id: row.id,
         baseRecord: row.base_record,
@@ -1354,7 +1357,7 @@ export class CollectionDatabase {
         augmentRecord: payload.enchantmentRecord ?? '',
         ascendant: Boolean(payload.ascendantRecord || payload.ascendantRecord2H),
         instanceKey,
-        isFavorite: favorites.has(favoriteItemKey(instanceKey, row.is_hardcore === 1)),
+        isFavorite: favorites.get(favoriteKey)!,
         rollAnalysis: row.roll_json ? JSON.parse(row.roll_json) as ItemRollAnalysis : null,
         ingestedAtUtc: row.ingested_at_utc,
         retrievedAtUtc: row.retrieved_at_utc

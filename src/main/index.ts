@@ -49,7 +49,8 @@ import {
   isCollectionOwned,
   withAwakeningAvailability
 } from '@shared/collection-availability'
-import { withRecipeAvailability } from '@shared/recipe-availability'
+import { presentCollection, withRecipeCollection, createVaultInstanceKey, type LiveVaultPayload } from './collection-presentation.ts'
+import { QuarantineReconciliationService } from './quarantine-reconciliation.ts'
 import { GrimDawnHelperClient } from './grim-dawn/helper-client'
 import {
   CollectionDatabase,
@@ -370,31 +371,6 @@ interface ItemIconExtractionResult {
   failures: Array<{ bitmap: string; error: string }>
 }
 
-interface LiveVaultPayload {
-  stashVersion: number
-  sourceTabIndex: number
-  sourceItemIndex: number
-  baseRecord: string
-  prefixRecord: string
-  suffixRecord: string
-  modifierRecord: string
-  transmuteRecord: string
-  seed: number
-  materiaRecord: string
-  relicCompletionBonusRecord: string
-  relicSeed: number
-  enchantmentRecord: string
-  ascendantRecord: string
-  ascendantRecord2H: string
-  unknown: number
-  enchantmentSeed: number
-  materiaCombines: number
-  stackCount: number
-  rerolls: number
-  affixRerolls: number
-  xOffset: number
-  yOffset: number
-}
 
 interface LiveIncomingItem {
   path: string
@@ -783,6 +759,24 @@ function registerIpcHandlers(
   const queueArchiveBackup = (reason: string): void => {
     queuedArchiveBackups.enqueue(reason)
   }
+  const quarantineReconciliation = new QuarantineReconciliationService({
+    jobs,
+    listRecords: () => database.listQuarantineCatalogRecords(),
+    resolve: (installationPath, records) => helper.request<ResolvedArchiveCatalogItem[]>(
+      'resolve-archive-items', { installationPath, records }
+    ),
+    commit: items => database.resolveQuarantineCatalogItems(items),
+    runExclusive,
+    queueBackup: queueArchiveBackup
+  })
+  const reconcileQuarantine = async (snapshot: CollectionSnapshot | null): Promise<void> => {
+    try {
+      await quarantineReconciliation.reconcile(snapshot?.discovery.installations[0]?.path)
+    } catch (error) {
+      // A metadata failure preserves quarantine and never changes import/scan success.
+      diagnostics.error('quarantine-reconciliation', 'metadata.failed', error)
+    }
+  }
 
   const stopPublishingJobs = jobs.subscribe((job) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -1113,6 +1107,7 @@ function registerIpcHandlers(
           publishProgress
         })
         if (result.canceled) job.finishAsCanceled('canceled')
+        else await reconcileQuarantine(latestCollection)
         return result
       } catch (error) {
         if (error instanceof ItemAssistantImportCanceledError) {
@@ -1190,7 +1185,7 @@ function registerIpcHandlers(
       present: async (snapshot, basis) => presentScreenshotCollection(
         snapshot, basis, process.env.CAIRN_CODEX_SCREENSHOT_PATH,
         process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE, createScreenshotCollectionFixture
-      ) ?? presentCollection(helper, database, snapshot, basis)
+      ) ?? presentCollection(database, snapshot, basis, ROLL_ANALYSIS_VERSION)
     },
     hydration: {
       hydrateAll: ({ installationPath, batchLimit, onProgress }) =>
@@ -1278,7 +1273,8 @@ function registerIpcHandlers(
       runExclusive,
       queueArchiveBackup
     },
-    catalogPresentationVersion: CATALOG_PRESENTATION_VERSION
+    catalogPresentationVersion: CATALOG_PRESENTATION_VERSION,
+    afterCatalogCommit: reconcileQuarantine
   })
   ipcDomains.collection.handle(
     IPC_CHANNELS.discoverGrimDawn,
@@ -1603,6 +1599,7 @@ function registerIpcHandlers(
   )
   return async () => {
     stopPublishingJobs()
+    await quarantineReconciliation.shutdown()
     await queuedArchiveBackups.flush()
     await preferenceStore.flush()
     await operations.flush()
@@ -3366,155 +3363,8 @@ function withProjectedAffixes(
   }
 }
 
-function lifetimeMode(snapshot: CollectionSnapshot): boolean | undefined {
-  const modes = new Set(snapshot.scannedStashes.map((stash) => stash.isHardcore))
-  return modes.size === 1 ? [...modes][0] : undefined
-}
 
-async function presentCollection(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  snapshot: CollectionSnapshot,
-  basis: CollectionBasis
-): Promise<CollectionSnapshot> {
-  await resolveQuarantinedArchiveItems(helper, database, snapshot)
-  const mode = lifetimeMode(snapshot)
-  if (basis !== 'archive') {
-    return withRecipeCollection(
-      database.presentSnapshot({ ...snapshot, basis: 'stashes' }, mode),
-      mode
-    )
-  }
 
-  const installation = snapshot.discovery.installations[0]
-  const archived = database.listAvailableArchiveItems(mode)
-  if (!installation || archived.length === 0) {
-    return withRecipeCollection(database.presentArchiveSnapshot(snapshot, [], mode), mode)
-  }
-  const payloads = archived.map((item) => item.payload as LiveVaultPayload)
-  const observedItems = archived.map((item, index): ObservedStashItem => {
-    const payload = payloads[index]!
-    return {
-      sourcePath: `vault://${item.id}`,
-      tabIndex: -1,
-      itemIndex: index,
-      baseRecord: payload.baseRecord,
-      prefixRecord: payload.prefixRecord,
-      suffixRecord: payload.suffixRecord,
-      modifierRecord: payload.modifierRecord,
-      transmuteRecord: payload.transmuteRecord,
-      seed: payload.seed,
-      materiaRecord: payload.materiaRecord,
-      relicCompletionBonusRecord: payload.relicCompletionBonusRecord,
-      relicSeed: payload.relicSeed,
-      enchantmentRecord: payload.enchantmentRecord,
-      ascendantRecord: payload.ascendantRecord,
-      ascendantRecord2H: payload.ascendantRecord2H,
-      enchantmentSeed: payload.enchantmentSeed,
-      materiaCombines: payload.materiaCombines,
-      stackCount: payload.stackCount,
-      rerolls: payload.rerolls,
-      affixRerolls: payload.affixRerolls,
-      rollAnalysis: archived[index]!.rollAnalysis,
-      instanceKey: createVaultInstanceKey(payload)
-    }
-  })
-  return {
-    ...withRecipeCollection(database.presentArchiveSnapshot(snapshot, observedItems, mode), mode),
-    rollHydrationPending: database.countArchiveRollAnalysisCandidates(ROLL_ANALYSIS_VERSION, mode)
-  }
-}
-
-async function resolveQuarantinedArchiveItems(
-  helper: GrimDawnHelperClient,
-  database: CollectionDatabase,
-  snapshot: CollectionSnapshot
-): Promise<void> {
-  const records = database.listQuarantineCatalogRecords()
-  const installationPath = snapshot.discovery.installations[0]?.path
-  if (records.length === 0 || !installationPath) return
-  try {
-    const resolved = await helper.request<ResolvedArchiveCatalogItem[]>('resolve-archive-items', {
-      installationPath,
-      records
-    })
-    const result = database.resolveQuarantineCatalogItems(resolved)
-    console.log(
-      `[quarantine-audit] released ${result.releasedRecords} valid Rare records; ` +
-      `retained ${result.recoveryRecords} generic records with resolved metadata; ` +
-      `${result.missingRecords} records were absent from the installed databases.`
-    )
-  } catch (error) {
-    console.warn('[quarantine-audit] Installed-data resolution failed; originals remain untouched.', error)
-  }
-}
-
-function withRecipeCollection(
-  snapshot: CollectionSnapshot,
-  isHardcore?: boolean
-): CollectionSnapshot {
-  const decorate = (item: CollectionSnapshot['items'][number]) =>
-    withRecipeAvailability(item, isHardcore)
-  const recipeItemsCatalog = snapshot.items.map(decorate)
-  const recipePlannerItems = (snapshot.plannerItems ?? []).map(decorate)
-  const materials = (snapshot.materials ?? []).map(decorate)
-  const awakeningSources = [...recipeItemsCatalog, ...recipePlannerItems]
-  const items = withAwakeningAvailability(recipeItemsCatalog, awakeningSources)
-  const plannerItems = withAwakeningAvailability(recipePlannerItems, awakeningSources)
-  const recipeItems = [...items, ...plannerItems, ...materials].filter(
-    (item, index, all) =>
-      Boolean(item.acquisition?.crafting) &&
-      all.findIndex((candidate) => candidate.record.toLowerCase() === item.record.toLowerCase()) === index
-  )
-  const rarities = snapshot.rarities.map((summary) => {
-    const matching = items.filter((item) => item.rarity === summary.rarity)
-    return {
-      ...summary,
-      total: matching.length,
-      collected: matching.filter(isCollectionOwned).length,
-      availableCopies: matching.reduce((count, item) => count + item.availableCount, 0)
-    }
-  })
-  const collectedRecipes = recipeItems.filter((item) => item.recipeUnlocked).length
-  return {
-    ...snapshot,
-    items,
-    plannerItems,
-    materials,
-    rarities,
-    recipeSummary: {
-      total: recipeItems.length,
-      collected: collectedRecipes,
-      unlockedItems: collectedRecipes
-    }
-  }
-}
-
-function createVaultInstanceKey(item: LiveVaultPayload): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify([
-        item.baseRecord,
-        item.prefixRecord,
-        item.suffixRecord,
-        item.modifierRecord,
-        item.transmuteRecord,
-        item.seed,
-        item.materiaRecord,
-        item.relicCompletionBonusRecord,
-        item.relicSeed,
-        item.enchantmentRecord,
-        item.ascendantRecord,
-        item.ascendantRecord2H,
-        item.enchantmentSeed,
-        item.materiaCombines,
-        item.stackCount,
-        item.rerolls,
-        item.affixRerolls
-      ])
-    )
-    .digest('hex')
-}
 
 function registerItemIconProtocol(): void {
   const iconDirectory = join(app.getPath('userData'), 'item-icons')

@@ -1,5 +1,18 @@
 # Release test matrix
 
+## Quarantine command ownership (#155, 2026-09-05)
+
+Synthetic on-disk archive tests verify unchanged SQLite data versions across cached
+read APIs, including during delayed resolution. Explicit reconciliation coalesces
+duplicate requests, uses 256-record batches, serializes with an archive operation,
+queues backups only for changed metadata, and leaves exact serialized payloads,
+SC/HC flags and vault states unchanged. Helper rejection after a committed batch,
+incomplete/mismatched results, absent-record retry, repeated generic resolution,
+shutdown and database reopen are covered. Production service lifecycle tests assert
+reconciliation follows catalog cache publication and never runs on cached loads.
+Focused service/background-job gates and typechecks passed; full integration
+verification is recorded in the PR. No personal data or live game was used.
+
 ## Collection request ownership (#154, 2026-09-05)
 
 Deferred-promise gates exercise the production job coordinator and raw collection

@@ -570,6 +570,7 @@ export class CollectionDatabase {
           updated_at_utc = ?
       WHERE record = ?
         AND content_pack = 'cairn-quarantine'
+        AND name LIKE 'Quarantined item (%'
     `)
     let releasedRecords = 0
     let recoveryRecords = 0

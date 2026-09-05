@@ -37,6 +37,7 @@ import {
   type WriteSafetyStatus
 } from '@shared/contracts'
 import type { AnyBackgroundJobSnapshot } from '@shared/background-jobs'
+import type { DismantlingPage, DismantlingSelection, SupplyPage, SupplySelection } from '@shared/workspace-query-contracts'
 import { decodeIpcError } from '@shared/ipc-error-transport'
 
 const ipcRenderer = {
@@ -143,6 +144,10 @@ const api: CairnCodexApi = {
     ipcRenderer.invoke(IPC_CHANNELS.listVaultItems) as Promise<VaultListItem[]>,
   queryVaultItems: (request: VaultPageRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.queryVaultItems, request) as Promise<VaultItemPage>,
+  querySupplies: request => ipcRenderer.invoke(IPC_CHANNELS.querySupplies, request) as Promise<SupplyPage>,
+  selectSupplyBoosts: request => ipcRenderer.invoke(IPC_CHANNELS.selectSupplyBoosts, request) as Promise<SupplySelection>,
+  queryDismantling: request => ipcRenderer.invoke(IPC_CHANNELS.queryDismantling, request) as Promise<DismantlingPage>,
+  selectDismantlingDuplicates: request => ipcRenderer.invoke(IPC_CHANNELS.selectDismantlingDuplicates, request) as Promise<DismantlingSelection>,
   queryOperationHistory: (request: OperationHistoryRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.queryOperationHistory, request) as Promise<OperationHistoryPage>,
   getVaultSummary: () =>

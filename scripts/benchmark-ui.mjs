@@ -86,6 +86,7 @@ const verifyFarmingPaging = process.argv.includes('--verify-farming-paging')
 const verifySetsPaging = process.argv.includes('--verify-sets-paging')
 const verifyOracleWorkspace = process.argv.includes('--verify-oracle-workspace')
 const verifyDismantlingWorkspace = process.argv.includes('--verify-dismantling-workspace')
+const verifyWorkspaceQueries = process.argv.includes('--verify-workspace-queries')
 const verifySkillExplorerWorkspace = process.argv.includes('--verify-skill-explorer-workspace')
 const verifyMiWorkshopWorkspace = process.argv.includes('--verify-mi-workshop-workspace')
 const verifySettingsWorkspace = process.argv.includes('--verify-settings-workspace')
@@ -203,6 +204,7 @@ const env = {
   ...(verifySetsPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SETS_PAGING: '1' } : {}),
   ...(verifyOracleWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ORACLE_WORKSPACE: '1' } : {}),
   ...(verifyDismantlingWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE: '1' } : {}),
+  ...(verifyWorkspaceQueries ? { CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_QUERIES: '1' } : {}),
   ...(verifySkillExplorerWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SKILL_EXPLORER_WORKSPACE: '1' } : {}),
   ...(verifyMiWorkshopWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_MI_WORKSHOP_WORKSPACE: '1' } : {}),
   ...(verifySettingsWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SETTINGS_WORKSPACE: '1' } : {}),
@@ -436,6 +438,7 @@ console.log(JSON.stringify({
   verifySetsPaging,
   verifyOracleWorkspace,
   verifyDismantlingWorkspace,
+  verifyWorkspaceQueries,
   verifySkillExplorerWorkspace,
   verifyMiWorkshopWorkspace,
   verifySettingsWorkspace,

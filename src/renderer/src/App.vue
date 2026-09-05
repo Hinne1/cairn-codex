@@ -74,12 +74,11 @@ import TransfersWorkspace from './workspaces/TransfersWorkspace.vue'
 import { createTransfersSession } from './workspaces/transfers'
 import SuppliesWorkspace from './workspaces/SuppliesWorkspace.vue'
 import {
-  buildReusableSupplySummary,
   createSupplyAccessSummary,
   createSupplySession,
-  type SupplyControls,
-  type SupplyOption
+  type SupplyControls
 } from './workspaces/supplies'
+import type { SupplySelectionItem } from '@shared/workspace-query-contracts'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { preferredScrollBehavior } from './motion-preference'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
@@ -433,6 +432,15 @@ const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(nu
 const pinning = ref(false)
 const vaultItems = ref<VaultListItem[]>([])
 const vaultItemsLoaded = ref(false)
+const archiveQueryRevision = ref(0)
+const querySupplyItems = window.cairnCodex.querySupplies
+const selectSupplyBoosts = window.cairnCodex.selectSupplyBoosts
+const queryDismantlingItems = window.cairnCodex.queryDismantling
+const selectDismantlingDuplicates = window.cairnCodex.selectDismantlingDuplicates
+watch(snapshot, () => {
+  archiveQueryRevision.value++
+  void refreshSupplySummary().catch(error => console.warn('Supply summary could not be refreshed.', error))
+})
 const vaultSummary = ref<VaultSummary>({
   total: 0,
   ingested: 0,
@@ -552,10 +560,8 @@ const transferableVaultItems = computed(() => storedVaultPage.value.items)
 const availableVaultItems = computed(() => storedVaultPage.value.items)
 const vaultPageCount = computed(() => Math.max(1, Math.ceil(storedVaultPage.value.total / vaultPageSize)))
 const visibleAvailableVaultItems = computed(() => availableVaultItems.value)
-const reusableSupplySummary = computed<CollectionRaritySummary>(() => buildReusableSupplySummary(
-  snapshot.value?.supplies ?? [],
-  vaultItems.value
-))
+const reusableSupplySummary = ref<CollectionRaritySummary>({ rarity: 'supply', total: 0, collected: 0, availableCopies: 0 })
+let supplySummaryGeneration = 0
 const supplyAccessSummary = computed(() => createSupplyAccessSummary(
   snapshot.value?.supplies ?? [],
   activeCharacter.value
@@ -3031,12 +3037,15 @@ function preferredStashPath(value: CollectionSnapshot): string {
 }
 
 async function refreshVault(): Promise<void> {
+  archiveQueryRevision.value++
   try {
-    const [summary, safety, live] = await Promise.allSettled([
+    const [summary, safety, live, supplies] = await Promise.allSettled([
       window.cairnCodex.getVaultSummary(),
       window.cairnCodex.inspectWriteSafety(),
-      window.cairnCodex.inspectLiveGame()
+      window.cairnCodex.inspectLiveGame(),
+      refreshSupplySummary()
     ])
+    if (supplies.status === 'rejected') console.warn('Supply summary could not be refreshed.', supplies.reason)
     if (summary.status === 'fulfilled') {
       vaultSummary.value = summary.value
       vaultSummaryStatus.value = 'ready'
@@ -3056,22 +3065,16 @@ async function refreshVault(): Promise<void> {
       activeView.value === 'vault' &&
       (transferSection.value === 'ingest-history' || transferSection.value === 'dispense-history')
     ) await refreshOperationHistory()
-    if (activeView.value === 'supplies' || activeView.value === 'dismantling') {
-      await refreshFullVaultItems()
-    }
   } catch (error) {
     reportTransferProblem(readableError(error))
   }
 }
 
-async function refreshFullVaultItems(): Promise<void> {
-  const items = await window.cairnCodex.listVaultItems()
-  vaultItems.value = items
-  vaultItemsLoaded.value = true
-  supplySession.selectedIds.value = supplySession.selectedIds.value.filter((id) =>
-    id.startsWith('augment:') ||
-    items.some((item) => item.id === id && item.state === 'ingested' && item.rarity === 'supply')
-  )
+async function refreshSupplySummary(): Promise<void> {
+  const generation = ++supplySummaryGeneration
+  const result = await window.cairnCodex.querySupplies({ source: 'archive', category: 'writs', slot: 'all', query: '',
+    activeCharacter: null, liveReady: false, offset: 0, limit: 1 })
+  if (generation === supplySummaryGeneration) reusableSupplySummary.value = result.summary
 }
 
 function scheduleVaultPageRefresh(): void {
@@ -3335,7 +3338,7 @@ async function retrieveSelectedLive(): Promise<void> {
   }
 }
 
-async function retrieveSupplies(selected: SupplyOption[], mode: TransferMode): Promise<void> {
+async function retrieveSupplies(selected: SupplySelectionItem[], mode: TransferMode): Promise<void> {
   if (selected.length === 0 || vaultBusy.value) return
   const factionAugments = selected.filter((item) => item.source === 'faction')
   const archived = selected.filter((item) => item.source === 'archive')
@@ -5592,8 +5595,10 @@ function formatRollValue(value: number): string {
       <SuppliesWorkspace
         v-else-if="activeView === 'supplies'"
         v-model:controls="supplyControls"
-        :catalog-items="snapshot?.supplies ?? []"
-        :vault-items="vaultItems"
+        :query-items="querySupplyItems"
+        :select-boosts="selectSupplyBoosts"
+        :archive-revision="archiveQueryRevision"
+        :format-error="readableError"
         :active-character="activeCharacter"
         :active-transfer-hardcore="activeTransferHardcore"
         :live-ready="liveStatus?.state === 'ready'"
@@ -5615,7 +5620,9 @@ function formatRollValue(value: number): string {
       <DismantlingWorkspace
         v-else-if="activeView === 'dismantling'"
         v-model:controls="dismantlingControls"
-        :items="vaultItems"
+        :query-items="queryDismantlingItems"
+        :select-duplicates="selectDismantlingDuplicates"
+        :archive-revision="archiveQueryRevision"
         :session="dismantlingSession"
         :preview-dismantling="previewDismantling"
         :format-error="readableError"

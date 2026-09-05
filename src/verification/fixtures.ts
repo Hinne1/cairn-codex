@@ -1,7 +1,9 @@
 import type { CollectionItem, CollectionSnapshot, ObservedStashItem } from '../shared/contracts.ts'
 import { CATALOG_PRESENTATION_VERSION } from '../main/catalog-versions.ts'
+import { workspaceQueryCollection } from './workspace-query-collection.ts'
 
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'workspace-queries') return workspaceQueryCollection(createScreenshotCollectionFixture('search-help'))
   if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
   if (name === 'settings') {
     const fixture = createScreenshotCollectionFixture('search-help')

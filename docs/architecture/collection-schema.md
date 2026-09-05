@@ -85,6 +85,15 @@ its live adapter marker. Ordinary offline failures and malformed identities rema
 unchanged. Resuming still requires the polled incoming source to match every
 persisted payload field and its original mode; reopening is idempotent.
 
+Schema version 14 adds `vault_item_projection`, a derived metadata table for bounded Supplies and
+Dismantling queries. A transactional backfill and insert/payload-or-roll-update triggers project
+seed, stack count, attachment/affix records and numeric roll percentile without changing exact
+`serialized_item` or `roll_json` bytes. Malformed legacy payloads remain stored and are excluded
+from these queries; malformed roll metadata becomes an absent score. Row state, mode, reusable
+status and catalog identity are joined from their authoritative tables on every query. The
+projection is removed with its vault row. Page and preview metadata lookups never read exact
+payload columns; migrations and authoritative transfer operations retain their existing ownership.
+
 The UI exposes two projections over the same canonical catalog:
 
 - **Stash Scanner** uses selected stash snapshots for physical availability and

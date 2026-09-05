@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import BoundedResultSurface from './components/BoundedResultSurface.vue'
-import ExplorerToolbar from './components/ExplorerToolbar.vue'
+import { createSetsSession } from './workspaces/sets'
+import SetsWorkspace from './workspaces/SetsWorkspace.vue'
+import { createCollectionDashboard } from './workspaces/collection-dashboard'
+import CollectionDashboard from './workspaces/CollectionDashboard.vue'
+import CollectionTriviaDialog from './workspaces/CollectionTriviaDialog.vue'
 import FailureProbe from './components/FailureProbe.vue'
 import OnboardingDialog from './components/OnboardingDialog.vue'
-import PlannerJourney from './components/PlannerJourney.vue'
-import PlannerSetupDialog from './components/PlannerSetupDialog.vue'
-import ResearchItemTable from './components/ResearchItemTable.vue'
-import RollCategoryProfile from './components/RollCategoryProfile.vue'
-import SemanticBadge from './components/SemanticBadge.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
-import { rollCategoryScores, rollStatQuality, averageRollQuality, formatCombinationPercentile } from './roll-rating'
+import { formatPresentationLine } from './item-presentation'
+import { createItemInspectionSession } from './inspection/item-inspection'
+import ItemInspectionDrawer from './inspection/ItemInspectionDrawer.vue'
 import cairnCodexLogo from '../../../build/icon.svg?url'
 import CollectionFarmingWorkspace from './workspaces/CollectionFarmingWorkspace.vue'
 import type { CollectionFarmingControls } from './workspaces/collection-farming'
@@ -19,42 +19,28 @@ import DismantlingWorkspace from './workspaces/DismantlingWorkspace.vue'
 import { createDismantlingSession, type DismantlingControls } from './workspaces/dismantling'
 import StashOracleWorkspace from './workspaces/StashOracleWorkspace.vue'
 import type { StashOracleControls } from './workspaces/stash-oracle'
+import LevelingPlannerWorkspace from './workspaces/LevelingPlannerWorkspace.vue'
+import { createLevelingPlannerSession } from './workspaces/leveling-planner'
 import SkillExplorerWorkspace from './workspaces/SkillExplorerWorkspace.vue'
 import {
   buildSkillNames,
-  skillMatchForItem,
-  type SkillExplorerControls,
-  type SkillMatch
+  type SkillExplorerControls
 } from './workspaces/skill-explorer'
 import {
-  researchAcquisitionFacts,
-  researchItemIsAvailable,
-  nextResearchSort,
-  researchItemPreferenceKey,
   researchItemTypeLabel,
-  researchRarityLabel,
-  researchRollFact,
-  researchSkillName,
-  type ResearchItemTableRow
+  researchRarityLabel
 } from './workspaces/research-item-table'
 import MiWorkshopWorkspace from './workspaces/MiWorkshopWorkspace.vue'
 import {
   buildMiMetricOptions,
-  compareCopiesByMiMetric,
   createMiWorkshopSession,
-  humanStatName,
-  miFamilyKey,
-  miMetricLabel,
-  miMetricResult,
   type MiWorkshopControls,
   updateMiWorkshopControls
 } from './workspaces/mi-workshop'
 import CollectionMaterialsWorkspace from './workspaces/CollectionMaterialsWorkspace.vue'
 import {
   buildCollectionRollSummaries,
-  collectionCategories,
   collectionRollFocusForSort,
-  matchesCollectionCategory,
   updateCollectionMaterialsControls,
   type CollectionMaterialsControls,
   type CollectionControls,
@@ -74,25 +60,25 @@ import TransfersWorkspace from './workspaces/TransfersWorkspace.vue'
 import { createTransfersSession } from './workspaces/transfers'
 import SuppliesWorkspace from './workspaces/SuppliesWorkspace.vue'
 import {
-  buildReusableSupplySummary,
   createSupplyAccessSummary,
   createSupplySession,
-  type SupplyControls,
-  type SupplyOption
+  type SupplyControls
 } from './workspaces/supplies'
+import type { SupplySelectionItem } from '@shared/workspace-query-contracts'
+import { useCollectionCopies } from './collection-copies'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { preferredScrollBehavior } from './motion-preference'
+import { CollectionSession, type CollectionPendingReads } from './collection-session'
+import { collectionRequestKey } from '@shared/collection-request'
 import {
   resetUiPreferences,
   type RendererFailureReport
 } from './renderer-recovery'
 import {
   createPreferenceRepository,
-  type StoredPlannerProfile as PlannerProfile,
   type StoredTodoItem as TodoItem,
   type TooltipBoundaryScrollPreference
 } from './preference-repository'
-import { searchGuidance } from './search-guidance'
 import {
   appRouteHref,
   createAppHistoryEntry,
@@ -102,46 +88,16 @@ import {
   type AppHistoryEntry,
   type AppRoute,
   type MaterialCategory,
-  type OwnershipFilter,
-  type PlannerDisplay,
-  type PlannerMapScope,
-  type PlannerMapSortMode,
-  type PlannerSortMode,
-  type RarityFilter,
-  type SetFeatureFilter,
-  type SetProgressFilter,
-  type SetSortMode,
-  type SortDirection,
   type TransferMode
 } from './app-route'
 import {
-  createCharacterPlannerProfile,
-  createManualPlannerProfile,
-  createPlannerClassOptions,
-  type PlannerSetupSubmission
-} from './planner-setup'
-import {
-  masteryMatchesForItem,
-  type PlannerMasteryMatch
-} from './planner-item-matches'
-import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
-import {
-  compareSetCompletion,
-  setCompletionCount,
-  setItemBadges,
   setItemDiscovered,
-  setItemUnqualified,
-  setRarity,
-  setReadiness,
-  setRollRating,
-  type SetRollRating
 } from './set-semantics'
 import {
   ONBOARDING_STEP_COUNT,
   applyContinueWithoutImport,
   type OnboardingStatus
 } from './onboarding'
-import ToolHeader from './components/ToolHeader.vue'
 import type { OracleCandidate } from './stash-oracle'
 import {
   isAvailableViaAwakening,
@@ -149,8 +105,6 @@ import {
   withAwakeningAvailability
 } from '@shared/collection-availability'
 import {
-  compileSearchQuery,
-  type CompiledSearchQuery,
   type SearchDocument,
   type SearchFieldValue
 } from '@shared/search-query'
@@ -167,14 +121,12 @@ import type {
   GrimDawnDiscovery,
   ItemGrantedSkillPresentation,
   ItemPresentation,
-  ItemPresentationLine,
   ItemRollAnalysis,
   LiveGameStatus,
   MapRegionLocation,
   ObservedStashItem,
   OperationHistoryPage,
   RecoveryStatus,
-  RolledStat,
   StagingTabInspection,
   StartupPhaseEvent,
   StartupStatus,
@@ -191,52 +143,6 @@ interface TooltipAffix {
   kind: 'prefix' | 'suffix'
   rarity: 'magical' | 'rare'
   presentation?: ItemPresentation
-}
-
-interface PresentedRollStat {
-  key: string
-  label: string
-  value: number
-  maximumValue: number | null
-  unit: string
-  valueLabel: string
-  qualityPercent: number | null
-  rankLabel: string | null
-  rankDescription: string
-  rangeLabel: string
-}
-
-interface ComparisonStatRow extends PresentedRollStat {
-  deltaLabel: string
-  deltaTone: 'positive' | 'negative' | 'same' | 'unique' | 'missing' | 'reference'
-  qualityDeltaLabel: string | null
-  missingFromCopy: boolean
-}
-
-interface CollectionSet {
-  record: string
-  name: string
-  items: CollectionItem[]
-  collected: number
-  availableCopies: number
-  minimumLevel: number
-  maximumLevel: number
-  rollRating: SetRollRating
-}
-
-interface RollTrackerSummary {
-  median: number | null
-  scored: number
-}
-
-interface CollectionTriviaFact {
-  id: string
-  eyebrow: string
-  value: string
-  title: string
-  detail: string
-  tone: 'gold' | 'purple' | 'blue' | 'green' | 'ember'
-  itemRecord?: string
 }
 
 const startupRecoveryParameters = new URLSearchParams(window.location.search)
@@ -280,9 +186,10 @@ const enabledStashPaths = computed<string[]>({
     else indexStashPaths.value = paths
   }
 })
-const scanning = ref(false)
+const collectionPending = ref<CollectionPendingReads>({ cache: 0, scan: 0, rebuild: 0, hydration: 0 })
+const scanning = computed(() => collectionPending.value.cache + collectionPending.value.scan + collectionPending.value.rebuild > 0)
 const appInitializing = ref(true)
-const archiveRollHydrating = ref(false)
+const archiveRollHydrating = computed(() => collectionPending.value.hydration > 0)
 const archiveRollHydrationCompleted = ref(0)
 const archiveRollHydrationTotal = ref(0)
 const scanActivity = ref<'collection' | 'game-data'>('collection')
@@ -291,11 +198,26 @@ const activeBackgroundJob = computed(() => backgroundJobs.value
   .filter((job) => job.status === 'queued' || job.status === 'running')
   .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0] ?? null)
 let stopBackgroundJobUpdates: (() => void) | null = null
+let stopArchiveRecoveryUpdates: (() => void) | null = null
 const startupPhaseStatus = ref<StartupStatus | null>(null)
 const notifications = createNotificationService()
 const currentNotification = notifications.current
 const notificationAnnouncement = notifications.announcement
 const cacheIssue = ref<string | null>(null)
+const collectionContext = () => ({ basis: collectionBasis.value, sourcePaths: [...enabledStashPaths.value] })
+const collectionSession = new CollectionSession({
+  context: collectionContext,
+  install: applySnapshot,
+  reload: () => { void reloadCollection() },
+  pendingChanged: pending => { collectionPending.value = pending },
+  reportError: (error, kind) => {
+    if (kind === 'cache') cacheIssue.value = readableError(error)
+    else if (kind === 'scan') reportScanProblem(readableError(error))
+    else if (kind === 'rebuild') reportTransferProblem(readableError(error))
+    else console.warn('Archived item rolls could not be hydrated in the background.', error)
+  }
+})
+watch(() => collectionRequestKey(collectionContext()), () => collectionSession.contextChanged(), { flush: 'sync' })
 const startupBackgroundPhase = computed<StartupStatus['backgroundPhase']>(() =>
   appInitializing.value && !snapshot.value
     ? 'opening-cache'
@@ -310,9 +232,13 @@ const tooltipBoundaryScroll = ref<TooltipBoundaryScrollPreference>(initialPrefer
 const failedItemIconUrls = ref(new Set<string>())
 const activeView = ref<ActiveView>('collection')
 const glossaryEntryId = ref(glossaryEntry(null).id)
-const query = ref('')
-const searchQuery = ref('')
-const rarityFilter = ref<RarityFilter>('all')
+const setsSession = createSetsSession({
+  items: () => snapshot.value?.items ?? [],
+  itemSearchDocument: itemStructuredSearchDocument,
+  restoringHistory: () => restoringAppHistory
+})
+const { query, rarityFilter, setProgressFilter, setFeatureFilter, setSortMode, setSortDirection,
+  currentPage, collectionSets } = setsSession
 const collectionControls = ref<CollectionControls>({
   category: 'All', query: '', ownership: 'all', rarity: 'all', sort: 'recent', direction: 'desc', page: 1
 })
@@ -330,10 +256,6 @@ const trackerCollapsed = ref(initialPreferences.appearance.trackerCollapsed)
 const navigationCollapsed = ref(initialPreferences.appearance.navigationCollapsed)
 const miCountingMode = ref<MiCountingMode>(initialPreferences.workspace.miCountingMode)
 const showLegacyScanner = ref(initialPreferences.workspace.showLegacyScanner)
-const setProgressFilter = ref<SetProgressFilter>('all')
-const setFeatureFilter = ref<SetFeatureFilter>('all')
-const setSortMode = ref<SetSortMode>('completion')
-const setSortDirection = ref<SortDirection>('desc')
 const skillExplorerControls = ref<SkillExplorerControls>({
   skill: initialPreferences.search.selectedSkill,
   query: '',
@@ -344,37 +266,6 @@ const skillExplorerControls = ref<SkillExplorerControls>({
   direction: 'asc',
   page: 1
 })
-const plannerProfiles = ref<PlannerProfile[]>(structuredClone(initialPreferences.planner.profiles))
-const selectedPlannerProfileId = ref(initialPreferences.planner.selectedProfileId)
-const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)
-  ?? plannerProfiles.value[0]
-const plannerSkills = ref<string[]>([...(initialPlannerProfile?.skills ?? ['Wendigo Totem'])])
-const plannerSkillDraft = ref('')
-const plannerSetupOpen = ref(false)
-const plannerMinimumLevel = ref(initialPlannerProfile?.minimumLevel ?? 1)
-const plannerLevelCap = ref(initialPlannerProfile?.levelCap ?? 70)
-const plannerMinimumLevelDraft = ref(plannerMinimumLevel.value)
-const plannerLevelCapDraft = ref(plannerLevelCap.value)
-let applyingPlannerProfile = false
-const plannerDisplay = ref<PlannerDisplay>(initialPreferences.appearance.plannerDisplay)
-const plannerPage = ref(1)
-const plannerMapScope = ref<PlannerMapScope>('selected')
-const plannerMapSortMode = ref<PlannerMapSortMode>('items')
-const plannerMapSortDirection = ref<SortDirection>('desc')
-const plannerQuery = ref('')
-const plannerOwnership = ref<OwnershipFilter>('all')
-const plannerSortMode = ref<PlannerSortMode>('level')
-const plannerSortDirection = ref<SortDirection>('asc')
-const plannerIgnoredRecords = computed<string[]>({
-  get: () => plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)?.ignoredRecords ?? [],
-  set: (records) => {
-    plannerProfiles.value = plannerProfiles.value.map((profile) => profile.id === selectedPlannerProfileId.value
-      ? { ...profile, ignoredRecords: [...records], modifiedAt: new Date().toISOString() }
-      : profile)
-  }
-})
-const plannerFavoriteRecords = ref<string[]>([...initialPreferences.planner.favoriteRecords])
-const plannerShowIgnored = ref(false)
 const oracleControls = ref<StashOracleControls>({
   query: '',
   characterClass: initialPreferences.search.oracleClass,
@@ -386,11 +277,6 @@ const oracleControls = ref<StashOracleControls>({
   direction: 'desc',
   page: 1
 })
-const discoveredCharacters = ref<CharacterSaveProfile[]>([])
-const characterImportLoading = ref(false)
-const characterImportError = ref<string | null>(null)
-const atlasRegionQuery = ref('')
-const selectedAtlasRegion = ref<string | null>(null)
 const transfersSession = createTransfersSession()
 const {
   mode: transferMode,
@@ -408,13 +294,42 @@ const {
   historyStructuredQuery,
   vaultStructuredQuery
 } = transfersSession
-const currentPage = ref(1)
-const selectedRecord = ref<string | null>(null)
-const selectedReferenceInstanceKey = ref<string | null>(null)
-const activeCopyAffixTarget = ref<{ copyKey: string; record: string } | null>(null)
-const pinning = ref(false)
-const vaultItems = ref<VaultListItem[]>([])
-const vaultItemsLoaded = ref(false)
+const inspectionSession = createItemInspectionSession({
+  contextKey: () => JSON.stringify([collectionRequestKey(collectionContext()), snapshot.value?.isHardcore]),
+  available: () => Boolean(snapshot.value),
+  items: () => plannerCatalogItems.value,
+  copies: () => allOwnedCopies.value,
+  observedCopies: () => snapshot.value?.observedItems ?? [],
+  affixes: () => affixByRecord.value,
+  metric: () => miWorkshopControls.value.metric,
+  metricDirection: () => miWorkshopControls.value.metricDirection,
+  storedCopyFor: vaultItemForObserved,
+  modeFor: copy => stashChoices.value.find(stash => stash.path === copy.sourcePath)?.isHardcore ?? snapshot.value?.isHardcore ?? false,
+  setPinnedBest: (record, instanceKey, isHardcore) => window.cairnCodex.setPinnedBest(record, instanceKey, isHardcore)
+})
+const {
+  selectedRecord, selectedReferenceInstanceKey, selectedItem
+} = inspectionSession
+const archiveQueryRevision = ref(0)
+const { archiveItems: vaultItems, copies: allOwnedCopies, archivedRecords: archivedRecordSet } = useCollectionCopies({
+  observedCopies: () => snapshot.value?.observedItems ?? [],
+  catalogItems: () => plannerCatalogItems.value,
+  basis: () => collectionBasis.value,
+  enabled: () => Boolean(snapshot.value) && collectionBasis.value === 'stashes' &&
+    ['collection', 'sets', 'planner', 'skills', 'oracle', 'mi-workshop', 'farming'].includes(activeView.value),
+  context: () => ({ isHardcore: snapshot.value?.isHardcore, revision: archiveQueryRevision.value,
+    source: JSON.stringify([collectionBasis.value, snapshot.value?.scannedStashes.map(stash => stash.path)]) }),
+  query: request => window.cairnCodex.queryVaultItems(request),
+  reportError: error => console.warn('Archive comparison copies could not be refreshed.', error)
+})
+const querySupplyItems = window.cairnCodex.querySupplies
+const selectSupplyBoosts = window.cairnCodex.selectSupplyBoosts
+const queryDismantlingItems = window.cairnCodex.queryDismantling
+const selectDismantlingDuplicates = window.cairnCodex.selectDismantlingDuplicates
+watch(snapshot, () => {
+  archiveQueryRevision.value++
+  void refreshSupplySummary().catch(error => console.warn('Supply summary could not be refreshed.', error))
+})
 const vaultSummary = ref<VaultSummary>({
   total: 0,
   ingested: 0,
@@ -516,11 +431,6 @@ let appHistoryReady = false
 let restoringAppHistory = false
 let appHistoryIndex = 0
 let appHistoryMaximum = 0
-const setSearchQuery = computed(() => compileSearchQuery(searchQuery.value, searchQueryOptions(searchSchemas.sets)))
-const plannerStructuredQuery = computed(() => compileSearchQuery(plannerQuery.value, searchQueryOptions(searchSchemas.planner)))
-const atlasStructuredQuery = computed(() => compileSearchQuery(atlasRegionQuery.value, searchQueryOptions(searchSchemas.atlas)))
-
-const categories = collectionCategories
 
 const targetStash = computed(() =>
   stashChoices.value.find((stash) => stash.path === selectedStashPath.value) ?? null
@@ -534,10 +444,8 @@ const transferableVaultItems = computed(() => storedVaultPage.value.items)
 const availableVaultItems = computed(() => storedVaultPage.value.items)
 const vaultPageCount = computed(() => Math.max(1, Math.ceil(storedVaultPage.value.total / vaultPageSize)))
 const visibleAvailableVaultItems = computed(() => availableVaultItems.value)
-const reusableSupplySummary = computed<CollectionRaritySummary>(() => buildReusableSupplySummary(
-  snapshot.value?.supplies ?? [],
-  vaultItems.value
-))
+const reusableSupplySummary = ref<CollectionRaritySummary>({ rarity: 'supply', total: 0, collected: 0, availableCopies: 0 })
+let supplySummaryGeneration = 0
 const supplyAccessSummary = computed(() => createSupplyAccessSummary(
   snapshot.value?.supplies ?? [],
   activeCharacter.value
@@ -622,377 +530,17 @@ const canApproveCurrentGameBuild = computed(() =>
   Boolean(liveStatus.value.gameDllSha256) &&
   liveStatus.value.detail.includes('new to CC')
 )
-const collectionBasisLabel = computed(() =>
-  collectionBasis.value === 'archive' ? 'Codex Archive' : 'Stash Scanner'
-)
-const allItemSummary = computed(() => {
-  const summaries = ['epic', 'legendary', 'mi']
-    .map((name) => rarity(name as 'epic' | 'legendary' | 'mi'))
-    .filter((value): value is CollectionRaritySummary => Boolean(value))
-  return {
-    total: summaries.reduce((sum, value) => sum + value.total, 0),
-    collected: summaries.reduce((sum, value) => sum + value.collected, 0),
-    availableCopies: summaries.reduce((sum, value) => sum + value.availableCopies, 0)
-  }
+const dashboard = createCollectionDashboard({
+  snapshot: () => snapshot.value,
+  miCountingMode: () => miCountingMode.value,
+  sets: () => collectionSets.value
 })
-function medianSummary(values: Array<number | null | undefined>): RollTrackerSummary {
-  const scored = values
-    .filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value))
-    .sort((left, right) => left - right)
-  if (scored.length === 0) return { median: null, scored: 0 }
-  const middle = Math.floor(scored.length / 2)
-  return {
-    median: scored.length % 2 === 0
-      ? (scored[middle - 1]! + scored[middle]!) / 2
-      : scored[middle]!,
-    scored: scored.length
-  }
-}
-function itemRollSummary(rarity?: 'epic' | 'legendary' | 'mi'): RollTrackerSummary {
-  const items = (snapshot.value?.items ?? []).filter((item) =>
-    ['epic', 'legendary', 'mi'].includes(item.rarity) && (!rarity || item.rarity === rarity)
-  )
-  if (miCountingMode.value === 'base' && (rarity === 'mi' || rarity === undefined)) {
-    const ordinary = items
-      .filter((item) => item.rarity !== 'mi')
-      .map((item) => item.bestRollPercentile)
-    const bestMiByBase = new Map<string, number>()
-    for (const item of items.filter((candidate) => candidate.rarity === 'mi')) {
-      if (item.bestRollPercentile === null) continue
-      const key = miFamilyKey(item)
-      bestMiByBase.set(key, Math.max(bestMiByBase.get(key) ?? -1, item.bestRollPercentile))
-    }
-    return medianSummary([...ordinary, ...bestMiByBase.values()])
-  }
-  return medianSummary(items.map((item) => item.bestRollPercentile))
-}
-const allItemRollSummary = computed(() => itemRollSummary())
-const legendaryRollSummary = computed(() => itemRollSummary('legendary'))
-const epicRollSummary = computed(() => itemRollSummary('epic'))
-const miRollSummary = computed(() => itemRollSummary('mi'))
-const awakeningAvailableLegendaryCount = computed(() =>
-  (snapshot.value?.items ?? []).filter((item) =>
-    item.rarity === 'legendary' && itemAvailableByAwakeningOnly(item)
-  ).length
-)
-const setRollSummary = computed(() => medianSummary(
-  collectionSets.value.flatMap((set) => set.items.map((item) => item.bestRollPercentile))
-))
-const affixRollSummary = computed(() => {
-  const recordKeys = new Map<string, string>()
-  for (const affix of snapshot.value?.affixes ?? []) {
-    for (const record of affix.records) recordKeys.set(record.toLocaleLowerCase(), affix.key)
-  }
-  const best = new Map<string, number>()
-  for (const copy of snapshot.value?.observedItems ?? []) {
-    for (const [record, score] of [
-      [copy.prefixRecord, copy.rollAnalysis?.prefixEstimatedPercentile],
-      [copy.suffixRecord, copy.rollAnalysis?.suffixEstimatedPercentile]
-    ] as const) {
-      if (!record || score === null || score === undefined) continue
-      const key = recordKeys.get(record.toLocaleLowerCase())
-      if (!key) continue
-      best.set(key, Math.max(best.get(key) ?? -1, score))
-    }
-  }
-  return medianSummary([...best.values()])
-})
-const setSummary = computed(() => ({
-  total: collectionSets.value.length,
-  collected: collectionSets.value.filter((set) => set.collected === set.items.length).length,
-  readyFromStorage: collectionSets.value.filter(setReadyFromStorage).length,
-  readyAfterCrafting: collectionSets.value.filter(setReadyAfterCrafting).length,
-  readyWithQualifiedAvailability: collectionSets.value.filter(setReadyWithQualifiedAvailability).length
-}))
-const componentSummary = computed<CollectionRaritySummary>(() => {
-  const items = (snapshot.value?.materials ?? []).filter((item) => item.rarity === 'component')
-  return {
-    rarity: 'component',
-    total: items.length,
-    collected: items.filter((item) => item.discovered).length,
-    availableCopies: items.reduce((count, item) => count + item.availableCount, 0)
-  }
-})
-const consumableSummary = computed<CollectionRaritySummary>(() => {
-  const items = (snapshot.value?.materials ?? []).filter((item) => item.rarity === 'consumable')
-  return {
-    rarity: 'consumable',
-    total: items.length,
-    collected: items.filter((item) => item.discovered).length,
-    availableCopies: items.reduce((count, item) => count + item.availableCount, 0)
-  }
-})
-const categoryProgressByName = computed(() => {
-  const progress = new Map<string, string>()
-  if (!snapshot.value) {
-    for (const category of categories) progress.set(category, '0 / 0')
-    return progress
-  }
-  const entriesByCategory = new Map(categories.map((category) => [category, new Map<string, boolean>()]))
-  for (const item of snapshot.value.items) {
-    const key = item.rarity === 'mi' && miCountingMode.value === 'base'
-      ? `mi:${miFamilyKey(item)}`
-      : `item:${item.record.toLocaleLowerCase()}`
-    const owned = isCollectionOwned(item)
-    for (const category of categories) {
-      if (!matchesCollectionCategory(item, category)) continue
-      const entries = entriesByCategory.get(category)!
-      entries.set(key, Boolean(entries.get(key) || owned))
-    }
-  }
-  for (const category of categories) {
-    const entries = entriesByCategory.get(category)!
-    let collected = 0
-    for (const owned of entries.values()) if (owned) collected += 1
-    progress.set(category, `${collected} / ${entries.size}`)
-  }
-  return progress
-})
-
-const collectionSets = computed<CollectionSet[]>(() => {
-  if (!snapshot.value) return []
-  const grouped = new Map<string, CollectionSet>()
-  for (const item of snapshot.value.items) {
-    if (!item.setRecord || !item.setName) continue
-    const existing = grouped.get(item.setRecord)
-    if (existing) {
-      existing.items.push(item)
-      existing.collected += setItemDiscovered(item) ? 1 : 0
-      existing.availableCopies += item.availableCount
-      if (item.levelRequirement > 0) {
-        existing.minimumLevel = existing.minimumLevel > 0
-          ? Math.min(existing.minimumLevel, item.levelRequirement)
-          : item.levelRequirement
-        existing.maximumLevel = Math.max(existing.maximumLevel, item.levelRequirement)
-      }
-    } else {
-      grouped.set(item.setRecord, {
-        record: item.setRecord,
-        name: item.setName,
-        items: [item],
-        collected: setItemDiscovered(item) ? 1 : 0,
-        availableCopies: item.availableCount,
-        minimumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0,
-        maximumLevel: item.levelRequirement > 0 ? item.levelRequirement : 0,
-        rollRating: setRollRating([item])
-      })
-    }
-  }
-  for (const set of grouped.values()) {
-    set.items.sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
-    set.collected = setCompletionCount(set.items)
-    set.rollRating = setRollRating(set.items)
-  }
-  return [...grouped.values()]
-})
-
-const visibleSets = computed(() => {
-  const structuredQuery = setSearchQuery.value
-  const sets = collectionSets.value
-    .filter(
-      (set) =>
-        rarityFilter.value === 'all' || set.items.some((item) => item.rarity === rarityFilter.value)
-    )
-    .filter((set) => {
-      if (setProgressFilter.value === 'complete') return set.collected === set.items.length
-      if (setProgressFilter.value === 'progress') {
-        return set.collected > 0 && set.collected < set.items.length
-      }
-      if (setProgressFilter.value === 'unstarted') return set.collected === 0
-      return true
-    })
-    .filter((set) => setFeatureFilter.value === 'all' || setHasVisualChanges(set))
-    .filter((set) => {
-      if (!structuredQuery.expression || structuredQuery.error) return structuredQuery.matches({ text: '' })
-      return set.items.some((item) => structuredQuery.matches(setStructuredSearchDocument(item, set)))
-    })
-  return sets.sort(compareSets)
-})
-
-const collectionTrivia = computed<CollectionTriviaFact[]>(() => {
-  if (!snapshot.value) return []
-  const facts: CollectionTriviaFact[] = []
-  const items = snapshot.value.items
-  const physicallyOwned = items.filter((item) => item.availableCount > 0)
-  const scored = physicallyOwned
-    .filter((item) => item.bestRollPercentile !== null)
-    .sort((left, right) => right.bestRollPercentile! - left.bestRollPercentile!)
-  const byCopies = (left: CollectionItem, right: CollectionItem) =>
-    right.availableCount - left.availableCount || left.name.localeCompare(right.name)
-
-  const legendaryHoard = physicallyOwned
-    .filter((item) => item.rarity === 'legendary')
-    .sort(byCopies)[0]
-  if (legendaryHoard) {
-    facts.push({
-      id: 'legendary-hoard', eyebrow: 'Purple pile', value: `${legendaryHoard.availableCount}×`,
-      title: legendaryHoard.name, detail: 'Your most-copied Legendary item.', tone: 'purple',
-      itemRecord: legendaryHoard.record
-    })
-  }
-
-  const copyChampion = [...physicallyOwned].sort(byCopies)[0]
-  if (copyChampion) {
-    facts.push({
-      id: 'copy-champion', eyebrow: 'Duplicate dynasty', value: `${copyChampion.availableCount}×`,
-      title: copyChampion.name,
-      detail: `${Math.max(0, copyChampion.availableCount - 1)} copies beyond the first. CC respects the commitment.`,
-      tone: copyChampion.rarity === 'epic' ? 'blue' : copyChampion.rarity === 'mi' ? 'green' : 'gold',
-      itemRecord: copyChampion.record
-    })
-  }
-
-  const bestRoll = scored[0]
-  if (bestRoll) {
-    facts.push({
-      id: 'best-roll', eyebrow: 'Roll royalty', value: `${bestRoll.bestRollPercentile!.toFixed(1)}%`,
-      title: bestRoll.name,
-      detail: `Best estimated aggregate roll among ${scored.length.toLocaleString()} scored item bases.`,
-      tone: 'gold', itemRecord: bestRoll.record
-    })
-  }
-
-  if (scored.length) {
-    const nearPerfect = scored.filter((item) => item.bestRollPercentile! >= 95).length
-    const excellent = scored.filter((item) => item.bestRollPercentile! >= 90).length
-    facts.push({
-      id: 'near-perfect', eyebrow: 'Top shelf', value: excellent.toLocaleString(),
-      title: '90th-percentile rolls',
-      detail: `${nearPerfect.toLocaleString()} item bases clear the 95th percentile.`, tone: 'gold'
-    })
-  }
-
-  const completeSets = collectionSets.value
-    .filter((set) => set.collected === set.items.length)
-    .sort((left, right) => right.items.length - left.items.length || left.name.localeCompare(right.name))
-  if (completeSets[0]) {
-    facts.push({
-      id: 'largest-complete-set', eyebrow: 'Set archivist',
-      value: `${completeSets[0].items.length}/${completeSets[0].items.length}`, title: completeSets[0].name,
-      detail: `Your largest completed collection set. ${completeSets.length} sets are complete in total.`, tone: 'ember',
-      itemRecord: completeSets[0].items[0]?.record
-    })
-  }
-
-  const closestSet = collectionSets.value
-    .filter((set) => set.collected > 0 && set.collected < set.items.length)
-    .sort((left, right) =>
-      right.collected / right.items.length - left.collected / left.items.length ||
-      right.collected - left.collected || left.name.localeCompare(right.name)
-    )[0]
-  if (closestSet) {
-    const missing = closestSet.items.filter((item) => !setItemDiscovered(item)).map((item) => item.name)
-    facts.push({
-      id: 'closest-set', eyebrow: 'Almost assembled', value: `${closestSet.collected}/${closestSet.items.length}`,
-      title: closestSet.name,
-      detail: `Still missing ${missing.slice(0, 2).join(' and ')}${missing.length > 2 ? `, plus ${missing.length - 2} more` : ''}.`,
-      tone: 'ember', itemRecord: closestSet.items[0]?.record
-    })
-  }
-
-  const dated = items
-    .filter((item) => item.firstDiscoveredAt && Number.isFinite(Date.parse(item.firstDiscoveredAt)))
-    .sort((left, right) => Date.parse(left.firstDiscoveredAt!) - Date.parse(right.firstDiscoveredAt!))
-  if (dated[0]) {
-    facts.push({
-      id: 'oldest-discovery', eyebrow: 'First page', value: formatTriviaDate(dated[0].firstDiscoveredAt!),
-      title: dated[0].name, detail: 'The oldest discovery timestamp still recorded in this archive scope.',
-      tone: 'blue', itemRecord: dated[0].record
-    })
-  }
-  const newest = dated.at(-1)
-  if (newest && newest.record !== dated[0]?.record) {
-    facts.push({
-      id: 'newest-discovery', eyebrow: 'Fresh ink', value: formatTriviaDate(newest.firstDiscoveredAt!),
-      title: newest.name, detail: 'Your most recently discovered item base.', tone: 'green',
-      itemRecord: newest.record
-    })
-  }
-
-  const slotCounts = new Map<string, number>()
-  for (const item of items.filter(isCollectionOwned)) {
-    slotCounts.set(item.slot, (slotCounts.get(item.slot) ?? 0) + 1)
-  }
-  const favoriteSlot = [...slotCounts.entries()].sort((left, right) => right[1] - left[1])[0]
-  if (favoriteSlot) {
-    facts.push({
-      id: 'favorite-slot', eyebrow: 'Armory bias', value: favoriteSlot[1].toLocaleString(),
-      title: triviaSlotLabel(favoriteSlot[0]),
-      detail: 'The equipment slot with the most discovered catalog entries.', tone: 'blue'
-    })
-  }
-
-  const miItems = items.filter((item) => item.rarity === 'mi')
-  const miFamilies = new Set(miItems.map(miFamilyKey))
-  const ownedMiFamilies = new Set(miItems.filter(isCollectionOwned).map(miFamilyKey))
-  facts.push({
-    id: 'mi-menagerie', eyebrow: 'Green menagerie', value: `${ownedMiFamilies.size}/${miFamilies.size}`,
-    title: 'Named MI bases',
-    detail: `${miItems.filter(isCollectionOwned).length.toLocaleString()} of ${miItems.length.toLocaleString()} individual level tiers have been discovered.`,
-    tone: 'green'
-  })
-
-  const topAffix = [...snapshot.value.affixes]
-    .filter((affix) => affix.availableCount > 0)
-    .sort((left, right) => right.availableCount - left.availableCount || left.name.localeCompare(right.name))[0]
-  if (topAffix) {
-    facts.push({
-      id: 'affix-magnet', eyebrow: 'Affix magnet', value: `${topAffix.availableCount}×`,
-      title: topAffix.name, detail: `Your most frequently retained ${topAffix.kind}.`,
-      tone: topAffix.rarity === 'rare' ? 'green' : 'blue'
-    })
-  }
-
-  const duplicateCopies = physicallyOwned.reduce(
-    (total, item) => total + Math.max(0, item.availableCount - 1), 0
-  )
-  facts.push({
-    id: 'duplicate-reserve', eyebrow: 'Emergency reserves', value: duplicateCopies.toLocaleString(),
-    title: 'Copies beyond completion',
-    detail: 'Everything after the first physical copy of each stored item tier.', tone: 'purple'
-  })
-
-  return facts
-})
+const { rarity, categoryProgressByName } = dashboard
 
 const plannerCatalogItems = computed(() => [
   ...(snapshot.value?.items ?? []),
   ...(snapshot.value?.plannerItems ?? [])
 ])
-const selectedPlannerProfile = computed(() =>
-  plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value) ?? null
-)
-const plannerClassOptions = computed(() => createPlannerClassOptions(snapshot.value?.skillClassNames))
-const plannerIgnoredRecordSet = computed(() => new Set(
-  plannerIgnoredRecords.value.map((record) => record.toLocaleLowerCase())
-))
-const plannerFavoriteRecordSet = computed(() => new Set(
-  plannerFavoriteRecords.value.map((record) => record.toLocaleLowerCase())
-))
-
-const archivedRecordSet = computed(() => {
-  if (collectionBasis.value === 'archive') {
-    return new Set(
-      plannerCatalogItems.value
-        .filter((item) => item.availableCount > 0)
-        .map((item) => item.record.toLocaleLowerCase())
-    )
-  }
-  return new Set(
-    vaultItems.value
-      .filter((item) =>
-        item.catalogued &&
-        item.state === 'ingested' &&
-        (snapshot.value?.isHardcore === undefined || item.isHardcore === snapshot.value.isHardcore)
-      )
-      .map((item) => item.baseRecord.toLocaleLowerCase())
-  )
-})
-
-const selectedItem = computed(() =>
-  plannerCatalogItems.value.find((item) => item.record === selectedRecord.value) ?? null
-)
-
 const remainingTodoCount = computed(() => todos.value.filter((todo) => !todo.done).length)
 const orderedTodos = computed(() => [...todos.value].sort((left, right) =>
   Number(left.done) - Number(right.done) ||
@@ -1007,280 +555,34 @@ const tooltipItem = computed(() =>
   ].find((item) => item.record === tooltipRecord.value) ?? null
 )
 
-const allOwnedCopies = computed(() => {
-  const copies = [...(snapshot.value?.observedItems ?? [])]
-  const observedVaultIds = new Set(
-    copies
-      .filter((copy) => copy.sourcePath.startsWith('vault://'))
-      .map((copy) => copy.sourcePath.slice('vault://'.length))
-  )
-  if (!vaultItemsLoaded.value) return copies
-  for (const item of vaultItems.value) {
-    if (
-      observedVaultIds.has(item.id) ||
-      !item.catalogued ||
-      item.state !== 'ingested' ||
-      (snapshot.value?.isHardcore !== undefined && item.isHardcore !== snapshot.value.isHardcore)
-    ) continue
-    copies.push(vaultItemAsObserved(item, copies.length))
-  }
-  return copies
-})
-
 const collectionRollSummaries = computed(() => buildCollectionRollSummaries(
   allOwnedCopies.value,
   collectionRollFocusForSort(collectionControls.value.sort)
 ))
-
-const selectedCopies = computed(() => {
-  if (!snapshot.value || !selectedRecord.value) return []
-  const pinned = selectedItem.value?.pinnedInstanceKey
-  const requestedReference = selectedReferenceInstanceKey.value
-  const copies = allOwnedCopies.value
-    .filter((item) => item.baseRecord === selectedRecord.value && item.instanceKey)
-  return copies
-    .sort((left, right) => {
-      if ((left.instanceKey === requestedReference) !== (right.instanceKey === requestedReference)) {
-        return left.instanceKey === requestedReference ? -1 : 1
-      }
-      if ((left.instanceKey === pinned) !== (right.instanceKey === pinned)) {
-        return left.instanceKey === pinned ? -1 : 1
-      }
-      if (selectedItem.value?.rarity !== 'mi') return 0
-      return compareCopiesByMiMetric(
-        left,
-        right,
-        miWorkshopControls.value.metric,
-        miWorkshopControls.value.metricDirection
-      )
-    })
-})
-
-const comparisonReferenceCopy = computed(() => {
-  const copies = selectedCopies.value
-  if (!copies.length) return null
-  const requestedReference = selectedReferenceInstanceKey.value
-  const requested = copies.find((copy) => copy.instanceKey === requestedReference)
-  if (requested) return requested
-  const pinned = selectedItem.value?.pinnedInstanceKey
-  return copies.find((copy) => copy.instanceKey === pinned) ?? copies[0]!
-})
-
-const selectedStoredCopies = computed(() => {
-  if (!selectedRecord.value) return []
-  return (snapshot.value?.observedItems ?? [])
-    .filter((observed) =>
-      observed.sourcePath.startsWith('vault://') &&
-      observed.baseRecord.toLocaleLowerCase() === selectedRecord.value?.toLocaleLowerCase()
-    )
-    .flatMap((observed) => {
-      const item = vaultItemForObserved(observed)
-      return item ? [item] : []
-    })
-})
 
 const skillNames = computed(() => buildSkillNames(
   plannerCatalogItems.value,
   snapshot.value?.skillMasteries
 ))
 
-const plannerSkillOptions = computed(() => {
-  const needle = plannerSkillDraft.value.trim().toLocaleLowerCase()
-  return skillNames.value
-    .filter((skill) => !plannerSkills.value.includes(skill))
-    .filter((skill) => !needle || skill.toLocaleLowerCase().includes(needle))
-    .slice(0, 30)
+const plannerSession = createLevelingPlannerSession({
+  initialPreferences,
+  items: () => plannerCatalogItems.value,
+  snapshot: () => snapshot.value,
+  skillNames: () => skillNames.value,
+  archivedRecords: () => archivedRecordSet.value,
+  isArchivedItem,
+  ownershipLabel: plannerOwnershipLabel,
+  itemSearchDocument: itemStructuredSearchDocument,
+  formatPresentationLine,
+  persistPlanner: (patch) => preferenceRepository.update('planner', patch),
+  persistDisplay: (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }),
+  listCharacters: () => window.cairnCodex.listCharacters(),
+  readableError,
+  reportProblem: reportTransferProblem,
+  reportSuccess
 })
-
-const plannerCandidateRows = computed(() => plannerCatalogItems.value
-  .filter((item) => item.levelRequirement >= plannerMinimumLevel.value)
-  .filter((item) => item.levelRequirement <= plannerLevelCap.value)
-  .filter((item) => {
-    const archived = isArchivedItem(item)
-    if (plannerOwnership.value === 'owned') return archived
-    if (plannerOwnership.value === 'missing') return !archived
-    return true
-  })
-  .filter((item) => plannerStructuredQuery.value.matches(plannerSearchDocument(item)))
-  .flatMap((item) => {
-    const matches = plannerSkills.value
-      .map((skill) => skillMatchForItem(item, skill))
-      .filter((match): match is SkillMatch => match !== null)
-    const masteryMatches = masteryMatchesForItem(item, selectedPlannerProfile.value?.masteries ?? [])
-    const petBonuses = (item.presentation?.sections ?? [])
-      .filter((section) => section.kind === 'pet')
-      .flatMap((section) => section.lines)
-      .map(formatPresentationLine)
-    return matches.length > 0 || masteryMatches.length > 0
-      ? [{ item, matches, masteryMatches, petBonuses }]
-      : []
-  })
-  .sort((left, right) => {
-    const direction = plannerSortDirection.value === 'asc' ? 1 : -1
-    const rarityRank: Record<string, number> = { legendary: 5, epic: 4, mi: 3, faction: 2, rare: 1 }
-    let comparison = 0
-    if (plannerSortMode.value === 'name') comparison = left.item.name.localeCompare(right.item.name)
-    else if (plannerSortMode.value === 'rarity') {
-      comparison = (rarityRank[left.item.rarity] ?? 0) - (rarityRank[right.item.rarity] ?? 0)
-    } else comparison = left.item.levelRequirement - right.item.levelRequirement
-    if (comparison === 0) comparison = left.item.name.localeCompare(right.item.name)
-    return comparison * direction
-  }))
-
-const plannerRows = computed(() => plannerCandidateRows.value.filter(({ item }) => {
-  const ignored = plannerIgnoredRecordSet.value.has(plannerRecordKey(item))
-  return plannerShowIgnored.value ? ignored : !ignored
-}))
-
-const plannerResearchRows = computed<ResearchItemTableRow[]>(() => plannerRows.value.map((row) => {
-  const ownership = plannerOwnershipLabel(row.item)
-  const roll = researchRollFact(row.item)
-  const recipe = recipeStatus(row.item)
-  return {
-    item: row.item,
-    available: researchItemIsAvailable(row.item, archivedRecordSet.value, recipe ? recipe.known === true : row.item.recipeUnlocked === true),
-    itemType: researchItemTypeLabel(row.item),
-    favorite: isPlannerFavorite(row.item),
-    ignored: plannerShowIgnored.value,
-    supports: [
-      ...row.masteryMatches.map((match) => ({
-        label: `All ${researchSkillName(match.mastery)} skills`,
-        text: match.amount > 0 ? `+${match.amount}` : 'Supported',
-        tone: 'accent' as const
-      })),
-      ...row.matches.map((match) => ({
-        label: researchSkillName(match.skill),
-        text: match.amount > 0 ? `+${match.amount}` : 'Modifier',
-        tone: 'accent' as const
-      }))
-    ],
-    modifiers: [
-      ...(row.petBonuses.length ? [{ kind: 'pet' as const, label: 'All pets', text: row.petBonuses.join('; '), tone: 'accent' as const }] : []),
-      ...row.masteryMatches.map((match) => ({ kind: 'rank' as const, label: 'Mastery-wide', text: masteryMatchEffect(match), skill: researchSkillName(match.mastery) })),
-      ...row.matches.flatMap((match) => [
-        ...(match.conversionTarget ? [{ kind: 'conversion' as const, label: 'Converts to', text: match.conversionTarget, tone: 'accent' as const, skill: researchSkillName(match.skill), targetDamageType: match.conversionTarget }] : []),
-        ...(match.conversionDetails ? [{ kind: 'conversion' as const, label: researchSkillName(match.skill), text: match.conversionDetails, skill: researchSkillName(match.skill) }] : []),
-        ...(match.special ? [{ kind: 'special' as const, label: researchSkillName(match.skill), text: match.special, skill: researchSkillName(match.skill) }] : []),
-        ...(!match.conversionDetails && !match.special
-          ? [{ kind: 'rank' as const, label: researchSkillName(match.skill), text: match.amount ? `+${match.amount} ranks` : 'Skill support', skill: researchSkillName(match.skill) }]
-          : []),
-        ...(match.visualTransformation ? [{ kind: 'visual' as const, label: 'Visual', text: match.visualTransformation, tone: 'positive' as const, skill: researchSkillName(match.skill) }] : [])
-      ])
-    ],
-    acquisition: [
-      ...(recipe ? [{
-        label: 'Blueprint',
-        text: recipe.label,
-        tone: recipe.known ? 'positive' as const : recipe.known === false ? 'warning' as const : 'muted' as const
-      }] : []),
-      ...researchAcquisitionFacts(row.item)
-    ],
-    archive: [
-      ...(ownership ? [{ text: ownership, tone: 'positive' as const }] : [{ text: 'Not archived', tone: 'muted' as const }]),
-      ...(roll ? [roll] : [])
-    ]
-  }
-}))
-
-const plannerMiItems = computed(() => {
-  const source = plannerMapScope.value === 'selected'
-    ? plannerRows.value.map((row) => row.item)
-    : (snapshot.value?.items ?? []).filter((item) => item.rarity === 'mi')
-  return source.filter((item, index) =>
-    item.rarity === 'mi' && source.findIndex((candidate) => candidate.record === item.record) === index
-  )
-})
-
-const atlasRegions = computed(() => {
-  const regions = new Map<string, {
-    key: string
-    name: string
-    contentPack: string
-    minimumItemLevel: number
-    location: MapRegionLocation
-    items: CollectionItem[]
-  }>()
-  for (const item of plannerMiItems.value) {
-    for (const location of item.acquisition?.locations ?? []) {
-      const key = `${location.contentPack}:${location.name}:${location.routeName ?? ''}`.toLocaleLowerCase()
-      const existing = regions.get(key)
-      if (existing) {
-        if (!existing.items.some((candidate) => candidate.record === item.record)) existing.items.push(item)
-        existing.minimumItemLevel = Math.min(existing.minimumItemLevel, item.levelRequirement)
-      } else {
-        regions.set(key, {
-          key,
-          name: location.name,
-          contentPack: location.contentPack,
-          minimumItemLevel: item.levelRequirement,
-          location,
-          items: [item]
-        })
-      }
-    }
-  }
-  return [...regions.values()].sort((left, right) =>
-    contentPackRank(left.contentPack) - contentPackRank(right.contentPack) ||
-    left.minimumItemLevel - right.minimumItemLevel ||
-    left.name.localeCompare(right.name)
-  )
-})
-
-const unlocatedPlannerMiItems = computed(() =>
-  plannerMiItems.value.filter((item) => !(item.acquisition?.locations?.length))
-)
-
-const visibleAtlasRegions = computed(() => {
-  const structuredQuery = atlasStructuredQuery.value
-  const direction = plannerMapSortDirection.value === 'asc' ? 1 : -1
-  return atlasRegions.value
-    .filter((region) => structuredQuery.matches({
-      text: [region.name, region.contentPack, ...region.items.map((item) => item.name), ...region.items.flatMap((item) => item.acquisition?.sources ?? [])].join(' '),
-      fields: {
-        name: region.name,
-        area: [region.name, region.location.routeName ?? ''],
-        item: region.items.map((item) => item.name),
-        monster: region.items.flatMap((item) => item.acquisition?.sources ?? []),
-        source: region.items.flatMap((item) => item.acquisition?.sources ?? []),
-        pack: region.contentPack,
-        level: region.minimumItemLevel
-      }
-    }))
-    .sort((left, right) => {
-      let comparison = 0
-      if (plannerMapSortMode.value === 'name') comparison = left.name.localeCompare(right.name)
-      else if (plannerMapSortMode.value === 'level') comparison = left.minimumItemLevel - right.minimumItemLevel
-      else comparison = left.items.length - right.items.length
-      if (comparison === 0) comparison = left.name.localeCompare(right.name)
-      return comparison * direction
-    })
-})
-
-const atlasMapPins = computed(() => {
-  const regions = visibleAtlasRegions.value.filter((region) =>
-    Boolean(region.location.zoneRecord) &&
-    Number.isFinite(region.location.originX) &&
-    Number.isFinite(region.location.originY)
-  )
-  if (regions.length === 0) return []
-  const xs = regions.map((region) => region.location.originX)
-  const ys = regions.map((region) => region.location.originY)
-  const minimumX = Math.min(...xs)
-  const maximumX = Math.max(...xs)
-  const minimumY = Math.min(...ys)
-  const maximumY = Math.max(...ys)
-  const width = Math.max(1, maximumX - minimumX)
-  const height = Math.max(1, maximumY - minimumY)
-  return regions.map((region) => ({
-    ...region,
-    left: 4 + ((region.location.originX - minimumX) / width) * 92,
-    top: 4 + ((maximumY - region.location.originY) / height) * 92
-  }))
-})
-
-const selectedAtlasItems = computed(() =>
-  atlasRegions.value.find((region) => region.key === selectedAtlasRegion.value)?.items ?? []
-)
+const recipeStatus = plannerSession.recipeStatus
 
 const affixByRecord = computed(() => {
   const byRecord = new Map<string, {
@@ -1332,16 +634,8 @@ const doubleRareMiBaseRecords = computed(() => new Set(
     .map((copy) => copy.baseRecord.toLocaleLowerCase())
 ))
 
-const activeCopyAffix = computed(() =>
-  activeCopyAffixTarget.value
-    ? affixByRecord.value.get(activeCopyAffixTarget.value.record.toLocaleLowerCase()) ?? null
-    : null
-)
-
 const miMetricOptions = computed(() => buildMiMetricOptions(allOwnedCopies.value))
-const selectedMiMetricLabel = computed(() =>
-  miMetricLabel(miMetricOptions.value, miWorkshopControls.value.metric)
-)
+
 const selectedMiMetric = computed({
   get: () => miWorkshopControls.value.metric,
   set: (metric: MiWorkshopControls['metric']) => {
@@ -1355,232 +649,20 @@ const selectedMiMetricDirection = computed({
   }
 })
 
-function masteryMatchEffect(match: PlannerMasteryMatch): string {
-  return match.amount > 0
-    ? `+${match.amount} rank${match.amount === 1 ? '' : 's'} to every ${match.mastery} skill`
-    : `Supports every ${match.mastery} skill`
-}
-
-function addPlannerSkill(skill = plannerSkillDraft.value): void {
-  const exact = skillNames.value.find(
-    (candidate) => candidate.toLocaleLowerCase() === skill.trim().toLocaleLowerCase()
-  ) ?? plannerSkillOptions.value[0]
-  if (!exact || plannerSkills.value.includes(exact)) return
-  plannerSkills.value = [...plannerSkills.value, exact]
-  plannerSkillDraft.value = ''
-}
-
-function removePlannerSkill(skill: string): void {
-  const profile = selectedPlannerProfile.value
-  if (profile?.source === 'character' && !profile.excludedSkills.includes(skill)) {
-    plannerProfiles.value = plannerProfiles.value.map((candidate) =>
-      candidate.id === profile.id
-        ? { ...candidate, excludedSkills: [...candidate.excludedSkills, skill] }
-        : candidate
-    )
-  }
-  plannerSkills.value = plannerSkills.value.filter((candidate) => candidate !== skill)
-}
-
-function restorePlannerSkill(skill: string): void {
-  const profile = selectedPlannerProfile.value
-  if (!profile || plannerSkills.value.includes(skill)) return
-  plannerProfiles.value = plannerProfiles.value.map((candidate) =>
-    candidate.id === profile.id
-      ? { ...candidate, excludedSkills: candidate.excludedSkills.filter((value) => value !== skill) }
-      : candidate
-  )
-  plannerSkills.value = [...plannerSkills.value, skill]
-}
-
-function selectPlannerProfile(profileId: string): void {
-  const profile = plannerProfiles.value.find((candidate) => candidate.id === profileId)
-  if (!profile) return
-  applyingPlannerProfile = true
-  selectedPlannerProfileId.value = profile.id
-  plannerSkills.value = [...profile.skills]
-  plannerMinimumLevel.value = profile.minimumLevel
-  plannerLevelCap.value = profile.levelCap
-  void nextTick(() => { applyingPlannerProfile = false })
-}
-
-function commitPlannerMinimumLevel(): void {
-  const next = Math.min(plannerLevelCap.value, Math.max(1, Number(plannerMinimumLevelDraft.value) || 1))
-  plannerMinimumLevelDraft.value = next
-  plannerMinimumLevel.value = next
-}
-
-function commitPlannerLevelCap(): void {
-  const next = Math.max(plannerMinimumLevel.value, Math.min(100, Number(plannerLevelCapDraft.value) || 100))
-  plannerLevelCapDraft.value = next
-  plannerLevelCap.value = next
-}
-
-function openPlannerSetup(): void {
-  plannerSetupOpen.value = true
-}
-
-async function loadCharacterProfiles(): Promise<void> {
-  if (characterImportLoading.value) return
-  characterImportLoading.value = true
-  characterImportError.value = null
-  try {
-    discoveredCharacters.value = await window.cairnCodex.listCharacters()
-  } catch (error) {
-    characterImportError.value = readableError(error)
-  } finally {
-    characterImportLoading.value = false
-  }
-}
-
-function importCharacterProfile(character: CharacterSaveProfile, setup?: PlannerSetupSubmission): void {
-  if (character.error) return
-  const existing = plannerProfiles.value.find((profile) =>
-    profile.source === 'character' && profile.characterPath?.toLocaleLowerCase() === character.path.toLocaleLowerCase()
-  )
-  const profile = createCharacterPlannerProfile({
-    character,
-    skillNames: skillNames.value,
-    classOptions: plannerClassOptions.value,
-    ...(existing ? { existing } : {}),
-    ...(setup ? { setup } : {}),
-    id: crypto.randomUUID(),
-    modifiedAt: new Date().toISOString()
-  })
-  plannerProfiles.value = existing
-    ? plannerProfiles.value.map((candidate) => candidate.id === existing.id ? profile : candidate)
-    : [...plannerProfiles.value, profile]
-  selectPlannerProfile(profile.id)
-}
-
-function completePlannerSetup(submission: PlannerSetupSubmission): void {
-  if (submission.source === 'character') {
-    const character = discoveredCharacters.value.find((candidate) => candidate.path === submission.characterPath)
-    if (!character) {
-      characterImportError.value = 'That character save is no longer available. Reopen New plan and refresh the save list.'
-      return
-    }
-    importCharacterProfile(character, submission)
-  } else {
-    const profile = createManualPlannerProfile(submission, crypto.randomUUID(), new Date().toISOString())
-    plannerProfiles.value = [...plannerProfiles.value, profile]
-    selectPlannerProfile(profile.id)
-  }
-  plannerSetupOpen.value = false
-}
-
-async function refreshSelectedCharacterProfile(): Promise<void> {
-  const profile = selectedPlannerProfile.value
-  if (profile?.source !== 'character' || !profile.characterPath) return
-  await loadCharacterProfiles()
-  const character = discoveredCharacters.value.find((candidate) =>
-    candidate.path.localeCompare(profile.characterPath!, undefined, { sensitivity: 'base' }) === 0
-  )
-  if (!character) {
-    reportTransferProblem('The source character save could not be found. The existing plan was not changed.')
-    return
-  }
-  importCharacterProfile(character)
-  reportSuccess(`Refreshed ${profile.name} from its character save.`)
-}
-
-function deletePlannerProfile(): void {
-  if (plannerProfiles.value.length <= 1) return
-  const index = plannerProfiles.value.findIndex((profile) => profile.id === selectedPlannerProfileId.value)
-  plannerProfiles.value = plannerProfiles.value.filter((profile) => profile.id !== selectedPlannerProfileId.value)
-  const fallback = plannerProfiles.value[Math.max(0, index - 1)] ?? plannerProfiles.value[0]
-  if (fallback) selectPlannerProfile(fallback.id)
-}
-
-function plannerRecordKey(item: CollectionItem): string {
-  return researchItemPreferenceKey(item)
-}
-
-function sortPlannerTable(sort: string): void {
-  if (sort !== 'name' && sort !== 'level' && sort !== 'rarity') return
-  const next = nextResearchSort(plannerSortMode.value, plannerSortDirection.value, sort)
-  plannerSortMode.value = next.sort
-  plannerSortDirection.value = next.direction
-}
-
-function recipeStatus(item: CollectionItem): { label: string; known: boolean | null } | null {
-  const crafting = item.acquisition?.crafting
-  if (!crafting) return null
-  const profileMode = selectedPlannerProfile.value?.isHardcore
-  if (profileMode !== undefined) {
-    const known = profileMode ? crafting.knownHardcore : crafting.knownSoftcore
-    return {
-      known,
-      label: known === null
-        ? 'Recipe status unavailable'
-        : `${known ? 'Recipe learned' : 'Recipe not learned'} (${profileMode ? 'HC' : 'SC'})`
-    }
-  }
-  if (crafting.knownSoftcore || crafting.knownHardcore) {
-    const modes = [crafting.knownSoftcore ? 'SC' : '', crafting.knownHardcore ? 'HC' : ''].filter(Boolean).join(' + ')
-    return { known: true, label: `Recipe learned (${modes})` }
-  }
-  const known = crafting.knownSoftcore === false && crafting.knownHardcore === false ? false : null
-  return { known, label: known === false ? 'Recipe not learned' : 'Recipe status unavailable' }
-}
-
-function isPlannerFavorite(item: CollectionItem): boolean {
-  return plannerFavoriteRecordSet.value.has(plannerRecordKey(item))
-}
-
-function togglePlannerFavorite(item: CollectionItem): void {
-  const key = plannerRecordKey(item)
-  plannerFavoriteRecords.value = plannerFavoriteRecordSet.value.has(key)
-    ? plannerFavoriteRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
-    : [...plannerFavoriteRecords.value, key]
-}
-
-function togglePlannerIgnored(item: CollectionItem): void {
-  const key = plannerRecordKey(item)
-  plannerIgnoredRecords.value = plannerIgnoredRecordSet.value.has(key)
-    ? plannerIgnoredRecords.value.filter((record) => record.toLocaleLowerCase() !== key)
-    : [...plannerIgnoredRecords.value, key]
-}
-
-function switchPlannerDisplay(display: PlannerDisplay): void {
-  const focused = document.activeElement instanceof HTMLElement
-    ? document.activeElement.dataset.resultKey
-    : undefined
-  plannerDisplay.value = display
-  if (!focused) return
-  void nextTick(async () => {
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-    const target = [...document.querySelectorAll<HTMLElement>('[data-result-key]')]
-      .find((element) => element.dataset.resultKey === focused)
-    target?.scrollIntoView({ block: 'center' })
-    target?.focus({ preventScroll: true })
-  })
-}
-
 function currentAppRoute(): AppRoute {
   const itemRecord = selectedRecord.value
   switch (activeView.value) {
     case 'collection': return { version: 1, workspace: 'collection', itemRecord, controls: {
       ...collectionControls.value
     } }
-    case 'sets': return { version: 1, workspace: 'sets', itemRecord, controls: {
-      query: query.value, progress: setProgressFilter.value, feature: setFeatureFilter.value,
-      sort: setSortMode.value, direction: setSortDirection.value, page: currentPage.value
-    } }
+    case 'sets': return { version: 1, workspace: 'sets', itemRecord, controls: setsSession.routeControls.value }
     case 'materials': return { version: 1, workspace: 'materials', itemRecord, controls: {
       ...materialsControls.value
     } }
     case 'skills': return { version: 1, workspace: 'skills', itemRecord, controls: {
       ...skillExplorerControls.value
     } }
-    case 'planner': return { version: 1, workspace: 'planner', itemRecord, controls: {
-      profileId: selectedPlannerProfileId.value, skills: [...plannerSkills.value], minimumLevel: plannerMinimumLevel.value,
-      maximumLevel: plannerLevelCap.value, query: plannerQuery.value, ownership: plannerOwnership.value,
-      showIgnored: plannerShowIgnored.value, sort: plannerSortMode.value, direction: plannerSortDirection.value,
-      display: plannerDisplay.value, page: plannerPage.value, atlasQuery: atlasRegionQuery.value,
-      atlasRegion: selectedAtlasRegion.value, mapScope: plannerMapScope.value, mapSort: plannerMapSortMode.value,
-      mapDirection: plannerMapSortDirection.value
-    } }
+    case 'planner': return { version: 1, workspace: 'planner', itemRecord, controls: plannerSession.routeControls.value }
     case 'oracle': return { version: 1, workspace: 'oracle', itemRecord, controls: {
       ...oracleControls.value
     } }
@@ -1626,24 +708,13 @@ function updateHistoryButtons(): void {
 function restoreAppRoute(route: AppRoute, referenceInstanceKey: string | null = null): void {
   restoringAppHistory = true
   activeView.value = route.workspace
-  selectedReferenceInstanceKey.value = route.itemRecord ? referenceInstanceKey : null
-  selectedRecord.value = route.itemRecord
+  inspectionSession.restore(route.itemRecord, referenceInstanceKey)
   switch (route.workspace) {
     case 'collection':
       collectionControls.value = { ...route.controls }
       break
     case 'sets':
-      if (searchQueryTimer) {
-        clearTimeout(searchQueryTimer)
-        searchQueryTimer = null
-      }
-      query.value = route.controls.query
-      searchQuery.value = route.controls.query
-      setProgressFilter.value = route.controls.progress
-      setFeatureFilter.value = route.controls.feature
-      setSortMode.value = route.controls.sort
-      setSortDirection.value = route.controls.direction
-      currentPage.value = route.controls.page
+      setsSession.restoreRoute(route.controls)
       break
     case 'materials':
       materialsControls.value = { ...route.controls }
@@ -1652,23 +723,7 @@ function restoreAppRoute(route: AppRoute, referenceInstanceKey: string | null = 
       skillExplorerControls.value = { ...route.controls }
       break
     case 'planner':
-      applyingPlannerProfile = true
-      if (route.controls.profileId) selectPlannerProfile(route.controls.profileId)
-      if (route.controls.skills.length > 0) plannerSkills.value = [...route.controls.skills]
-      plannerMinimumLevel.value = route.controls.minimumLevel
-      plannerLevelCap.value = Math.max(route.controls.minimumLevel, route.controls.maximumLevel)
-      plannerQuery.value = route.controls.query
-      plannerOwnership.value = route.controls.ownership
-      plannerShowIgnored.value = route.controls.showIgnored
-      plannerSortMode.value = route.controls.sort
-      plannerSortDirection.value = route.controls.direction
-      plannerDisplay.value = route.controls.display
-      plannerPage.value = route.controls.page
-      atlasRegionQuery.value = route.controls.atlasQuery
-      selectedAtlasRegion.value = route.controls.atlasRegion
-      plannerMapScope.value = route.controls.mapScope
-      plannerMapSortMode.value = route.controls.mapSort
-      plannerMapSortDirection.value = route.controls.mapDirection
+      plannerSession.restoreRoute(route.controls)
       break
     case 'oracle':
       oracleControls.value = {
@@ -1711,7 +766,6 @@ function restoreAppRoute(route: AppRoute, referenceInstanceKey: string | null = 
       scheduleOperationHistoryRefresh()
       scheduleVaultPageRefresh()
     }
-    applyingPlannerProfile = false
     restoringAppHistory = false
   })
 }
@@ -1743,28 +797,6 @@ function returnToCollection(): void {
 }
 
 watch(
-  [query, rarityFilter, setProgressFilter, setFeatureFilter, setSortMode, setSortDirection],
-  () => {
-    if (restoringAppHistory) return
-    currentPage.value = 1
-  }
-)
-
-let searchQueryTimer: ReturnType<typeof setTimeout> | null = null
-watch(query, (value) => {
-  if (searchQueryTimer) clearTimeout(searchQueryTimer)
-  searchQueryTimer = setTimeout(() => {
-    searchQuery.value = value
-    searchQueryTimer = null
-  }, 120)
-})
-
-watch(setSortMode, (mode) => {
-  if (restoringAppHistory) return
-  setSortDirection.value = mode === 'completion' ? 'desc' : 'asc'
-})
-
-watch(
   [
     () => skillExplorerControls.value.skill,
     () => skillExplorerControls.value.scope
@@ -1786,10 +818,7 @@ watch(
     oracleMaximumLevel
   })
 )
-watch(selectedRecord, () => {
-  activeCopyAffixTarget.value = null
-})
-watch([activeView, selectedRecord, transferSection, selectedPlannerProfileId, glossaryEntryId], () => {
+watch([activeView, selectedRecord, transferSection, plannerSession.selectedPlannerProfileId, glossaryEntryId], () => {
   if (!appHistoryReady || restoringAppHistory) return
   appHistoryIndex += 1
   appHistoryMaximum = appHistoryIndex
@@ -1805,9 +834,7 @@ watch(
     skillExplorerControls,
     oracleControls,
     miWorkshopControls,
-    plannerSkills, plannerMinimumLevel, plannerLevelCap, plannerQuery, plannerOwnership, plannerShowIgnored,
-    plannerSortMode, plannerSortDirection, plannerDisplay, plannerPage, atlasRegionQuery, selectedAtlasRegion,
-    plannerMapScope, plannerMapSortMode, plannerMapSortDirection,
+    plannerSession.routeControls,
     supplyControls,
     farmingControls,
     dismantlingControls,
@@ -1820,60 +847,8 @@ watch(
   },
   { flush: 'post', deep: true }
 )
-watch(plannerMinimumLevel, (level) => {
-  plannerMinimumLevelDraft.value = level
-  if (level > plannerLevelCap.value) plannerLevelCap.value = level
-})
-watch(plannerLevelCap, (level) => {
-  plannerLevelCapDraft.value = level
-  if (level < plannerMinimumLevel.value) plannerMinimumLevel.value = level
-})
-watch(plannerDisplay, (plannerDisplay) => preferenceRepository.update('appearance', { plannerDisplay }))
 watch(navigationCollapsed, (navigationCollapsed) => preferenceRepository.update('appearance', { navigationCollapsed }))
 watch(tooltipBoundaryScroll, (tooltipBoundaryScroll) => preferenceRepository.update('appearance', { tooltipBoundaryScroll }))
-watch([plannerQuery, plannerOwnership, plannerShowIgnored, plannerSortMode, plannerSortDirection, plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
-  if (restoringAppHistory) return
-  plannerPage.value = 1
-})
-watch([plannerSkills, plannerMinimumLevel, plannerLevelCap], () => {
-  if (applyingPlannerProfile) return
-  plannerProfiles.value = plannerProfiles.value.map((profile) =>
-    profile.id === selectedPlannerProfileId.value
-      ? {
-          ...profile,
-          skills: [...plannerSkills.value],
-          minimumLevel: plannerMinimumLevel.value,
-          levelCap: plannerLevelCap.value,
-          modifiedAt: new Date().toISOString()
-        }
-      : profile
-  )
-}, { deep: true })
-watch(plannerProfiles, (profiles) => {
-  preferenceRepository.update('planner', {
-    profiles: profiles.map((profile) => ({
-      ...profile,
-      skills: [...profile.skills],
-      excludedSkills: [...profile.excludedSkills]
-    }))
-  })
-}, { deep: true, immediate: true })
-watch(selectedPlannerProfileId, (profileId) => {
-  preferenceRepository.update('planner', { selectedProfileId: profileId })
-})
-watch(plannerFavoriteRecords, (records) => {
-  preferenceRepository.update('planner', { favoriteRecords: [...records] })
-}, { deep: true })
-watch([plannerMapScope, plannerMinimumLevel, plannerLevelCap, plannerSkills], () => {
-  if (restoringAppHistory) return
-  selectedAtlasRegion.value = null
-})
-watch(visibleAtlasRegions, (regions) => {
-  if (restoringAppHistory) return
-  if (!regions.some((region) => region.key === selectedAtlasRegion.value)) {
-    selectedAtlasRegion.value = regions[0]?.key ?? null
-  }
-}, { immediate: true })
 watch(transferMode, () => {
   if (supplyControls.value.mode !== transferMode.value) {
     supplyControls.value = { ...supplyControls.value, mode: transferMode.value }
@@ -1993,6 +968,10 @@ onMounted(async () => {
   window.addEventListener('keyup', handleTooltipKeyUp)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   stopBackgroundJobUpdates = window.cairnCodex.onBackgroundJobChanged(retainBackgroundJob)
+  stopArchiveRecoveryUpdates = window.cairnCodex.onArchiveRecoveryChanged(() => {
+    collectionSession.invalidate()
+    void refreshVault()
+  })
   try {
     backgroundJobs.value = await window.cairnCodex.getBackgroundJobs()
   } catch (error) {
@@ -2042,19 +1021,15 @@ onMounted(async () => {
     await pollLiveLifecycle()
     liveSyncTimer = setInterval(() => void syncLiveMode(), 1000)
     liveLifecycleTimer = setInterval(() => void pollLiveLifecycle(), 10_000)
-    let cached: CollectionSnapshot | null = null
-    try {
-      cached = await window.cairnCodex.getCachedCollection(
-        [...enabledStashPaths.value],
-        collectionBasis.value
-      )
-    } catch (error) {
-      cacheIssue.value = readableError(error)
-      console.warn('Cached collection was unavailable; falling back to a full scan.', error)
-    }
+    const startupCache: { snapshot: CollectionSnapshot | null } = { snapshot: null }
+    const cacheCurrent = await collectionSession.run('cache', async (read) => {
+      const value = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
+      if (read.install(value)) startupCache.snapshot = value
+    })
+    const cached = startupCache.snapshot
+    if (!cacheCurrent) return
     if (cached) {
       await reportStartupPhase('cache-hit')
-      applySnapshot(cached)
       await waitForPaint()
       await reportStartupPhase('cached-paint')
       await reportStartupPhase('interactive')
@@ -2083,8 +1058,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  collectionSession.dispose()
   stopBackgroundJobUpdates?.()
   stopBackgroundJobUpdates = null
+  stopArchiveRecoveryUpdates?.()
+  stopArchiveRecoveryUpdates = null
   document.body.classList.remove('onboarding-active')
   window.removeEventListener('popstate', handleAppHistory)
   window.removeEventListener('pageshow', handlePageShow)
@@ -2096,65 +1074,35 @@ onBeforeUnmount(() => {
   if (liveSyncTimer) clearInterval(liveSyncTimer)
   if (liveLifecycleTimer) clearInterval(liveLifecycleTimer)
   notifications.clear()
-  if (searchQueryTimer) clearTimeout(searchQueryTimer)
   if (vaultPageTimer) clearTimeout(vaultPageTimer)
   if (operationHistoryTimer) clearTimeout(operationHistoryTimer)
   cancelSearchDocumentWarmup()
 })
 
 async function scanCollection(startupRun = false, hydrateAfter = true): Promise<void> {
-  const requestedSources = [...enabledStashPaths.value]
-  const requestedBasis = collectionBasis.value
-  const requestedKey = JSON.stringify({
-    basis: requestedBasis,
-    paths: requestedSources.map((path) => path.toLocaleLowerCase()).sort()
-  })
   scanActivity.value = 'collection'
-  scanning.value = true
   clearScanProblem()
   let shouldHydrate = false
   if (startupRun) await reportStartupPhase('scan-started')
-  try {
-    const result = await window.cairnCodex.scanCollection(requestedSources, requestedBasis)
-    const currentKey = JSON.stringify({
-      basis: collectionBasis.value,
-      paths: enabledStashPaths.value.map((path) => path.toLocaleLowerCase()).sort()
-    })
-    if (requestedKey === currentKey) {
-      applySnapshot(result)
+  await collectionSession.run('scan', async (read) => {
+    const result = await window.cairnCodex.scanCollection(read.context.sourcePaths, read.context.basis)
+    if (read.install(result)) {
       shouldHydrate = liveStatus.value?.state !== 'ready'
-    } else {
-      const current = await window.cairnCodex.getCachedCollection(
-        [...enabledStashPaths.value],
-        collectionBasis.value
-      )
-      if (current) applySnapshot(current)
     }
-  } catch (error) {
-    reportScanProblem(error instanceof Error ? error.message : 'Collection scan failed.')
-  } finally {
-    scanning.value = false
-    if (startupRun) await reportStartupPhase('scan-settled')
-  }
+  })
+  if (startupRun) await reportStartupPhase('scan-settled')
   if (hydrateAfter && shouldHydrate) void hydrateArchiveRolls(startupRun)
   else if (hydrateAfter && startupRun) await reportStartupPhase('roll-analysis-skipped')
 }
 
 async function rebuildGameDataIndex(): Promise<void> {
   scanActivity.value = 'game-data'
-  scanning.value = true
-  try {
+  await collectionSession.run('rebuild', async (read) => {
     const result = await window.cairnCodex.rebuildGameDataIndex(
-      [...enabledStashPaths.value],
-      collectionBasis.value
+      read.context.sourcePaths, read.context.basis
     )
-    applySnapshot(result)
-    reportSuccess('Game-data and map location indexes rebuilt from the installed Grim Dawn files.')
-  } catch (error) {
-    reportTransferProblem(readableError(error))
-  } finally {
-    scanning.value = false
-  }
+    if (read.install(result)) reportSuccess('Game-data and map location indexes rebuilt from the installed Grim Dawn files.')
+  })
 }
 
 async function exportDiagnostics(): Promise<void> {
@@ -2473,33 +1421,6 @@ function applySnapshot(value: CollectionSnapshot): void {
   }
 }
 
-function vaultItemAsObserved(item: VaultListItem, itemIndex: number): ObservedStashItem {
-  return {
-    sourcePath: `vault://${item.id}`,
-    tabIndex: -1,
-    itemIndex,
-    baseRecord: item.baseRecord,
-    prefixRecord: item.prefixRecord,
-    suffixRecord: item.suffixRecord,
-    modifierRecord: '',
-    transmuteRecord: '',
-    seed: item.seed,
-    materiaRecord: '',
-    relicCompletionBonusRecord: '',
-    relicSeed: 0,
-    enchantmentRecord: '',
-    ascendantRecord: '',
-    ascendantRecord2H: '',
-    enchantmentSeed: 0,
-    materiaCombines: 0,
-    stackCount: 1,
-    rerolls: 0,
-    affixRerolls: 0,
-    rollAnalysis: item.rollAnalysis,
-    instanceKey: item.instanceKey
-  }
-}
-
 function storeTodos(): void {
   preferenceRepository.update('notes', { todos: todos.value.map((todo) => ({ ...todo })) })
 }
@@ -2525,21 +1446,6 @@ function openTriviaItem(record?: string): void {
   if (!item) return
   triviaOpen.value = false
   openItem(item)
-}
-
-function formatTriviaDate(value: string): string {
-  return new Date(value).toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric'
-  })
-}
-
-function triviaSlotLabel(slot: string): string {
-  const labels: Record<string, string> = {
-    head: 'Headgear', chest: 'Chest armor', shoulders: 'Shoulders', hands: 'Gloves',
-    legs: 'Leg armor', feet: 'Boots', waist: 'Belts', weapon: 'Weapons', offhand: 'Offhands',
-    shield: 'Shields', ring: 'Rings', amulet: 'Amulets', medal: 'Medals', relic: 'Relics'
-  }
-  return labels[slot] ?? slot.replaceAll('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function addTodo(): void {
@@ -2826,21 +1732,25 @@ async function selectSourceMode(isHardcore: boolean): Promise<void> {
 async function loadSelectedSources(): Promise<void> {
   hideTooltip()
   selectedRecord.value = null
-  const cached = await window.cairnCodex.getCachedCollection(
-    [...enabledStashPaths.value],
-    collectionBasis.value
-  )
-  if (cached) {
-    applySnapshot(cached)
-    void hydrateArchiveRolls()
-  }
-  else await scanCollection()
+  if (!await reloadCollection()) return
+  void hydrateArchiveRolls()
   await refreshVault()
+}
+
+async function reloadCollection(): Promise<boolean> {
+  let needsScan = false
+  const current = await collectionSession.run('cache', async (read) => {
+    const cached = await window.cairnCodex.getCachedCollection(read.context.sourcePaths, read.context.basis)
+    if (read.install(cached)) needsScan = cached === null
+  })
+  if (!current) return false
+  if (needsScan) await scanCollection()
+  return true
 }
 
 async function hydrateArchiveRolls(startupRun = false): Promise<void> {
   if (
-    archiveRollHydrating.value ||
+    scanning.value ||
     collectionBasis.value !== 'archive' ||
     !snapshot.value ||
     liveGameIsReady()
@@ -2848,67 +1758,32 @@ async function hydrateArchiveRolls(startupRun = false): Promise<void> {
     if (startupRun) await reportStartupPhase('roll-analysis-skipped')
     return
   }
-  archiveRollHydrating.value = true
   archiveRollHydrationCompleted.value = 0
   archiveRollHydrationTotal.value = 0
-  const requestedSources = [...enabledStashPaths.value]
-  const requestedSourceKey = JSON.stringify([...requestedSources].sort())
   if (startupRun) await reportStartupPhase('roll-analysis-started')
-  try {
+  await collectionSession.run('hydration', async (read) => {
     let pending = 1
-    while (pending > 0 && collectionBasis.value === 'archive' && !liveGameIsReady()) {
-      const result = await window.cairnCodex.hydrateArchiveRolls(requestedSources)
-      if (
-        !result ||
-        collectionBasis.value !== 'archive' ||
-        JSON.stringify([...enabledStashPaths.value].sort()) !== requestedSourceKey
-      ) break
+    while (pending > 0 && read.isCurrent() && !liveGameIsReady()) {
+      const result = await window.cairnCodex.hydrateArchiveRolls(read.context.sourcePaths)
+      if (!result || liveGameIsReady() || !read.install(result.snapshot)) break
       archiveRollHydrationCompleted.value += result.processed
       pending = result.pending
       archiveRollHydrationTotal.value = Math.max(
         archiveRollHydrationTotal.value,
         archiveRollHydrationCompleted.value + pending
       )
-      if (result.snapshot) applySnapshot(result.snapshot)
       if (result.processed === 0 && pending > 0) {
         console.warn('Archived roll hydration made no progress; stopping this background run.')
         break
       }
       if (pending > 0) await new Promise((resolve) => setTimeout(resolve, 40))
     }
-  } catch (error) {
-    console.warn('Archived item rolls could not be hydrated in the background.', error)
-  } finally {
-    archiveRollHydrating.value = false
-    if (startupRun) await reportStartupPhase('roll-analysis-settled')
-  }
+  })
+  if (startupRun) await reportStartupPhase('roll-analysis-settled')
 }
 
 function liveGameIsReady(): boolean {
   return liveStatus.value?.state === 'ready'
-}
-
-function rarity(name: 'epic' | 'legendary' | 'mi'): CollectionRaritySummary | undefined {
-  if (!snapshot.value) return undefined
-  if (name !== 'mi' || miCountingMode.value === 'tier') {
-    return snapshot.value.rarities.find((summary) => summary.rarity === name)
-  }
-  const families = new Map<string, CollectionItem[]>()
-  for (const item of snapshot.value.items.filter((candidate) => candidate.rarity === 'mi')) {
-    const key = miFamilyKey(item)
-    const family = families.get(key)
-    if (family) family.push(item)
-    else families.set(key, [item])
-  }
-  return {
-    rarity: 'mi',
-    total: families.size,
-    collected: [...families.values()].filter((family) => family.some(isCollectionOwned)).length,
-    availableCopies: [...families.values()].reduce(
-      (count, family) => count + family.reduce((sum, item) => sum + item.availableCount, 0),
-      0
-    )
-  }
 }
 
 function filterToRarity(value: 'epic' | 'legendary' | 'mi'): void {
@@ -2975,13 +1850,7 @@ function openStashOracle(): void {
 }
 
 function sendOracleCandidateToPlanner(candidate: OracleCandidate): void {
-  plannerSkills.value = [...new Set([candidate.skill, ...candidate.relatedSkills])]
-  plannerMinimumLevelDraft.value = Math.min(plannerMinimumLevel.value, oracleControls.value.minimumLevel)
-  plannerLevelCapDraft.value = Math.max(plannerLevelCap.value, oracleControls.value.maximumLevel)
-  plannerMinimumLevel.value = plannerMinimumLevelDraft.value
-  plannerLevelCap.value = plannerLevelCapDraft.value
-  plannerQuery.value = ''
-  plannerOwnership.value = 'all'
+  plannerSession.buildFromOracle(candidate, oracleControls.value.minimumLevel, oracleControls.value.maximumLevel)
   activeView.value = 'planner'
 }
 
@@ -2998,28 +1867,11 @@ async function openSupplies(): Promise<void> {
   if (liveStatus.value?.state === 'ready') await refreshHeaderCharacters()
 }
 
-function percentage(summary: Pick<CollectionRaritySummary, 'total' | 'collected'> | undefined): string {
-  if (!summary || summary.total === 0) return '0%'
-  return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
-}
-
 function cachedCollectionTime(): string {
   if (!snapshot.value) return ''
   const asOfUtc = snapshot.value.cachedDataAsOfUtc ?? snapshot.value.scannedAtUtc
   const scanned = new Date(asOfUtc)
   return Number.isNaN(scanned.getTime()) ? asOfUtc : scanned.toLocaleString()
-}
-
-function affixPercentage(): string {
-  const summary = snapshot.value?.affixSummary
-  if (!summary || summary.total === 0) return '0%'
-  return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
-}
-
-function recipePercentage(): string {
-  const summary = snapshot.value?.recipeSummary
-  if (!summary || summary.total === 0) return '0%'
-  return ((summary.collected / summary.total) * 100).toFixed(1) + '%'
 }
 
 function categoryProgress(category: string): string {
@@ -3047,12 +1899,15 @@ function preferredStashPath(value: CollectionSnapshot): string {
 }
 
 async function refreshVault(): Promise<void> {
+  archiveQueryRevision.value++
   try {
-    const [summary, safety, live] = await Promise.allSettled([
+    const [summary, safety, live, supplies] = await Promise.allSettled([
       window.cairnCodex.getVaultSummary(),
       window.cairnCodex.inspectWriteSafety(),
-      window.cairnCodex.inspectLiveGame()
+      window.cairnCodex.inspectLiveGame(),
+      refreshSupplySummary()
     ])
+    if (supplies.status === 'rejected') console.warn('Supply summary could not be refreshed.', supplies.reason)
     if (summary.status === 'fulfilled') {
       vaultSummary.value = summary.value
       vaultSummaryStatus.value = 'ready'
@@ -3072,22 +1927,16 @@ async function refreshVault(): Promise<void> {
       activeView.value === 'vault' &&
       (transferSection.value === 'ingest-history' || transferSection.value === 'dispense-history')
     ) await refreshOperationHistory()
-    if (activeView.value === 'supplies' || activeView.value === 'dismantling') {
-      await refreshFullVaultItems()
-    }
   } catch (error) {
     reportTransferProblem(readableError(error))
   }
 }
 
-async function refreshFullVaultItems(): Promise<void> {
-  const items = await window.cairnCodex.listVaultItems()
-  vaultItems.value = items
-  vaultItemsLoaded.value = true
-  supplySession.selectedIds.value = supplySession.selectedIds.value.filter((id) =>
-    id.startsWith('augment:') ||
-    items.some((item) => item.id === id && item.state === 'ingested' && item.rarity === 'supply')
-  )
+async function refreshSupplySummary(): Promise<void> {
+  const generation = ++supplySummaryGeneration
+  const result = await window.cairnCodex.querySupplies({ source: 'archive', category: 'writs', slot: 'all', query: '',
+    activeCharacter: null, liveReady: false, offset: 0, limit: 1 })
+  if (generation === supplySummaryGeneration) reusableSupplySummary.value = result.summary
 }
 
 function scheduleVaultPageRefresh(): void {
@@ -3319,10 +2168,12 @@ async function syncLiveMode(): Promise<void> {
   }
 }
 
-async function retrieveSelectedLive(): Promise<void> {
+type ArchiveConfirmationMetadata = ReadonlyMap<string, Pick<VaultListItem, 'reusable' | 'rarity'>>
+
+async function retrieveSelectedLive(metadata?: ArchiveConfirmationMetadata): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
   const count = selectedVaultIds.value.length
-  const selected = selectedVaultIds.value.map(vaultItemForId)
+  const selected = selectedVaultIds.value.map(id => metadata?.get(id) ?? vaultItemForId(id))
   const reusable = selected.every((item) => item?.reusable)
   const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(
@@ -3351,7 +2202,7 @@ async function retrieveSelectedLive(): Promise<void> {
   }
 }
 
-async function retrieveSupplies(selected: SupplyOption[], mode: TransferMode): Promise<void> {
+async function retrieveSupplies(selected: SupplySelectionItem[], mode: TransferMode): Promise<void> {
   if (selected.length === 0 || vaultBusy.value) return
   const factionAugments = selected.filter((item) => item.source === 'faction')
   const archived = selected.filter((item) => item.source === 'archive')
@@ -3387,8 +2238,9 @@ async function retrieveSupplies(selected: SupplyOption[], mode: TransferMode): P
   }
   if (archived.length > 0) {
     selectedVaultIds.value = archived.map((item) => item.id)
-    if (mode === 'live') await retrieveSelectedLive()
-    else await retrieveSelected()
+    const metadata: ArchiveConfirmationMetadata = new Map(archived.map(item => [item.id, { reusable: item.reusable, rarity: 'supply' }]))
+    if (mode === 'live') await retrieveSelectedLive(metadata)
+    else await retrieveSelected(metadata)
   }
   supplySession.selectedIds.value = []
 }
@@ -3487,7 +2339,7 @@ function applyLiveIngests(
         }))
       ]
     : snapshot.value.observedItems
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
+  collectionSession.commit(withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies }))
 }
 
 function applyLiveRetrievals(
@@ -3533,7 +2385,7 @@ function applyLiveRetrievals(
       ? item
       : { ...item, availableCount: Math.max(0, item.availableCount - removed) }
   })
-  snapshot.value = withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies })
+  collectionSession.commit(withUpdatedSummaries({ ...snapshot.value, observedItems, items, supplies }))
 }
 
 function withUpdatedSummaries(value: CollectionSnapshot): CollectionSnapshot {
@@ -3594,9 +2446,9 @@ async function refreshStaging(): Promise<void> {
   }
 }
 
-async function retrieveSelected(): Promise<void> {
+async function retrieveSelected(metadata?: ArchiveConfirmationMetadata): Promise<void> {
   if (selectedVaultIds.value.length === 0 || vaultBusy.value) return
-  const selected = selectedVaultIds.value.map(vaultItemForId)
+  const selected = selectedVaultIds.value.map(id => metadata?.get(id) ?? vaultItemForId(id))
   const reusable = selected.every((item) => item?.reusable)
   const supplies = selected.every((item) => item?.rarity === 'supply')
   const confirmed = window.confirm(reusable
@@ -3630,24 +2482,6 @@ function readableError(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }
 
-function setCompletionPercent(set: CollectionSet): string {
-  return ((set.collected / set.items.length) * 100).toFixed(1) + '%'
-}
-
-function setReadyFromStorage(set: CollectionSet): boolean {
-  return set.items.every((item) => item.availableCount > 0)
-}
-
-function setReadyAfterCrafting(set: CollectionSet): boolean {
-  return set.items.every((item) => item.availableCount > 0 || item.recipeUnlocked)
-}
-
-function setReadyWithQualifiedAvailability(set: CollectionSet): boolean {
-  return set.items.every((item) =>
-    item.availableCount > 0 || item.recipeUnlocked || isAvailableViaAwakening(item)
-  )
-}
-
 function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
   return item.availableCount === 0 && isAvailableViaAwakening(item)
 }
@@ -3656,25 +2490,6 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
   const source = item.awakeningSourceName ?? 'owned Epic base'
   const count = item.awakeningSourceAvailableCount ?? 0
   return `Available by awakening ${source}${count > 1 ? ` (${count} bases)` : ''}`
-}
-
-function setLevelLabel(set: CollectionSet): string {
-  if (set.maximumLevel <= 0) return 'No level requirement'
-  if (set.minimumLevel === set.maximumLevel) return `Level ${set.minimumLevel}`
-  return `Levels ${set.minimumLevel}–${set.maximumLevel}`
-}
-
-function compareSets(left: CollectionSet, right: CollectionSet): number {
-  let comparison = 0
-  if (setSortMode.value === 'level') {
-    comparison = left.minimumLevel - right.minimumLevel || left.maximumLevel - right.maximumLevel
-  } else if (setSortMode.value === 'completion') {
-    comparison = compareSetCompletion(left.items, right.items)
-  } else {
-    comparison = left.name.localeCompare(right.name)
-  }
-  if (comparison === 0) comparison = left.name.localeCompare(right.name)
-  return setSortDirection.value === 'asc' ? comparison : -comparison
 }
 
 function bestStoredCopy(record: string): VaultListItem | null {
@@ -3703,8 +2518,7 @@ function bestStoredCopy(record: string): VaultListItem | null {
 
 function openItem(item: CollectionItem, referenceInstanceKey: string | null = null): void {
   hideTooltip()
-  selectedReferenceInstanceKey.value = referenceInstanceKey
-  selectedRecord.value = item.record
+  inspectionSession.open(item, referenceInstanceKey)
 }
 
 function catalogItemByRecord(record: string | null | undefined): CollectionItem | null {
@@ -3773,38 +2587,6 @@ function plannerOwnershipLabel(item: CollectionItem): string | null {
 
 function normalizeLoose(value: string): string {
   return value.normalize('NFKD').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
-}
-
-function plannerSearchDocument(item: CollectionItem): SearchDocument {
-  const itemDocument = itemStructuredSearchDocument(item)
-  const sources = item.acquisition?.sources ?? []
-  const areas = (item.acquisition?.locations ?? []).flatMap((location) => [location.name, location.routeName ?? ''])
-  return {
-    text: [itemDocument.text, ...sources, ...areas].join(' '),
-    fields: {
-      name: item.name,
-      type: item.itemClass,
-      slot: item.slot,
-      rarity: item.rarity,
-      skill: itemDocument.fields?.skill,
-      damage: itemDocument.fields?.damage,
-      source: sources,
-      area: areas,
-      level: item.levelRequirement,
-      owned: isArchivedItem(item)
-    }
-  }
-}
-
-function searchErrorMessage(query: CompiledSearchQuery): string | null {
-  if (!query.error) return null
-  return query.error.fragment
-    ? `${query.error.message} Check “${query.error.fragment}”.`
-    : query.error.message
-}
-
-function contentPackRank(contentPack: string): number {
-  return ({ base: 0, gdx1: 1, gdx2: 2, gdx3: 3 } as Record<string, number>)[contentPack] ?? 9
 }
 
 function contentPackShortLabel(contentPack: string): string {
@@ -3952,25 +2734,6 @@ function itemStructuredSearchDocument(item: CollectionItem): SearchDocument {
   return { text: itemSearchEverything(item, document), fields: document.fields }
 }
 
-function setStructuredSearchDocument(item: CollectionItem, set: CollectionSet): SearchDocument {
-  const document = itemStructuredSearchDocument(item)
-  const fx = (item.presentation?.sections ?? []).some((section) => section.kind === 'visual-modifier') ||
-    (item.setPresentation?.tiers ?? []).some((tier) =>
-      (tier.skillModifiers ?? []).some((section) => section.kind === 'visual-modifier')
-    )
-  return {
-    text: document.text,
-    fields: {
-      ...document.fields,
-      owned: setItemDiscovered(item),
-      complete: set.collected === set.items.length,
-      craftable: item.recipeUnlocked === true,
-      awakening: isAvailableViaAwakening(item),
-      fx
-    }
-  }
-}
-
 function skillSearchText(item: CollectionItem): string {
   if (!item.presentation) return ''
   const skillLines = item.presentation.sections
@@ -3999,21 +2762,6 @@ function grantedSkillSearchParts(skill: ItemGrantedSkillPresentation | null | un
     ...skill.lines.map((line) => formatPresentationLine(line)),
     ...(skill.linkedSkills ?? []).flatMap((linked) => grantedSkillSearchParts(linked))
   ].filter((value): value is string => Boolean(value))
-}
-
-function setMemberVisualChanges(set: CollectionSet) {
-  return set.items.flatMap((item) =>
-    (item.presentation?.sections ?? [])
-      .filter((section) => section.kind === 'visual-modifier')
-      .map((section) => ({ item, section }))
-  )
-}
-
-function setHasVisualChanges(set: CollectionSet): boolean {
-  return setMemberVisualChanges(set).length > 0 ||
-    (set.items[0]?.setPresentation?.tiers ?? []).some((tier) =>
-      (tier.skillModifiers ?? []).some((section) => section.kind === 'visual-modifier')
-    )
 }
 
 function queueTooltip(
@@ -4282,31 +3030,6 @@ function setMemberItems(item: CollectionItem): CollectionItem[] {
     .sort((left, right) => left.slot.localeCompare(right.slot) || left.name.localeCompare(right.name))
 }
 
-function formatPresentationLine(line: ItemPresentationLine): string {
-  const minimum = line.minimum === null ? '' : formatRollValue(line.minimum)
-  const maximum = line.maximum === null ? '' : formatRollValue(line.maximum)
-  const range = maximum ? `${minimum}${line.unit} - ${maximum}${line.unit}` : `${minimum}${line.unit}`
-  return `${line.prefix}${range}${range ? ' ' : ''}${line.label}${line.suffix}`
-}
-
-async function pinCopy(copy: ObservedStashItem): Promise<void> {
-  if (!selectedItem.value || !copy.instanceKey || pinning.value) return
-  pinning.value = true
-  try {
-    const next = selectedItem.value.pinnedInstanceKey === copy.instanceKey ? null : copy.instanceKey
-    const source = stashChoices.value.find((stash) => stash.path === copy.sourcePath)
-    await window.cairnCodex.setPinnedBest(
-      selectedItem.value.record,
-      next,
-      source?.isHardcore ?? snapshot.value?.isHardcore ?? false
-    )
-    selectedItem.value.pinnedInstanceKey = next
-    selectedReferenceInstanceKey.value = next
-  } finally {
-    pinning.value = false
-  }
-}
-
 function vaultItemForId(id: string): VaultListItem | null {
   const visible = [
     ...storedVaultPage.value.items,
@@ -4361,257 +3084,6 @@ function vaultItemForObserved(copy: ObservedStashItem): VaultListItem | null {
 
 function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
   return vaultItemForObserved(copy)
-}
-
-function copyAffixName(record: string, emptyLabel: string): string {
-  if (!record) return emptyLabel
-  return affixByRecord.value.get(record.toLocaleLowerCase())?.name ??
-    record.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.dbr$/i, '') ?? record
-}
-
-function copyAffixRarity(record: string): 'magical' | 'rare' | null {
-  if (!record) return null
-  return affixByRecord.value.get(record.toLocaleLowerCase())?.rarity ?? null
-}
-
-function copyAffixRarityLabel(record: string): string {
-  const rarity = copyAffixRarity(record)
-  return rarity === 'magical' ? 'Magic' : rarity === 'rare' ? 'Rare' : 'Unknown rarity'
-}
-
-function copyAffixKey(copy: ObservedStashItem, record: string): string {
-  return `${copy.instanceKey ?? `${copy.sourcePath}:${copy.tabIndex}:${copy.itemIndex}`}|${record}`
-}
-
-function copyAffixIsOpen(copy: ObservedStashItem, record: string): boolean {
-  return Boolean(record) && activeCopyAffixTarget.value?.copyKey === copyAffixKey(copy, record)
-}
-
-function toggleCopyAffix(copy: ObservedStashItem, record: string): void {
-  if (!record) return
-  const copyKey = copyAffixKey(copy, record)
-  activeCopyAffixTarget.value = activeCopyAffixTarget.value?.copyKey === copyKey
-    ? null
-    : { copyKey, record }
-}
-
-function copySourceLabel(copy: ObservedStashItem): string {
-  if (vaultCopyForObserved(copy)) return 'Stored in Codex Archive'
-  const name = copy.sourcePath.replaceAll('\\', '/').split('/').at(-1)
-  return name ? `Currently in ${name}` : 'Currently scanned copy'
-}
-
-function presentRolledStats(source: RolledStat[] | undefined, includeFixed = false): PresentedRollStat[] {
-  const stats = (source ?? [])
-    .filter((stat) => includeFixed || stat.estimatedPercentile !== null)
-  const byField = new Map(stats.map((stat) => [stat.field, stat]))
-  const consumed = new Set<string>()
-  return stats
-    .flatMap<PresentedRollStat>((stat): PresentedRollStat[] => {
-      if (consumed.has(stat.field)) return []
-      if (stat.field.endsWith('Max') && byField.has(stat.field.slice(0, -3))) return []
-      const root = stat.field.endsWith('Min') ? stat.field.slice(0, -3) : stat.field
-      const maximum = byField.get(root + 'Max')
-      if (maximum && maximum.field !== stat.field) {
-        if (maximum && (includeFixed || maximum.estimatedPercentile !== null)) {
-          consumed.add(maximum.field)
-          const unit = rollStatUnit(root)
-          const valueLabel =
-            stat.value === maximum.value
-              ? `${formatRollValue(stat.value)}${unit}`
-              : `${formatRollValue(stat.value)}–${formatRollValue(maximum.value)}${unit}`
-          return [
-            {
-              key: root,
-              label: rollStatName(root),
-              value: stat.value,
-              maximumValue: maximum.value,
-              unit,
-              valueLabel,
-              qualityPercent: averageRollQuality([stat, maximum]),
-              rankLabel: null,
-              rankDescription: `Individual sampled percentile ranks: minimum ${formatCombinationPercentile(stat.estimatedPercentile) ?? 'fixed'}; maximum ${formatCombinationPercentile(maximum.estimatedPercentile) ?? 'fixed'}.`,
-              rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(maximum.observedMaximum ?? maximum.value)}${unit}`
-            }
-          ]
-        }
-      }
-      return [
-        {
-          key: stat.field,
-          label: rollStatName(stat.field),
-          value: stat.value,
-          maximumValue: null,
-          unit: rollStatUnit(stat.field),
-          valueLabel: `${formatRollValue(stat.value)}${rollStatUnit(stat.field)}`,
-          qualityPercent: rollStatQuality(stat),
-          rankLabel: formatCombinationPercentile(stat.estimatedPercentile),
-          rankDescription: 'Range quality (0% minimum, 100% maximum); parentheses show sampled percentile rank, counting half of ties.',
-          rangeLabel: `${formatRollValue(stat.observedMinimum ?? stat.value)}–${formatRollValue(stat.observedMaximum ?? stat.value)}${rollStatUnit(stat.field)}`
-        }
-      ]
-    })
-    .sort((left, right) => left.label.localeCompare(right.label))
-}
-
-function rollStatName(field: string): string {
-  if (field.startsWith('conversionPercentage')) {
-    const conversionIndex = field.endsWith('2') ? 1 : 0
-    const conversions = (selectedItem.value?.presentation?.sections ?? [])
-      .flatMap((section) => section.lines)
-      .filter((line) => line.label.includes('Damage converted to'))
-    return conversions[conversionIndex]?.label ?? 'Damage conversion'
-  }
-  return humanStatName(field)
-}
-
-function rollStatUnit(field: string): string {
-  if (
-    field.startsWith('conversionPercentage') ||
-    field.endsWith('Modifier') ||
-    (field.startsWith('defensive') &&
-      !['defensiveProtection', 'defensiveBlock', 'defensiveBonusProtection'].includes(field)) ||
-    field === 'offensiveLifeLeechMin' ||
-    field.includes('Chance') ||
-    field.includes('Reduction')
-  ) return '%'
-  return ''
-}
-
-function rollableStats(copy: ObservedStashItem) {
-  return presentRolledStats(copy.rollAnalysis?.stats)
-}
-
-function petRollableStats(copy: ObservedStashItem) {
-  return presentRolledStats(copy.rollAnalysis?.petStats, true)
-}
-
-function formatSignedRollDelta(value: number, unit: string): string {
-  if (Math.abs(value) < 0.0000001) return `0${unit}`
-  return `${value > 0 ? '+' : '−'}${formatRollValue(Math.abs(value))}${unit}`
-}
-
-function statValuesMatch(left: PresentedRollStat, right: PresentedRollStat): boolean {
-  return left.value === right.value && left.maximumValue === right.maximumValue
-}
-
-function comparisonStats(copy: ObservedStashItem, pet: boolean): ComparisonStatRow[] {
-  const reference = comparisonReferenceCopy.value
-  const sourceFor = (candidate: ObservedStashItem) => presentRolledStats(
-    pet ? candidate.rollAnalysis?.petStats : candidate.rollAnalysis?.stats,
-    true
-  )
-  const current = new Map(sourceFor(copy).map((stat) => [stat.key, stat]))
-  const referenceStats = new Map((reference ? sourceFor(reference) : []).map((stat) => [stat.key, stat]))
-  const universe = new Map<string, PresentedRollStat[]>()
-  for (const candidate of selectedCopies.value) {
-    for (const stat of sourceFor(candidate)) {
-      const existing = universe.get(stat.key)
-      if (existing) existing.push(stat)
-      else universe.set(stat.key, [stat])
-    }
-  }
-  return [...universe.entries()]
-    .filter(([, variants]) =>
-      variants.some((stat) => stat.qualityPercent !== null) ||
-      variants.length !== selectedCopies.value.length ||
-      variants.some((stat) => !statValuesMatch(stat, variants[0]!))
-    )
-    .map(([key, variants]) => {
-      const own = current.get(key)
-      const baseline = referenceStats.get(key)
-      const template = own ?? baseline ?? variants[0]!
-      const isReference = copy.instanceKey === reference?.instanceKey
-      if (isReference) {
-        return {
-          ...template,
-          valueLabel: own?.valueLabel ?? '—',
-          qualityPercent: own?.qualityPercent ?? null,
-          deltaLabel: 'Reference',
-          deltaTone: 'reference' as const,
-          qualityDeltaLabel: null,
-          missingFromCopy: !own
-        }
-      }
-      if (!own && baseline) {
-        return {
-          ...baseline,
-          valueLabel: '—',
-          qualityPercent: null,
-          deltaLabel: `Missing ${baseline.valueLabel}`,
-          deltaTone: 'missing' as const,
-          qualityDeltaLabel: null,
-          missingFromCopy: true
-        }
-      }
-      if (own && !baseline) {
-        return {
-          ...own,
-          deltaLabel: `Adds ${own.valueLabel}`,
-          deltaTone: 'unique' as const,
-          qualityDeltaLabel: null,
-          missingFromCopy: false
-        }
-      }
-      if (!own || !baseline) {
-        return {
-          ...template,
-          valueLabel: own?.valueLabel ?? '—',
-          qualityPercent: own?.qualityPercent ?? null,
-          deltaLabel: '—',
-          deltaTone: 'same' as const,
-          qualityDeltaLabel: null,
-          missingFromCopy: !own
-        }
-      }
-      const lowerDelta = own.value - baseline.value
-      const upperDelta = own.maximumValue !== null || baseline.maximumValue !== null
-        ? (own.maximumValue ?? own.value) - (baseline.maximumValue ?? baseline.value)
-        : null
-      const deltaLabel = upperDelta !== null && upperDelta !== lowerDelta
-        ? `${formatSignedRollDelta(lowerDelta, own.unit)} / ${formatSignedRollDelta(upperDelta, own.unit)}`
-        : formatSignedRollDelta(lowerDelta, own.unit)
-      const qualityDelta = own.qualityPercent !== null && baseline.qualityPercent !== null
-        ? own.qualityPercent - baseline.qualityPercent
-        : null
-      return {
-        ...own,
-        deltaLabel: statValuesMatch(own, baseline) ? 'Same value' : deltaLabel,
-        deltaTone: lowerDelta > 0 || (lowerDelta === 0 && (upperDelta ?? 0) > 0)
-          ? 'positive' as const
-          : lowerDelta < 0 || (lowerDelta === 0 && (upperDelta ?? 0) < 0)
-            ? 'negative' as const
-            : 'same' as const,
-        qualityDeltaLabel: qualityDelta === null || Math.abs(qualityDelta) < 0.05
-          ? null
-          : `${qualityDelta > 0 ? '+' : '−'}${Math.abs(qualityDelta).toFixed(0)} quality points`,
-        missingFromCopy: false
-      }
-    })
-    .sort((left, right) => left.label.localeCompare(right.label))
-}
-
-function comparisonItemStats(copy: ObservedStashItem): ComparisonStatRow[] {
-  return comparisonStats(copy, false)
-}
-
-function comparisonPetStats(copy: ObservedStashItem): ComparisonStatRow[] {
-  return comparisonStats(copy, true)
-}
-
-function copyAffixDelta(copy: ObservedStashItem, kind: 'prefix' | 'suffix'): string {
-  const reference = comparisonReferenceCopy.value
-  if (!reference || copy.instanceKey === reference.instanceKey) return 'Reference affix'
-  const record = kind === 'prefix' ? copy.prefixRecord : copy.suffixRecord
-  const baseline = kind === 'prefix' ? reference.prefixRecord : reference.suffixRecord
-  if (record === baseline) return 'Same as reference'
-  if (!record) return 'Missing vs reference'
-  if (!baseline) return 'Added vs reference'
-  return 'Different from reference'
-}
-
-function formatRollValue(value: number): string {
-  return Number.isInteger(value) ? value.toString() : value.toFixed(1)
 }
 
 </script>
@@ -4829,42 +3301,12 @@ function formatRollValue(value: number): string {
       </section>
     </div>
 
-    <div v-if="triviaOpen" class="trivia-backdrop" @click.self="triviaOpen = false">
-      <section class="trivia-dialog" role="dialog" aria-modal="true" aria-labelledby="trivia-title">
-        <header>
-          <div>
-            <p class="section-label">Collection trivia</p>
-            <h2 id="trivia-title">Codex Curiosities</h2>
-            <p>Odd records and minor triumphs from the currently selected archive scope.</p>
-          </div>
-          <button type="button" class="todo-close" aria-label="Close collection trivia" @click="triviaOpen = false">×</button>
-        </header>
-        <div class="trivia-scroll">
-          <div v-if="collectionTrivia.length" class="trivia-grid">
-            <component
-              :is="fact.itemRecord ? 'button' : 'article'"
-              v-for="fact in collectionTrivia"
-              :key="fact.id"
-              :type="fact.itemRecord ? 'button' : undefined"
-              class="trivia-fact"
-              :class="[`tone-${fact.tone}`, { actionable: fact.itemRecord }]"
-              @click="openTriviaItem(fact.itemRecord)"
-            >
-              <span class="trivia-eyebrow">{{ fact.eyebrow }}</span>
-              <strong class="trivia-value">{{ fact.value }}</strong>
-              <h3>{{ fact.title }}</h3>
-              <p>{{ fact.detail }}</p>
-              <small v-if="fact.itemRecord">Inspect item →</small>
-            </component>
-          </div>
-          <p v-else class="todo-empty">The Codex needs a few discoveries before it can become nosy.</p>
-        </div>
-        <footer>
-          <span>{{ collectionTrivia.length }} curiosities · recalculated from live collection data</span>
-          <button type="button" @click="triviaOpen = false">Close</button>
-        </footer>
-      </section>
-    </div>
+    <CollectionTriviaDialog
+      :open="triviaOpen"
+      :collection-trivia="dashboard.collectionTrivia.value"
+      @close="triviaOpen = false"
+      @open-item="openTriviaItem"
+    />
 
     <div v-if="todoOpen" class="todo-backdrop" @click.self="todoOpen = false">
       <section class="todo-dialog" role="dialog" aria-modal="true" aria-labelledby="todo-title">
@@ -4968,257 +3410,37 @@ function formatRollValue(value: number): string {
           Cached as of {{ cachedCollectionTime() }}. Recipes, supplies, and components remain available while their save sources are offline; refresh when they are available again.
         </span>
       </section>
-      <section v-if="activeView === 'collection'" class="hero">
-        <div>
-          <p class="section-label">{{ collectionBasisLabel }}</p>
-          <h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>
-          <p class="hero-copy">
-            <template v-if="discovery?.installations[0]">
-              {{ sourceModeLabel }} ·
-              {{ snapshot?.contentPacks.length ?? 0 }} content packs ·
-              {{ snapshot?.scannedStashes.length ?? 0 }} transfer stashes ·
-              {{ snapshot?.items.length.toLocaleString() ?? 0 }} catalog entries ·
-              {{ archivedCopyCount.toLocaleString() }} archived copies
-            </template>
-            <template v-else>
-              Locating Grim Dawn, its item database, and transfer stashes.
-            </template>
-          </p>
-        </div>
-        <button class="primary-action" type="button" :disabled="scanning" @click="scanCollection()">
-          {{ scanning ? 'Reading the archives…' : 'Refresh collection' }}
-        </button>
-      </section>
-
-      <section v-if="snapshot && activeView === 'collection'" class="completion-tracker" aria-label="Collection completion">
-        <header>
-          <div><p class="section-label">Collection progress</p><strong>{{ allItemSummary.collected }} / {{ allItemSummary.total }} tracked entries</strong></div>
-          <button type="button" :aria-expanded="!trackerCollapsed" @click="toggleTracker">{{ trackerCollapsed ? 'Show trackers' : 'Hide trackers' }}</button>
-        </header>
-        <div v-if="!trackerCollapsed" class="metrics">
-        <button
-          type="button"
-          :aria-pressed="collectionControls.rarity === 'all'"
-          @click="filterToAllRarities"
-        >
-          <div class="metric-heading">
-            <span>All items</span>
-            <strong>{{ allItemSummary.collected }} / {{ allItemSummary.total || '—' }}</strong>
-          </div>
-          <div class="meter all"><span :style="{ width: percentage(allItemSummary) }" /></div>
-          <small>
-            {{ percentage(allItemSummary) }} discovered · Epic, Legendary, and {{ miCountingMode === 'base' ? 'MI bases' : 'MI level tiers' }}
-            <template v-if="allItemRollSummary.median !== null"> · median best {{ allItemRollSummary.median.toFixed(1) }}% ({{ allItemRollSummary.scored }} scored)</template>
-          </small>
-        </button>
-        <button
-          type="button"
-          :aria-pressed="collectionControls.rarity === 'legendary'"
-          @click="filterToRarity('legendary')"
-        >
-          <div class="metric-heading">
-            <span>Legendaries</span>
-            <strong>{{ rarity('legendary')?.collected ?? 0 }} / {{ rarity('legendary')?.total ?? '—' }}</strong>
-          </div>
-          <div class="meter legendary"><span :style="{ width: percentage(rarity('legendary')) }" /></div>
-          <small>
-            {{ percentage(rarity('legendary')) }} discovered · {{ rarity('legendary')?.availableCopies ?? 0 }} copies available
-            <template v-if="awakeningAvailableLegendaryCount"> · {{ awakeningAvailableLegendaryCount }} available by awakening</template>
-            <template v-if="legendaryRollSummary.median !== null"> · median best {{ legendaryRollSummary.median.toFixed(1) }}% ({{ legendaryRollSummary.scored }} scored)</template>
-          </small>
-        </button>
-        <button
-          type="button"
-          :aria-pressed="collectionControls.rarity === 'epic'"
-          @click="filterToRarity('epic')"
-        >
-          <div class="metric-heading">
-            <span>Epics</span>
-            <strong>{{ rarity('epic')?.collected ?? 0 }} / {{ rarity('epic')?.total ?? '—' }}</strong>
-          </div>
-          <div class="meter epic"><span :style="{ width: percentage(rarity('epic')) }" /></div>
-          <small>
-            {{ percentage(rarity('epic')) }} discovered · {{ rarity('epic')?.availableCopies ?? 0 }} copies available
-            <template v-if="epicRollSummary.median !== null"> · median best {{ epicRollSummary.median.toFixed(1) }}% ({{ epicRollSummary.scored }} scored)</template>
-          </small>
-        </button>
-        <button
-          type="button"
-          :aria-pressed="collectionControls.rarity === 'mi'"
-          @click="filterToRarity('mi')"
-        >
-          <div class="metric-heading">
-            <span>{{ miCountingMode === 'base' ? 'MI Bases' : 'MI Level Tiers' }}</span>
-            <strong>{{ rarity('mi')?.collected ?? 0 }} / {{ rarity('mi')?.total ?? '—' }}</strong>
-          </div>
-          <div class="meter mi"><span :style="{ width: percentage(rarity('mi')) }" /></div>
-          <small>
-            {{ percentage(rarity('mi')) }} discovered · {{ miCountingMode === 'base' ? 'any owned tier completes its base' : 'every obtainable level tier counted separately' }}
-            <template v-if="miRollSummary.median !== null"> · median best {{ miRollSummary.median.toFixed(1) }}% ({{ miRollSummary.scored }} scored)</template>
-          </small>
-        </button>
-        <button
-          type="button"
-          aria-pressed="false"
-          @click="openAffixWorkshop"
-        >
-          <div class="metric-heading">
-            <span>Affixes</span>
-            <strong>{{ snapshot?.affixSummary.collected ?? 0 }} / {{ snapshot?.affixSummary.total ?? '—' }}</strong>
-          </div>
-          <div class="meter affix"><span :style="{ width: affixPercentage() }" /></div>
-          <small>
-            {{ affixPercentage() }} discovered · prefixes and suffixes
-            <template v-if="affixRollSummary.median !== null"> · median best {{ affixRollSummary.median.toFixed(1) }}% ({{ affixRollSummary.scored }} scored)</template>
-          </small>
-        </button>
-        <button
-          type="button"
-          aria-pressed="false"
-          @click="openSets"
-        >
-          <div class="metric-heading">
-            <span>Sets</span>
-            <strong>{{ setSummary.collected }} / {{ setSummary.total || '—' }}</strong>
-          </div>
-          <div class="meter set"><span :style="{ width: percentage(setSummary) }" /></div>
-          <small>
-            {{ percentage(setSummary) }} complete · {{ setSummary.readyFromStorage }} ready from storage
-            <template v-if="setSummary.readyAfterCrafting > setSummary.readyFromStorage">
-              · {{ setSummary.readyAfterCrafting - setSummary.readyFromStorage }} more after crafting
-            </template>
-            <template v-if="setSummary.readyWithQualifiedAvailability > setSummary.readyAfterCrafting">
-              · {{ setSummary.readyWithQualifiedAvailability - setSummary.readyAfterCrafting }} more with awakening
-            </template>
-            <template v-if="setRollSummary.median !== null"> · median best piece {{ setRollSummary.median.toFixed(1) }}% ({{ setRollSummary.scored }} scored)</template>
-          </small>
-        </button>
-        <button
-          type="button"
-          aria-pressed="false"
-          @click="openMaterials('component')"
-        >
-          <div class="metric-heading">
-            <span>Components</span>
-            <strong>{{ componentSummary.collected }} / {{ componentSummary.total || '—' }}</strong>
-          </div>
-          <div class="meter component"><span :style="{ width: percentage(componentSummary) }" /></div>
-          <small>{{ percentage(componentSummary) }} held or recipe-unlocked · {{ componentSummary.availableCopies.toLocaleString() }} in storage</small>
-        </button>
-        <button
-          type="button"
-          aria-pressed="false"
-          @click="openMaterials('all')"
-        >
-          <div class="metric-heading">
-            <span>Consumables</span>
-            <strong>{{ consumableSummary.collected }} / {{ consumableSummary.total || '—' }}</strong>
-          </div>
-          <div class="meter consumable"><span :style="{ width: percentage(consumableSummary) }" /></div>
-          <small>{{ percentage(consumableSummary) }} tracked · materials, Dynamite, and potion formulas</small>
-        </button>
-        <button
-          type="button"
-          aria-pressed="false"
-          @click="openSupplies"
-        >
-          <div class="metric-heading">
-            <span>Supplies</span>
-            <strong>{{ reusableSupplySummary.collected }} / {{ reusableSupplySummary.total || '—' }}</strong>
-          </div>
-          <div class="meter supply"><span :style="{ width: percentage(reusableSupplySummary) }" /></div>
-          <small>{{ percentage(reusableSupplySummary) }} reusable unlocks · {{ supplyAccessSummary }}</small>
-        </button>
-        <button
-          type="button"
-          :aria-pressed="collectionControls.rarity === 'recipe'"
-          @click="filterToRecipes"
-        >
-          <div class="metric-heading">
-            <span>Recipes</span>
-            <strong>{{ snapshot?.recipeSummary.collected ?? 0 }} / {{ snapshot?.recipeSummary.total ?? '—' }}</strong>
-          </div>
-          <div class="meter recipe"><span :style="{ width: recipePercentage() }" /></div>
-          <small>{{ recipePercentage() }} learned · crafted items count as unlocked</small>
-        </button>
-        </div>
-      </section>
-
-      <section v-if="showLegacyScanner && activeView === 'collection'" class="collection-basis" aria-label="Collection persistence">
-        <button
-          type="button"
-          :class="{ active: collectionBasis === 'archive' }"
-          :aria-pressed="collectionBasis === 'archive'"
-          @click="setCollectionBasis('archive')"
-        >
-          <strong>Codex Archive</strong>
-          <small>Your durable CC collection. Counts copies stored by CC, even after they leave Grim Dawn.</small>
-        </button>
-        <button
-          type="button"
-          :class="{ active: collectionBasis === 'stashes' }"
-          :aria-pressed="collectionBasis === 'stashes'"
-          @click="setCollectionBasis('stashes')"
-        >
-          <strong>Stash Scanner</strong>
-          <small>A live inventory of physical copies currently present in the selected Grim Dawn stash files.</small>
-        </button>
-      </section>
-      <ExplorerToolbar
-        v-if="snapshot && activeView === 'sets'"
-        class="collection-explorer-toolbar"
-        v-model="query"
-        v-bind="searchGuidance.sets"
-        search-label="Search sets"
-        placeholder="Name, stat, skill… (try skill:wendigo)"
-        :result-count="visibleSets.length"
-        result-label="sets"
-        :search-error="searchErrorMessage(setSearchQuery)"
-      >
-        <template #filters>
-          <label>
-            <span>Set progress</span>
-            <select v-model="setProgressFilter" autocomplete="off">
-              <option value="all">All sets</option>
-              <option value="complete">Complete</option>
-              <option value="progress">In progress</option>
-              <option value="unstarted">Unstarted</option>
-            </select>
-          </label>
-          <label>
-            <span>Rarity</span>
-            <select v-model="rarityFilter" autocomplete="off">
-              <option value="all">All set rarities</option>
-              <option value="legendary">Legendary sets</option>
-              <option value="epic">Epic sets</option>
-            </select>
-          </label>
-          <label>
-            <span>Special feature</span>
-            <select v-model="setFeatureFilter" autocomplete="off">
-              <option value="all">All set effects</option>
-              <option value="visual">Visual transformations</option>
-            </select>
-          </label>
-        </template>
-        <template #sort>
-          <label>
-            <span>Sort by</span>
-            <select v-model="setSortMode" autocomplete="off">
-              <option value="completion">Completion</option>
-              <option value="level">Required level</option>
-              <option value="name">Name</option>
-            </select>
-          </label>
-          <label>
-            <span>Order</span>
-            <select v-model="setSortDirection" autocomplete="off">
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </select>
-          </label>
-        </template>
-      </ExplorerToolbar>
+      <CollectionDashboard
+        v-if="activeView === 'collection'"
+        :model="dashboard"
+        :available="Boolean(snapshot)"
+        :installation-found="Boolean(discovery?.installations[0])"
+        :source-mode-label="sourceModeLabel"
+        :content-pack-count="snapshot?.contentPacks.length ?? 0"
+        :scanned-stash-count="snapshot?.scannedStashes.length ?? 0"
+        :catalog-entry-count="snapshot?.items.length ?? 0"
+        :archived-copy-count="archivedCopyCount"
+        :scanning="scanning"
+        :tracker-collapsed="trackerCollapsed"
+        :collection-basis="collectionBasis"
+        :show-legacy-scanner="showLegacyScanner"
+        :mi-counting-mode="miCountingMode"
+        :selected-rarity="collectionControls.rarity"
+        :affix-summary="snapshot?.affixSummary"
+        :recipe-summary="snapshot?.recipeSummary"
+        :reusable-supply-summary="reusableSupplySummary"
+        :supply-access-summary="supplyAccessSummary"
+        @refresh="scanCollection()"
+        @toggle-tracker="toggleTracker"
+        @filter-all="filterToAllRarities"
+        @filter-recipes="filterToRecipes"
+        @filter-rarity="filterToRarity"
+        @open-affixes="openAffixWorkshop"
+        @open-sets="openSets"
+        @open-materials="openMaterials"
+        @open-supplies="openSupplies"
+        @set-basis="setCollectionBasis"
+      />
 
       <CollectionMaterialsWorkspace
         v-if="snapshot && (activeView === 'collection' || activeView === 'materials')"
@@ -5277,313 +3499,19 @@ function formatRollValue(value: number): string {
         @inspect-skill="inspectOracleSkill"
       />
 
-      <section v-else-if="activeView === 'planner'" class="leveling-planner" aria-label="Character leveling shopping list">
-        <ToolHeader
-          eyebrow="Character shopping list"
-          title="Leveling Planner"
-          description="Pick the skills your character actually uses. CC merges their supporting MIs, Epics, Legendaries, and faction gear into one leveling route."
-          tone="blue"
-        >
-          <template #aside>
-            <div class="segmented-control planner-display" aria-label="Planner display">
-              <button type="button" :class="{ active: plannerDisplay === 'table' }" @click="switchPlannerDisplay('table')">Table</button>
-              <button type="button" :class="{ active: plannerDisplay === 'journey' }" @click="switchPlannerDisplay('journey')">Journey</button>
-              <button type="button" :class="{ active: plannerDisplay === 'map' }" @click="switchPlannerDisplay('map')">MI sources</button>
-            </div>
-          </template>
-        </ToolHeader>
-
-        <div class="planner-controls">
-          <div class="planner-profile-control">
-            <label for="planner-profile-select">Active plan</label>
-            <div class="planner-control-row">
-              <select
-                id="planner-profile-select"
-                :value="selectedPlannerProfileId"
-                @change="selectPlannerProfile(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="profile in plannerProfiles" :key="profile.id" :value="profile.id">
-                  {{ profile.name }}{{ profile.className ? ` · ${profile.className}` : '' }}{{ profile.source === 'character' ? ' · character' : '' }}
-                </option>
-              </select>
-              <button type="button" class="planner-new-plan" @click="openPlannerSetup">New plan</button>
-              <button
-                v-if="selectedPlannerProfile?.source === 'character'"
-                type="button"
-                :disabled="characterImportLoading"
-                @click="refreshSelectedCharacterProfile"
-              >{{ characterImportLoading ? 'Refreshing…' : 'Refresh save' }}</button>
-              <button type="button" :disabled="plannerProfiles.length <= 1" title="Delete this plan" @click="deletePlannerProfile">Delete</button>
-            </div>
-            <small>
-              {{ selectedPlannerProfile?.className || 'Class not set' }}
-              <template v-if="selectedPlannerProfile?.masteries?.length"> · {{ selectedPlannerProfile.masteries.join(' + ') }}</template>
-            </small>
-          </div>
-          <div class="planner-skill-control">
-            <label for="planner-skill-input">Add a skill</label>
-            <span>
-              <input
-                id="planner-skill-input"
-                v-model="plannerSkillDraft"
-                type="search"
-                list="planner-skill-options"
-                autocomplete="off"
-                placeholder="Type a skill name…"
-                @keydown.enter.prevent="addPlannerSkill()"
-              />
-              <datalist id="planner-skill-options">
-                <option v-for="skill in plannerSkillOptions" :key="skill" :value="skill" />
-              </datalist>
-              <button type="button" :disabled="plannerSkillOptions.length === 0" @click="addPlannerSkill()">Add</button>
-            </span>
-          </div>
-          <div class="planner-level-range" aria-label="Item level range">
-            <label class="planner-level-control">
-              <span>Minimum item level</span>
-              <input v-model.number="plannerMinimumLevelDraft" type="number" min="1" :max="plannerLevelCapDraft" @change="commitPlannerMinimumLevel" @keydown.enter.prevent="commitPlannerMinimumLevel" />
-            </label>
-            <label class="planner-level-control">
-              <span>Level cap</span>
-              <input v-model.number="plannerLevelCapDraft" type="number" :min="plannerMinimumLevelDraft" max="100" @change="commitPlannerLevelCap" @keydown.enter.prevent="commitPlannerLevelCap" />
-            </label>
-          </div>
-          <div class="planner-skill-chips" aria-label="Selected skills">
-            <button
-              v-for="skill in plannerSkills"
-              :key="skill"
-              type="button"
-              :aria-label="`Remove ${skill}`"
-              @click="removePlannerSkill(skill)"
-            >
-              {{ skill }} <span>×</span>
-            </button>
-            <small v-if="plannerSkills.length === 0">Add two or three build-defining skills to begin.</small>
-          </div>
-          <div v-if="selectedPlannerProfile?.excludedSkills.length" class="planner-excluded-skills">
-            <small>Ignored character skills</small>
-            <button v-for="skill in selectedPlannerProfile.excludedSkills" :key="skill" type="button" @click="restorePlannerSkill(skill)">
-              + {{ skill }}
-            </button>
-          </div>
-        </div>
-
-        <PlannerSetupDialog
-          v-if="plannerSetupOpen"
-          :profiles="plannerProfiles"
-          :characters="discoveredCharacters"
-          :characters-loading="characterImportLoading"
-          :characters-error="characterImportError"
-          :class-options="plannerClassOptions"
-          :skill-names="skillNames"
-          :skill-masteries="snapshot?.skillMasteries"
-          @cancel="plannerSetupOpen = false"
-          @request-characters="loadCharacterProfiles"
-          @submit="completePlannerSetup"
-        />
-        <template v-if="plannerDisplay !== 'map'">
-          <ExplorerToolbar
-            v-model="plannerQuery"
-            v-bind="searchGuidance.planner"
-            class="planner-explorer-toolbar"
-            search-label="Search shopping list"
-            placeholder="Item, monster, area… (try zarias)"
-            :result-count="plannerRows.length"
-            result-label="relevant item tiers"
-            :search-error="searchErrorMessage(plannerStructuredQuery)"
-          >
-            <template #filters>
-              <label>
-                <span>Archive status</span>
-                <select v-model="plannerOwnership" autocomplete="off">
-                  <option value="all">All items</option>
-                  <option value="owned">In Archive</option>
-                  <option value="missing">Not archived</option>
-                </select>
-              </label>
-              <label>
-                <span>List</span>
-                <select v-model="plannerShowIgnored" autocomplete="off">
-                  <option :value="false">Shopping list</option>
-                  <option :value="true">Ignored bases ({{ plannerIgnoredRecords.length }})</option>
-                </select>
-              </label>
-            </template>
-            <template #sort>
-              <label>
-                <span>Sort by</span>
-                <select v-model="plannerSortMode" autocomplete="off">
-                  <option value="level">Required level</option>
-                  <option value="name">Item name</option>
-                  <option value="rarity">Rarity</option>
-                </select>
-              </label>
-              <label>
-                <span>Order</span>
-                <select v-model="plannerSortDirection" autocomplete="off">
-                  <option value="asc">Lowest first</option>
-                  <option value="desc">Highest first</option>
-                </select>
-              </label>
-            </template>
-          </ExplorerToolbar>
-          <div class="planner-summary">
-            <span><strong>{{ plannerRows.length }}</strong> relevant item tiers</span>
-            <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'mi').length }}</strong> MIs</span>
-            <span><strong>{{ plannerRows.filter((row) => row.item.rarity === 'faction' || row.item.acquisition?.factions?.length).length }}</strong> faction purchases</span>
-            <span><strong>{{ plannerRows.filter((row) => row.item.acquisition?.crafting).length }}</strong> craftable</span>
-          </div>
-          <ResearchItemTable
-            v-if="plannerDisplay === 'table'"
-            v-model:page="plannerPage"
-            :rows="plannerResearchRows"
-            :icon-url-for-item="itemIconUrl"
-            :sort="plannerSortMode"
-            :direction="plannerSortDirection"
-            :sort-columns="{ item: 'name', level: 'level' }"
-            :empty-title="plannerShowIgnored ? 'No ignored bases' : 'No shopping-list items'"
-            :empty-detail="plannerShowIgnored ? 'Ignore an item base to keep it out of the active shopping list.' : 'Select a mastery or skill, widen the item level range, or restore an ignored base.'"
-            label="Leveling Planner item results"
-            pagination="continuous"
-            actions
-            :ignored-view="plannerShowIgnored"
-            @sort="sortPlannerTable"
-            @activate="openItem"
-            @queue-tooltip="queueTooltip"
-            @show-tooltip="showTooltip"
-            @move-tooltip="moveTooltip"
-            @scroll-tooltip="scrollTooltip"
-            @hide-tooltip="scheduleTooltipHide"
-            @favorite="togglePlannerFavorite"
-            @ignore="togglePlannerIgnored"
-          />
-          <PlannerJourney
-            v-else
-            v-model:page="plannerPage"
-            :rows="plannerResearchRows"
-            :icon-url-for-item="itemIconUrl"
-            :ignored-view="plannerShowIgnored"
-            @activate="openItem"
-            @queue-tooltip="queueTooltip"
-            @show-tooltip="showTooltip"
-            @move-tooltip="moveTooltip"
-            @scroll-tooltip="scrollTooltip"
-            @hide-tooltip="scheduleTooltipHide"
-            @favorite="togglePlannerFavorite"
-            @ignore="togglePlannerIgnored"
-          />
-        </template>
-
-        <template v-else>
-          <ExplorerToolbar
-            v-model="atlasRegionQuery"
-            v-bind="searchGuidance.atlas"
-            class="planner-map-explorer-toolbar"
-            search-label="Search MI sources"
-            placeholder="Area, MI, monster…"
-            :result-count="visibleAtlasRegions.length"
-            result-label="source areas"
-            :search-error="searchErrorMessage(atlasStructuredQuery)"
-          >
-            <template #filters>
-              <label>
-                <span>Catalog scope</span>
-                <select v-model="plannerMapScope" autocomplete="off">
-                  <option value="selected">Selected build</option>
-                  <option value="all">All MI tiers</option>
-                </select>
-              </label>
-            </template>
-            <template #sort>
-              <label>
-                <span>Sort by</span>
-                <select v-model="plannerMapSortMode" autocomplete="off">
-                  <option value="items">Matching MI tiers</option>
-                  <option value="level">Earliest item level</option>
-                  <option value="name">Area name</option>
-                </select>
-              </label>
-              <label>
-                <span>Order</span>
-                <select v-model="plannerMapSortDirection" autocomplete="off">
-                  <option value="desc">Highest first</option>
-                  <option value="asc">Lowest first</option>
-                </select>
-              </label>
-            </template>
-          </ExplorerToolbar>
-          <p class="explorer-context-note">{{ plannerMiItems.length }} MI tiers indexed<span v-if="unlocatedPlannerMiItems.length"> · {{ unlocatedPlannerMiItems.length }} unlocated</span></p>
-          <section class="planner-world-map" aria-label="Cairn item source map">
-            <header>
-              <span><strong>Campaign source map</strong><small>Positions come directly from Grim Dawn's world-region coordinates.</small></span>
-              <span class="planner-map-legend">
-                <i class="base" />GD <i class="gdx1" />AoM <i class="gdx2" />FG <i class="gdx3" />FoA
-              </span>
-            </header>
-            <div v-if="atlasMapPins.length" class="planner-map-canvas">
-              <button
-                v-for="pin in atlasMapPins"
-                :key="pin.key"
-                type="button"
-                class="planner-map-pin"
-                :class="[pin.contentPack, { active: selectedAtlasRegion === pin.key }]"
-                :style="{ left: `${pin.left}%`, top: `${pin.top}%` }"
-                :aria-label="`${pin.name}, ${pin.items.length} matching item tiers`"
-                :title="`${pin.name} (${contentPackShortLabel(pin.contentPack)}) · ${pin.items.length} tiers`"
-                @click="selectedAtlasRegion = pin.key"
-              >
-                <b>{{ pin.items.length }}</b>
-                <span>{{ pin.name }}</span>
-              </button>
-            </div>
-            <p v-else class="skill-empty">No campaign coordinates are available for the current filter.</p>
-          </section>
-          <div class="mi-source-layout">
-            <aside class="mi-atlas-regions">
-              <button
-                v-for="region in visibleAtlasRegions"
-                :key="region.key"
-                type="button"
-                :data-region-key="region.key"
-                :class="{ active: selectedAtlasRegion === region.key }"
-                @click="selectedAtlasRegion = region.key"
-              >
-                <span>
-                  <strong>{{ region.name }} ({{ contentPackShortLabel(region.contentPack) }})</strong>
-                  <small>{{ [...new Set(region.items.flatMap((item) => item.acquisition?.sources ?? []))].slice(0, 2).join(' · ') }}</small>
-                </span>
-                <b>{{ region.items.length }} tiers · earliest item Lv{{ region.minimumItemLevel }}</b>
-              </button>
-            </aside>
-            <section class="mi-source-detail">
-              <header v-if="selectedAtlasRegion">
-                <p class="section-label">Area drops</p>
-                <h3>{{ atlasRegions.find((region) => region.key === selectedAtlasRegion)?.name }} ({{ contentPackShortLabel(atlasRegions.find((region) => region.key === selectedAtlasRegion)?.contentPack ?? '') }})</h3>
-                <p>Item tiers whose indexed monster source can appear in this area.</p>
-              </header>
-              <div v-if="selectedAtlasItems.length" class="atlas-item-list">
-                <button
-                  v-for="item in selectedAtlasItems"
-                  :key="item.record"
-                  type="button"
-                  @mouseenter="queueTooltip(item, $event)"
-                  @mousemove="moveTooltip"
-                  @mouseleave="scheduleTooltipHide"
-                  @click="openItem(item)"
-                >
-                  <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" @error="handleItemIconError(item)" />
-                  <span>
-                    <strong>{{ item.name }}</strong>
-                    <small>Lv{{ item.levelRequirement }} · {{ researchItemTypeLabel(item) }}</small>
-                    <small>{{ item.acquisition?.sources[0] }}</small>
-                  </span>
-                </button>
-              </div>
-              <p v-else class="skill-empty">No indexed MIs match this area filter.</p>
-            </section>
-          </div>
-        </template>
-      </section>
+      <LevelingPlannerWorkspace
+        v-else-if="activeView === 'planner'"
+        :session="plannerSession"
+        :icon-url-for-item="itemIconUrl"
+        :content-pack-label="contentPackShortLabel"
+        @queue-tooltip="queueTooltip"
+        @show-tooltip="showTooltip"
+        @move-tooltip="moveTooltip"
+        @scroll-tooltip="scrollTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+        @icon-error="handleItemIconError"
+      />
 
       <MiWorkshopWorkspace
         v-else-if="activeView === 'mi-workshop'"
@@ -5608,8 +3536,10 @@ function formatRollValue(value: number): string {
       <SuppliesWorkspace
         v-else-if="activeView === 'supplies'"
         v-model:controls="supplyControls"
-        :catalog-items="snapshot?.supplies ?? []"
-        :vault-items="vaultItems"
+        :query-items="querySupplyItems"
+        :select-boosts="selectSupplyBoosts"
+        :archive-revision="archiveQueryRevision"
+        :format-error="readableError"
         :active-character="activeCharacter"
         :active-transfer-hardcore="activeTransferHardcore"
         :live-ready="liveStatus?.state === 'ready'"
@@ -5631,7 +3561,9 @@ function formatRollValue(value: number): string {
       <DismantlingWorkspace
         v-else-if="activeView === 'dismantling'"
         v-model:controls="dismantlingControls"
-        :items="vaultItems"
+        :query-items="queryDismantlingItems"
+        :select-duplicates="selectDismantlingDuplicates"
+        :archive-revision="archiveQueryRevision"
         :session="dismantlingSession"
         :preview-dismantling="previewDismantling"
         :format-error="readableError"
@@ -5734,8 +3666,8 @@ function formatRollValue(value: number): string {
         @refresh-vault="refreshVault"
         @start-live-mode="startLiveMode"
         @stop-live-mode="stopLiveMode"
-        @retrieve-selected-live="retrieveSelectedLive"
-        @retrieve-selected="retrieveSelected"
+        @retrieve-selected-live="retrieveSelectedLive()"
+        @retrieve-selected="retrieveSelected()"
       />
 
       <section v-else-if="!snapshot && (appInitializing || scanning)" class="empty-state">
@@ -5744,171 +3676,15 @@ function formatRollValue(value: number): string {
         <p>Parsing the game database and your transfer stashes.</p>
       </section>
 
-      <BoundedResultSurface
+      <SetsWorkspace
         v-else-if="activeView === 'sets'"
-        v-model:page="currentPage"
-        class="set-results"
-        :items="visibleSets"
-        :get-key="set => set.record"
-        :page-size="50"
-        empty-title="No sets match these filters"
-        empty-detail="Try changing the current search or set filters."
-        label="Item sets"
-        layout="grid"
-      >
-        <template #item="{ item: set }">
-          <article
-            class="set-card"
-            :class="`rarity-${setRarity(set.items)}`"
-            :data-set-record="set.record"
-          >
-          <header>
-            <div>
-              <div class="set-heading-badges">
-                <SemanticBadge :tone="setRarity(set.items)">{{ setRarity(set.items) }}</SemanticBadge>
-                <SemanticBadge tone="level">{{ setLevelLabel(set) }}</SemanticBadge>
-              </div>
-              <h3>{{ set.name }}</h3>
-            </div>
-            <div class="set-status">
-              <SemanticBadge :tone="set.collected === set.items.length ? 'complete' : 'progress'">
-                {{ set.collected }} / {{ set.items.length }} discovered
-              </SemanticBadge>
-              <span class="set-percentage">{{ setCompletionPercent(set) }}</span>
-              <span
-                class="set-roll-rating"
-                :class="{ unavailable: set.rollRating.average === null }"
-                :title="set.rollRating.average === null
-                  ? 'No physically available set pieces have a trusted roll rating yet.'
-                  : `${set.rollRating.ratedPieces} of ${set.rollRating.availablePieces} available set pieces rated.`"
-              >
-                <template v-if="set.rollRating.average !== null">
-                  ★ {{ set.rollRating.average.toFixed(1) }}% avg roll
-                  <small>{{ set.rollRating.ratedPieces }}/{{ set.rollRating.availablePieces }} rated</small>
-                </template>
-                <template v-else>☆ No rated rolls</template>
-              </span>
-            </div>
-          </header>
-          <div class="set-meter">
-            <span :style="{ width: `${(set.collected / set.items.length) * 100}%` }" />
-          </div>
-          <div class="set-readiness">
-            <span>Readiness</span>
-            <SemanticBadge :tone="setReadiness(set.items).tone">
-              {{ setReadiness(set.items).label }}
-            </SemanticBadge>
-          </div>
-          <ul>
-            <li
-              v-for="item in set.items"
-              :key="item.record"
-              :class="{
-                missing: setItemUnqualified(item),
-                craftable: item.recipeUnlocked && item.availableCount === 0 && !isAvailableViaAwakening(item),
-                awakening: itemAvailableByAwakeningOnly(item)
-              }"
-            >
-              <button
-                type="button"
-                aria-describedby="item-tooltip"
-                @mouseenter="queueTooltip(item, $event)"
-                @mousemove="moveTooltip"
-                @mouseleave="scheduleTooltipHide"
-                @focus="queueTooltip(item, $event)"
-                @blur="scheduleTooltipHide"
-                @click="openItem(item)"
-              >
-                <span aria-hidden="true">{{ item.availableCount > 0 ? '✓' : setItemDiscovered(item) ? '◇' : itemAvailableByAwakeningOnly(item) ? '✦' : item.recipeUnlocked ? '⊕' : '○' }}</span>
-                <div><strong>{{ item.name }}</strong><small>{{ item.slot }}</small></div>
-                <span class="set-item-badges">
-                  <SemanticBadge
-                    v-for="badge in setItemBadges(item)"
-                    :key="badge.key"
-                    :tone="badge.tone"
-                    compact
-                  >
-                    {{ badge.label }}
-                  </SemanticBadge>
-                </span>
-              </button>
-            </li>
-          </ul>
-          <section v-if="setMemberVisualChanges(set).length" class="set-member-fx">
-            <header><h4>Member item FX</h4><SemanticBadge tone="fx" compact>FX change</SemanticBadge></header>
-            <button
-              v-for="change in setMemberVisualChanges(set)"
-              :key="`${change.item.record}:${change.section.heading}`"
-              type="button"
-              aria-describedby="item-tooltip"
-              @mouseenter="queueTooltip(change.item, $event)"
-              @mousemove="moveTooltip"
-              @mouseleave="scheduleTooltipHide"
-              @focus="queueTooltip(change.item, $event)"
-              @blur="scheduleTooltipHide"
-              @click="openItem(change.item)"
-            >
-              <strong>{{ change.item.name }}</strong>
-              <span>{{ change.section.heading?.replace(' · Visual transformation', '') }}</span>
-              <small>{{ change.section.lines.map((line) => formatPresentationLine(line)).join(' · ') }}</small>
-            </button>
-          </section>
-          <div v-if="set.items[0]?.setPresentation?.tiers.length" class="set-bonus-tiers">
-            <section
-              v-for="tier in set.items[0]?.setPresentation?.tiers"
-              :key="tier.requiredPieces"
-              :class="{ unlocked: set.collected >= tier.requiredPieces }"
-            >
-              <div class="set-tier-base">
-                <h4>({{ tier.requiredPieces }}) Set</h4>
-                <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
-                  {{ formatPresentationLine(line) }}
-                </p>
-                <div v-if="tier.petLines?.length" class="set-tier-group pet-bonus">
-                  <h5>Bonus to All Pets</h5>
-                  <p v-for="(line, index) in tier.petLines" :key="`pet:${line.label}:${index}`">
-                    {{ formatPresentationLine(line) }}
-                  </p>
-                </div>
-              </div>
-              <div
-                v-for="modifier in tier.skillModifiers ?? []"
-                :key="`modifier:${modifier.heading}`"
-                class="set-tier-group skill-bonus"
-                :class="{ 'visual-bonus': modifier.kind === 'visual-modifier' }"
-              >
-                <h5>
-                  {{ modifier.heading }}
-                  <SemanticBadge v-if="modifier.kind === 'visual-modifier'" tone="fx" compact>FX change</SemanticBadge>
-                </h5>
-                <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
-                  {{ formatPresentationLine(line) }}
-                </p>
-              </div>
-              <div v-if="tier.grantedSkill" class="set-tier-group skill-bonus">
-                <h5>{{ tier.grantedSkill.name }}</h5>
-                <p v-if="tier.grantedSkill.trigger">{{ tier.grantedSkill.trigger }}</p>
-                <p v-if="tier.grantedSkill.description">{{ tier.grantedSkill.description }}</p>
-                <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
-                  {{ formatPresentationLine(line) }}
-                </p>
-                <div
-                  v-for="linked in tier.grantedSkill.linkedSkills ?? []"
-                  :key="linked.name"
-                  class="linked-granted-skill"
-                >
-                  <h6>{{ linked.name }}</h6>
-                  <p v-if="linked.description">{{ linked.description }}</p>
-                  <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                    {{ formatPresentationLine(line) }}
-                  </p>
-                </div>
-              </div>
-            </section>
-          </div>
-          </article>
-        </template>
-      </BoundedResultSurface>
+        :session="setsSession"
+        :available="Boolean(snapshot)"
+        @queue-tooltip="queueTooltip"
+        @move-tooltip="moveTooltip"
+        @hide-tooltip="scheduleTooltipHide"
+        @open-item="openItem"
+      />
     </main>
     </WorkspaceErrorBoundary>
     </div>
@@ -6161,256 +3937,24 @@ function formatRollValue(value: number): string {
       </aside>
     </Teleport>
 
-    <div v-if="selectedItem" class="drawer-backdrop comparison-backdrop" @click.self="selectedRecord = null">
-      <aside class="item-drawer comparison-workspace" :aria-label="selectedItem.name + ' copy comparison'">
-        <button class="drawer-close" type="button" aria-label="Close comparison" @click="selectedRecord = null">×</button>
-        <header class="comparison-heading">
-          <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" @error="handleItemIconError(selectedItem)" />
-          <span v-else class="item-icon-placeholder comparison-icon-placeholder" aria-hidden="true">{{ selectedItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
-          <div>
-            <p class="section-label">Copy comparison</p>
-            <h2>{{ selectedItem.name }}</h2>
-            <p class="drawer-intro">
-              One copy is the reference. Every other copy shows its exact value and quality deltas against it.
-              Saving a reference also remembers that copy as your preferred roll.
-            </p>
-            <button type="button" class="roll-help-link" @click="openGlossary()">How item rolls are rated → Glossary</button>
-          </div>
-          <div class="comparison-count">
-            <strong>{{ selectedCopies.length }}</strong>
-            <span>{{ selectedCopies.length === 1 ? 'copy' : 'copies' }}</span>
-          </div>
-        </header>
-        <section v-if="selectedItem.rarity === 'mi'" class="drawer-mi-tools">
-          <button type="button" @click="openSelectedMiInWorkshop">Open in MI Workshop</button>
-          <label>
-            <span>Compare these copies by</span>
-            <select v-model="selectedMiMetric">
-              <optgroup label="Roll quality">
-                <option v-for="option in miMetricOptions.quality" :key="option.key" :value="option.key">{{ option.label }}</option>
-              </optgroup>
-              <optgroup label="Item stats">
-                <option v-for="option in miMetricOptions.item" :key="option.key" :value="option.key">{{ option.label }}</option>
-              </optgroup>
-              <optgroup label="Bonus to All Pets">
-                <option v-for="option in miMetricOptions.pet" :key="option.key" :value="option.key">{{ option.label }}</option>
-              </optgroup>
-            </select>
-          </label>
-          <label>
-            <span>Order</span>
-            <select v-model="selectedMiMetricDirection">
-              <option value="desc">Highest first</option>
-              <option value="asc">Lowest first</option>
-            </select>
-          </label>
-        </section>
-        <section v-if="selectedStoredCopies.length" class="drawer-stored-copies">
-          <header>
-            <div>
-              <p class="section-label">Codex Archive</p>
-              <strong>{{ selectedStoredCopies.length }} stored {{ selectedStoredCopies.length === 1 ? 'copy' : 'copies' }}</strong>
-            </div>
-            <small>Returns land in the {{ liveStatus?.depositTabDescription ?? 'configured retrieval tab' }}.</small>
-          </header>
-          <p>Select the exact copy below. Roll, affixes, seed, pin state, and retrieval now stay together.</p>
-        </section>
-        <section v-else-if="itemAvailableByAwakeningOnly(selectedItem)" class="drawer-awakening-source">
-          <span class="awakening-sigil"><i /></span>
-          <div>
-            <p class="section-label">Qualified availability</p>
-            <strong>{{ awakeningAvailabilityLabel(selectedItem) }}</strong>
-            <small>This Legendary is not stored yet. Awakening consumes one qualifying Epic base.</small>
-          </div>
-          <button
-            v-if="catalogItemByRecord(selectedItem.awakeningSourceRecord)"
-            type="button"
-            @click="openItem(catalogItemByRecord(selectedItem.awakeningSourceRecord)!)"
-          >View Epic base</button>
-        </section>
-        <p
-          v-if="selectedItem.pinnedInstanceKey && !selectedCopies.some((copy) => copy.instanceKey === selectedItem?.pinnedInstanceKey)"
-          class="pinned-away"
-        >
-          Your pinned copy is remembered, but it is not in a currently scanned stash.
-        </p>
-
-        <div class="copy-list">
-          <p v-if="selectedCopies.length === 0 && !itemAvailableByAwakeningOnly(selectedItem)" class="drawer-empty">
-            No currently scanned copy is available. The catalog tooltip will show this item's possible ranges.
-          </p>
-          <article
-            v-for="(copy, index) in selectedCopies"
-            :key="copy.instanceKey"
-            class="copy-card"
-            :class="{
-              pinned: copy.instanceKey === selectedItem.pinnedInstanceKey,
-              reference: copy.instanceKey === comparisonReferenceCopy?.instanceKey
-            }"
-          >
-            <header>
-              <div class="copy-identity">
-                <div class="copy-item-heading" :class="selectedItem.rarity">
-                  <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" @error="handleItemIconError(selectedItem)" />
-                  <span v-else class="item-icon-placeholder copy-icon-placeholder" aria-hidden="true">{{ selectedItem.slot.slice(0, 2).toLocaleUpperCase() }}</span>
-                  <div>
-                    <p>
-                      {{ copy.instanceKey === comparisonReferenceCopy?.instanceKey ? 'Reference copy' : `Copy ${index + 1}` }}
-                      <span v-if="vaultCopyForObserved(copy)" class="stored-badge">Stored</span>
-                      <img
-                        v-if="selectedItem.rarity === 'mi' && isDoubleRareMiCopy(copy) && snapshot?.uiIcons?.doubleRareMi"
-                        class="double-rare-icon"
-                        :src="`cairn-icon://asset/${snapshot.uiIcons.doubleRareMi}.png`"
-                        alt="Double rare"
-                        title="Double rare Monster Infrequent"
-                      />
-                      <span
-                        v-else-if="selectedItem.rarity === 'mi' && isDoubleRareMiCopy(copy)"
-                        class="double-rare-badge"
-                      >Double rare</span>
-                    </p>
-                    <h3 class="copy-colored-name">
-                      <span
-                        v-if="copy.prefixRecord"
-                        class="copy-name-affix"
-                        :class="copyAffixRarity(copy.prefixRecord)"
-                      >{{ copyAffixName(copy.prefixRecord, '') }}</span>
-                      <span class="copy-name-base">{{ selectedItem.name }}</span>
-                      <span
-                        v-if="copy.suffixRecord"
-                        class="copy-name-affix"
-                        :class="copyAffixRarity(copy.suffixRecord)"
-                      >{{ copyAffixName(copy.suffixRecord, '') }}</span>
-                    </h3>
-                    <small>{{ researchRarityLabel(selectedItem) }} · {{ researchItemTypeLabel(selectedItem) }} · Lv{{ selectedItem.levelRequirement }}</small>
-                  </div>
-                </div>
-                <div class="copy-roll-profile">
-                  <small :title="selectedItem.rarity === 'mi'
-                    ? 'Category badges rate variable values for this exact base, prefix, and suffix. They do not rate affix suitability.'
-                    : 'Category badges show average range quality (0% minimum, 100% maximum), then its sampled percentile in parentheses.'">
-                    {{ selectedItem.rarity === 'mi' ? 'Roll profile · exact affix rolls' : 'Roll profile · average (rarity)' }}
-                  </small>
-                  <RollCategoryProfile
-                    :scores="rollCategoryScores(copy.rollAnalysis)"
-                    :max-visible="5"
-                  />
-                  <span v-if="!rollCategoryScores(copy.rollAnalysis).length" class="copy-roll-unscored">
-                    {{ copy.rollAnalysis?.trusted ? ((copy.rollAnalysis.modelVersion ?? 0) < 9 ? 'Quality recalculation pending' : 'No variable rolls') : 'Unscored' }}
-                  </span>
-                </div>
-                <p
-                  v-if="selectedItem.rarity === 'mi' && (miWorkshopControls.metric.startsWith('item:') || miWorkshopControls.metric.startsWith('pet:'))"
-                  class="copy-selected-metric"
-                >
-                  <span>{{ selectedMiMetricLabel }}</span>
-                  <strong>{{ miMetricResult(copy, miWorkshopControls.metric).display }}</strong>
-                </p>
-                <div class="copy-affixes">
-                  <button
-                    type="button"
-                    :disabled="!copy.prefixRecord"
-                    :class="[copyAffixRarity(copy.prefixRecord), { active: copyAffixIsOpen(copy, copy.prefixRecord) }]"
-                    :title="copy.prefixRecord ? 'Show this prefix’s bonuses' : 'This copy has no prefix'"
-                    @click="toggleCopyAffix(copy, copy.prefixRecord)"
-                  ><small>Prefix · {{ copyAffixRarityLabel(copy.prefixRecord) }}</small><strong>{{ copyAffixName(copy.prefixRecord, 'No prefix') }}</strong><em>{{ copyAffixDelta(copy, 'prefix') }}</em></button>
-                  <button
-                    type="button"
-                    :disabled="!copy.suffixRecord"
-                    :class="[copyAffixRarity(copy.suffixRecord), { active: copyAffixIsOpen(copy, copy.suffixRecord) }]"
-                    :title="copy.suffixRecord ? 'Show this suffix’s bonuses' : 'This copy has no suffix'"
-                    @click="toggleCopyAffix(copy, copy.suffixRecord)"
-                  ><small>Suffix · {{ copyAffixRarityLabel(copy.suffixRecord) }}</small><strong>{{ copyAffixName(copy.suffixRecord, 'No suffix') }}</strong><em>{{ copyAffixDelta(copy, 'suffix') }}</em></button>
-                </div>
-                <section
-                  v-if="activeCopyAffix && activeCopyAffixTarget && [copy.prefixRecord, copy.suffixRecord].includes(activeCopyAffixTarget.record) && copyAffixIsOpen(copy, activeCopyAffixTarget.record)"
-                  class="copy-affix-detail"
-                  :class="activeCopyAffix.rarity"
-                >
-                  <header>
-                    <span><small>{{ activeCopyAffix.kind }}</small><strong>{{ activeCopyAffix.name }}</strong></span>
-                    <button type="button" aria-label="Close affix details" @click="activeCopyAffixTarget = null">×</button>
-                  </header>
-                  <template v-if="activeCopyAffix.presentation?.sections.some((section) => section.lines.length)">
-                    <div v-for="section in activeCopyAffix.presentation?.sections ?? []" :key="`${activeCopyAffixTarget.record}:${section.kind}:${section.heading}`" class="copy-affix-section">
-                      <h4 v-if="section.heading">{{ section.heading }}</h4>
-                      <p v-for="line in section.lines" :key="`${line.label}:${line.minimum}:${line.maximum}`" :class="`tone-${line.tone}`">
-                        {{ formatPresentationLine(line) }}
-                      </p>
-                    </div>
-                  </template>
-                  <p v-else class="copy-affix-empty">This affix changes non-rollable item rules rather than visible stats.</p>
-                </section>
-                <p class="copy-provenance">{{ copySourceLabel(copy) }} · Seed {{ copy.seed }}</p>
-              </div>
-              <div class="copy-actions">
-                <span v-if="copy.instanceKey === comparisonReferenceCopy?.instanceKey" class="reference-badge">Reference</span>
-                <button
-                  v-if="vaultCopyForObserved(copy)"
-                  class="retrieve-copy"
-                  type="button"
-                  :disabled="vaultBusy || liveStatus?.state !== 'ready'"
-                  @click="retrieveArchivedCopyLive(vaultCopyForObserved(copy)!.id)"
-                >
-                  Retrieve this copy
-                </button>
-                <button type="button" :disabled="pinning" @click="pinCopy(copy)">
-                  {{ copy.instanceKey === selectedItem.pinnedInstanceKey
-                    ? 'Clear saved reference'
-                    : copy.instanceKey === comparisonReferenceCopy?.instanceKey
-                      ? 'Save this reference'
-                      : 'Use as reference' }}
-                </button>
-              </div>
-            </header>
-
-            <p v-if="copy.rollAnalysis && !copy.rollAnalysis.trusted" class="withheld-note">
-              {{ copy.rollAnalysis.reason }}
-            </p>
-            <div v-else-if="copy.rollAnalysis && (comparisonItemStats(copy).length || comparisonPetStats(copy).length)" class="copy-roll-sections">
-              <section v-if="comparisonItemStats(copy).length">
-                <h3>Item differences</h3>
-                <p class="copy-roll-guide">Actual value · delta from reference · range quality (0–100%); parentheses show sampled percentile</p>
-                <div class="stat-list">
-                  <div v-for="stat in comparisonItemStats(copy)" :key="stat.key" class="stat-row" :class="{ missing: stat.missingFromCopy }">
-                    <div class="stat-heading">
-                      <span>{{ stat.label }}</span>
-                      <strong :title="stat.rankDescription">{{ stat.valueLabel }}<template v-if="stat.qualityPercent !== null"> · {{ stat.qualityPercent.toFixed(0) }}%<template v-if="stat.rankLabel"> ({{ stat.rankLabel }})</template></template><template v-else> · fixed</template></strong>
-                    </div>
-                    <div class="stat-delta" :class="`delta-${stat.deltaTone}`">
-                      <b>{{ stat.deltaLabel }}</b>
-                      <small v-if="stat.qualityDeltaLabel">{{ stat.qualityDeltaLabel }}</small>
-                    </div>
-                    <div v-if="stat.qualityPercent !== null" class="stat-meter"><span :style="{ width: `${stat.qualityPercent}%` }" /></div>
-                    <small>{{ stat.qualityPercent === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
-                  </div>
-                </div>
-              </section>
-              <section v-if="comparisonPetStats(copy).length" class="pet-roll-section">
-                <h3>Bonus to All Pets differences</h3>
-                <p class="copy-roll-guide">Includes inherent and affix-granted pet bonuses, compared to the reference copy</p>
-                <div class="stat-list">
-                  <div v-for="stat in comparisonPetStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row" :class="{ missing: stat.missingFromCopy }">
-                    <div class="stat-heading">
-                      <span>{{ stat.label }}</span>
-                      <strong :title="stat.rankDescription">{{ stat.valueLabel }}<template v-if="stat.qualityPercent !== null"> · {{ stat.qualityPercent.toFixed(0) }}%<template v-if="stat.rankLabel"> ({{ stat.rankLabel }})</template></template><template v-else> · fixed</template></strong>
-                    </div>
-                    <div class="stat-delta" :class="`delta-${stat.deltaTone}`">
-                      <b>{{ stat.deltaLabel }}</b>
-                      <small v-if="stat.qualityDeltaLabel">{{ stat.qualityDeltaLabel }}</small>
-                    </div>
-                    <div v-if="stat.qualityPercent !== null" class="stat-meter"><span :style="{ width: `${stat.qualityPercent}%` }" /></div>
-                    <small>{{ stat.qualityPercent === null ? 'Fixed value' : `${stat.rangeLabel} sampled range` }}</small>
-                  </div>
-                </div>
-              </section>
-            </div>
-            <p v-else class="withheld-note">
-              Roll analysis is pending. This copy remains safe and retrievable; its score will appear without reopening the drawer.
-            </p>
-          </article>
-        </div>
-      </aside>
-    </div>
+    <ItemInspectionDrawer
+      :session="inspectionSession"
+      v-model:metric="selectedMiMetric"
+      v-model:metric-direction="selectedMiMetricDirection"
+      :item-icon-url="itemIconUrl"
+      :catalog-item-by-record="catalogItemByRecord"
+      :vault-copy-for-observed="vaultCopyForObserved"
+      :is-double-rare-mi-copy="isDoubleRareMiCopy"
+      :mi-metric-options="miMetricOptions"
+      :double-rare-icon="snapshot?.uiIcons?.doubleRareMi"
+      :deposit-tab-description="liveStatus?.depositTabDescription ?? 'configured retrieval tab'"
+      :busy="vaultBusy"
+      :live-ready="liveStatus?.state === 'ready'"
+      @icon-error="handleItemIconError"
+      @open-roll-help="openGlossary()"
+      @open-mi-workshop="openSelectedMiInWorkshop"
+      @open-item="openItem"
+      @retrieve-copy="retrieveArchivedCopyLive"
+    />
   </div>
 </template>

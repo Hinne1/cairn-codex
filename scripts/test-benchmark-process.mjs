@@ -67,7 +67,7 @@ if (process.platform === 'win32') {
 
 const [benchmark, main, routes, grids, sets, skills] = await Promise.all([
   readFile(new URL('./benchmark-ui.mjs', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/main/bootstrap.ts', import.meta.url), 'utf8'),
   readFile(new URL('./test-app-routes-electron.mjs', import.meta.url), 'utf8'),
   readFile(new URL('./test-bounded-grid-semantics-electron.mjs', import.meta.url), 'utf8'),
   readFile(new URL('./test-sets-bounded-results-electron.mjs', import.meta.url), 'utf8'),

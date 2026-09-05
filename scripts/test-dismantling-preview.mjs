@@ -1,16 +1,19 @@
 import { spawn } from 'node:child_process'
 import { copyFile, mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import electron from 'electron'
+import { verificationEnvironment } from './verification-environment.mjs'
 
 function argument(name) {
   const index = process.argv.indexOf(name)
   return index >= 0 ? process.argv[index + 1] : null
 }
 
-const appPath = argument('--app')
+if (argument('--app')) throw new Error('Interaction verification uses the dedicated entry. Build with npm run build:verification; --app is no longer accepted here.')
+const appPath = electron
 const baseDatabase = argument('--base-db')
-if (!appPath || !baseDatabase) {
-  throw new Error('Pass --app and --base-db (a closed/read-only Cairn archive snapshot).')
+if (!baseDatabase) {
+  throw new Error('Pass --base-db (a closed/read-only Cairn archive snapshot). Run npm run build:verification first.')
 }
 
 const testRoot = resolve('local-cache', 'dismantling-preview-test')
@@ -21,9 +24,9 @@ await rm(testRoot, { recursive: true, force: true })
 await mkdir(profileRoot, { recursive: true })
 await copyFile(resolve(baseDatabase), databasePath)
 
-const child = spawn(resolve(appPath), [`--user-data-dir=${profileRoot}`], {
+const child = spawn(resolve(appPath), ['local-cache/verification-build/main/index.js', `--user-data-dir=${profileRoot}`], {
   env: {
-    ...process.env,
+    ...verificationEnvironment(),
     CAIRN_CODEX_SCREENSHOT_PATH: screenshotPath,
     CAIRN_CODEX_SCREENSHOT_CATEGORY: 'Dismantling Lab',
     CAIRN_CODEX_SCREENSHOT_DISMANTLING_PREVIEW: '1',

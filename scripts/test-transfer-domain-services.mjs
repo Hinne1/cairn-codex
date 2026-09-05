@@ -59,6 +59,7 @@ function archiveFixture(overrides = {}) {
     reads: {
       findCatalogNames: () => new Map([['records/a.dbr', 'Fixture A']]),
       readVaultItems: () => [],
+      readDismantlingItems: () => [],
       readVaultPage: (request) => ({ items: [], total: 0, offset: request.offset, limit: request.limit }),
       readOperationHistory: (request) => ({ items: [], total: 0, offset: request.offset, limit: request.limit }),
       readVaultSummary: () => emptySummary,
@@ -116,7 +117,7 @@ function archiveFixture(overrides = {}) {
   }
   let simulated = null
   const fixture = archiveFixture({
-    reads: { readVaultItems: () => [eligible] },
+    reads: { readDismantlingItems: () => [eligible] },
     dependencies: {
       simulateDismantling: async (installationPath, items) => {
         simulated = { installationPath, items }

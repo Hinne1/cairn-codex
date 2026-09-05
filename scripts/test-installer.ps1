@@ -58,23 +58,40 @@ if ($vcSignature.Status -ne 'Valid' -or $vcSignature.SignerCertificate.Subject -
 
 $sentinelPath = Join-Path $profileRoot 'preserve-on-uninstall.txt'
 Set-Content -LiteralPath $sentinelPath -Value 'Cairn user data must survive uninstall.' -Encoding UTF8
-$oldScreenshotPath = $env:CAIRN_CODEX_SCREENSHOT_PATH
-$oldScreenshotCategory = $env:CAIRN_CODEX_SCREENSHOT_CATEGORY
-$oldScreenshotWait = $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN
-$oldScreenshotFixture = $env:CAIRN_CODEX_SCREENSHOT_FIXTURE
+Push-Location $projectRoot
 try {
+  & node --experimental-strip-types --disable-warning=ExperimentalWarning (Join-Path $PSScriptRoot 'seed-verification-profile.mjs') $profileRoot
+  if ($LASTEXITCODE -ne 0) { throw 'Could not seed the isolated installed-package catalog.' }
+} finally { Pop-Location }
+$oldScreenshotPath = $env:CAIRN_CODEX_SCREENSHOT_PATH
+$oldScreenshotRoute = $env:CAIRN_CODEX_SCREENSHOT_ROUTE_HASH
+$oldScreenshotWait = $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN
+$operationalVariables = @(
+  'CAIRN_CODEX_DATABASE_PATH', 'CAIRN_CODEX_ARCHIVE_BACKUP_DIR', 'CAIRN_CODEX_MIGRATION_BACKUP_DIR',
+  'CAIRN_CODEX_INGEST_REQUEST', 'CAIRN_CODEX_IMPORT_GDIA', 'CAIRN_CODEX_RETRIEVAL_PLAN_REQUEST',
+  'CAIRN_CODEX_RETRIEVE_REQUEST', 'CAIRN_CODEX_SMOKE_TEST'
+)
+$oldOperationalEnvironment = @{}
+foreach ($name in $operationalVariables) {
+  $oldOperationalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+try {
+  foreach ($name in $operationalVariables) {
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+  }
   $env:CAIRN_CODEX_SCREENSHOT_PATH = $screenshotPath
-  $env:CAIRN_CODEX_SCREENSHOT_CATEGORY = 'Settings'
+  $env:CAIRN_CODEX_SCREENSHOT_ROUTE_HASH = '#cc-route=1&view=settings'
   $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN = '0'
-  $env:CAIRN_CODEX_SCREENSHOT_FIXTURE = 'onboarding'
   Write-Host 'Launching the installed application with an isolated first-run profile.'
   $application = Start-Process -FilePath $appPath -ArgumentList @("--user-data-dir=$profileRoot") -WindowStyle Hidden -Wait -PassThru
   if ($application.ExitCode -ne 0) { throw "Installed application exited with code $($application.ExitCode)." }
 } finally {
+  foreach ($name in $operationalVariables) {
+    [Environment]::SetEnvironmentVariable($name, $oldOperationalEnvironment[$name], 'Process')
+  }
   $env:CAIRN_CODEX_SCREENSHOT_PATH = $oldScreenshotPath
-  $env:CAIRN_CODEX_SCREENSHOT_CATEGORY = $oldScreenshotCategory
+  $env:CAIRN_CODEX_SCREENSHOT_ROUTE_HASH = $oldScreenshotRoute
   $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN = $oldScreenshotWait
-  $env:CAIRN_CODEX_SCREENSHOT_FIXTURE = $oldScreenshotFixture
 }
 if (-not (Test-Path -LiteralPath $screenshotPath)) { throw 'Installed application did not produce its first-run screenshot.' }
 if ((Get-Item -LiteralPath $screenshotPath).Length -lt 10kb) { throw 'Installed first-run screenshot is unexpectedly small.' }

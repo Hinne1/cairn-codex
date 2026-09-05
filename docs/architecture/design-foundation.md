@@ -33,7 +33,7 @@ remain protected and invalid or inaccessible manifests fall back to the Cairn pa
 | Components & Consumables | Collection-level heading | Yes | Yes | Separate material identity from Collection without inventing another toolbar or card language. |
 | Skill Explorer | Yes | Yes | Yes | Tokenize table, picker, and selected-skill hierarchy; adopt shared bounded result behavior. |
 | Stash Oracle | Yes | Yes | Yes | Retain green research tone while aligning cards, badges, and loading/empty states. |
-| Leveling Planner | Yes | Yes | Yes | Consolidate profile/setup controls and table/card/map result states around shared geometry. |
+| Leveling Planner | Yes | Yes | Yes | Dedicated workspace/session and shared Table/Journey rows; toolbar composition follows reviewed mockups in #138. |
 | MI Workshop | Yes | Yes | Yes | Align comparison metrics and table behavior with the shared result primitive. |
 | Supplies | Yes | Yes | Yes | Align selection cards and persistent dispense action with standard batch-action states. |
 | Collection Farming | Yes | Yes | Yes | Align route cards and no-location states with shared cards and empty-state language. |
@@ -84,6 +84,21 @@ The remaining result migrations are intentionally split by collision domain: #64
 #63 owns responsive geometry and narrow data presentation. #16 remains the single final owner
 for focus, keyboard, reduced-motion, and assistive-technology acceptance across all workspaces.
 
+## Planner ownership follow-through (2026-09-04)
+
+The #126 extraction moves the remaining Planner controls and result markup to
+`LevelingPlannerWorkspace.vue`, reactive state/persistence/history to `leveling-planner.ts`,
+and deterministic item-row projection to `planner-results.ts`. The application shell retains
+typed service and navigation adapters. This is a behavior-preserving ownership change, with
+no new CSS or toolbar layout. The earlier audit table above remains historical evidence;
+toolbar convergence is now #138, not a reason to reopen the completed #17 migration.
+
+Direct session regressions exercise per-plan exclusions, global favorites, SC/HC recipe status,
+profile changes, level commits, route restoration, map selection, preference round trips,
+character-discovery loading/errors, and empty catalogs. A generated 20k projection completed in
+about 90ms. The existing wide/compact Electron route suite remains the visual and interaction
+gate for Table/Journey focus, continuous scrolling, actions, and MI Sources restoration.
+
 ## Migration order
 
 1. Move shared `ToolHeader`, `ExplorerToolbar`, advanced search, semantic badges, import status,
@@ -113,6 +128,13 @@ The final issue #45 review compares all workspaces in one matrix so local improv
 hide a new cross-tool inconsistency.
 
 ## Enforcement
+
+Research toolbar follow-through (#138, 2026-09-04): Skill Explorer and Planner now
+use one opt-in ExplorerToolbar composition for subject, search, filters, result
+count, sorting and view controls. Wide and compact mockups were approved with
+always-inline Planner skill editing; no Edit build gate. Domain-specific selectors
+remain in typed workspace/session boundaries. Shared controls consume semantic
+tokens, and isolated production-component tests cover both workspaces together.
 
 `npm run test:theme-contract` verifies required semantic roles and runtime/CSS fallback parity,
 exercises manifest versioning and fail-closed contrast behavior, protects gameplay semantics,

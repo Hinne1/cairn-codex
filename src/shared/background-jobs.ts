@@ -2,6 +2,7 @@ export const BACKGROUND_JOB_KINDS = [
   'collection-scan',
   'game-data-rebuild',
   'roll-hydration',
+  'quarantine-reconciliation',
   'item-assistant-import',
   'archive-backup',
   'icon-extraction',
@@ -14,6 +15,7 @@ export interface BackgroundJobStageByKind {
   'collection-scan': 'queued' | 'scanning' | 'persisting' | 'complete' | 'failed' | 'canceled'
   'game-data-rebuild': 'queued' | 'scanning' | 'persisting' | 'complete' | 'failed' | 'canceled'
   'roll-hydration': 'queued' | 'analyzing' | 'persisting' | 'complete' | 'failed' | 'canceled'
+  'quarantine-reconciliation': 'queued' | 'resolving' | 'persisting' | 'complete' | 'failed' | 'canceled'
   'item-assistant-import':
     | 'queued'
     | 'selecting'

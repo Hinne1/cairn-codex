@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { verificationEnvironment } from './verification-environment.mjs'
 import {
   BenchmarkRendererFailure,
   benchmarkRendererFailure,
@@ -15,13 +16,28 @@ function argument(name) {
 }
 
 const electronSource = process.argv.includes('--electron-source')
+const productionEntry = process.argv.includes('--production-entry')
+const verificationRun = electronSource && !productionEntry
+const diagnosticOnly = process.argv.includes('--diagnostic-only')
+if (!verificationRun) {
+  const allowed = new Set(['--app', '--diagnostic-only', '--electron-source', '--production-entry',
+    '--base-db', '--base-profile', '--route-hash', '--width', '--height', '--screenshot-name',
+    '--warm-budget-ms', '--wait-for-background-jobs', '--disable-gpu',
+    '--allow-windows-sandbox-fallback', '--assert-no-overflow'])
+  const unsupported = process.argv.slice(2).filter(value => value.startsWith('--') && !allowed.has(value))
+  if (!diagnosticOnly || unsupported.length) {
+    throw new Error('Release captures require --diagnostic-only and support cached-startup measurements, route, viewport, and overflow checks. ' +
+      'Run fixture and interaction scenarios with --electron-source after npm run build:verification.' +
+      (unsupported.length ? ` Unsupported release options: ${unsupported.join(', ')}` : ''))
+  }
+}
 const appPath = resolve(argument('--app') ?? (
   electronSource ? 'node_modules/electron/dist/electron.exe' : 'dist/win-unpacked/Cairn Codex.exe'
 ))
 const baseDatabase = argument('--base-db')
 const baseProfile = argument('--base-profile')
 const fixture = argument('--fixture')
-const query = argument('--query') ?? 'wendigo'
+const query = argument('--query') ?? (verificationRun ? 'wendigo' : '')
 const category = argument('--category')
 const skillQuery = argument('--skill-query')
 const skillSelectFirst = process.argv.includes('--skill-select-first')
@@ -70,6 +86,7 @@ const verifyFarmingPaging = process.argv.includes('--verify-farming-paging')
 const verifySetsPaging = process.argv.includes('--verify-sets-paging')
 const verifyOracleWorkspace = process.argv.includes('--verify-oracle-workspace')
 const verifyDismantlingWorkspace = process.argv.includes('--verify-dismantling-workspace')
+const verifyWorkspaceQueries = process.argv.includes('--verify-workspace-queries')
 const verifySkillExplorerWorkspace = process.argv.includes('--verify-skill-explorer-workspace')
 const verifyMiWorkshopWorkspace = process.argv.includes('--verify-mi-workshop-workspace')
 const verifySettingsWorkspace = process.argv.includes('--verify-settings-workspace')
@@ -147,11 +164,11 @@ if (gdiaResultFixture) {
 }
 
 const env = {
-  ...process.env,
+  ...verificationEnvironment(),
   CAIRN_CODEX_SCREENSHOT_PATH: screenshotPath,
   CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN: waitForBackgroundJobs ? '1' : '0',
   CAIRN_CODEX_SCREENSHOT_QUERY: query,
-  CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture ?? '',
+  CAIRN_CODEX_SCREENSHOT_FIXTURE: fixture ?? (diagnosticOnly ? process.env.CAIRN_CODEX_SCREENSHOT_FIXTURE ?? '' : ''),
   ...(openSearchHelp ? { CAIRN_CODEX_SCREENSHOT_OPEN_SEARCH_HELP: '1' } : {}),
   ...(collapseTrackers ? { CAIRN_CODEX_SCREENSHOT_COLLAPSE_TRACKERS: '1' } : {}),
   ...(enableAllTools ? { CAIRN_CODEX_SCREENSHOT_ENABLE_ALL_TOOLS: '1' } : {}),
@@ -187,6 +204,7 @@ const env = {
   ...(verifySetsPaging ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SETS_PAGING: '1' } : {}),
   ...(verifyOracleWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_ORACLE_WORKSPACE: '1' } : {}),
   ...(verifyDismantlingWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_DISMANTLING_WORKSPACE: '1' } : {}),
+  ...(verifyWorkspaceQueries ? { CAIRN_CODEX_SCREENSHOT_VERIFY_WORKSPACE_QUERIES: '1' } : {}),
   ...(verifySkillExplorerWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SKILL_EXPLORER_WORKSPACE: '1' } : {}),
   ...(verifyMiWorkshopWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_MI_WORKSHOP_WORKSPACE: '1' } : {}),
   ...(verifySettingsWorkspace ? { CAIRN_CODEX_SCREENSHOT_VERIFY_SETTINGS_WORKSPACE: '1' } : {}),
@@ -209,7 +227,7 @@ async function runBenchmarkProcess({ noSandbox = false } = {}) {
   const child = spawn(appPath, [
     ...(disableGpu ? ['--disable-gpu', '--disable-gpu-sandbox', '--in-process-gpu'] : []),
     ...(noSandbox ? ['--no-sandbox'] : []),
-    ...(electronSource ? ['.'] : []),
+    ...(electronSource ? [verificationRun ? 'local-cache/verification-build/main/index.js' : '.'] : []),
     `--user-data-dir=${profileRoot}`
   ], {
     env,
@@ -380,6 +398,7 @@ if (warmBudgetMs !== null) {
 }
 console.log(JSON.stringify({
   passed: true,
+  diagnosticOnly,
   sandboxFallbackUsed: benchmarkRun.noSandbox,
   initialRendererLaunchFailure,
   source: fixture ? `fixture:${fixture}` : resolve(baseProfile ?? baseDatabase),
@@ -388,7 +407,7 @@ console.log(JSON.stringify({
   warmBudgetMs: warmBudgetMs === null ? null : Number(warmBudgetMs),
   searchMsIncludingDebounce: report.interactions?.searchMs,
   query,
-  category: category ?? 'Collection',
+  category: category ?? (diagnosticOnly ? report.renderedState?.activeWorkspace : 'Collection'),
   skillQuery,
   skillSelectFirst,
   oracleMinimumLevel,
@@ -419,6 +438,7 @@ console.log(JSON.stringify({
   verifySetsPaging,
   verifyOracleWorkspace,
   verifyDismantlingWorkspace,
+  verifyWorkspaceQueries,
   verifySkillExplorerWorkspace,
   verifyMiWorkshopWorkspace,
   verifySettingsWorkspace,

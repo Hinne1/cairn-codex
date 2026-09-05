@@ -1,5 +1,40 @@
 # Release test matrix
 
+## Quarantine command ownership (#155, 2026-09-05)
+
+Synthetic on-disk archive tests verify unchanged SQLite data versions across cached
+read APIs, including during delayed resolution. Explicit reconciliation coalesces
+duplicate requests, uses 256-record batches, serializes with an archive operation,
+queues backups only for changed metadata, and leaves exact serialized payloads,
+SC/HC flags and vault states unchanged. Helper rejection after a committed batch,
+incomplete/mismatched results, absent-record retry, repeated generic resolution,
+shutdown and database reopen are covered. Production service lifecycle tests assert
+reconciliation follows catalog cache publication and never runs on cached loads.
+Focused service/background-job gates and typechecks passed; full integration
+verification is recorded in the PR. No personal data or live game was used.
+
+## Collection request ownership (#154, 2026-09-05)
+
+Deferred-promise gates exercise the production job coordinator and raw collection
+refresh service with four concurrent SC/HC and archive/stash callers. One scan and
+cache write produce four separate caller presentations; opposite scan/rebuild
+requests reject during refresh. Renderer session gates cover reversed completion,
+A → B → A selection, stale errors after success, busy counts for outstanding work,
+unmount and committed updates superseding every earlier read kind. Focused gates
+and TypeScript/Vue typechecks passed. Full integration evidence is recorded in the
+PR; all fixtures are synthetic.
+
+## Helper protocol review (#153, 2026-09-05)
+
+Synthetic subprocess gates cover invalid/null/missing/ambiguous responses, UTF-8
+fragmentation, unknown/duplicate IDs, version/capability mismatch, one handshake
+per generation, bounded admission/output, worker eviction, process exit and
+disposal. A generated commit completes exactly once after timeout and disposal,
+beyond the prior two-second kill fallback. Read-only recovery retains the original
+process for late completion; uncertain failures survive IPC wrapping. Focused
+gates and Node typechecking passed. No personal data or live game was used. Full
+integration verification is recorded in the PR.
+
 The CI suite is intentionally independent of a Grim Dawn installation. Before a
 public tag, the maintainer additionally runs `npm.cmd run test:release-local` on
 a supported game installation and records the manual live-transfer results here.
@@ -9,7 +44,7 @@ a supported game installation and records the manual live-transfer results here.
 | Scenario | Evidence | Current result |
 | --- | --- | --- |
 | CI superseded-run cancellation | `npm run test:ci-concurrency` (included in `preverify`) | **Contract passed 2026-09-04:** the missing policy failed before the fix; workflow-level cancellation is enabled and repeated commits share the same group. Different PR merge refs (including forks), branches, tags, workflows, and push/PR checks remain isolated. Workflow YAML parses. GitHub-hosted cancellation is checked separately on the PR; this contract does not simulate the Actions scheduler or assert a clean dependency-security verdict. |
-| Bounded dependency audit transport | `npm run test:dependency-audit`; npm 11.17.0 against the unchanged lockfile | **Offline contracts and full local verification passed 2026-09-04 on e444088:** clean/below-threshold, high/critical, malformed/error/inconsistent reports, nonzero exit, timeout, retry bounds, and CI fail-closed behavior. npm 11.17.0 uses bulk advisories only. Locked installation succeeds without modifying `package-lock.json`; metadata GET requests work, but small/full uncompressed and full compressed bulk POST probes timed out locally. [Clean Windows run 33853884647](https://github.com/Hinne1/cairn-codex/actions/runs/33853884647) installed the pinned CLI and locked dependencies and passed contract tests, then stopped after two approximately 16-second bulk timeouts with explicit UNAVAILABLE messages; verification was correctly skipped. Live audit success remains blocked on the registry response; endpoint errors are not a passing security audit. |
+| OSV dependency security gate | `test:dependency-audit`, `test:dependency-audit:live`, and `audit:dependencies` against the unchanged npm lockfile | **Contracts and live local audit passed 2026-09-04:** OSV checked 434 distinct locked package versions (including dev/optional/peer and uninstalled platform variants), finding zero advisories in about two seconds. The live minimist@1.2.5 control correctly blocked critical GHSA-xvch-5gv4-984h; patched 1.2.8 passed. Contract tests cover malformed/empty inventory, unsupported sources, scoped/aliased/nested packages, all severity classes, unknown severity, withdrawn/mismatched records, incomplete batches, repeated/excessive pagination, HTTP/JSON/size failures, retries, abort, and npm-offline-setting immunity. No dependency versions or lockfile changed. Clean Windows CI verification is required before completion; historical npm endpoint errors remain documented in issue #143. |
 | Named MI Workshop presentation fixture | `test:screenshot-collection` and `test:mi-workshop-fixture:electron` with generated profiles at 1,440×1,000 and 520×1,000 | **Passed 2026-09-04:** all 72 synthetic affix combinations survive presentation without a glossary verification flag; exactly 50 rows are mounted. Keyboard affixed tooltip, delayed pointer tooltip, strict double-rare filtering, ascending level sort, paging, empty/reset state, and labeled local scrolling passed. Documents remain at 1,425px/505px with no horizontal overflow. Read-only post-run database checks find zero vault items, observed items, stash snapshots, and operation journal entries. Named presentation preserves source-filtered copy identity, normal startup delegates to the real archive presenter, and the existing Skill Explorer fixture path remains intact. |
 | Rarity palette and research availability | Theme contrast tests, research model contracts, wide/compact Skill Explorer Electron gates | **Passed 2026-09-03:** epic blue follows the supplied game reference; legendary purple is contrast-adjusted. Both retain 4.5:1 name contrast with the subtle unavailable fade. Archived copies, learned recipes, and available awakening bases remain full-strength; history alone is faded. Planner recipe status respects SC/HC. Skill modifiers and controls are not faded. |
 | Fixed-tooltip page handoff | Real wheel input in wide/compact Skill Explorer Electron gates | **Passed 2026-09-03:** direct tooltip wheel input at both top and bottom explicitly continues into the page when selected; containment prevents page movement. Reproduced Chromium accepting an unprevented wheel at the bottom of a fixed tooltip without scrolling the page, then verified the explicit handoff. |
@@ -106,7 +141,9 @@ withheld no roll scores as untrusted. The same run completed the isolated archiv
 backup/restore round trip without touching the user archive or game files.
 
 The UI benchmark enforces the warm-start budget with
-`node scripts/benchmark-ui.mjs --warm-budget-ms 5000`. Cold or stale-cache indexing is
+`node scripts/benchmark-ui.mjs --app <executable> --diagnostic-only --base-profile <disposable-profile> --warm-budget-ms 5000`.
+Fixture/interaction scenarios use `--electron-source` after `npm run build:verification`.
+See the [verification boundary](architecture/verification.md). Cold or stale-cache indexing is
 measured as a separate scan phase and is not presented as cached startup latency.
 Automated Electron gates opt into a Windows-only test fallback: when the first sandboxed
 renderer exits specifically with `reason=launch-failed`, the harness records the exit details
@@ -136,6 +173,15 @@ both motion preferences. Animated scrolling retains queued input until the visib
 edge; reduced-motion scrolling reaches the edge immediately and allows the next
 event to return to the page. The fixture restores the original media-query API in
 a `finally` block, independent of the Windows runner's animation setting.
+
+Planner extraction regressions (2026-09-04): the production session and preference repository
+pass plan isolation, shared favorites, SC/HC recipe availability, level commits, profile creation
+and deletion, route/page/area restoration, character-discovery loading/error, Oracle handoff,
+empty catalog, and reload checks. The pure 20k item projection completed in 89ms on the local
+host. The existing 1,440px and 520px Electron gates passed Table/Journey scrolling and focused
+row restoration, keyboard actions, profile isolation, setup focus, and MI Sources history.
+The 120-item Planner fixture retains 50-row batches (100 mounted after advancing the continuous
+window). No personal profile, save, game process, or asset was used or modified.
 
 ## Manual live-transfer gates
 
@@ -192,6 +238,69 @@ fingerprints: hook SHA-256
 `419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5` and injector SHA-256
 `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`. Exact published
 portable and installer hashes are carried by the release's `.sha256` and manifest assets.
+
+## Research toolbar regression (#138)
+
+`npm run test:research-toolbars:electron` builds and mounts the production Planner,
+Skill Explorer and shared toolbar against synthetic data and a memory-only
+preference repository. It verifies 1,440px/520px control containment (including
+compact 125% zoom), the same
+context/search/filter/result structure, inline add/remove skills with native Enter,
+keyboard sort direction, Explorer picker Escape, and Planner view-switch focus
+with independent item/map queries. It checks data-empty and filter-empty results,
+shared loading/error semantics, and generated 20,000-item catalogs: 50 mounted rows
+per workspace, 341ms Planner and 359ms Explorer including 100ms settle in the
+architecture integration run. Screenshots are saved under a disposable local-cache directory;
+none contain game assets or personal data. The gate is part of `npm run verify`.
+Existing session/history and full-application tooltip checks remain required.
+
+## Bounded archive workspace queries (#159)
+
+Windows x64, Node 22.14, generated temporary SQLite archive: 20,000 equipment copies split
+evenly between SC/HC, 145 supply copies and 15 malformed legacy payloads (including integers
+outside SQLite and JavaScript safe ranges). One measured run backfilled schema 14 in 335 ms;
+the first 120-copy page took 84 ms, whole-group SC duplicate selection 88 ms and a 60-option
+supply page 92 ms. The full query assertion batch took 828 ms.
+The 120-copy IPC response was 52,368 bytes. Instrumented queries read no exact payload columns
+and parsed zero exact payloads; SHA-256 comparison preserved every migrated payload byte.
+The query batch increased JS heap by 3.6 MB; process RSS was 88.7 MB and process peak RSS was
+96,252 KiB. Peak RSS includes fixture generation and migration, not only paging.
+
+The isolated Electron 20k fixture mounted 120 Dismantling rows and 60 Supply cards at 1440×1000
+and 520×1000. Page two replaced the mounted window and retained selection; mode/query changes
+cleared it. All-mode, SC/HC, rarity, compatible-slot, normal/empty states and keyboard selection
+passed without horizontal document overflow or changing an archive row or operation journal.
+Reproduce with `npm run test:workspace-queries` and, after the verification/helper builds,
+`npm run test:workspace-queries:electron`. Captures and reports are generated under
+`local-cache/workspace-query-verification`; no personal profile or live transfer is exercised.
+
+## Collection, Sets and inspection ownership (#158)
+
+The direct production-owner gates (`test:collection-ownership` and `test:roll-rating`) cover
+dashboard medians and readiness, typed Sets route restoration with pending query work,
+archive augmentation and mode isolation, exact comparison/reference identity, and pin rejection,
+overlap, navigation, disposal, catalog replacement and source/mode ABA. Distinct vault/scanned
+copies with identical fingerprints pass both the production bounded-window and actual drawer
+regressions; reference semantics remain unchanged. A generated 20,000-item catalog projected
+4,000 sets in 13 ms; comparison setup for 20,000 copies plus the first 50 rows took 41 ms.
+The gate also enforces the extracted owners' dependency direction and typed effect boundaries.
+
+`test:collection-ownership:electron`, included in full verification, builds the actual Vue owners
+with synthetic fixtures and a memory-only pin port in a disposable, sandboxed Electron profile.
+It checks 1440px and 520px, compact 125% zoom, dashboard disclosure and refresh state, keyboard
+card activation, exact copy pinning and close, Sets page restoration, invalid/empty searches,
+and empty catalogs. Large fixtures mount 48 Collection cards, 50 Sets cards, and 50 copy cards;
+copy page two retains the explicit reference. Measured 20k renders including 100 ms settling:
+
+| Surface | 1440px | 520px | Mounted cards |
+| --- | --- | --- | --- |
+| Collection | 172 ms | 188 ms | 48 |
+| Sets | 122 ms | 124 ms | 50 |
+| Copy inspection | 156 ms | 140 ms | 50 |
+
+Captures are generated under `local-cache/collection-owner-test-*`. No personal profile, save,
+archive, game asset, live process or transfer is used. Legacy trivia/modal focus debt remains
+tracked by #16; this extraction does not claim that migration.
 
 ## Sidebar edge and icon regression
 

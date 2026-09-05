@@ -39,35 +39,44 @@ contract and runs as part of full verification. Release publishing is unchanged.
 
 ### Dependency audit
 
-CI installs npm **11.17.0** independently of the npm bundled with Node 22. This pinned
-version uses the supported bulk-advisory endpoint without falling back to the retired
-quick-audit endpoint. Installations use `npm ci --no-audit` only to avoid an implicit,
-duplicate audit; the separate `npm run audit:dependencies` step remains mandatory.
-The lockfile is still validated by `npm ci`, not regenerated to conceal endpoint errors.
-The audit explicitly disables offline mode, overriding environment and `.npmrc` settings
-that would otherwise let npm report zero findings without contacting the registry.
+The mandatory `npm run audit:dependencies` gate queries the live
+[OSV API](https://google.github.io/osv.dev/api/) for every distinct npm name/version
+in `package-lock.json`. The maintainer approved this provider change after npm's own
+advisory endpoint repeatedly returned service errors. `npm ci --no-audit` still validates
+the unchanged lockfile; it skips only npm's implicit audit, not the blocking OSV gate.
+No additional npm version, scanner executable, API key, or system installation is needed.
 
-The audit includes development, optional, and peer dependencies. The wrapper returns 1
-for high/critical findings and 2 for unavailable/invalid reports, which **are not a clean
-security verdict**. The outer npm/CI launcher may normalize failure to exit 1; use the
-explicit `DEPENDENCY AUDIT FAILED` versus `DEPENDENCY AUDIT UNAVAILABLE` log messages
-to distinguish these outcomes.
-Each attempt has a 210-second process deadline and a 180-second fetch timeout, with one
-bounded retry only for unavailable results. CI also caps the step at eight minutes.
-This allows the approximately 175-second successful audit observed on a clean Windows
-runner without inheriting npm's default retry delays.
-No vulnerability finding is retried away or marked successful. Report-validation and
-timeout/error contracts run in `test:dependency-audit` and the full verification suite.
+Coverage includes development, optional, peer, nested, aliased, and other-platform
+dependencies, even when they are absent from local `node_modules`. Local/git/workspace
+sources or malformed/empty inventories are rejected for explicit review, never skipped.
+Only package names and versions are sent to OSV; no saves, source code, or credentials.
 
-For local auditing without changing your system npm:
+OSV matches affected versions; full matching advisories supply GitHub's qualitative
+`database_specific.severity`. HIGH/CRITICAL findings return 1. LOW/MODERATE findings
+are reported without blocking; withdrawn advisories are identified separately.
+Missing/unknown severity, mismatched advisory identity, incomplete batches, malformed
+responses, and service errors return 2: **not a clean security verdict**. Outer launchers
+may normalize failure exit codes; the FAILED/UNAVAILABLE log labels remain distinct.
+
+Every request has a 15-second deadline and at most one retry. The whole audit has a
+two-minute deadline, with a three-minute CI step limit. Response size, batch size and
+pagination are bounded; exceeding a limit fails closed. No persistent/offline advisory
+cache or npm settings can suppress the live lookup. A later service failure never
+falls back to a previous clean result or retries away known findings.
+
+Local verification:
 
 ```powershell
-npm.cmd exec --yes --package=npm@11.17.0 -- npm run audit:dependencies
+npm.cmd run test:dependency-audit
+npm.cmd run test:dependency-audit:live
+npm.cmd run audit:dependencies
 ```
 
-See the [npm audit documentation](https://docs.npmjs.com/cli/audit/) for the advisory
-protocol. A healthy registry and a successful clean-runner audit remain required evidence;
-passing the offline wrapper tests alone does not establish dependency security.
+CI runs known-vulnerable and patched minimist controls before the real lockfile audit,
+then proceeds to `npm run verify` only on success. Offline contract tests also run in
+full verification, but are not a dependency-security verdict. A new advisory affecting
+the patched control will intentionally require investigation, not an automatic exception.
+The provider's coverage differs from npm's own audit; this is explicitly an OSV verdict.
 
 For installed-game integration checks:
 
@@ -76,6 +85,10 @@ npm.cmd run smoke:desktop
 ```
 
 This smoke suite uses an in-memory database and disposable transaction fixtures.
+UI verification uses `npm.cmd run build:verification`; production builds exclude
+its fixture factories and interaction drivers. See the
+[Electron verification boundary](docs/architecture/verification.md) for launch
+commands, isolated profiles, and installed-package diagnostics.
 Never point test code at a writable personal stash unless the test is explicitly
 part of the documented manual live matrix.
 

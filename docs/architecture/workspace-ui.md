@@ -82,6 +82,26 @@ Planner result modes, MI Workshop, Supplies, Collection Farming, Dismantling Lab
 Transfers archive browser currently use this contract. Settings and configuration forms do not
 use an explorer toolbar because they do not represent a searchable result set.
 
+### Research composition
+
+Skill Explorer and all three Planner views opt into the typed `layout="research"`
+composition of `ExplorerToolbar`, approved in #138. It uses the same search, clear,
+tips, advanced-query dialog, error and loading controls as the standard layout:
+
+- `before`: domain context, followed by search and always-visible filters;
+- results row: one live count, sort selector, shared `SortDirectionButton`, optional `views`;
+- `summary`: optional compact domain facts, without duplicating the main count.
+
+Planner skills are always visible and editable inline, including at compact widths.
+There is no Edit build mode. Profiles, levels, skill additions/removals, character
+refresh and ignored-skill restoration retain session ownership. The shared shell
+owns spacing, context-field styling, focus treatment and responsive wrapping;
+workspaces supply their domain controls through slots, not parallel toolbar CSS.
+Planner keeps one mounted toolbar when changing Table/Journey/MI sources, so the
+view switch retains keyboard focus. A workspace-local adapter selects the item or
+area query without merging their state. No new App.vue orchestration or preference
+schema is required. Other workspaces retain the default standard composition.
+
 ## Tool headers
 
 Specialist workspaces use `src/renderer/src/components/ToolHeader.vue` for their eyebrow,
@@ -205,12 +225,27 @@ global tooltip and item drawer. A restored route preserves its requested page, w
 search or filters reset the workspace to page one.
 
 Dismantling Lab keeps its read-only safety boundary while following the same ownership model.
-`DismantlingWorkspace.vue` owns query and filter edits, transient copy selection, safe-duplicate
-selection, progressive disclosure, preview state, and result/preview markup; `dismantling.ts` owns
-pure eligibility, structured filtering, and duplicate-preservation policy. `App.vue` supplies the
-typed route-control snapshot, immutable vault-item input, a narrow preview adapter, and the shared
-redacted-error formatter. The workspace never reaches the preload API directly, and no destructive
-dismantling path is introduced by the extraction.
+`DismantlingWorkspace.vue` owns query/filter edits, transient selection and read-only preview state.
+The main-process `ArchiveWorkspaceQueries` owns eligibility, structured filtering and duplicate
+preservation. Queries return 120 metadata rows per page; `BoundedResultSurface` keeps that DOM bound
+while paging. Duplicate selection ranks the whole eligible base/mode group before applying search,
+protects its best-scored (otherwise newest) copy, excludes attached extras and caps results at 10,000
+IDs. Preview resolves only requested IDs, rejecting duplicates, missing copies and changed eligibility.
+`App.vue` supplies typed query/selection/preview adapters and an archive revision, never full-vault
+input. The workspace does not reach preload directly or introduce a destructive dismantling path.
+
+Both archive-query workspaces preserve selection across pages and clear it when search, filters,
+transfer/character context or archive revision changes. They retain compact selected metadata,
+not unseen archive payloads. The remote-page owner discards late results and errors after a new
+request, revision or unmount; preview and bulk-selection callbacks have equivalent lifetime guards.
+
+Legacy stash-basis Collection, Planner, Explorer, Oracle and MI comparisons retain their archive
+ownership/copy augmentation through `archive-copy-session.ts`. It reads the existing vault API in
+250-row pages only while a comparison consumer is active, publishes a complete set, and discards
+stale batches on source/mode/revision changes or disposal. Supplies and Dismantling never start
+this reader. Those legacy comparison consumers still aggregate all their copies; #158 owns their
+further extraction. Supplies carries compact reusable metadata into transfer confirmations so
+confirmation wording does not depend on whether a comparison workspace was visited first.
 
 Skill Explorer owns its complete typed route-control snapshot, subject picker, suggestions,
 structured result search, availability/rarity/slot filters, sort controls, and paging in
@@ -225,6 +260,18 @@ the global immediate-focus and delayed-pointer tooltip adapters, the item-drawer
 same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
+
+Leveling Planner owns its controls, setup dialog, Table/Journey/MI Sources markup, and view-switch
+focus restoration in `LevelingPlannerWorkspace.vue`. Its shell-lifetime `leveling-planner.ts`
+session owns profiles, level drafts, skills, scoped exclusions, favorites, character discovery,
+map selection, route restoration, and preference writes through typed injected adapters. Keeping
+the session alive across workspace unmounts preserves drafts and in-flight discovery. `App.vue`
+only supplies shared catalog/search/ownership services, navigation, notifications, and global
+tooltip/drawer adapters; it does not manipulate individual Planner controls. The session exposes
+one typed route snapshot and one restoration method, suppressing profile writes and page/area
+reset watchers during restoration. `planner-results.ts` owns pure item matching, sorting,
+exclusion filtering, and projection into the shared research rows. Regression tests exercise the
+production session with Vue reactivity and the real preference repository, plus a 20k item model.
 
 Leveling Planner projects skill ranks, mastery-wide bonuses, conversions, special and visual
 modifiers, blueprint/faction/drop acquisition, archive availability, and roll context into the
@@ -274,21 +321,21 @@ Keyboard users use Page Up/Down while the describing item retains focus. Hoverin
 pending dismissal, and horizontal table containment never blocks vertical workspace scrolling.
 
 Supplies owns its typed category, compatible-slot, query, transfer-mode, and page controls plus
-its transient keyed selection in `SuppliesWorkspace.vue`. `supplies.ts` owns reusable-unlock
-counting, catalog presentation indexing, archived-copy identity, faction-reputation access,
-structured search, and deterministic option projection. `App.vue` supplies immutable catalog and
-archive inputs, active-character and transfer readiness, one global-tooltip adapter, and one
-narrow dispense callback; the workspace never reaches the preload API directly. Category and slot
-changes clear selection, query edits preserve selection while resetting page one, transfer-mode
-changes clear selection, and Back/Forward restores the complete typed control snapshot. Supplies
-retains its established delayed tooltip behavior for both pointer and keyboard focus.
+its transient keyed selection in `SuppliesWorkspace.vue`. The shared pure `supply-presentation.ts`
+owns catalog indexing, faction access and option presentation. Main-process queries group archived
+unlocks by record/mode, keep individual potion copies and return 60 options per page plus compact
+counts. Bulk boost selection returns only eligible active-mode IDs and metadata. `App.vue` supplies
+narrow query/selection/dispense adapters, active-character/transfer readiness and the global tooltip
+adapter; the workspace never reaches preload directly. Back/Forward restores typed controls, and
+Supplies retains delayed tooltips for pointer and keyboard focus. Exact transfer payloads remain
+authoritative in the existing main-process transfer services.
 
 MI Workshop owns its typed query, affix-quality filter, selected comparison metric, sort, direction,
 page, reserve disclosure, shared toolbar, and complete bounded comparison table in
 `MiWorkshopWorkspace.vue`. `mi-workshop.ts` owns exact base/prefix/suffix grouping, the affix rarity
 index, strict rare-prefix plus rare-suffix filtering, structured base/affix/stat/skill matching,
 metric leadership, and deterministic group sorting. `App.vue` retains one typed Back/Forward
-control snapshot, the shared comparison drawer, and narrow catalog/icon/global-tooltip/item-drawer
+control snapshot, the shared inspection session, and narrow catalog/icon/global-tooltip/item-drawer
 adapters. Keyboard focus opens the affixed copy tooltip immediately; pointer hover keeps the
 established delay. Changing a user-facing query, filter, metric, or sort resets paging, while route
 restoration replaces the complete snapshot without a watcher erasing the restored page. Page-only
@@ -300,11 +347,40 @@ rarity filters, sort, page reset, category rail, 48-card bounded result surface,
 `collection-materials.ts` owns deterministic category, ownership, recipe, strict double-rare,
 structured-query, and sorting projection. `App.vue` keeps two complete typed control snapshots so
 switching between Collection, Materials, and Sets cannot leak filters or paging across tools. The
-shell retains Collection's dashboard, completion trackers, and tool launcher plus narrow adapters
-for search documents, category progress, global tooltips, item drawers, and live retrieval. Route
+shell composes `CollectionDashboard.vue` and its typed `collection-dashboard.ts` projection for
+completion trackers, category progress and trivia. It retains tool launching and narrow adapters
+for search documents, global tooltips, item inspection, and live retrieval. Route
 restoration replaces the appropriate snapshot, while user edits reset only that route to page one.
 Raw query edits enter typed route history immediately, while the expensive catalog projection uses
 a workspace-owned 120 ms debounce and cancels pending work on unmount.
+
+`SetsWorkspace.vue` owns the Sets toolbar and 50-card grid; `sets.ts` owns the typed shell-lifetime
+session, grouping, discovery/readiness projection, query debounce, filters, sort and page. Route
+restoration applies one complete control snapshot and cancels pending query work without erasing
+the restored page. Discovery, physical storage, recipe crafting and qualified awakening remain
+distinct. The legacy trivia dialog moved to `CollectionTriviaDialog.vue`; its focus-management
+debt remains tracked by #16, and extraction is not counted as an accessibility migration.
+
+`inspection/item-inspection.ts` owns selected item/reference, affix disclosure, copy ordering and
+pin-in-flight state. `ItemInspectionDrawer.vue` receives that typed session and narrow icon,
+catalog, stored-copy and action ports. It renders at most 50 copy cards through the shared bounded
+surface; the explicit reference remains first on page one and remains the comparison reference
+on later pages. Rows use physical vault/source identity so identical item fingerprints cannot
+collide; saved pins and reference matching retain their existing fingerprint semantics.
+`inspection-presentation.ts` owns pure roll and delta projection, computing the
+cross-copy stat universe once and caching each displayed copy's rows. A pending pin captures its
+item, source/mode context generation and selection revision: success updates that item's pin
+after catalog refresh only while its collection context is current. Source/mode changes, including
+A→B→A, invalidate completion updates; navigation or disposal cannot redirect a newer selection.
+Rejection leaves the pin unchanged.
+
+`collection-copies.ts` owns the legacy archive augmentation through `archive-copy-session.ts`.
+That reader still aggregates all comparison copies after 250-row reads and publishes only a
+complete set for the current source/mode/revision. Its exact identity, archive deduplication and
+SC/HC filtering are preserved; it is not a claim that comparison now uses compact remote DTOs.
+Supplies and Dismantling retain their separate bounded queries. The Collection ownership gate
+rejects imports back into App/main/preload/verification, direct bridge/storage effects and untyped
+shell injection in these owners. Shell adapters remain responsible for navigation and persistence.
 
 Category roll sorts keep unrated items after rated items in either direction;
 among unrated entries, collected items precede missing items. An exact reference

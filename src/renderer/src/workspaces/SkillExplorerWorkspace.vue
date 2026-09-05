@@ -4,6 +4,7 @@ import type { CollectionItem } from '@shared/contracts'
 import { compileSearchQuery } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
+import SortDirectionButton from '../components/SortDirectionButton.vue'
 import ResearchItemTable from '../components/ResearchItemTable.vue'
 import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
@@ -214,68 +215,72 @@ function changeSort(next: string): void {
 <template>
   <section class="skill-explorer" aria-label="Skill item explorer">
     <ToolHeader
-      eyebrow="Build research prototype"
-      title="Items for a skill"
-      description="Choose a skill to compare direct rank bonuses, damage conversions, special modifiers, visual transformations, and level requirements."
+      eyebrow="Item research"
+      title="Skill Explorer"
+      description="Explore the items that change and strengthen a skill."
     />
-    <div class="skill-picker">
-      <div class="skill-combobox" @focusout="handlePickerFocusOut">
-        <label for="skill-picker-input">Skill</label>
-        <span class="skill-input-wrap">
-          <input
-            id="skill-picker-input"
-            v-model="selectedSkill"
-            type="text"
-            role="combobox"
-            autocomplete="off"
-            aria-autocomplete="list"
-            :aria-expanded="pickerOpen"
-            aria-haspopup="listbox"
-            :aria-controls="pickerOpen ? skillListboxId : undefined"
-            :aria-activedescendant="activeSuggestionId"
-            placeholder="Choose or type a skill…"
-            @focus="openPicker"
-            @input="handlePickerInput"
-            @keydown="handlePickerKey"
-          />
-          <button v-if="selectedSkill" type="button" aria-label="Clear selected skill" @click="selectedSkill = ''; openPicker()">×</button>
-        </span>
-        <span v-if="pickerOpen" :id="skillListboxId" class="skill-suggestions" role="listbox" aria-label="Indexed skills">
-          <button
-            v-for="(skill, index) in suggestions"
-            :key="skill"
-            :id="skillOptionIds.get(skill)"
-            type="button"
-            role="option"
-            tabindex="-1"
-            :aria-selected="index === pickerIndex"
-            :class="{ active: index === pickerIndex }"
-            @mouseenter="pickerIndex = index"
-            @mousedown.prevent
-            @click="selectSkill(skill)"
-          >{{ researchSkillName(skill) }}</button>
-          <small v-if="suggestions.length === 0">No indexed skill matches that text.</small>
-        </span>
-      </div>
-    </div>
     <ExplorerToolbar
       v-model="query"
       v-bind="searchGuidance.skillItems"
       class="skill-explorer-toolbar"
-      search-label="Search matching items"
-      placeholder="Item, slot, modifier, damage type…"
+      layout="research"
+      search-label="Search items"
+      placeholder="Item, skill modifier, damage type…"
       :result-count="rows.length"
       result-label="matching items"
       :search-error="searchError"
     >
+      <template #before>
+        <div class="research-context-row">
+          <div class="skill-combobox research-subject-field" @focusout="handlePickerFocusOut">
+            <label class="research-context-label" for="skill-picker-input">Skill</label>
+            <span class="skill-input-wrap">
+              <input
+                id="skill-picker-input"
+                class="research-context-input"
+                v-model="selectedSkill"
+                type="text"
+                role="combobox"
+                autocomplete="off"
+                aria-autocomplete="list"
+                :aria-expanded="pickerOpen"
+                aria-haspopup="listbox"
+                :aria-controls="pickerOpen ? skillListboxId : undefined"
+                :aria-activedescendant="activeSuggestionId"
+                placeholder="Choose or type a skill…"
+                @focus="openPicker"
+                @input="handlePickerInput"
+                @keydown="handlePickerKey"
+              />
+              <button v-if="selectedSkill" type="button" aria-label="Clear selected skill" @click="selectedSkill = ''; openPicker()">×</button>
+            </span>
+            <span v-if="pickerOpen" :id="skillListboxId" class="skill-suggestions" role="listbox" aria-label="Indexed skills">
+              <button
+                v-for="(skill, index) in suggestions"
+                :key="skill"
+                :id="skillOptionIds.get(skill)"
+                type="button"
+                role="option"
+                tabindex="-1"
+                :aria-selected="index === pickerIndex"
+                :class="{ active: index === pickerIndex }"
+                @mouseenter="pickerIndex = index"
+                @mousedown.prevent
+                @click="selectSkill(skill)"
+              >{{ researchSkillName(skill) }}</button>
+              <small v-if="suggestions.length === 0">No indexed skill matches that text.</small>
+            </span>
+          </div>
+        </div>
+      </template>
       <template #filters>
-        <label><span>Availability</span><select v-model="scope" autocomplete="off"><option value="all">All catalog items</option><option value="archive">My Archive</option></select></label>
+        <label><span>Archive status</span><select v-model="scope" autocomplete="off"><option value="all">All items</option><option value="archive">In Archive</option></select></label>
         <label><span>Rarity</span><select v-model="rarity" autocomplete="off"><option value="all">All rarities</option><option value="legendary">Legendary</option><option value="epic">Epic</option><option value="mi">Monster Infrequent</option><option value="rare">Rare</option></select></label>
         <label><span>Slot</span><select v-model="slot" autocomplete="off"><option value="all">All slots</option><option v-for="option in slotOptions" :key="option" :value="option">{{ option }}</option></select></label>
       </template>
       <template #sort>
         <label><span>Sort by</span><select v-model="sort" autocomplete="off"><option value="level">Required level</option><option value="amount">Ranks & modifiers</option><option value="item">Item name</option><option value="slot">Slot</option><option value="conversion">Conversion target</option><option value="special">Special modifier</option></select></label>
-        <label><span>Order</span><select v-model="direction" autocomplete="off"><option value="asc">Lowest first</option><option value="desc">Highest first</option></select></label>
+        <SortDirectionButton v-model="direction" />
       </template>
     </ExplorerToolbar>
     <ResearchItemTable

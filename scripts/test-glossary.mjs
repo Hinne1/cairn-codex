@@ -36,7 +36,7 @@ for (const url of ['file:///C:/secret', 'javascript:alert(1)', 'https://www.grim
 
 const [app, main, helper, sidebar, workspace] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/main/bootstrap.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/helper/CairnCodex.GrimDawn/ItemRollAnalyzer.cs', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/WorkspaceSidebar.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/GlossaryWorkspace.vue', import.meta.url), 'utf8')
@@ -46,7 +46,9 @@ assert.match(helper, /ModelVersion = 9/)
 assert.match(JSON.stringify(entry), /4,096/)
 assert.match(app, /@glossary="openGlossary\(\)"/)
 assert.match(app, /function openGlossary[\s\S]*?activeView.value = 'glossary'[\s\S]*?selectedRecord.value = null[\s\S]*?selectedReferenceInstanceKey.value = null/)
-assert.equal((app.match(/@open-roll-help="openGlossary\(\)"/g) ?? []).length, 2)
+assert.equal((app.match(/@open-roll-help="openGlossary\(\)"/g) ?? []).length, 3)
+const drawer = await readFile(new URL('../src/renderer/src/inspection/ItemInspectionDrawer.vue', import.meta.url), 'utf8')
+assert.match(drawer, /class="roll-help-link" @click="emit\('open-roll-help'\)"/)
 assert.match(sidebar, /data-destination-id="glossary"[\s\S]*?aria-label="Glossary"/)
 assert.doesNotMatch(sidebar.slice(sidebar.indexOf('data-destination-id="glossary"'), sidebar.indexOf("emit('glossary')")), /disabled/)
 assert.match(main, /isGlossarySourceUrl\(url\)[\s\S]*?shell.openExternal\(url\)[\s\S]*?action: 'deny'/)

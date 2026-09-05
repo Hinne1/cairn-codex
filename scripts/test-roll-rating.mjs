@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-import { computed, ref } from 'vue'
-import ts from 'typescript'
+import { effectScope, ref, shallowRef, nextTick } from 'vue'
+import { createItemInspectionSession } from '../src/renderer/src/inspection/item-inspection.ts'
+import { presentRolledStats as present } from '../src/renderer/src/inspection/inspection-presentation.ts'
 import { createAppHistoryEntry, defaultAppRoute, parseAppHistoryEntry } from '../src/renderer/src/app-route.ts'
 import { categoryScoreDescription, formatCategoryScore, rollCategoryScores, rollStatQuality, averageRollQuality } from '../src/renderer/src/roll-rating.ts'
 
@@ -29,14 +29,6 @@ assert.equal(formatCategoryScore({ ...score, qualityPercent: undefined }), '—'
 
 // Exercise the production reference selection and route restoration with synthetic copies.
 // No Electron API, profile, persistence, or game data is involved.
-const appSource = await readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8')
-const presentedSource = appSource.slice(appSource.indexOf('function presentRolledStats('), appSource.indexOf('function rollStatName('))
-const presentJs = ts.transpileModule(presentedSource + '\nreturn presentRolledStats', {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None }
-}).outputText
-const present = new Function('rollStatQuality', 'averageRollQuality', 'formatCombinationPercentile', 'rollStatUnit', 'formatRollValue', 'rollStatName', presentJs)(
-  rollStatQuality, averageRollQuality, value => value === null ? null : `${Math.round(value)}th`, () => '', String, field => field
-)
 assert.equal(present([vitality])[0].qualityPercent, 100, 'the actual drawer projection must fill the meter at maximum')
 const range = present([{ ...vitality, field: 'offensiveVitalityMin' }, { ...vitality, field: 'offensiveVitalityMax', value: 18, observedMinimum: 14, observedMaximum: 18 }])
 assert.equal(range.length, 1)
@@ -44,24 +36,26 @@ assert.equal(range[0].qualityPercent, 100, 'min/max members must normalize indep
 assert.equal(range[0].rankLabel, null, 'do not invent a combination percentile by averaging marginal ranks')
 assert.equal(present([{ ...vitality, field: 'offensiveVitalityMin' }, { ...vitality, field: 'offensiveVitalityMax', rollable: false, value: 18, observedMinimum: 18, observedMaximum: 18, estimatedPercentile: null }], true)[0].qualityPercent, 100,
   'a fixed range member must not hide or dilute the variable member quality')
-const referenceSource = appSource.slice(appSource.indexOf('const comparisonReferenceCopy = computed('), appSource.indexOf('const selectedStoredCopies = computed('))
-const restoreSource = appSource.slice(appSource.indexOf('function restoreAppRoute('), appSource.indexOf('function handlePageShow('))
-assert.ok(referenceSource && restoreSource)
-const js = ts.transpileModule(`
-  let restoringAppHistory = false
-  const activeView = ref('collection')
-  const selectedRecord = ref(null)
-  const selectedReferenceInstanceKey = ref(null)
-  const collectionControls = ref({})
-  const selectedItem = ref({ pinnedInstanceKey: 'pinned-other' })
-  const copies = [{ instanceKey: 'pinned-other' }, { instanceKey: 'score-leader' }]
-  const selectedCopies = computed(() => selectedRecord.value ? copies : [])
-  const nextTick = () => {} // Workspace follow-up jobs are unrelated to copy identity.
-  ${referenceSource}
-  ${restoreSource}
-  return { restoreAppRoute, comparisonReferenceCopy, selectedItem, selectedReferenceInstanceKey, copies }
-`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
-const harness = new Function('ref', 'computed', js)(ref, computed)
+const record = 'records/items/test.dbr'
+const copies = shallowRef([
+  { baseRecord: record, instanceKey: 'pinned-other', sourcePath: 'synthetic-sc', prefixRecord: '', suffixRecord: '' },
+  { baseRecord: record, instanceKey: 'score-leader', sourcePath: 'synthetic-hc', prefixRecord: '', suffixRecord: '' }
+])
+const items = shallowRef([{ record, rarity: 'legendary', pinnedInstanceKey: 'pinned-other' }])
+const writes = []
+const contextKey = ref('synthetic-sc')
+let finishPin
+let rejectPin
+const scope = effectScope()
+const harness = scope.run(() => createItemInspectionSession({
+  contextKey: () => contextKey.value,
+  available: () => true, items: () => items.value, copies: () => copies.value,
+  observedCopies: () => [], affixes: () => new Map(), metric: () => 'overall',
+  metricDirection: () => 'desc', storedCopyFor: () => null,
+  modeFor: copy => copy.sourcePath === 'synthetic-hc',
+  setPinnedBest: (...args) => { writes.push(args); return new Promise((resolve, reject) => { finishPin = resolve; rejectPin = reject }) }
+}))
+const restoreAppRoute = (route, reference) => harness.restore(route.itemRecord, reference)
 const itemRoute = { ...defaultAppRoute('collection'), itemRecord: 'records/items/test.dbr' }
 const history = [
   createAppHistoryEntry(0, defaultAppRoute('collection')),
@@ -70,7 +64,7 @@ const history = [
 ]
 function restore(index) {
   const entry = parseAppHistoryEntry(JSON.parse(JSON.stringify(history[index])))
-  harness.restoreAppRoute(entry.route, entry.referenceInstanceKey)
+  restoreAppRoute(entry.route, entry.referenceInstanceKey)
 }
 restore(1)
 assert.equal(harness.comparisonReferenceCopy.value.instanceKey, 'score-leader')
@@ -81,9 +75,61 @@ assert.equal(harness.comparisonReferenceCopy.value.instanceKey, 'score-leader')
 restore(0)
 restore(1) // Forward also restores the exact score leader.
 assert.equal(harness.comparisonReferenceCopy.value.instanceKey, 'score-leader')
-harness.restoreAppRoute(itemRoute) // Shared links/old entries have no local copy selection.
+restoreAppRoute(itemRoute) // Shared links/old entries have no local copy selection.
 assert.equal(harness.comparisonReferenceCopy.value.instanceKey, 'pinned-other')
-harness.restoreAppRoute(itemRoute, 'removed-copy')
+restoreAppRoute(itemRoute, 'removed-copy')
 assert.equal(harness.comparisonReferenceCopy.value.instanceKey, 'pinned-other', 'missing copies fall back safely')
+
+harness.open(items.value[0], 'score-leader')
+const pendingPin = harness.pinCopy(copies.value[1])
+assert.deepEqual(writes, [[record, 'score-leader', true]], 'pinning keeps the exact source mode')
+await harness.pinCopy(copies.value[1])
+assert.equal(writes.length, 1, 'a repeated pin cannot overlap the outstanding write')
+harness.close()
+harness.open({ record: 'different', rarity: 'legendary' })
+finishPin()
+await pendingPin
+assert.equal(items.value[0].pinnedInstanceKey, 'score-leader')
+assert.equal(harness.selectedRecord.value, 'different')
+assert.equal(harness.selectedReferenceInstanceKey.value, null, 'completed pin does not change the newly inspected item')
+harness.restore(record, 'score-leader')
+harness.toggleCopyAffix(copies.value[0], 'records/affixes/test.dbr')
+assert.ok(harness.activeCopyAffixTarget.value)
+harness.close()
+await nextTick()
+assert.equal(harness.activeCopyAffixTarget.value, null)
+harness.restore(record, 'score-leader')
+const rejectedPin = harness.pinCopy(copies.value[0])
+rejectPin(new Error('synthetic pin failure'))
+await assert.rejects(rejectedPin, /synthetic pin failure/)
+assert.equal(harness.pinning.value, false)
+assert.equal(items.value[0].pinnedInstanceKey, 'score-leader', 'failed writes cannot invent a pin')
+assert.equal(harness.selectedReferenceInstanceKey.value, 'score-leader')
+const refreshedPin = harness.pinCopy(copies.value[0])
+items.value = [{ ...items.value[0] }]
+finishPin()
+await refreshedPin
+assert.equal(items.value[0].pinnedInstanceKey, 'pinned-other', 'completed pin updates the refreshed catalog object')
+assert.equal(harness.selectedReferenceInstanceKey.value, 'pinned-other')
+for (const change of ['mode', 'source', 'aba']) {
+  harness.restore(record, 'pinned-other')
+  const previousContext = contextKey.value
+  const changedContextPin = harness.pinCopy(copies.value[1])
+  const previousItem = items.value[0]
+  contextKey.value = change === 'mode' ? 'synthetic-hc' : previousContext + '-other-source'
+  if (change === 'aba') contextKey.value = previousContext
+  items.value = [{ ...previousItem, pinnedInstanceKey: 'current-context-pin' }]
+  // Keep the record and explicit reference unchanged: only collection context invalidates it.
+  finishPin()
+  await changedContextPin
+  assert.equal(items.value[0].pinnedInstanceKey, 'current-context-pin', change + ': stale pin cannot update this catalog')
+  assert.equal(harness.selectedReferenceInstanceKey.value, 'pinned-other', change + ': stale pin cannot redirect the reference')
+  assert.notEqual(previousItem.pinnedInstanceKey, 'score-leader', change + ': no stale object mutation')
+}
+const disposedPin = harness.pinCopy(copies.value[1])
+scope.stop()
+finishPin()
+await disposedPin
+assert.equal(harness.selectedReferenceInstanceKey.value, 'pinned-other', 'disposed owner cannot alter history selection')
 
 console.log('Roll rating regressions passed: tie-aware wording, exact reference Back/Forward, legacy routes, and missing-copy fallback.')

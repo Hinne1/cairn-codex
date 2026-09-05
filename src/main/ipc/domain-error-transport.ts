@@ -4,6 +4,7 @@ import {
   type IpcErrorKind,
   type IpcErrorPayload
 } from '../../shared/ipc-error-transport.ts'
+import { HelperRequestError } from '../grim-dawn/helper-protocol.ts'
 
 export type { IpcErrorDomain, IpcErrorKind, IpcErrorPayload } from '../../shared/ipc-error-transport.ts'
 
@@ -197,6 +198,17 @@ function payload(domain: IpcErrorDomain, kind: IpcErrorKind, rule: ErrorRule): I
 
 /** Classify an ordinary production error without exposing its message or stack. */
 export function classifyIpcDomainError(domain: IpcErrorDomain, error: unknown): IpcErrorPayload {
+  let cause: unknown = error
+  for (let depth = 0; depth < 8 && cause instanceof Error; depth++, cause = cause.cause) {
+    if (cause instanceof HelperRequestError && cause.uncertain) {
+      return {
+        schemaVersion: IPC_ERROR_SCHEMA_VERSION, domain, kind: 'known',
+        code: `${domain}.helper-outcome-uncertain`,
+        message: 'The helper operation may have completed. Check its result and recovery status before retrying.',
+        retryable: false, uncertain: true
+      }
+    }
+  }
   const policy = policies[domain]
   const message = errorMessage(error)
   const code = errorCode(error)

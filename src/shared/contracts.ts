@@ -1,9 +1,11 @@
 import type { AnyBackgroundJobSnapshot } from './background-jobs'
+import type { DismantlingPage, DismantlingQueryRequest, DismantlingSelection, SupplyPage, SupplyQueryRequest, SupplySelection } from './workspace-query-contracts.ts'
 
 export const IPC_CHANNELS = {
   getBackgroundJobs: 'jobs:list',
   cancelBackgroundJob: 'jobs:cancel',
   backgroundJobChanged: 'jobs:changed',
+  archiveRecoveryChanged: 'archive:recovery-changed',
   getAppStatus: 'app:get-status',
   setZoomFactor: 'app:set-zoom-factor',
   exportDiagnostics: 'app:export-diagnostics',
@@ -43,6 +45,10 @@ export const IPC_CHANNELS = {
   inspectStagingTab: 'vault:inspect-staging-tab',
   listVaultItems: 'vault:list-items',
   queryVaultItems: 'vault:query-items',
+  querySupplies: 'vault:query-supplies',
+  selectSupplyBoosts: 'vault:select-supply-boosts',
+  queryDismantling: 'vault:query-dismantling',
+  selectDismantlingDuplicates: 'vault:select-dismantling-duplicates',
   queryOperationHistory: 'vault:query-operation-history',
   getVaultSummary: 'vault:get-summary',
   previewDismantling: 'vault:preview-dismantling',
@@ -231,6 +237,7 @@ export interface CairnCodexApi {
   getBackgroundJobs: () => Promise<AnyBackgroundJobSnapshot[]>
   cancelBackgroundJob: (id: string) => Promise<AnyBackgroundJobSnapshot | null>
   onBackgroundJobChanged: (listener: (job: AnyBackgroundJobSnapshot) => void) => () => void
+  onArchiveRecoveryChanged: (listener: () => void) => () => void
   getAppStatus: () => Promise<AppStatus>
   setZoomFactor: (factor: number) => Promise<number>
   exportDiagnostics: () => Promise<DiagnosticExportResult>
@@ -270,6 +277,10 @@ export interface CairnCodexApi {
   inspectStagingTab: (path: string) => Promise<StagingTabInspection>
   listVaultItems: () => Promise<VaultListItem[]>
   queryVaultItems: (request: VaultPageRequest) => Promise<VaultItemPage>
+  querySupplies: (request: SupplyQueryRequest) => Promise<SupplyPage>
+  selectSupplyBoosts: (request: SupplyQueryRequest) => Promise<SupplySelection>
+  queryDismantling: (request: DismantlingQueryRequest) => Promise<DismantlingPage>
+  selectDismantlingDuplicates: (request: DismantlingQueryRequest) => Promise<DismantlingSelection>
   queryOperationHistory: (request: OperationHistoryRequest) => Promise<OperationHistoryPage>
   getVaultSummary: () => Promise<VaultSummary>
   previewDismantling: (vaultItemIds: string[]) => Promise<DismantlingPreview>

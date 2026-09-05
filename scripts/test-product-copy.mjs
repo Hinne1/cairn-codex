@@ -8,15 +8,6 @@ const sourceExtensions = new Set(['.cs', '.css', '.html', '.ts', '.vue'])
 const ignoredDirectories = new Set(['bin', 'obj'])
 
 const allowedLoreLines = new Set([
-  "src/main/index.ts::name: 'Veil of the Cairn',",
-  "src/main/index.ts::members: ['Cairn Hood', 'Cairn Mantle', 'Cairn Sigil'],",
-  "src/main/index.ts::record: 'records/items/synthetic/cairn_hood.dbr', name: 'Cairn Hood', rarity: 'legendary',",
-  "src/main/index.ts::slot: 'head', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',",
-  "src/main/index.ts::record: 'records/items/synthetic/cairn_mantle.dbr', name: 'Cairn Mantle', rarity: 'legendary',",
-  "src/main/index.ts::slot: 'shoulders', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',",
-  "src/main/index.ts::record: 'records/items/synthetic/cairn_sigil.dbr', name: 'Cairn Sigil', rarity: 'legendary',",
-  "src/main/index.ts::slot: 'medal', level: 94, setName: 'Veil of the Cairn', setRecord: 'records/items/synthetic/cairn_set.dbr',",
-  "src/main/index.ts::awakeningSourceName: 'Cairn Mark', setPresentation",
   "src/renderer/src/App.vue::<h2>{{ snapshot ? 'Your collection has entered the Codex.' : 'Reading the archives of Cairn…' }}</h2>",
   'src/renderer/src/App.vue::<section class="planner-world-map" aria-label="Cairn item source map">'
 ])
@@ -27,15 +18,15 @@ const allowedProductNameLines = new Set([
   "src/renderer/src/semantic-tokens.ts::name: 'Cairn Codex',",
   'src/main/collection-database.ts::`Archive schema ${version.user_version} is newer than this Cairn Codex build supports.`',
   "src/main/collection-database.ts::throw new Error('The selected file is not a Cairn Codex archive database.')",
-  "src/main/index.ts::title: 'Export Cairn Codex preferences',",
-  "src/main/index.ts::filters: [{ name: 'Cairn Codex preferences', extensions: ['json'] }]",
-  "src/main/index.ts::title: 'Export Cairn Codex archive backup',",
-  "src/main/index.ts::filters: [{ name: 'Cairn Codex archive', extensions: ['sqlite3'] }]",
-  "src/main/index.ts::title: 'Restore Cairn Codex archive backup',",
-  "src/main/index.ts::{ name: 'Cairn Codex archive', extensions: ['sqlite3', 'sqlite', 'db'] },",
-  "src/main/index.ts::title: 'Restore Cairn Codex archive?',",
-  "src/main/index.ts::title: 'Save Cairn Codex support bundle',",
-  "src/main/index.ts::console.log('[startup] Electron ready; opening Cairn Codex services.')",
+  "src/main/bootstrap.ts::title: 'Export Cairn Codex preferences',",
+  "src/main/bootstrap.ts::filters: [{ name: 'Cairn Codex preferences', extensions: ['json'] }]",
+  "src/main/bootstrap.ts::title: 'Export Cairn Codex archive backup',",
+  "src/main/bootstrap.ts::filters: [{ name: 'Cairn Codex archive', extensions: ['sqlite3'] }]",
+  "src/main/bootstrap.ts::title: 'Restore Cairn Codex archive backup',",
+  "src/main/bootstrap.ts::{ name: 'Cairn Codex archive', extensions: ['sqlite3', 'sqlite', 'db'] },",
+  "src/main/bootstrap.ts::title: 'Restore Cairn Codex archive?',",
+  "src/main/bootstrap.ts::title: 'Save Cairn Codex support bundle',",
+  "src/main/bootstrap.ts::console.log('[startup] Electron ready; opening Cairn Codex services.')",
   "src/main/ipc/domain-error-transport.ts::known('live-transfers.adapter-missing', 'The native live adapter is missing. Repair or reinstall Cairn Codex, then review Windows Security Protection history.', /live adapter is incomplete: missing .*Protection history/i),",
   "src/renderer/src/App.vue::'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while CC owns the game hook.'",
   'src/renderer/src/App.vue::<h1>Cairn Codex</h1>',
@@ -58,14 +49,14 @@ const requiredProductNameContexts = [
   ['src/renderer/index.html', '<title>Cairn Codex</title>'],
   ['src/renderer/src/App.vue', '<h1>Cairn Codex</h1>'],
   ['src/renderer/src/components/OnboardingDialog.vue', 'Welcome to Cairn Codex'],
-  ['src/main/index.ts', "title: 'Export Cairn Codex preferences'"]
+  ['src/main/bootstrap.ts', "title: 'Export Cairn Codex preferences'"]
 ]
 
 const requiredCompactSubjectContexts = [
   ['src/renderer/src/components/OnboardingDialog.vue', 'CC automatically checks'],
   ['src/renderer/src/components/OnboardingDialog.vue', 'CC rotates archive snapshots'],
   ['src/renderer/src/App.vue', 'new to CC'],
-  ['src/main/index.ts', 'CC will verify this backup']
+  ['src/main/bootstrap.ts', 'CC will verify this backup']
 ]
 
 async function collectSourceFiles(directory) {

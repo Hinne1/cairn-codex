@@ -1,7 +1,9 @@
 # Main-process services and IPC
 
 The Electron bootstrap is a composition root. Renderer requests still cross the existing typed
-preload contract, but raw `ipcMain.handle` registration is not permitted in `src/main/index.ts`.
+preload contract, but raw `ipcMain.handle` registration is not permitted in the entry
+or `src/main/bootstrap.ts`. The entry selects the production application; the
+[verification entry](verification.md) injects test hooks without entering release builds.
 Each request belongs to exactly one main-process domain service.
 
 ## Domain ownership

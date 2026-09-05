@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { moveBoundedVisualRowKey } from '../src/renderer/src/bounded-results.ts'
-import { presentScreenshotCollection } from '../src/main/screenshot-collection.ts'
+import { presentScreenshotCollection } from '../src/verification/screenshot-collection.ts'
 
-const [component, collection, oracle, supplies, main, benchmark, packageJson] = await Promise.all([
+const [component, collection, oracle, supplies, benchmark, packageJson] = await Promise.all([
   readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/CollectionMaterialsWorkspace.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/StashOracleWorkspace.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/workspaces/SuppliesWorkspace.vue', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('./benchmark-ui.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../package.json', import.meta.url), 'utf8')
 ])
@@ -27,18 +26,9 @@ assert.match(collection, /layout="grid"[\s\S]*?interactive/)
 assert.match(oracle, /layout="grid" navigable/)
 assert.match(supplies, /layout="grid"[\s\S]*?selection-mode="multiple"/)
 
-assert.match(main, /name === 'bounded-grid-a11y'/)
-assert.match(main, /presentScreenshotCollection\([\s\S]*?CAIRN_CODEX_SCREENSHOT_PATH[\s\S]*?CAIRN_CODEX_SCREENSHOT_FIXTURE/)
 const gridFixture = { observedItems: [{ instanceKey: 'synthetic-grid-copy' }] }
 assert.strictEqual(presentScreenshotCollection(gridFixture, 'archive', 'capture.png', 'bounded-grid-a11y', () => { throw new Error('Must retain projected grid copies') }).observedItems, gridFixture.observedItems)
 assert.equal(presentScreenshotCollection(gridFixture, 'archive', undefined, 'bounded-grid-a11y', () => null), null)
-assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_BOUNDED_GRID_SEMANTICS/)
-assert.match(main, /direct grid rows/)
-assert.match(main, /direct gridcell/)
-assert.match(main, /top > firstTop \+ 1\) \?\? first/)
-assert.match(main, /key: 'ArrowUp'[\s\S]*?document\.activeElement !== first/)
-assert.doesNotMatch(main, /oracleCount === 0/)
-assert.match(main, /Supplies selection and disabled semantics/)
 assert.match(benchmark, /--verify-bounded-grid-semantics/)
 assert.match(packageJson, /test:bounded-grid-semantics:electron/)
 

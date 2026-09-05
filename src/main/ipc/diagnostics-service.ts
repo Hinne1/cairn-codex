@@ -26,6 +26,7 @@ export interface DiagnosticExporter {
 }
 
 export interface DiagnosticsServiceDependencies {
+  visualDiagnosticsActive(): boolean
   appVersion(): string
   helperHealth(): Promise<unknown>
   safeModeStatus(): AppStatus['safeMode']
@@ -105,7 +106,7 @@ export class DiagnosticsService {
 
   getRecoveryStatus(): Promise<RecoveryStatus> {
     return this.dependencies.runExclusive(async () => {
-      await this.dependencies.reconcileRecovery()
+      if (!this.dependencies.visualDiagnosticsActive()) await this.dependencies.reconcileRecovery()
       const operations = this.dependencies.recoveryOperations()
       return {
         requiresAttention: operations.length > 0,

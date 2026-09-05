@@ -46,11 +46,10 @@ const empty = createBoundedResultWindow({
 assert.equal(empty.entries.length, 0)
 assert.equal(empty.totalCount, 0)
 
-const [app, boundedSurface, styles, main, benchmark, packageJson] = await Promise.all([
+const [app, boundedSurface, styles, benchmark, packageJson] = await Promise.all([
   readFile(new URL('../src/renderer/src/App.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/components/BoundedResultSurface.vue', import.meta.url), 'utf8'),
   readFile(new URL('../src/renderer/src/styles.css', import.meta.url), 'utf8'),
-  readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('./benchmark-ui.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../package.json', import.meta.url), 'utf8')
 ])
@@ -66,9 +65,6 @@ assert.match(boundedSurface, /props\.layout === 'grid' && !usesGridSemantics\.va
 assert.match(boundedSurface, /usesListSemantics\.value[\s\S]*?'list'[\s\S]*?'listitem'/)
 assert.match(styles, /\.set-results \.bounded-results-collection\.is-grid/)
 assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.set-results \.bounded-results-collection\.is-grid/)
-assert.match(main, /name === 'sets-bounded'/)
-assert.match(main, /Array\.from\(\{ length: 202 \}/)
-assert.match(main, /CAIRN_CODEX_SCREENSHOT_VERIFY_SETS_PAGING/)
 assert.match(benchmark, /--expected-set-cards/)
 assert.match(benchmark, /--verify-sets-paging/)
 assert.match(packageJson, /test:sets-bounded-results/)

@@ -440,6 +440,9 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .awakening-sigil i { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #bd64ef; box-shadow: 0 0 4px #bd64ef; }
 .card-awakening-sigil { position: absolute; top: 7px; left: 8px; width: 21px; height: 25px; margin: 0; }
 .card-result { align-self: end; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(143, 117, 69, 0.22); }
+.card-result.has-roll-profile { align-items: stretch; flex-direction: column; }
+.card-roll-profile { display: grid; min-width: 0; gap: var(--cc-space-3); }
+.card-roll-context { color: var(--cc-text-muted); font-size: var(--cc-font-size-sm); }
 .card-result > strong:last-child { color: #d4c19a; font-size: 11px; }
 .card-result > strong.awakening-available { max-width: 62%; color: #d6a84d; line-height: 1.25; text-align: right; }
 .card-roll-score { display: inline-flex; min-width: 0; align-items: baseline; gap: 5px; color: #e1b85d; white-space: nowrap; }

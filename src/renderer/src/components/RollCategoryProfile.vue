@@ -2,28 +2,33 @@
 import { computed } from 'vue'
 import type { RollCategoryScore } from '@shared/contracts'
 import { categoryScoreDescription, formatCategoryScore, rollCategoryLabel } from '../roll-rating'
+import RollCategoryIcon from './RollCategoryIcon.vue'
 
 const props = withDefaults(defineProps<{
   scores?: readonly RollCategoryScore[]
   maxVisible?: number
   excludeKey?: string | null
+  preferredKey?: string | null
   compact?: boolean
 }>(), {
   scores: () => [],
   maxVisible: 4,
   excludeKey: null,
+  preferredKey: null,
   compact: false
 })
 
 const available = computed(() => props.scores.filter((score) => score.key !== props.excludeKey))
 const visible = computed(() => {
   if (available.value.length <= props.maxVisible) return available.value
-  const supporting = available.value.filter((score) => score.category !== 'offense')
-  const offenseSlots = Math.max(1, props.maxVisible - supporting.length)
-  return [
-    ...available.value.filter((score) => score.category === 'offense').slice(0, offenseSlots),
-    ...supporting
-  ].slice(0, props.maxVisible)
+  const preferred = available.value.find((score) => score.key === props.preferredKey)
+  const representatives: RollCategoryScore[] = preferred ? [preferred] : []
+  for (const category of ['offense', 'defense', 'pet', 'utility', 'retaliation']) {
+    if (representatives.some((score) => score.category === category)) continue
+    const score = available.value.find((candidate) => candidate.category === category)
+    if (score) representatives.push(score)
+  }
+  return [...representatives, ...available.value.filter((score) => !representatives.includes(score))].slice(0, props.maxVisible)
 })
 const hidden = computed(() => {
   const shown = new Set(visible.value.map((score) => score.key))
@@ -40,7 +45,7 @@ const hidden = computed(() => {
       :class="`category-${score.category}`"
       :title="categoryScoreDescription(score)"
     >
-      <small>{{ rollCategoryLabel(score) }}</small>
+      <span class="roll-category-label"><RollCategoryIcon :category="score.category" /><small>{{ rollCategoryLabel(score) }}</small></span>
       <strong>{{ formatCategoryScore(score) }}</strong>
     </span>
     <details v-if="hidden.length" class="roll-category-more" @click.stop @keydown.enter.stop @keydown.space.stop>
@@ -53,7 +58,7 @@ const hidden = computed(() => {
           :class="`category-${score.category}`"
           :title="categoryScoreDescription(score)"
         >
-          <small>{{ rollCategoryLabel(score) }}</small>
+          <span class="roll-category-label"><RollCategoryIcon :category="score.category" /><small>{{ rollCategoryLabel(score) }}</small></span>
           <strong>{{ formatCategoryScore(score) }}</strong>
         </span>
       </div>
@@ -70,7 +75,7 @@ const hidden = computed(() => {
 
 .roll-category-score {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--cc-space-2);
   min-width: 78px;
   padding: var(--cc-space-2) var(--cc-space-3);
@@ -79,6 +84,7 @@ const hidden = computed(() => {
   background: var(--cc-surface-1);
 }
 
+.roll-category-label { display: inline-flex; min-width: 0; align-items: center; gap: var(--cc-space-1); color: var(--cc-text-muted); }
 .roll-category-score small {
   overflow: hidden;
   color: var(--cc-text-muted);
@@ -108,11 +114,15 @@ const hidden = computed(() => {
 }
 
 .compact .roll-category-score {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--cc-space-1);
   min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
 }
+.compact .roll-category-score strong { margin-left: 0; }
 
 .roll-category-more {
   align-self: center;

@@ -27,6 +27,7 @@ while ((line = Console.ReadLine()) is not null)
             {
                 service = "CairnCodex.GrimDawn",
                 protocolVersion = ProtocolVersion,
+                capabilities = new[] { "json-line-v1", "live-lane-v1", "worker-lane-v1" },
                 mode = "read-only"
             }),
             "measure-memory" => MeasureMemory(request),

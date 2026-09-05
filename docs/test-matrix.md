@@ -1,5 +1,16 @@
 # Release test matrix
 
+## Helper protocol review (#153, 2026-09-05)
+
+Synthetic subprocess gates cover invalid/null/missing/ambiguous responses, UTF-8
+fragmentation, unknown/duplicate IDs, version/capability mismatch, one handshake
+per generation, bounded admission/output, worker eviction, process exit and
+disposal. A generated commit completes exactly once after timeout and disposal,
+beyond the prior two-second kill fallback. Read-only recovery retains the original
+process for late completion; uncertain failures survive IPC wrapping. Focused
+gates and Node typechecking passed. No personal data or live game was used. Full
+integration verification is recorded in the PR.
+
 The CI suite is intentionally independent of a Grim Dawn installation. Before a
 public tag, the maintainer additionally runs `npm.cmd run test:release-local` on
 a supported game installation and records the manual live-transfer results here.

@@ -15,7 +15,7 @@ Request:
 Successful response:
 
 ```json
-{"id":"1","result":{"service":"CairnCodex.GrimDawn","protocolVersion":1,"mode":"read-only"}}
+{"id":"1","result":{"service":"CairnCodex.GrimDawn","protocolVersion":1,"capabilities":["json-line-v1","live-lane-v1","worker-lane-v1"],"mode":"read-only"}}
 ```
 
 Error response:
@@ -27,6 +27,57 @@ Error response:
 The protocol is versioned independently of either executable. Binary item data
 will be base64 encoded at this boundary unless profiling demonstrates that a
 separate binary transport is necessary.
+
+## Process generations and failure handling
+
+Each live/worker process must complete one health handshake before any operational
+request is sent. The service name, exact protocol version and required capability
+flags are verified again after worker eviction or process exit. Capability flags
+describe this transport contract; existing helper/hook/game fingerprint checks
+remain authoritative for native-write permission.
+
+`src/main/grim-dawn/helper-protocol.ts` explicitly classifies every method's lane
+and side effects. A parity test covers the C# dispatch table. Windows-specific
+implementations remain behind this boundary, preparing for #160.
+
+The client validates JSON object envelopes, bounded decimal IDs and exactly one
+success/error variant. C#'s null inactive branch is accepted, as is an explicitly
+null success. A missing result is never success. Valid unknown/duplicate IDs are
+ignored; malformed JSON, UTF-8 or envelopes fail the generation with a fixed error
+without logging response contents. Helper stderr is drained without forwarding
+raw payloads or personal paths. Correlated request diagnostics remain available.
+
+Default per-lane limits are 64 admitted/pending requests, 32 MiB per request,
+64 MiB aggregate serialized pending/admission data, and 256 MiB per response line
+(including lines without a terminator). Fragment accumulation is also bounded.
+The response budget permits catalog snapshots; these are hard safety ceilings,
+not target payload sizes. Request deadlines default to 60 seconds and worker idle
+eviction to 30 seconds. Waiting for the initial handshake is bounded separately
+by the same deadline. Options permit tighter fixture limits.
+
+`HelperRequestError` distinguishes protocol/transport errors and uncertain writes.
+A read timeout can retire and replace a read-only generation. If any write remains
+in flight, a timeout settles its caller but retains its request until a late reply
+or exit. New writes are rejected while a timed-out write remains unresolved;
+read-only recovery requests remain possible. Nothing is automatically replayed.
+Late completion releases transport resources without reporting a second success;
+journals and receipts decide the durable outcome.
+If a read expires behind a write and never replies, completion of the final write
+retires the generation so that the read cannot retain queue capacity indefinitely.
+
+Malformed output or disposal closes stdin gracefully. A generation with an
+outstanding write is never killed by the timeout/idle fallback, and a replacement
+cannot overlap that retiring generation. A permanently stuck write therefore
+leaves the lane unavailable pending explicit process recovery. For read-only
+retirement, a two-second kill fallback is allowed. A retiring live generation keeps
+its lane occupied until process exit, including after read timeouts, because its
+native connection outlives individual requests. A disposed client cannot start
+another process. IPC translation preserves uncertainty through wrapped causes
+without exposing internal messages or offering an automatic retry.
+
+`npm run test:helper-client` covers malformed output, capabilities, lane isolation,
+queue/line limits, duplicate IDs, fragmented Unicode, exit, late completion and a
+synthetic commit that outlives both its deadline and the old shutdown kill delay.
 
 ## Process lanes and cache lifetime
 

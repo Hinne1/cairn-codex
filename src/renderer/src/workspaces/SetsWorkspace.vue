@@ -5,6 +5,7 @@ import { isAvailableViaAwakening } from '../../../shared/collection-availability
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import SemanticBadge from '../components/SemanticBadge.vue'
+import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import { formatPresentationLine } from '../item-presentation'
 import { setItemBadges, setItemDiscovered, setItemUnqualified, setRarity, setReadiness } from '../set-semantics'
@@ -28,6 +29,12 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
 </script>
 
 <template>
+  <section class="sets-workspace" aria-label="Item sets">
+  <ToolHeader
+    eyebrow="Collection progress"
+    title="Sets"
+    description="Track missing pieces, review set bonuses, and see which sets are ready to equip."
+  />
   <ExplorerToolbar
     v-if="available"
     class="collection-explorer-toolbar"
@@ -90,8 +97,8 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
     :items="visibleSets"
     :get-key="set => set.record"
     :page-size="50"
-    empty-title="No sets match these filters"
-    empty-detail="Try changing the current search or set filters."
+    :empty-title="available ? 'No sets match these filters' : 'Set collection is unavailable'"
+    :empty-detail="available ? 'Try changing the current search or set filters.' : 'Refresh your collection to load set progress.'"
     label="Item sets"
     layout="grid"
   >
@@ -248,4 +255,5 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
       </article>
     </template>
   </BoundedResultSurface>
+  </section>
 </template>

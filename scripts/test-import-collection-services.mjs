@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, readFile, writeFile, stat, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { CATALOG_PRESENTATION_VERSION } from '../src/main/catalog-versions.ts'
+import { MAP_LOCATION_INDEX_VERSION, readMapLocationIndex, mapLocationIndexIsFresh } from '../src/main/map-location-index-cache.ts'
 import { BackgroundJobCoordinator } from '../src/main/background-jobs.ts'
 import { runCollectionRefresh } from '../src/main/ipc/collection-refresh-jobs.ts'
 import { CollectionSession } from '../src/renderer/src/collection-session.ts'
@@ -618,6 +623,64 @@ for (const kind of ['scan', 'rebuild']) {
   assert.equal(written.items[0].acquisition.crafting.knownSoftcore, true)
 }
 
+// Chest source identity upgrades invalidate both caches even when source files
+// have not changed. Exercise actual cache files and the ordinary scan path.
+{
+  const root = await mkdtemp(join(tmpdir(), 'cairn-chest-cache-'))
+  try {
+    const mapPath = join(root, 'map.json')
+    const sourcePath = join(root, 'synthetic-map.arc')
+    await writeFile(sourcePath, 'synthetic map fingerprint')
+    const sourceStat = await stat(sourcePath)
+    const tableRecord = 'records/items/lootchests/chestloottables/fixture.dbr'
+    const chestRecord = 'records/items/lootchests/fixture.dbr'
+    const location = { name: 'Fixture Region', levelFile: 'fixture.lvl', contentPack: 'fixture' }
+    const oldMap = { version: 8, archives: [{ path: sourcePath, length: sourceStat.size,
+      lastWriteUtc: sourceStat.mtime.toISOString() }], sourceLocations: { [tableRecord]: [location] } }
+    assert.equal(await mapLocationIndexIsFresh(oldMap), true, 'old source files still match')
+    await writeFile(mapPath, JSON.stringify(oldMap))
+    assert.equal(await readMapLocationIndex(mapPath), null, 'old map schema must not be reused')
+    let cached = { ...collectionSnapshot('chest-upgrade'), catalogPresentationVersion: 33,
+      items: [{ record: 'records/fixture-item.dbr', acquisition: { sources: ['Random drop'], sourceRecords: [tableRecord] } }] }
+    let scans = 0
+    let mapRebuilds = 0
+    const service = new CollectionService(collectionDependencies({
+      catalogPresentationVersion: CATALOG_PRESENTATION_VERSION,
+      cache: { read: async () => cached, write: async snapshot => { cached = snapshot } },
+      freshness: { areSourcesFresh: async () => true, isMapIndexFresh: async () => {
+        const index = await readMapLocationIndex(mapPath)
+        return Boolean(index && await mapLocationIndexIsFresh(index))
+      } },
+      scanner: { scanInstalledData: async () => { scans++; return { ...cached,
+        items: [{ record: 'records/fixture-item.dbr', acquisition: { sources: ['Found in Fixture Chest'], sourceRecords: [chestRecord] } }] } } },
+      maps: { attachLocations: async (snapshot, force) => {
+        assert.equal(force, false, 'normal refresh must rebuild without a forced reset')
+        let index = await readMapLocationIndex(mapPath)
+        if (!index) {
+          mapRebuilds++
+          index = { ...oldMap, version: MAP_LOCATION_INDEX_VERSION, sourceLocations: { [chestRecord]: [location] } }
+          await writeFile(mapPath, JSON.stringify(index))
+        }
+        return { ...snapshot, items: snapshot.items.map(item => ({ ...item, acquisition: {
+          ...item.acquisition, locations: item.acquisition.sourceRecords.flatMap(record => index.sourceLocations[record] ?? [])
+        } })) }
+      } }
+    }))
+    const request = { sourcePaths: [], basis: 'stashes' }
+    assert.equal((await service.getCached(request)).cacheNeedsRefresh, true)
+    const refreshed = await service.scan(request)
+    assert.equal(refreshed.catalogPresentationVersion, CATALOG_PRESENTATION_VERSION)
+    assert.ok(CATALOG_PRESENTATION_VERSION > 33)
+    assert.ok(MAP_LOCATION_INDEX_VERSION > 8)
+    assert.deepEqual(refreshed.items[0].acquisition.locations, [location])
+    assert.equal(scans, 1)
+    assert.equal(mapRebuilds, 1)
+    assert.equal((await service.getCached(request)).cacheNeedsRefresh, false)
+    const producer = await readFile('src/helper/CairnCodex.GrimDawn/MapLocationIndexer.cs', 'utf8')
+    assert.match(producer, new RegExp(`new MapLocationIndexResult\\(\\s*${MAP_LOCATION_INDEX_VERSION},`), 'helper producer and cache reader must agree')
+  } finally { await rm(root, { recursive: true, force: true }) }
+}
+
 // Native-stash ratings are cached in the source snapshot, not the vault rows
 // hydrated for archive views. A model upgrade must enter normal deferred refresh.
 for (const version of [9, undefined]) {
@@ -710,4 +773,4 @@ for (const version of [9, undefined]) {
   assert.equal(hydrated.snapshot.basis, 'archive')
 }
 
-console.log('Import and collection service checks passed without Electron or filesystem access.')
+console.log('Import and collection service checks passed without Electron, using isolated synthetic cache files.')

@@ -76,7 +76,7 @@ internal static class MapLocationIndexer
             })
             .ToArray();
         return new MapLocationIndexResult(
-            8,
+            9,
             DateTimeOffset.UtcNow,
             fingerprints,
             scannedRegions,

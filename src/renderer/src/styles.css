@@ -701,7 +701,8 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .supply-results .bounded-results-item.is-selected { background: transparent; box-shadow: none; }
 .supply-card { display: grid; grid-template-columns: auto 42px 1fr auto; align-items: start; gap: 11px; min-height: 66px; padding: 12px; border: 1px solid #39352d; border-radius: 6px; background: rgba(25,24,20,.82); cursor: pointer; }
 .supply-card:has(input:checked) { border-color: #8a6d39; background: #2b261d; box-shadow: inset 3px 0 #bf9144; }
-.supply-card.locked { opacity: .48; cursor: not-allowed; }
+.supply-card.locked { cursor: not-allowed; }
+.supply-card.locked .supply-icon { opacity: .48; }
 .supply-card > input { margin-top: 3px; accent-color: #bd9043; }
 .supply-icon { display: grid; width: 42px; height: 42px; place-items: center; }
 .supply-icon img { display: block; max-width: 42px; max-height: 42px; image-rendering: auto; }
@@ -851,7 +852,7 @@ body.onboarding-active { overflow: hidden; }
 .copy-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr)); align-items: start; gap: 16px; max-width: 1500px; margin: 0 auto; }
 .copy-card { padding: 18px; border: 1px solid #3c382f; border-radius: 8px; background: rgba(31, 29, 24, 0.88); }
 .copy-card.pinned { border-color: #8b6a32; box-shadow: inset 3px 0 #b98c3d; }
-.copy-card.reference { border-color: #b28a43; background: linear-gradient(145deg, rgba(55, 43, 25, .96), rgba(27, 26, 22, .95)); box-shadow: inset 4px 0 #d3a74f, 0 10px 30px rgba(0,0,0,.2); }
+.copy-card.reference { border-color: #b28a43; background: linear-gradient(145deg, var(--cc-accent-surface-hover), var(--cc-surface-1)); box-shadow: inset 4px 0 #d3a74f, 0 10px 30px rgba(0,0,0,.2); }
 .copy-card > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 24px; margin-bottom: 18px; }
 .copy-card > header p { margin: 0 0 5px; color: #716b60; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
 .copy-card > header strong { color: #e0bd6d; font: 500 26px Georgia, serif; }

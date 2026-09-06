@@ -268,7 +268,7 @@ function scrollTableHorizontally(event: WheelEvent): void {
 .research-item-table :deep(.bounded-results-item) { border-radius: 0; transition: background var(--cc-transition-fast); }
 .research-item-table :deep(.bounded-results-item:hover) { background: var(--cc-accent-surface-hover); }
 .research-table-row.favorite { box-shadow: inset 3px 0 var(--cc-accent); }
-.research-table-row.ignored { opacity: .7; }
+.research-table-row.ignored .research-item-picture { opacity: .7; }
 .research-item-identity { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--cc-space-4); align-items: center; }
 .research-item-picture {
   display: grid;

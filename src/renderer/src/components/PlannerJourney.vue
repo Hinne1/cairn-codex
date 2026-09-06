@@ -174,7 +174,7 @@ function handleImageError(item: CollectionItem): void {
   background: var(--cc-tone-surface);
 }
 .planner-journey-row.favorite .planner-journey-card { border-color: var(--cc-accent-border); box-shadow: inset 3px 0 var(--cc-accent); }
-.planner-journey-row.ignored { opacity: .7; }
+.planner-journey-row.ignored .planner-journey-picture { opacity: .7; }
 .planner-journey-picture {
   display: grid;
   width: 58px;

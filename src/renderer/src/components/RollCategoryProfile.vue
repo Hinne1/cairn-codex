@@ -77,6 +77,7 @@ const hidden = computed(() => {
 }
 
 .roll-category-score {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--cc-space-2);

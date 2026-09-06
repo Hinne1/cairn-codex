@@ -38,6 +38,13 @@ if (!process.versions.electron) {
   void app.whenReady().then(async () => {
     const window = new BrowserWindow({ show: false, width: 1440, height: 1000, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } })
     const run = source => window.webContents.executeJavaScript(source)
+    const assertOpaqueDamage = async () => assert.equal(await run(`Array.from(document.querySelectorAll('[data-damage-family]')).every(node => {
+      for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor)
+        if (Number(style.opacity) !== 1 || style.filter !== 'none') return false
+      }
+      return true
+    })`), true, 'ignored, unavailable and locked states must not fade or desaturate damage text')
     const act = async source => { await run(source); await run('window.damageFixture.settle()'); await new Promise(resolveSettled => setTimeout(resolveSettled, 50)) }
     const capture = name => new Promise((resolveCapture, reject) => {
       const timer = setTimeout(() => { window.webContents.removeListener('paint', paint); reject(new Error('Damage screenshot timed out')) }, 5000)
@@ -61,10 +68,19 @@ if (!process.versions.electron) {
           assert.deepEqual(await run('Array.from(document.querySelectorAll("[data-conversion-role]"), node => [node.dataset.conversionRole,node.dataset.damageFamily])'), [['source','physical'],['target','fire']])
           const tooltipFire = await run('getComputedStyle(document.querySelector("[data-damage-family=fire]")).color')
           await capture('tooltip-' + width + '-' + alternate)
+          await act('window.damageFixture.view.value = "surfaces"')
+          await assertOpaqueDamage()
+          assert.deepEqual(await run('Array.from(document.querySelectorAll(".supply-effects li"), node=>node.textContent).slice(0,5)'), await run('window.damageFixture.supply.effects'))
+          assert.equal(await run('document.querySelectorAll(".supply-effects li:first-child [data-damage-family], .supply-effects li:nth-child(4) [data-damage-family], #legacy-supply [data-damage-family]").length'), 0, 'flavor, granted skill names and legacy untyped effects stay plain')
+          assert.deepEqual(await run('Array.from(document.querySelectorAll(".supply-effects [data-damage-family]"), node=>node.dataset.damageFamily)'), ['fire','cold','aether'])
+          assert.equal(await run('window.damageFixture.referenceContrasts().length'), 20)
+          assert.equal(await run('window.damageFixture.referenceContrasts().every(ratio=>ratio>=4.5)'), true, 'all damage text must pass contrast at both rendered reference-gradient endpoints')
+          await capture('surfaces-' + width + '-' + alternate)
           for (const view of ['table', 'journey']) {
             await act('window.damageFixture.view.value = "' + view + '"; window.damageFixture.setCount(2)')
             assert.equal(await run('getComputedStyle(document.querySelector("[data-damage-family=fire]")).color'), tooltipFire, 'shared colors must survive table tone and alternate theme')
             assert.equal(await run('document.querySelectorAll(".research-item [data-damage-family], .research-supports [data-damage-family], .planner-journey-copy > strong [data-damage-family]").length'), 0)
+            await assertOpaqueDamage()
             if (view === 'table') {
               await act('document.querySelector(".research-item-table").scrollLeft = 600')
               assert.deepEqual(await run('Array.from(document.querySelectorAll("[data-conversion-role]")).slice(0,2).map(node=>node.dataset.damageFamily)'), ['physical','fire'])

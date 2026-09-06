@@ -477,6 +477,13 @@ as a conversion target opt into type-only matching. Conversion spans identify so
 target independently. Do not apply the tokenizer to item names, flavor prose or skill names,
 or introduce view-local damage matching.
 
+Supplies retain the original `effects` strings for search and compatibility, and carry optional
+`effectDetails` for the same five visible effects through the typed workspace page contract.
+`SupplyEffects.vue` uses this stat provenance to render structured lines without treating flavor
+text or granted-skill names as stats. Missing provenance falls back to the original plain text.
+Ignored research rows and locked Supplies dim their pictures only; their damage text stays
+opaque. Reference-copy backgrounds use contrast-checked surface tokens.
+
 Compact `RollCategoryProfile` scores use a colored category icon and a single-line value.
 Full category names remain in the accessibility tree and in a keyboard-operable Roll details
 disclosure, including when all categories fit. Unknown offense types keep a visible label.

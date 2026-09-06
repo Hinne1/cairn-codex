@@ -1,4 +1,4 @@
-import type { CharacterSaveProfile, CollectionItem, CollectionRaritySummary, VaultListItem } from './contracts.ts'
+import type { CharacterSaveProfile, CollectionItem, CollectionRaritySummary, ItemPresentationLine, VaultListItem } from './contracts.ts'
 
 export const WORKSPACE_PAGE_LIMIT = 250
 export const ARCHIVE_SELECTION_LIMIT = 10_000
@@ -59,12 +59,19 @@ export interface SupplySelectionItem {
   eligible: boolean
 }
 
+export interface SupplyEffect {
+  text: string
+  line?: ItemPresentationLine
+  scope?: 'pet'
+}
+
 export interface SupplyOption extends SupplySelectionItem {
   slotFamilies: Array<Exclude<SupplySlotFilter, 'all'>>
   stackCount: number
   detail: string
   catalogItem: CollectionItem | null
   effects: string[]
+  effectDetails?: SupplyEffect[]
   effectCount: number
 }
 

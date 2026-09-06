@@ -9,9 +9,6 @@ export async function verifyTooltipVersions(contents: WebContents): Promise<void
   const title = () => evaluate(`document.querySelector('.tooltip-header h3')?.textContent.trim()`)
   const card = (name: string) => `[data-result-key="records/items/synthetic/version_${name}.dbr"]`
   const key = async (key: string, modifiers = 0, autoRepeat = false) => {
-    // Overlapping-source reopening after dismissal is tracked separately in #185.
-    // Move out immediately before Escape, within the tooltip's dismissal grace period.
-    if (key === 'Escape') await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 })
     const event = { key, code: key.toLowerCase() === 'v' ? 'KeyV' : key, modifiers, autoRepeat }
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...event, text: key.length === 1 && modifiers === 0 ? key : '' })
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...event })
@@ -50,8 +47,30 @@ export async function verifyTooltipVersions(contents: WebContents): Promise<void
     assert.equal(await title(), 'Version Test Awakened', 'Clicking the version row switches to Awakened')
     await click('.tooltip-version-summary')
     assert.equal(await title(), 'Version Test Original', 'Clicking the version row switches back')
+    const dismissalPoint = await point('.tooltip-version-summary')
     await key('Escape')
-    assert.equal(await title(), undefined, 'Escape closes the tooltip')
+    await settle()
+    assert.equal(await title(), undefined, 'Escape stays dismissed with a stationary pointer')
+    const uncoveredCard = await evaluate(`document.elementFromPoint(${dismissalPoint.x}, ${dismissalPoint.y})?.closest('[data-result-key]')?.getAttribute('data-result-key')`)
+    if (await evaluate('innerWidth <= 520')) {
+      assert.equal(uncoveredCard, 'records/items/synthetic/version_original.dbr', 'Compact dismissal must uncover the hovered card')
+      await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dismissalPoint.x + 2, y: dismissalPoint.y })
+      await settle()
+      assert.equal(await title(), 'Version Test Original', 'Intentional movement inside the uncovered card reopens its tooltip')
+    } else {
+      assert.equal(uncoveredCard, undefined, 'Wide dismissal must exercise ordinary non-overlapping placement')
+      await hover(`${card('original')} .item-copy`)
+      assert.equal(await title(), 'Version Test Original', 'Returning to the source reopens its tooltip')
+    }
+    await key('Escape')
+    assert.equal(await title(), undefined, 'A reopened tooltip can be dismissed again')
+    // Enter the first result using a native Tab event, without moving the pointer.
+    await evaluate(`document.querySelector('.roll-help-link').focus()`)
+    await key('Tab')
+    assert.equal(await evaluate(`document.activeElement?.getAttribute('data-result-key')`), 'records/items/synthetic/version_unpaired.dbr', 'Tab moves keyboard focus to the first tooltip source')
+    assert.equal(await title(), 'Version Test Unpaired', 'New keyboard focus reopens a dismissed tooltip')
+    await key('Escape')
+    await evaluate(`document.activeElement?.blur()`)
     await evaluate(`document.querySelector(${JSON.stringify(card('original'))}).focus()`)
     await settle()
     assert.equal(await title(), 'Version Test Original', 'Keyboard focus opens the original tooltip')

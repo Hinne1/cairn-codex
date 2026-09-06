@@ -71,6 +71,7 @@ import { useCollectionCopies } from './collection-copies'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { resolveActiveCharacter } from './live-presence'
 import { preferredScrollBehavior } from './motion-preference'
+import { createTooltipDismissal } from './tooltip-dismissal'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
 import { collectionRequestKey } from '@shared/collection-request'
 import {
@@ -439,6 +440,7 @@ const tooltipElement = ref<HTMLElement | null>(null)
 const tooltipDetailsHeld = ref(false)
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
+const tooltipDismissal = createTooltipDismissal()
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 let liveSyncInFlight = false
@@ -976,6 +978,8 @@ onMounted(async () => {
   window.addEventListener('pageshow', handlePageShow)
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('keyup', handleTooltipKeyUp)
+  window.addEventListener('pointermove', tooltipDismissal.pointerMoved, true)
+  window.addEventListener('focusin', tooltipDismissal.focusChanged, true)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   stopBackgroundJobUpdates = window.cairnCodex.onBackgroundJobChanged(retainBackgroundJob)
   stopArchiveRecoveryUpdates = window.cairnCodex.onArchiveRecoveryChanged(() => {
@@ -1078,6 +1082,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pageshow', handlePageShow)
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('keyup', handleTooltipKeyUp)
+  window.removeEventListener('pointermove', tooltipDismissal.pointerMoved, true)
+  window.removeEventListener('focusin', tooltipDismissal.focusChanged, true)
   window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
   cancelTooltipHide()
@@ -2777,6 +2783,7 @@ function queueTooltip(
   anchor: MouseEvent | FocusEvent | HTMLElement,
   copy?: Pick<ObservedStashItem, 'prefixRecord' | 'suffixRecord'>
 ): void {
+  if (anchor instanceof MouseEvent && !tooltipDismissal.allowHover(anchor, source => queueTooltip(item, source, copy))) return
   cancelTooltipHide()
   cancelTooltip()
   positionTooltip(anchor)
@@ -2837,6 +2844,7 @@ function cancelTooltipHide(): void {
 }
 
 function scheduleTooltipHide(): void {
+  tooltipDismissal.cancelHover()
   cancelTooltip()
   cancelTooltipHide()
   tooltipHideTimer = setTimeout(hideTooltip, 90)
@@ -3024,6 +3032,7 @@ function handleEscape(event: KeyboardEvent): void {
     todoOpen.value = false
     return
   }
+  tooltipDismissal.dismiss()
   hideTooltip()
   showConnectionDiagnostics.value = false
   selectedRecord.value = null

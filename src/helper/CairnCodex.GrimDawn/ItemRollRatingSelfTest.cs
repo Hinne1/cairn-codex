@@ -1,3 +1,5 @@
+using GrimDawnItemStats;
+
 namespace CairnCodex.GrimDawn;
 
 internal static class ItemRollRatingSelfTest
@@ -59,6 +61,29 @@ internal static class ItemRollRatingSelfTest
             "Attack damage converted to health was incorrectly treated as Vitality damage.");
         Check(RollCategoryClassifier.Classify("retaliationFireModifier").Category == "retaliation",
             "Retaliation was incorrectly allowed to inflate ordinary offense.");
+
+        // A base plus two Bleeding affixes produces one Bleeding score, alongside Pierce.
+        // Exercise the same stat engine -> sampled bounds -> category pipeline as real copies.
+        var affixedSamples = Enumerable.Range(1, 64).Select(seed => ItemStatEngine.Compute(
+            [new("offensiveSlowBleedingModifier", "", 50), new("offensivePierceModifier", "", 30)],
+            (uint)seed,
+            prefixStats: [new("offensiveSlowBleedingModifier", "", 25)],
+            suffixStats: [new("offensiveSlowBleedingModifier", "", 25)])).ToArray();
+        Check(affixedSamples.All(sample => sample.UnmodeledFields.Count == 0),
+            "The affixed Bleeding fixture contains unmodeled fields.");
+        var affixedBounds = affixedSamples[0].Stats.Keys.ToDictionary(field => field,
+            field => affixedSamples.Select(sample => sample.Stats[field]).Order().ToArray());
+        foreach (var sample in affixedSamples)
+        {
+            var combined = ItemRollAnalyzer.ScoreCategories(sample.Stats.Select(pair =>
+                ItemRollAnalyzer.Score(pair.Key, pair.Value, affixedBounds)).ToArray(), []);
+            Check(combined.Select(score => score.Key).SequenceEqual(["offense:pierce", "offense:bleeding"]),
+                "Repeated affix contributions duplicated a category or merged Pierce with Bleeding.");
+            Check(combined.All(score => score.StatCount == 1),
+                "A shared base/affix field was counted more than once in a damage score.");
+            Check(sample.Stats["offensiveSlowBleedingModifier"] >= 80,
+                "The Bleeding total lost a base or affix contribution.");
+        }
 
         // Perfect 9 in a 7–9 range is 100% quality, despite an 83.33 midrank.
         var discrete = new Dictionary<string, double[]> { ["offensiveVitality"] = [7, 8, 9] };

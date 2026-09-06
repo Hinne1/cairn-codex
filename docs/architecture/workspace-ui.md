@@ -485,6 +485,10 @@ Ignored research rows and locked Supplies dim their pictures only; their damage 
 opaque. Reference-copy backgrounds use contrast-checked surface tokens.
 
 Compact `RollCategoryProfile` scores use a colored category icon and a single-line value.
+Pierce uses an arrowhead and Bleeding a blood drop; their shared Rainbow color does not
+merge their category identities. Same-type base/prefix/suffix contributions are already
+combined by the stat engine before category scoring. Both compact and expanded profiles
+pass the score's damage type to the shared icon, and the glossary shows both shapes.
 Full category names remain in the accessibility tree and in a keyboard-operable Roll details
 disclosure, including when all categories fit. Unknown offense types keep a visible label.
 The glossary provides the shared color legend and icon explanations. Colors never change

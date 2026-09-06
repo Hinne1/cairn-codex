@@ -47,7 +47,7 @@ const hidden = computed(() => {
       :style="score.category === 'offense' ? damageStyle(score.damageType) : undefined"
       :title="categoryScoreDescription(score)"
     >
-      <span class="roll-category-label"><RollCategoryIcon :category="score.category" /><small>{{ rollCategoryLabel(score) }}</small></span>
+      <span class="roll-category-label"><RollCategoryIcon :category="score.category" :damage-type="score.damageType" /><small>{{ rollCategoryLabel(score) }}</small></span>
       <strong>{{ formatCategoryScore(score) }}</strong>
     </span>
     <details v-if="compact || hidden.length" class="roll-category-more" @click.stop @keydown.enter.stop @keydown.space.stop>
@@ -61,7 +61,7 @@ const hidden = computed(() => {
           :style="score.category === 'offense' ? damageStyle(score.damageType) : undefined"
           :title="categoryScoreDescription(score)"
         >
-          <span class="roll-category-label"><RollCategoryIcon :category="score.category" /><small>{{ rollCategoryLabel(score) }}</small></span>
+          <span class="roll-category-label"><RollCategoryIcon :category="score.category" :damage-type="score.damageType" /><small>{{ rollCategoryLabel(score) }}</small></span>
           <strong>{{ formatCategoryScore(score) }}</strong>
         </span>
       </div>

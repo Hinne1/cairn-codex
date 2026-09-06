@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import type { RollCategoryScore } from '@shared/contracts'
 
-defineProps<{ category: RollCategoryScore['category'] }>()
+defineProps<{ category: RollCategoryScore['category']; damageType?: string | null }>()
 </script>
 
 <template>
-  <svg class="roll-category-icon" :data-category="category" viewBox="0 0 24 24" fill="none"
+  <svg class="roll-category-icon" :data-category="category" :data-damage-type="category === 'offense' ? damageType : undefined" viewBox="0 0 24 24" fill="none"
     stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
     aria-hidden="true" focusable="false">
     <template v-if="category === 'offense'">
-      <path d="m8 16 12-12v5L11 18M6 13l5 5M3 21l5-5M3 18l3 3" />
+      <template v-if="damageType === 'bleeding'">
+        <path d="M12 3c-2 4-7 8-7 12a7 7 0 0 0 14 0c0-4-5-8-7-12Z" />
+        <path d="M8 15a4 4 0 0 0 4 4" />
+      </template>
+      <path v-else-if="damageType === 'pierce'" d="m21 3-4 11-3-4-4-3zM14 10 3 21M3 16v5h5" />
+      <path v-else d="m8 16 12-12v5L11 18M6 13l5 5M3 21l5-5M3 18l3 3" />
     </template>
     <template v-else-if="category === 'defense'">
       <path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6zM12 7v10" />

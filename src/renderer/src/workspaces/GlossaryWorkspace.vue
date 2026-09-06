@@ -59,7 +59,11 @@ function jumpTo(id: string): void {
           <h4 v-else tabindex="-1">{{ section.title }}</h4>
           <ul v-if="section.damageLegend" class="damage-legend" aria-label="Rainbow Filter damage colors">
             <li v-for="family in DAMAGE_FAMILIES" :key="family.id" :style="damageStyle(family.id)">
-              <RollCategoryIcon category="offense" />{{ family.label }}
+              <template v-if="family.id === 'pierce'">
+                <span class="damage-legend-type"><RollCategoryIcon category="offense" damage-type="pierce" />Pierce</span>
+                <span class="damage-legend-type"><RollCategoryIcon category="offense" damage-type="bleeding" />Bleeding</span>
+              </template>
+              <template v-else><RollCategoryIcon category="offense" :damage-type="family.id" />{{ family.label }}</template>
             </li>
           </ul>
           <template v-for="(paragraph, index) in section.paragraphs" :key="paragraph">
@@ -113,7 +117,8 @@ th, td { text-align: left; padding: var(--cc-space-3); border-bottom: 1px solid 
 th { color: var(--cc-text-strong); }
 .glossary-sources { padding-top: var(--cc-space-6); border-top: 1px solid var(--cc-border-subtle); }
 .damage-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--cc-space-3); padding: 0; list-style: none; }
-.damage-legend li { display: flex; align-items: center; gap: var(--cc-space-3); margin: 0; }
+.damage-legend li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cc-space-3); margin: 0; }
+.damage-legend-type { display: inline-flex; align-items: center; gap: var(--cc-space-2); }
 a { color: var(--cc-accent-strong); text-decoration: underline; text-underline-offset: 3px; }
 button:focus-visible, summary:focus-visible, a:focus-visible, [tabindex='-1']:focus-visible { outline: 2px solid var(--cc-focus); outline-offset: 3px; }
 @media (max-width: 1100px) {

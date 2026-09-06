@@ -2459,6 +2459,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
           await window.webContents.executeJavaScript(`
             (async () => {
               const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              if (document.querySelector('.onboarding-dialog')) throw new Error('Dismiss onboarding before testing the search controls behind it.')
               const details = document.querySelector('.explorer-search-help')
               const summary = details?.querySelector('summary')
               if (!(details instanceof HTMLDetailsElement) || !(summary instanceof HTMLElement)) {

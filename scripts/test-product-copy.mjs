@@ -31,6 +31,7 @@ const allowedProductNameLines = new Set([
   "src/renderer/src/App.vue::'Enable the Cairn Codex live adapter for this Grim Dawn session? Item Assistant must remain closed while CC owns the game hook.'",
   'src/renderer/src/App.vue::<h1>Cairn Codex</h1>',
   "src/renderer/src/App.vue::<strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</strong>",
+  "src/renderer/src/App.vue::<p class=\"visually-hidden background-status\" role=\"status\" aria-atomic=\"true\">{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</p>",
   'src/renderer/src/workspaces/SettingsWorkspace.vue::<section class="settings-workspace" aria-label="Cairn Codex settings">',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::"Close Grim Dawn Item Assistant before enabling Cairn Codex live mode.");',
   'src/helper/CairnCodex.GrimDawn/LiveGameAdapter.cs::0, WindowClassName, "Cairn Codex live host", 0,',

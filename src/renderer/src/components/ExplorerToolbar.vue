@@ -179,7 +179,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="explorer-toolbar-results">
-      <output class="explorer-result-count" aria-live="polite">
+      <output class="explorer-result-count" aria-live="polite" aria-atomic="true">
         <span class="explorer-result-value">
           <span v-if="loading" class="explorer-result-spinner" aria-hidden="true" />
           <strong>{{ resultCount.toLocaleString() }}</strong>

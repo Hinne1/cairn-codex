@@ -3179,12 +3179,13 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
       </div>
     </header>
 
-    <p
-      v-if="notificationAnnouncement"
-      :key="notificationAnnouncement.id"
-      class="visually-hidden"
-      :role="notificationAnnouncement.assertive ? 'alert' : 'status'"
-    >{{ notificationAnnouncement.text }}</p>
+    <p class="visually-hidden notification-status" role="status" aria-atomic="true">
+      <span v-if="notificationAnnouncement && !notificationAnnouncement.assertive" :key="notificationAnnouncement.id">{{ notificationAnnouncement.text }}</span>
+    </p>
+    <p class="visually-hidden notification-alert" role="alert" aria-atomic="true">
+      <span v-if="notificationAnnouncement?.assertive" :key="notificationAnnouncement.id">{{ notificationAnnouncement.text }}</span>
+    </p>
+    <p class="visually-hidden background-status" role="status" aria-atomic="true">{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</p>
     <aside v-if="currentNotification" class="growl-stack" aria-label="Notification">
       <article class="growl" :class="currentNotification.severity">
         <span><strong>{{ currentNotification.title }}</strong>{{ currentNotification.message }}</span>
@@ -3375,7 +3376,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
     >
     <FailureProbe v-if="simulateWorkspaceFailure" />
     <main>
-      <section v-if="appInitializing || activeBackgroundJob" class="background-scan" aria-live="polite">
+      <section v-if="appInitializing || activeBackgroundJob" class="background-scan">
         <span class="scan-spinner" aria-hidden="true" />
         <div>
           <strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</strong>

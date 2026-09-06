@@ -22,6 +22,7 @@ const props = withDefaults(defineProps<{
   layout?: 'list' | 'grid' | 'table'
   loading?: boolean
   error?: string | null
+  announceError?: boolean
   emptyTitle?: string
   emptyDetail?: string
   selectionMode?: BoundedSelectionMode
@@ -41,6 +42,7 @@ const props = withDefaults(defineProps<{
   layout: 'list',
   loading: false,
   error: null,
+  announceError: true,
   emptyTitle: 'No results',
   emptyDetail: 'Try changing the search or filters.',
   selectionMode: 'none',
@@ -399,7 +401,7 @@ onBeforeUnmount(() => continuousObserver?.disconnect())
       </slot>
     </div>
 
-    <div v-else-if="error" class="bounded-results-state is-error" role="alert">
+    <div v-else-if="error" class="bounded-results-state is-error" :role="announceError ? 'alert' : undefined">
       <slot name="error" :message="error" :retry="() => emit('retry')">
         <strong>Results could not be loaded.</strong>
         <p>{{ error }}</p>

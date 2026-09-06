@@ -251,6 +251,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
       :total-count="loading ? Math.max(data.total, page * 60) : data.total"
       :loading="loading"
       :error="searchError || loadError"
+      :announce-error="!searchError"
       :get-key="item => item.id"
       :page-size="60"
       :selection-disabled="busy || loading || selectionBusy"

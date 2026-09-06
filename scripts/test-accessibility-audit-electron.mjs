@@ -8,7 +8,7 @@ await mkdir(captures, { recursive: true })
 for (const [width, recovery] of [[1440, false], [520, false], [520, true]]) {
   const name = `accessibility-${recovery ? 'recovery-' : ''}${width}`
   const result = spawnSync(process.execPath, [resolve('scripts/benchmark-ui.mjs'),
-    '--allow-windows-sandbox-fallback', '--electron-source', '--fixture', 'skill-explorer', '--query', '',
+    '--allow-windows-sandbox-fallback', '--electron-source', '--fixture', 'accessibility-audit', '--query', '',
     ...(recovery ? ['--safe-mode-suggested'] : ['--enable-all-tools', '--dismiss-onboarding']),
     '--disable-gpu', '--assert-no-overflow', '--width', String(width), '--height', '1000', '--screenshot-name', name
   ], { cwd: resolve('.'), env: { ...process.env, CAIRN_CODEX_SCREENSHOT_VERIFY_A11Y_AUDIT: '1' }, stdio: 'inherit', windowsHide: true })

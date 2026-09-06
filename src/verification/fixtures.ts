@@ -4,6 +4,23 @@ import { ROLL_ANALYSIS_VERSION } from '../shared/roll-analysis.ts'
 import { workspaceQueryCollection } from './workspace-query-collection.ts'
 
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'accessibility-audit') {
+    const fixture = createScreenshotCollectionFixture('tooltip-scroll')
+    const [base, awakened] = createScreenshotCollectionFixture('tooltip-versions').items
+    return { ...fixture, items: [...fixture.items, ...createScreenshotCollectionFixture('sets-semantics').items,
+      { ...base!, name: 'Accessible Epic Base', availableCount: 1 },
+      { ...awakened!, name: 'Accessible Awakened Item', availableCount: 0,
+        availableViaAwakening: true, awakeningSourceRecord: base!.record,
+        awakeningSourceName: 'Accessible Epic Base', awakeningSourceAvailableCount: 1 }
+    ], observedItems: [...fixture.observedItems.map((copy): ObservedStashItem => ({ ...copy,
+      rollAnalysis: copy.rollAnalysis ? { ...copy.rollAnalysis, categoryScores: [
+        ...(copy.rollAnalysis.categoryScores ?? []),
+        { key: 'offense:cold', category: 'offense', damageType: 'cold', estimatedPercentile: 60,
+          qualityPercent: 60, statCount: 1, combinationPercentile: 60 }
+      ] } : null
+    })), { ...fixture.observedItems[0]!, baseRecord: base!.record, instanceKey: 'a11y-epic-base',
+      prefixRecord: '', suffixRecord: '', rollAnalysis: null }] }
+  }
   if (name === 'tooltip-scroll') {
     const fixture = createScreenshotCollectionFixture('skill-explorer')
     const workshop = createScreenshotCollectionFixture('mi-workshop')

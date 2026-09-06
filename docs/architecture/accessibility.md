@@ -76,12 +76,14 @@ uncovers its source. Moving within that source resumes the normal hover delay; m
 discards the old request. A new keyboard focus change also permits inspection again. The shared
 dismissal controller is covered by the real-pointer/keyboard version gate at 1,440px and 520px.
 
+Keyboard focus opens descriptions immediately, retaining the source anchor while its focus event
+is active. Pointer hover retains the shared 180ms delay.
 All item sources forward wheel input through the same `tooltip-scroll.ts` policy; the complete
 entry-point inventory lives in `workspace-ui.md`. Farming and Planner MI Sources expose the same
 description on their existing item buttons, and Oracle evidence buttons also name `item-tooltip`.
 `test:tooltip-scroll` covers pixel/line/page modes, fractional deltas, queued edges and repeated
 reversals. `test:tooltip-scroll:electron` checks tooltip and page offsets with native input across
-Collection, Skill Explorer, Planner Table and Journey at both widths and both boundary settings,
+Collection, Skill Explorer, Planner Table and Journey, and MI Workshop at both widths and both boundary settings,
 plus focused Page Up/Down, short content and reduced motion. It runs in full verification.
 
 Original/Awakened tooltip versions switch with V while the describing item stays focused.

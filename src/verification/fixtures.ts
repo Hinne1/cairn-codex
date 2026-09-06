@@ -6,7 +6,10 @@ import { workspaceQueryCollection } from './workspace-query-collection.ts'
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
   if (name === 'tooltip-scroll') {
     const fixture = createScreenshotCollectionFixture('skill-explorer')
-    return { ...fixture, items: fixture.items.map((item, index) => ({
+    const workshop = createScreenshotCollectionFixture('mi-workshop')
+    return { ...fixture, scannedStashes: workshop.scannedStashes, availableStashes: workshop.availableStashes,
+      observedItems: workshop.observedItems, affixes: workshop.affixes, affixSummary: workshop.affixSummary,
+      rarities: [...fixture.rarities, ...workshop.rarities], items: [...fixture.items.map((item, index): CollectionItem => ({
       ...item,
       presentation: { ...item.presentation!, sections: [{
         kind: 'base', heading: null, lines: [
@@ -16,7 +19,7 @@ export function createScreenshotCollectionFixture(name: string): CollectionSnaps
           }))
         ]
       }] }
-    })) }
+    })), ...workshop.items] }
   }
   if (name === 'tooltip-versions') {
     const fixture = createScreenshotCollectionFixture('search-help')

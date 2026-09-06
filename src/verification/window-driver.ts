@@ -1359,6 +1359,18 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               if (!document.querySelector('.game-tooltip')) {
                 throw new Error('Collection Farming item snippets did not retain the global tooltip.')
               }
+              item.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+              await new Promise((resolve) => setTimeout(resolve, 120))
+              item.scrollIntoView({ block: 'center' })
+              await frames()
+              item.focus()
+              await frames()
+              const focusedTooltip = document.querySelector('.game-tooltip')
+              const focusRect = item.getBoundingClientRect()
+              const expectedTop = Math.max(14, Math.min(focusRect.top, innerHeight - Math.min(760, innerHeight - 28) - 14))
+              if (!focusedTooltip || Math.abs(focusedTooltip.getBoundingClientRect().top - expectedTop) > 1) {
+                throw new Error('Collection Farming keyboard focus did not anchor its tooltip to the source.')
+              }
               const expectedItemName = item.textContent?.trim()
               item.click()
               await frames()
@@ -1461,8 +1473,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               first.focus()
               if (document.activeElement !== first) throw new Error('The first Supply card was not keyboard focusable.')
               if (nativeFocusEvents === 0) first.dispatchEvent(new FocusEvent('focus'))
-              if (document.querySelector('.game-tooltip')) throw new Error('Supply focus bypassed the established delayed tooltip queue.')
-              for (let attempt = 0; attempt < 40 && !document.querySelector('.game-tooltip'); attempt += 1) await wait(25)
+              await frames()
               if (!document.querySelector('.game-tooltip')) throw new Error('Supply keyboard focus did not use the global item tooltip.')
               first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
               await wait(20)

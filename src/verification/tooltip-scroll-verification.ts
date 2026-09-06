@@ -37,11 +37,14 @@ export async function verifyTooltipScrolling(contents: WebContents): Promise<voi
     }
   }
   const selectSource = async (selector: string, long: boolean) => {
+    await evaluate(`document.activeElement?.blur()`)
     await move({ x: 0, y: 0 })
     await key('Escape')
+    await evaluate(`document.documentElement.classList.toggle('wheel-verification-overflow', ${long})`)
     await evaluate(`(() => {
       document.querySelector('[data-wheel-source]')?.removeAttribute('data-wheel-source');
       const candidates = [...document.querySelectorAll(${JSON.stringify(selector)})].filter(element => {
+        if (element.matches('.mi-table-row')) return true;
         const record = element.closest('[data-result-key]')?.getAttribute('data-result-key') ?? '';
         const index = Number(record.split('skill_support_')[1]?.split('.dbr')[0]);
         return Number.isFinite(index) && index % 2 === ${long ? 0 : 1};
@@ -59,7 +62,6 @@ export async function verifyTooltipScrolling(contents: WebContents): Promise<voi
     if (long) {
       // Keep an exposed source below the fixed overlay at both viewport widths.
       // Only the verification profile changes this cap; contents are real fixture lines.
-      await evaluate(`document.querySelector('.game-tooltip').style.maxHeight = '180px'`)
       await move({ x: location.x + 2, y: location.y })
       await wait()
       assert.ok((await state()).maximum > 0, 'Long fixture overflows its tooltip')
@@ -72,11 +74,13 @@ export async function verifyTooltipScrolling(contents: WebContents): Promise<voi
   contents.debugger.attach('1.3')
   try {
     await contents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+    await evaluate(`(() => { const style = document.createElement('style'); style.id = 'wheel-verification-cap'; style.textContent = '.wheel-verification-overflow .game-tooltip { max-height: 180px !important; }'; document.head.appendChild(style); })()`)
     const workspaces = [
       { destination: 'collection', source: '.item-card', journey: false },
       { destination: 'skills', source: '.research-item', journey: false },
       { destination: 'planner', source: '.research-item', journey: false },
-      { destination: 'planner', source: '.planner-journey-picture', journey: true }
+      { destination: 'planner', source: '.planner-journey-picture', journey: true },
+      { destination: 'mi-workshop', source: '.mi-table-row', journey: false }
     ]
     for (const boundary of ['page', 'contain']) {
       await navigate('settings')
@@ -118,6 +122,7 @@ export async function verifyTooltipScrolling(contents: WebContents): Promise<voi
         // A keyboard description owns Page Up/Down without moving focus or page.
         await move({ x: 0, y: 0 })
         await wait(120)
+        await evaluate(`document.activeElement?.blur()`)
         await evaluate(`document.querySelector('[data-wheel-source]').closest('[data-result-key]').focus()`)
         await wait()
         const focused = await state()
@@ -129,6 +134,22 @@ export async function verifyTooltipScrolling(contents: WebContents): Promise<voi
         assert.equal(down.focus, focused.focus)
         await key('PageUp')
         assert.ok((await state()).top < down.top, `${context}: PageUp reverses keyboard scrolling`)
+
+        // Source boundaries depend on native scroll chaining through local table wrappers.
+        for (const direction of [-1, 1]) {
+          const edgePoint = await selectSource(workspace.source, true)
+          await evaluate(`document.querySelector('.game-tooltip').scrollTop = ${direction < 0 ? '0' : 'document.querySelector(".game-tooltip").scrollHeight'}`)
+          const before = await state()
+          await wheel(edgePoint, direction * 60)
+          const after = await state()
+          if (boundary === 'contain') assert.equal(after.page, before.page, `${context}: source edge honors containment`)
+          else assert.ok((after.page - before.page) * direction > 0, `${context}: source edge hands off through its wrapper`)
+        }
+
+        const shortSource = await selectSource(workspace.source, false)
+        const beforeShortSource = await state()
+        await wheel(shortSource, 60)
+        assert.ok((await state()).page > beforeShortSource.page, `${context}: short source tooltip leaves native page scrolling available`)
 
         await selectSource(workspace.source, false)
         const shortPoint = await point('.game-tooltip')
@@ -159,8 +180,9 @@ export async function verifyTooltipScrolling(contents: WebContents): Promise<voi
     await evaluate(`(() => { const input = document.querySelector('.explorer-search input'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); })()`)
     await wait(400)
     const count = await evaluate(`document.querySelectorAll('.item-card').length`)
-    assert.ok(count > 0 && count <= 48, 'Collection keeps the 120-item fixture bounded')
-    console.log(`Native tooltip bounded fixture: 120 items, ${count} Collection cards mounted.`)
+    assert.ok(count > 0 && count <= 48, 'Collection keeps the 126-item fixture bounded')
+    await evaluate(`document.getElementById('wheel-verification-cap').remove(); document.documentElement.classList.remove('wheel-verification-overflow')`)
+    console.log(`Native tooltip bounded fixture: 126 items, ${count} Collection cards mounted.`)
   } catch (error) {
     await writeFile(process.env.CAIRN_CODEX_SCREENSHOT_PATH!.replace(/\.png$/, '-failure.png'), (await contents.capturePage()).toPNG())
     throw error

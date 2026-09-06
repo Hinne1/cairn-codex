@@ -211,6 +211,8 @@ their existing owners. Reduced motion applies tooltip offsets immediately.
 Direct wheel input over the fixed overlay explicitly hands off to the page, because Chromium
 does not reliably chain it. This includes short tooltips with no scroll range, regardless of
 the boundary preference. Source forwarding never captures wheel input over adjacent content.
+Local table wrappers contain horizontal overscroll only, so source boundaries can continue into
+the page. Keyboard focus opens descriptions immediately; pointer hover uses the shared 180ms delay.
 The shared 90ms leave grace, viewport placement, held details, version switching, and affix
 composition remain independent of this policy.
 
@@ -360,7 +362,7 @@ unlocks by record/mode, keep individual potion copies and return 60 options per 
 counts. Bulk boost selection returns only eligible active-mode IDs and metadata. `App.vue` supplies
 narrow query/selection/dispense adapters, active-character/transfer readiness and the global tooltip
 adapter; the workspace never reaches preload directly. Back/Forward restores typed controls, and
-Supplies retains delayed tooltips for pointer and keyboard focus. Exact transfer payloads remain
+  Supplies retains delayed pointer tooltips and immediate keyboard descriptions. Exact transfer payloads remain
 authoritative in the existing main-process transfer services.
 
 MI Workshop owns its typed query, affix-quality filter, selected comparison metric, sort, direction,

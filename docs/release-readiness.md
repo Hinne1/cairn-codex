@@ -40,6 +40,13 @@ The measured evidence and product/architecture follow-up are tracked in
   publish implicitly; publication is a separate final step after artifact audits.
   The manifest records provenance, not completion of the manual release matrix.
 
+Package and repository audits share exclusions for database/SQLite sidecars, saves,
+queues, dumps and extracted game-data formats. Package path checks apply equally
+to ordinary files, ASAR entries and unpacked ASAR payloads. Nested/extra ASAR
+containers and links are rejected instead of hiding unaudited contents. The one
+package-only debug-symbol exception is `resources/helper/CairnCodex.GrimDawn.pdb`,
+generated with the helper for diagnostics; arbitrary PDBs remain forbidden.
+
 - [x] TypeScript and Vue production builds pass.
 - [x] The packaged helper is self-contained and does not require a separately
       installed .NET runtime.

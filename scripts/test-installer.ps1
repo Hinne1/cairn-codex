@@ -22,6 +22,7 @@ $folders = Get-CairnQualificationFolders
 Assert-CairnInstallerRegistryEmpty @(Get-CairnInstallerRegistryRecords $identity.installerGuid)
 Assert-CairnNoRunningApplication
 foreach ($path in @(Get-CairnQualificationConflicts $folders $identity)) { Assert-CairnQualificationPath $path -MustBeAbsent }
+Assert-CairnNoPreviousQualification (Join-Path $projectRoot 'local-cache')
 if ($PreflightOnly) {
   Write-Host 'Read-only preflight passed. No installer, uninstaller, cleanup, or qualification was run.'
   return
@@ -55,6 +56,8 @@ foreach ($path in @($testRoot, $installRoot, $profileRoot)) {
 Assert-CairnQualificationPath $testRoot -MustBeAbsent
 
 function Wait-QualificationProcess($Process, [string] $Stage) {
+  # Retain the handle so PowerShell can read the exit code after native exit.
+  $null = $Process.Handle
   if (-not $Process.WaitForExit(180000)) { throw "$Stage timed out. Preserve this VM and its evidence; no process was killed or cleanup attempted." }
   $Process.Refresh()
   if ($Process.ExitCode -ne 0) { throw "$Stage exited with code $($Process.ExitCode). Preserve qualification evidence." }
@@ -77,6 +80,7 @@ $appPath = Join-Path $installRoot 'Cairn Codex.exe'
 $uninstallerPath = Join-Path $installRoot 'Uninstall Cairn Codex.exe'
 if (-not (Test-Path -LiteralPath $appPath)) { throw 'Installed application executable was not created.' }
 if (-not (Test-Path -LiteralPath $uninstallerPath)) { throw 'Installed uninstaller was not created.' }
+$uninstallerHash = (Get-FileHash -LiteralPath $uninstallerPath -Algorithm SHA256).Hash
 Assert-CairnInstalledRegistration @(Get-CairnInstallerRegistryRecords $identity.installerGuid) $installRoot
 Assert-CairnInstalledShortcuts $folders $identity $appPath
 $prerequisiteRoot = Join-Path $installRoot 'resources\prerequisites'
@@ -147,12 +151,16 @@ Write-Host 'Uninstalling the release candidate.'
 Assert-CairnNoRunningApplication
 Assert-CairnInstalledRegistration @(Get-CairnInstallerRegistryRecords $identity.installerGuid) $installRoot
 Assert-CairnInstalledShortcuts $folders $identity $appPath
-$uninstaller = Start-Process -FilePath $uninstallerPath -ArgumentList @('/S', '/currentuser') -WindowStyle Hidden -PassThru
+# NSIS normally spawns a temporary copy and exits before actual removal. An
+# owned copy outside INSTDIR with _?= last runs the removal in the waited process.
+$ownedUninstaller = Join-Path $testRoot 'qualification-uninstaller.exe'
+Assert-CairnQualificationPath $ownedUninstaller -MustBeAbsent
+if ((Get-FileHash -LiteralPath $uninstallerPath -Algorithm SHA256).Hash -ne $uninstallerHash) { throw 'Installed uninstaller changed during qualification.' }
+Copy-Item -LiteralPath $uninstallerPath -Destination $ownedUninstaller
+if ((Get-FileHash -LiteralPath $ownedUninstaller -Algorithm SHA256).Hash -ne $uninstallerHash) { throw 'Qualification uninstaller copy failed verification.' }
+$uninstaller = Start-Process -FilePath $ownedUninstaller -ArgumentList @('/S', '/currentuser', "_?=$installRoot") -WindowStyle Hidden -PassThru
 Wait-QualificationProcess $uninstaller 'Uninstaller'
-for ($attempt = 0; $attempt -lt 50 -and (Test-Path -LiteralPath $appPath); $attempt += 1) {
-  Start-Sleep -Milliseconds 100
-}
-if (Test-Path -LiteralPath $appPath) { throw 'Application executable remains after uninstall.' }
+Assert-CairnQualificationPath $installRoot -MustBeAbsent
 foreach ($path in $sentinelPaths) {
   if (-not (Test-Path -LiteralPath $path) -or [IO.File]::ReadAllText($path) -cne $sentinelContent) { throw 'User-data sentinel was changed or removed by uninstall.' }
 }

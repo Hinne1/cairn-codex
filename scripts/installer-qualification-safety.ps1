@@ -87,6 +87,10 @@ function Assert-CairnQualificationPath {
 }
 
 function Get-CairnQualificationFolders {
+  param(
+    [scriptblock] $ReadSpecialFolder = { param($Name) [Environment]::GetFolderPath([Environment+SpecialFolder]::$Name, [Environment+SpecialFolderOption]::DoNotVerify) },
+    [scriptblock] $ReadUserProgramFiles = { [CairnQualificationKnownFolder]::Read('5CD7AEE2-2219-4A67-B85D-6C9CE15660CB') }
+  )
   if (-not ('CairnQualificationKnownFolder' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -97,7 +101,9 @@ public static class CairnQualificationKnownFolder {
   public static string Read(string value) {
     Guid id = new Guid(value); IntPtr path = IntPtr.Zero;
     try {
-      Marshal.ThrowExceptionForHR(SHGetKnownFolderPath(ref id, 0, IntPtr.Zero, out path));
+      // KF_FLAG_DONT_VERIFY resolves a fresh account's not-yet-created path.
+      // Never use KF_FLAG_CREATE: this preflight is read-only.
+      Marshal.ThrowExceptionForHR(SHGetKnownFolderPath(ref id, 0x4000, IntPtr.Zero, out path));
       return Marshal.PtrToStringUni(path);
     } finally { if (path != IntPtr.Zero) Marshal.FreeCoTaskMem(path); }
   }
@@ -106,14 +112,27 @@ public static class CairnQualificationKnownFolder {
   }
   $folders = [ordered]@{}
   foreach ($name in @('ApplicationData', 'LocalApplicationData', 'ProgramFiles', 'ProgramFilesX86', 'DesktopDirectory', 'CommonDesktopDirectory', 'Programs', 'CommonPrograms')) {
-    $value = [Environment]::GetFolderPath([Environment+SpecialFolder]::$name, [Environment+SpecialFolderOption]::DoNotVerify)
+    $value = & $ReadSpecialFolder $name
     if (-not $value) { throw "Cannot resolve Windows known folder $name." }
     $folders[$name] = $value
   }
-  $folders.UserProgramFiles = [CairnQualificationKnownFolder]::Read('5CD7AEE2-2219-4A67-B85D-6C9CE15660CB')
+  $folders.UserProgramFiles = & $ReadUserProgramFiles
   if (-not $folders.UserProgramFiles) { throw 'Cannot resolve Windows UserProgramFiles.' }
   foreach ($path in $folders.Values) { Assert-CairnQualificationPath $path }
   [pscustomobject]$folders
+}
+
+function Assert-CairnNoPreviousQualification {
+  param([Parameter(Mandatory)] [string] $CacheRoot)
+  Assert-CairnQualificationPath $CacheRoot
+  if (-not (Test-Path -LiteralPath $CacheRoot)) { return }
+  # Reject every previous root, including absent/malformed evidence and runs
+  # interrupted before NSIS wrote registration. Never recurse or clean it up.
+  foreach ($entry in Get-ChildItem -LiteralPath $CacheRoot -Force -ErrorAction Stop) {
+    if ($entry.Name -like 'installer-qualification-*' -or $entry.Name -eq 'installer-lifecycle') {
+      throw 'Previous installer qualification evidence exists. Preserve it for investigation and use a fresh disposable Windows snapshot; no installer or cleanup was run.'
+    }
+  }
 }
 
 function Get-CairnQualificationConflicts {

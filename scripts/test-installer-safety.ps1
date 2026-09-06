@@ -75,15 +75,30 @@ try {
     else { $records[$index].UninstallString = '"' + (Join-Path $target 'Uninstall Cairn Codex.exe') + '" /allusers' }
     Reject { Assert-CairnInstalledRegistration $records $installedRoot } "unowned install or uninstaller $index"
   }
-  $folders = [ordered]@{}
+  $fixtureFolders = [ordered]@{}
   foreach ($name in @('ApplicationData', 'LocalApplicationData', 'ProgramFiles', 'ProgramFilesX86', 'DesktopDirectory', 'CommonDesktopDirectory', 'Programs', 'CommonPrograms', 'UserProgramFiles')) {
-    $folders[$name] = Join-Path $fixtureRoot $name
+    $fixtureFolders[$name] = Join-Path $fixtureRoot $name
   }
-  $conflicts = @(Get-CairnQualificationConflicts ([pscustomobject]$folders) $identity)
-  if ($conflicts.Count -ne 14 -or $conflicts -notcontains (Join-Path $folders.UserProgramFiles $identity.productName)) { throw 'Incomplete known-folder coverage.' }
+  $resolvedFolders = Get-CairnQualificationFolders { param($Name) $fixtureFolders[$Name] } { $fixtureFolders.UserProgramFiles }
+  if ($resolvedFolders.UserProgramFiles -ne $fixtureFolders.UserProgramFiles -or (Test-Path -LiteralPath $resolvedFolders.UserProgramFiles)) { throw 'Missing known folder was not resolved without creating it.' }
+  $conflicts = @(Get-CairnQualificationConflicts ([pscustomobject]$fixtureFolders) $identity)
+  if ($conflicts.Count -ne 14 -or $conflicts -notcontains (Join-Path $fixtureFolders.UserProgramFiles $identity.productName)) { throw 'Incomplete known-folder coverage.' }
   foreach ($path in $conflicts) {
     New-Item -ItemType Directory -Path $path -Force | Out-Null
     Reject { Assert-CairnQualificationPath $path -MustBeAbsent } 'existing product path'
+  }
+  $cache = Join-Path $fixtureRoot 'cache'
+  Assert-CairnNoPreviousQualification $cache
+  New-Item -ItemType Directory -Path $cache | Out-Null
+  Assert-CairnNoPreviousQualification $cache
+  $interrupted = Join-Path $cache 'installer-qualification-interrupted'
+  New-Item -ItemType Directory -Path $interrupted | Out-Null
+  Reject { Assert-CairnNoPreviousQualification $cache } 'interrupted before evidence write'
+  $record = Join-Path $interrupted 'qualification.json'
+  foreach ($value in @('{"status":"started"}', 'incomplete-json', '{"status":"passed"}')) {
+    [IO.File]::WriteAllText($record, $value)
+    Reject { Assert-CairnNoPreviousQualification $cache } 'previous qualification cannot be bypassed with a fresh GUID'
+    if ([IO.File]::ReadAllText($record) -cne $value) { throw 'Previous evidence was modified.' }
   }
 } finally {
   $resolved = [IO.Path]::GetFullPath($fixtureRoot)

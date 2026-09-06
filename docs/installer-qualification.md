@@ -43,7 +43,9 @@ explicit `/currentuser` scope. It refuses existing registration in either hive
 or registry view, inaccessible probes, running CC processes, existing default
 profile/install/shortcut paths, and paths through junctions or symbolic links.
 It checks the installed registration and shortcut targets before running its own
-uninstaller. HKCU Software keys are shared across Windows registry views; see
+uninstaller. An owned hash-verified copy outside the installation uses NSIS's
+`_?=` mode so the waited process completes the actual uninstall; the entire
+installation directory must disappear. HKCU Software keys are shared across Windows registry views; see
 [Microsoft's WOW64 registry mapping](https://learn.microsoft.com/en-us/windows/win32/winprog64/shared-registry-keys).
 
 Sentinels in the disposable account's real default Roaming and Local AppData
@@ -55,6 +57,8 @@ Keep the `local-cache/installer-qualification-*` evidence, screenshot and retain
 sentinels. A failed/interrupted run never invokes a previous uninstaller, kills a
 process or recursively clears test evidence. Investigate failures and restore a
 fresh VM snapshot before retrying; do not bypass the preflight to reuse it.
+Any previous qualification root also blocks a new run, even when interruption
+happened before registry or evidence creation.
 
 ## Record manual results for this exact artifact
 

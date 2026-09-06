@@ -796,9 +796,12 @@ internal static class ItemCatalogBuilder
                                path.Contains("/merchants/", StringComparison.OrdinalIgnoreCase);
                 var isMonster = source.Record.Type == "Monster" ||
                                 path.Contains("/creatures/enemies/", StringComparison.OrdinalIgnoreCase);
-                var isContainer = path.Contains("/interactiveobjects/loot", StringComparison.OrdinalIgnoreCase) ||
+                // Chest loot tables share the lootchests directory with placed chests.
+                // They are traversal bridges, not actionable source candidates.
+                var isContainer = !path.Contains("/chestloottables/", StringComparison.OrdinalIgnoreCase) &&
+                                 (path.Contains("/interactiveobjects/loot", StringComparison.OrdinalIgnoreCase) ||
                                   path.Contains("/lootcontainers/", StringComparison.OrdinalIgnoreCase) ||
-                                  path.Contains("/items/lootchests/", StringComparison.OrdinalIgnoreCase);
+                                  path.Contains("/items/lootchests/", StringComparison.OrdinalIgnoreCase));
                 var isFormula = source.Record.Type == "ItemArtifactFormula";
 
                 // Only a formula whose artifactName points directly at this item is a

@@ -64,7 +64,7 @@
     "test:settings-workspace": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-settings-workspace.mjs",
     "test:workspace-sidebar": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-workspace-sidebar.mjs",
     "test:transfers-workspace": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-transfers-workspace.mjs",
-    "test:roll-rating": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-roll-rating.mjs",
+    "test:roll-rating": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-roll-rating.mjs && node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-dot-roll-scores.mjs",
     "test:roll-rating:electron": "install-electron && node ./scripts/test-roll-category-profile-electron.mjs",
     "test:glossary": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-glossary.mjs",
     "test:glossary:electron": "install-electron && node ./scripts/test-glossary-electron.mjs",

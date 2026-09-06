@@ -99,8 +99,12 @@ if (!process.versions.electron) {
         console.log('Damage research ' + width + ': 20k items, 50 rows, ' + (Date.now() - start) + 'ms')
         await act('window.damageFixture.view.value = "glossary"')
         assert.equal(await run('document.querySelectorAll(".damage-legend li").length'), 10)
-        assert.deepEqual(await run('Array.from(document.querySelectorAll(".damage-legend-type"), type => type.textContent.trim())'), ['Pierce', 'Bleeding'])
-        assert.equal(await run('new Set(Array.from(document.querySelectorAll(".damage-legend-type svg"), icon => icon.innerHTML)).size'), 2, 'the glossary distinguishes Pierce and Bleeding by shape')
+        assert.equal(await run('document.querySelectorAll(".damage-legend-type").length'), 17)
+        assert.equal(await run(`Array.from(document.querySelectorAll('.damage-legend li')).every(row => {
+          const icons = Array.from(row.querySelectorAll('svg'));
+          return icons.length === 1 || icons[0].innerHTML !== icons[1].innerHTML;
+        })`), true, 'every same-color direct/DoT pair has distinct icon shapes')
+        assert.match(await run('document.querySelector(".damage-legend").textContent'), /Internal Trauma[\s\S]*Bleeding[\s\S]*Frostburn[\s\S]*Burn[\s\S]*Poison[\s\S]*Electrocute[\s\S]*Vitality Decay/)
         assert.equal(await run('document.activeElement.id'), 'glossary-entry-title')
         assert.equal(await run('document.documentElement.scrollWidth <= window.innerWidth'), true)
         await act('document.querySelector(".damage-legend").scrollIntoView()')

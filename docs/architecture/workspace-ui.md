@@ -433,7 +433,7 @@ Collection, MI Workshop, and copy comparison offer concise roll-help links. Open
 the current drawer without modifying the previous session-history entry or saved reference pin;
 Back restores the prior filters and exact viewed copy. Glossary state is not a saved preference.
 
-The initial guide explains model-v9 range quality separately from midrank percentile, deterministic
+The initial guide explains current-model range quality separately from midrank percentile, deterministic
 sampling, fixed-member exclusion, grouped damage ranges, offense families, Elemental damage,
 retaliation/pet separation, and exact-template MI limitations. The primary example is `78% (98th)`;
 the optional 7/8/9 table illustrates why maximum quality can have an 83rd-percentile rank.
@@ -485,14 +485,37 @@ Ignored research rows and locked Supplies dim their pictures only; their damage 
 opaque. Reference-copy backgrounds use contrast-checked surface tokens.
 
 Compact `RollCategoryProfile` scores use a colored category icon and a single-line value.
-Pierce uses an arrowhead and Bleeding a blood drop; their shared Rainbow color does not
-merge their category identities. Same-type base/prefix/suffix contributions are already
+Pierce uses an arrowhead, Bleeding a blood drop, and the six other DoTs an hourglass.
+Their shared Rainbow colors do not merge category identities. Same-type base/prefix/suffix contributions are already
 combined by the stat engine before category scoring. Both compact and expanded profiles
-pass the score's damage type to the shared icon, and the glossary shows both shapes.
+pass the score's damage type to the shared icon, and the glossary shows each direct/DoT pair.
 Full category names remain in the accessibility tree and in a keyboard-operable Roll details
 disclosure, including when all categories fit. Unknown offense types keep a visible label.
 The glossary provides the shared color legend and icon explanations. Colors never change
 score calculation, trust rules, archive ordering or the exact reference-copy selection.
+
+`shared/roll-analysis.ts` owns the current rating version (v10), type labels, DoT identity,
+and stable selector order. Route normalization and Collection sort options derive from it;
+MI metrics derive from the same current category scores. The helper classifier recognizes
+`offensiveSlow*` fields before their direct tokens: Internal Trauma, Burn, Frostburn,
+Electrocute, Poison, and Vitality Decay each have an independent quality average and sampled
+combination percentile. Flat amount, percentage damage and duration remain within that DoT.
+Universal offensive groups retain their existing behavior. Elemental damage groups support
+Fire/Cold/Lightning only; Elemental resistance reduction also supports their DoTs, and Physical
+resistance reduction also supports Internal Trauma. Pet and retaliation remain separate.
+
+The helper model version and shared TS version must match. `rollCategoryScores` accepts only
+trusted current-model categories, so old merged scores cannot affect badges, category metrics,
+or reference-copy selection while bounded archive hydration recalculates them. Per-stat bounds
+and explicitly labeled legacy percentile metrics remain usable. The existing version-based
+candidate query retries unfinished batches after restart in both SC and HC; only rating JSON
+changes, without schema or exact payload changes. Generated reopen/partial-batch regressions
+cover this in `test:roll-rating`.
+Native-stash ratings instead live in the source snapshot. `CollectionService.getCached` marks
+an outdated analyzed copy stale for the requested stash sources and leaves refresh to the normal
+caller, preserving live-mode deferral. Archive views keep using bounded vault hydration. Current
+native ratings and intentionally unscored/ineligible items do not cause repeated scans; service
+tests cover the upgrade, deferred read, persisted refresh and reopen.
 
 ## Adding a workspace
 

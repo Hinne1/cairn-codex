@@ -62,6 +62,78 @@ internal static class ItemRollRatingSelfTest
         Check(RollCategoryClassifier.Classify("retaliationFireModifier").Category == "retaliation",
             "Retaliation was incorrectly allowed to inflate ordinary offense.");
 
+        var durationPairs = new[]
+        {
+            (Token: "Physical", Direct: "physical", Dot: "internal-trauma"),
+            (Token: "Fire", Direct: "fire", Dot: "burn"),
+            (Token: "Cold", Direct: "cold", Dot: "frostburn"),
+            (Token: "Lightning", Direct: "lightning", Dot: "electrocute"),
+            (Token: "Poison", Direct: "acid", Dot: "poison"),
+            (Token: "Life", Direct: "vitality", Dot: "vitality-decay")
+        };
+        foreach (var pair in durationPairs)
+        {
+            var direct = $"offensive{pair.Token}";
+            var dot = $"offensiveSlow{pair.Token}";
+            foreach (var suffix in new[] { "Min", "Max", "Modifier", "DurationMin", "DurationModifier" })
+            {
+                Check(RollCategoryClassifier.Classify(dot + suffix).DamageType == pair.Dot,
+                    $"{dot + suffix} was not classified as {pair.Dot}.");
+            }
+            var separate = ItemRollAnalyzer.ScoreCategories([
+                Scored(direct + "Modifier", 10), Scored(dot + "Min", 70), Scored(dot + "Max", 90),
+                Scored(dot + "Modifier", 80), Scored(dot + "DurationModifier", 100),
+                Scored("characterOffensiveAbility", 60), Scored("offensiveElementalModifier", 30)
+            ], []).ToDictionary(score => score.Key);
+            var elemental = pair.Direct is "fire" or "cold" or "lightning";
+            CheckScore(separate[$"offense:{pair.Direct}"], elemental ? 100.0 / 3 : 35, elemental ? 3 : 2, null, pair.Direct);
+            CheckScore(separate[$"offense:{pair.Dot}"], 80, 4, null, pair.Dot);
+            Check(separate.Count == 3, "A direct/DoT pair created an unexpected extra score.");
+
+            // Distinct distributions must use exactly the same groups as the actual
+            // scores, preserving opposed rolls instead of averaging the two types.
+            var pairedValues = new Dictionary<string, List<double>>
+            {
+                [direct + "Modifier"] = Enumerable.Range(0, 4096).Select(index => (double)index).ToList(),
+                [dot + "Modifier"] = Enumerable.Range(0, 4096).Select(index => (double)(4095 - index)).ToList()
+            };
+            var pairedBounds = pairedValues.ToDictionary(value => value.Key, value => value.Value.Order().ToArray());
+            var pairedDistribution = ItemRollAnalyzer.BuildCategoryAverageQualities(pairedValues,
+                new Dictionary<string, List<double>>(), pairedBounds, new Dictionary<string, double[]>());
+            var pairedScores = ItemRollAnalyzer.ScoreCategories(pairedValues.Select(value =>
+                ItemRollAnalyzer.Score(value.Key, value.Value[0], pairedBounds)).ToArray(), [], pairedDistribution);
+            Check(pairedScores.Count == 2 && pairedScores[0].QualityPercent == 0 && pairedScores[1].QualityPercent == 100 &&
+                pairedScores[0].CombinationPercentile < pairedScores[1].CombinationPercentile,
+                "Direct and DoT qualities or combination percentiles were merged.");
+
+            // Exercise real stat-engine aggregation with two jittered affixes for
+            // every new DoT type. Each field remains one group after composition.
+            var durationSamples = Enumerable.Range(1, 64).Select(seed => ItemStatEngine.Compute(
+                [new(dot + "Modifier", "", 50), new(direct + "Modifier", "", 30)], (uint)seed,
+                prefixStats: [new("lootRandomizerJitter", "", 20), new(dot + "Modifier", "", 25)],
+                suffixStats: [new("lootRandomizerJitter", "", 20), new(dot + "Modifier", "", 25)])).ToArray();
+            Check(durationSamples.All(sample => sample.UnmodeledFields.Count == 0), "DoT affix fixture used an unmodeled field.");
+            var durationBounds = durationSamples[0].Stats.Keys.ToDictionary(field => field,
+                field => durationSamples.Select(sample => sample.Stats[field]).Order().ToArray());
+            foreach (var sample in durationSamples)
+            {
+                var aggregated = ItemRollAnalyzer.ScoreCategories(sample.Stats.Select(value =>
+                    ItemRollAnalyzer.Score(value.Key, value.Value, durationBounds)).ToArray(), []);
+                Check(aggregated.Select(score => score.Key).SequenceEqual([$"offense:{pair.Direct}", $"offense:{pair.Dot}"]) &&
+                    aggregated.All(score => score.StatCount == 1), "Repeated DoT affix contributions duplicated or merged categories.");
+                Check(sample.Stats[dot + "Modifier"] >= 75, "The DoT total lost a base or affix contribution.");
+            }
+        }
+        Check(RollCategoryClassifier.Classify("offensiveSlowLifeLeachMin").DamageType is null,
+            "Life leech over time was misclassified as Vitality Decay.");
+        var resistanceScores = ItemRollAnalyzer.ScoreCategories([
+            Scored("offensiveSlowPhysicalModifier", 20), Scored("offensivePhysicalResistanceReductionPercentMin", 80),
+            Scored("offensiveSlowFireModifier", 20), Scored("offensiveElementalResistanceReductionAbsoluteMin", 80),
+            Scored("offensiveElementalModifier", 0)
+        ], []).ToDictionary(score => score.Key);
+        CheckScore(resistanceScores["offense:internal-trauma"], 50, 2, null, "Physical resistance support for Trauma");
+        CheckScore(resistanceScores["offense:burn"], 50, 2, null, "Elemental resistance support for Burn");
+
         // A base plus two Bleeding affixes produces one Bleeding score, alongside Pierce.
         // Exercise the same stat engine -> sampled bounds -> category pipeline as real copies.
         var affixedSamples = Enumerable.Range(1, 64).Select(seed => ItemStatEngine.Compute(

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, ref } from 'vue'
 import { compileSearchQuery } from '../src/shared/search-query.ts'
+import { ROLL_ANALYSIS_VERSION } from '../src/shared/roll-analysis.ts'
 import {
   buildCollectionRollSummaries,
   collectionRollFocusForSort,
@@ -48,7 +49,7 @@ assert.equal(collectionRollFocusForSort('roll-retaliation'), 'retaliation')
 const rollCopies = [
   {
     baseRecord: 'records/items/roll-a.dbr', instanceKey: 'roll-a-1',
-    rollAnalysis: { trusted: true, categoryScores: [
+    rollAnalysis: { trusted: true, modelVersion: ROLL_ANALYSIS_VERSION, categoryScores: [
       { key: 'offense:fire', category: 'offense', damageType: 'fire', qualityPercent: 70, estimatedPercentile: 70, combinationPercentile: 92, statCount: 3 },
       { key: 'retaliation', category: 'retaliation', damageType: null, qualityPercent: 91, estimatedPercentile: 91, combinationPercentile: 97, statCount: 2 },
       { key: 'defense', category: 'defense', damageType: null, qualityPercent: 84, estimatedPercentile: 84, combinationPercentile: 96, statCount: 2 }
@@ -56,13 +57,13 @@ const rollCopies = [
   },
   {
     baseRecord: 'records/items/roll-a.dbr', instanceKey: 'roll-a-2',
-    rollAnalysis: { trusted: true, categoryScores: [
+    rollAnalysis: { trusted: true, modelVersion: ROLL_ANALYSIS_VERSION, categoryScores: [
       { key: 'offense:fire', category: 'offense', damageType: 'fire', qualityPercent: 88, estimatedPercentile: 88, combinationPercentile: 98, statCount: 3 }
     ] }
   },
   {
     baseRecord: 'records/items/roll-b.dbr', instanceKey: 'roll-b-1',
-    rollAnalysis: { trusted: true, categoryScores: [
+    rollAnalysis: { trusted: true, modelVersion: ROLL_ANALYSIS_VERSION, categoryScores: [
       { key: 'offense:fire', category: 'offense', damageType: 'fire', qualityPercent: 81, estimatedPercentile: 81, combinationPercentile: 99, statCount: 3 }
     ] }
   }

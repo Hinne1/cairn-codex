@@ -10,6 +10,7 @@ import { researchItemTypeLabel, researchRarityLabel } from '../workspaces/resear
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import RollCategoryProfile from '../components/RollCategoryProfile.vue'
 import { rollCategoryScores } from '../roll-rating'
+import { ROLL_ANALYSIS_VERSION } from '../../../shared/roll-analysis.ts'
 import PresentationLine from '../components/PresentationLine.vue'
 import DamageText from '../components/DamageText.vue'
 import { isAvailableViaAwakening } from '../../../shared/collection-availability'
@@ -201,7 +202,7 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
                   :max-visible="5"
                 />
                 <span v-if="!rollCategoryScores(copy.rollAnalysis).length" class="copy-roll-unscored">
-                  {{ copy.rollAnalysis?.trusted ? ((copy.rollAnalysis.modelVersion ?? 0) < 9 ? 'Quality recalculation pending' : 'No variable rolls') : 'Unscored' }}
+                  {{ copy.rollAnalysis?.trusted ? (copy.rollAnalysis.modelVersion !== ROLL_ANALYSIS_VERSION ? 'Quality recalculation pending' : 'No variable rolls') : 'Unscored' }}
                 </span>
               </div>
               <p

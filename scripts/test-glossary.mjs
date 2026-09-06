@@ -5,6 +5,7 @@ import { glossarySources, isGlossarySourceUrl } from '../src/shared/glossary-sou
 import { defaultAppRoute, parseAppRoute, appRouteHash, parseAppRouteHash, createAppHistoryEntry } from '../src/renderer/src/app-route.ts'
 import { rollStatQuality, averageRollQuality, formatCombinationPercentile } from '../src/renderer/src/roll-rating.ts'
 import { validateNavigation } from '../src/main/ipc/validation.ts'
+import { ROLL_ANALYSIS_VERSION } from '../src/shared/roll-analysis.ts'
 
 const route = defaultAppRoute('glossary')
 assert.deepEqual(validateNavigation({ view: 'glossary' }), { view: 'glossary' })
@@ -42,7 +43,8 @@ const [app, main, helper, sidebar, workspace] = await Promise.all([
   readFile(new URL('../src/renderer/src/workspaces/GlossaryWorkspace.vue', import.meta.url), 'utf8')
 ])
 assert.match(helper, /PercentileSampleSize = 4096/)
-assert.match(helper, /ModelVersion = 9/)
+assert.match(helper, new RegExp(`ModelVersion = ${ROLL_ANALYSIS_VERSION}\\b`))
+assert.match(JSON.stringify(entry), new RegExp(`Roll model v${ROLL_ANALYSIS_VERSION}\\b`))
 assert.match(JSON.stringify(entry), /4,096/)
 assert.match(app, /@glossary="openGlossary\(\)"/)
 assert.match(app, /function openGlossary[\s\S]*?activeView.value = 'glossary'[\s\S]*?selectedRecord.value = null[\s\S]*?selectedReferenceInstanceKey.value = null/)

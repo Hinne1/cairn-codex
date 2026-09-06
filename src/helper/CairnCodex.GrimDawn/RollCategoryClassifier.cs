@@ -5,17 +5,33 @@ internal static class RollCategoryClassifier
     private static readonly (string Token, string DamageType)[] DamageTypes =
     {
         ("Physical", "physical"),
+        ("SlowPhysical", "internal-trauma"),
         ("Pierce", "pierce"),
         ("Bleeding", "bleeding"),
         ("Fire", "fire"),
+        ("SlowFire", "burn"),
         ("Cold", "cold"),
+        ("SlowCold", "frostburn"),
         ("Lightning", "lightning"),
+        ("SlowLightning", "electrocute"),
         ("Poison", "acid"),
+        ("SlowPoison", "poison"),
         ("Life", "vitality"),
+        ("SlowLife", "vitality-decay"),
         ("Aether", "aether"),
         ("Chaos", "chaos"),
         ("Elemental", "elemental")
     };
+
+    private static readonly (string Token, string DamageType)[] MatchingDamageTypes =
+        DamageTypes.OrderByDescending(type => type.Token.Length).ToArray();
+
+    // Resistance reduction can help the duration type even though ordinary flat
+    // and percentage direct-damage bonuses do not belong in its score.
+    public static bool SharesResistanceWithDot(string field, string damageType) =>
+        damageType == "internal-trauma" && field.StartsWith("offensivePhysicalResistanceReduction", StringComparison.Ordinal) ||
+        damageType is "burn" or "frostburn" or "electrocute" &&
+            field.StartsWith("offensiveElementalResistanceReduction", StringComparison.Ordinal);
 
     private static readonly string[] DefensiveCharacterTokens =
     {
@@ -93,7 +109,9 @@ internal static class RollCategoryClassifier
         {
             return null;
         }
-        foreach (var (token, damageType) in DamageTypes)
+        // Match the duration form before its direct-damage token (SlowPoison is
+        // Poison; Poison is the database name for Acid). Keep display ordering above.
+        foreach (var (token, damageType) in MatchingDamageTypes)
         {
             if (field.Contains(token, StringComparison.Ordinal)) return damageType;
         }

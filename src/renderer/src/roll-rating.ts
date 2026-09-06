@@ -1,18 +1,8 @@
 import type { ItemRollAnalysis, RollCategoryScore, RolledStat } from '@shared/contracts'
+import { ROLL_ANALYSIS_VERSION, ROLL_DAMAGE_TYPES } from '../../shared/roll-analysis.ts'
 
-const damageTypeLabels: Record<string, string> = {
-  physical: 'Physical',
-  pierce: 'Pierce',
-  bleeding: 'Bleeding',
-  fire: 'Fire',
-  cold: 'Cold',
-  lightning: 'Lightning',
-  acid: 'Acid',
-  vitality: 'Vitality',
-  aether: 'Aether',
-  chaos: 'Chaos',
-  elemental: 'Elemental'
-}
+const damageTypeLabels: Record<string, string> = Object.fromEntries(
+  ROLL_DAMAGE_TYPES.map(({ id, label }) => [id, label]))
 
 export function rollCategoryLabel(score: RollCategoryScore): string {
   if (score.category === 'offense') {
@@ -27,8 +17,9 @@ export function rollCategoryLabel(score: RollCategoryScore): string {
 export function rollCategoryScores(
   analysis: ItemRollAnalysis | null | undefined
 ): readonly RollCategoryScore[] {
-  // Old category percentiles cannot be relabeled as range quality. Wait for v9 hydration.
-  return analysis?.trusted ? (analysis.categoryScores ?? []).filter((score) =>
+  // Older scores combine direct damage and DoT. Wait for current-model hydration
+  // before showing or sorting categories; old per-stat bounds remain usable below.
+  return analysis?.trusted && analysis.modelVersion === ROLL_ANALYSIS_VERSION ? (analysis.categoryScores ?? []).filter((score) =>
     typeof score.qualityPercent === 'number' && Number.isFinite(score.qualityPercent)
   ) : []
 }

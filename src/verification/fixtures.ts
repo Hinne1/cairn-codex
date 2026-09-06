@@ -1,5 +1,6 @@
 import type { CollectionItem, CollectionSnapshot, ObservedStashItem } from '../shared/contracts.ts'
 import { CATALOG_PRESENTATION_VERSION } from '../main/catalog-versions.ts'
+import { ROLL_ANALYSIS_VERSION } from '../shared/roll-analysis.ts'
 import { workspaceQueryCollection } from './workspace-query-collection.ts'
 
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
@@ -460,7 +461,7 @@ export function createScreenshotCollectionFixture(name: string): CollectionSnaps
         affixRerolls: 0,
         instanceKey: `fixture-mi-${index}`,
         rollAnalysis: {
-          modelVersion: 9,
+          modelVersion: ROLL_ANALYSIS_VERSION,
           baseRecord: base.record,
           prefixRecord: prefix.records[0]!,
           suffixRecord: suffix.records[0]!,

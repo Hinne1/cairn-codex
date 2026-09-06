@@ -37,6 +37,7 @@ export const HELPER_METHODS = {
   'enqueue-live-retrieval': liveWrite,
   'inspect-live-retrieval': liveRead,
   'self-test-write-transaction': workerWrite,
+  'self-test-character-reader': workerWrite,
   'self-test-live-queue': liveWrite,
   'self-test-dismantling': workerRead,
   'self-test-acquisition': workerRead,

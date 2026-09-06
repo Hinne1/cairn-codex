@@ -97,6 +97,11 @@ including skills, factions, checksums, truncation and missing saves. They run in
 helper self-tests and desktop smoke; neither requires a named personal character or
 particular build. Desktop smoke still requires an installed game's catalog and
 retains its installation/catalog assertions.
+The older integration assertions still require a populated transfer stash with a
+trusted roll-analysis copy and a learned Softcore Abyssal Mask blueprint. Those
+save inputs are read only; a successful run does not yet qualify an account with
+no saves. Removing those remaining prerequisites is tracked separately from the
+generated character-reader checks.
 UI verification uses `npm.cmd run build:verification`; production builds exclude
 its fixture factories and interaction drivers. See the
 [Electron verification boundary](docs/architecture/verification.md) for launch

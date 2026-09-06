@@ -104,7 +104,7 @@ internal static class CharacterSaveReaderSelfTest
             writer.UInt(2);
             foreach (var rank in new[] { 12u, 0u })
             {
-                writer.Text(SkillRecord);
+                writer.Text(rank > 0 ? SkillRecord : "records/skills/fixture/zero_rank.dbr");
                 writer.UInt(rank);
                 writer.Byte(1);
                 writer.UInt(0); writer.UInt(0); writer.UInt(0);

@@ -92,6 +92,11 @@ npm.cmd run smoke:desktop
 ```
 
 This smoke suite uses an in-memory database and disposable transaction fixtures.
+Character-save checks generate encrypted SC/HC fixtures for supported data versions,
+including skills, factions, checksums, truncation and missing saves. They run in the
+helper self-tests and desktop smoke; neither requires a named personal character or
+particular build. Desktop smoke still requires an installed game's catalog and
+retains its installation/catalog assertions.
 UI verification uses `npm.cmd run build:verification`; production builds exclude
 its fixture factories and interaction drivers. See the
 [Electron verification boundary](docs/architecture/verification.md) for launch

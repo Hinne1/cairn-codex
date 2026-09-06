@@ -30,13 +30,16 @@ internal static class CharacterSaveReader
     public static CharacterSaveProfile[] Discover(string installationPath)
     {
         var data = ItemCatalogBuilder.Load(installationPath);
-        return FindCharacterFiles()
+        return ReadFiles(FindCharacterFiles(), data);
+    }
+
+    internal static CharacterSaveProfile[] ReadFiles(IEnumerable<string> paths, ItemCatalogData data) =>
+        paths
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(path => ReadSafely(path, data))
             .OrderBy(profile => profile.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(profile => profile.Path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-    }
 
     private static CharacterSaveProfile ReadSafely(string path, ItemCatalogData data)
     {

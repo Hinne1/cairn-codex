@@ -238,8 +238,8 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
         {{ mode === 'live' ? liveStatusLabel : offlineReady ? 'Offline staging ready' : 'Offline staging locked' }}
       </span>
       <div class="segmented-control" aria-label="Supply transfer method">
-        <button type="button" :class="{ active: mode === 'live' }" @click="mode = 'live'">Live</button>
-        <button type="button" :class="{ active: mode === 'offline' }" @click="mode = 'offline'">Offline</button>
+        <button type="button" :class="{ active: mode === 'live' }" :aria-pressed="mode === 'live'" @click="mode = 'live'">Live</button>
+        <button type="button" :class="{ active: mode === 'offline' }" :aria-pressed="mode === 'offline'" @click="mode = 'offline'">Offline</button>
       </div>
     </div>
     <BoundedResultSurface
@@ -280,6 +280,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
         >
           <input
             type="checkbox"
+            :aria-label="`Select ${item.name}`"
             :checked="selected"
             :disabled="busy || selectionBusy || !item.eligible"
             @click.stop
@@ -301,7 +302,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
         </article>
       </template>
     </BoundedResultSurface>
-    <p v-if="selectionError" class="vault-notice error">{{ selectionError }}</p>
+    <p v-if="selectionError" class="vault-notice error" role="alert">{{ selectionError }}</p>
     <button
       class="supply-dispense"
       type="button"

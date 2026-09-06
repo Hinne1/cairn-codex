@@ -73,6 +73,12 @@ screen reader and its settings.
 
 ## Status announcements
 
+Every separately focusable selection checkbox names its item. Selected category, method and
+section controls expose pressed state as well as their visible active treatment. Clearing a
+shared search returns focus to its input after the Clear button disappears. Native verification
+of these rules and local asynchronous rejection alerts extends the existing archive-query gate;
+see the #197 section of the test matrix.
+
 Notification polite (`status`) and assertive (`alert`) containers remain mounted before messages
 arrive. Exactly one channel is populated for each announcement. Keyed message content supports
 new notifications with identical text, while the notification service suppresses identical

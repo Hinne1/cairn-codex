@@ -56,7 +56,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Packaged helper self-test failed.' }
 Push-Location $projectRoot
 try {
   & (Join-Path $PSScriptRoot 'prepare-builder-app.ps1')
-  & npx.cmd electron-builder --projectDir dist\builder-app --win nsis
+  & npx.cmd electron-builder --projectDir dist\builder-app --win nsis --publish never
   if ($LASTEXITCODE -ne 0) { throw 'NSIS installer build failed.' }
 } finally {
   Pop-Location

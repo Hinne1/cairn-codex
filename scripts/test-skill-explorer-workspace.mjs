@@ -220,7 +220,7 @@ assert.match(table, /\{ key: 'item', label: 'Item' \}[\s\S]*?\{ key: 'modifiers'
 assert.match(table, /:aria-sort="ariaSort\(column\.key\)"/)
 assert.match(workspace, /label: 'Visual'[\s\S]*?row\.visualTransformation/)
 assert.match(app, /const skillExplorerControls = ref<SkillExplorerControls>\(\{[\s\S]*?sort: 'level',[\s\S]*?direction: 'asc'/)
-assert.match(app, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?event\.currentTarget === tooltip[\s\S]*?tooltipBoundaryScroll\.value === 'contain'[\s\S]*?animateTooltipScroll/)
+assert.match(app, /function scrollTooltip\(event: WheelEvent\)[\s\S]*?tooltipWheelIntent\(event,[\s\S]*?direct: event\.currentTarget === tooltip[\s\S]*?boundary: tooltipBoundaryScroll\.value[\s\S]*?animateTooltipScroll/)
 assert.match(app, /tooltip-boundary-\$\{tooltipBoundaryScroll\}[\s\S]*?tooltip-icon-placeholder/)
 assert.match(app, /@mouseenter="cancelTooltipHide"[\s\S]*?@wheel="scrollTooltip"/)
 assert.match(app, /<SkillExplorerWorkspace[\s\S]*?@show-tooltip="showTooltip"/)

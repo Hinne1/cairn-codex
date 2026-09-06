@@ -25,7 +25,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'queue-tooltip': [item: CollectionItem, event: MouseEvent]
+  'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem]
 }>()
@@ -116,8 +117,12 @@ const searchError = computed(() => {
                 v-for="item in target.items.slice(0, 12)"
                 :key="item.record"
                 type="button"
+                aria-describedby="item-tooltip"
                 @mouseenter="emit('queue-tooltip', item, $event)"
                 @mouseleave="emit('hide-tooltip')"
+                @focus="emit('queue-tooltip', item, $event)"
+                @blur="emit('hide-tooltip')"
+                @wheel="emit('scroll-tooltip', $event)"
                 @click="emit('open-item', item)"
               >
                 <img v-if="iconUrlForItem(item)" :src="iconUrlForItem(item)!" alt="" />

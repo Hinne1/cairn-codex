@@ -4,6 +4,20 @@ import { ROLL_ANALYSIS_VERSION } from '../shared/roll-analysis.ts'
 import { workspaceQueryCollection } from './workspace-query-collection.ts'
 
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'tooltip-scroll') {
+    const fixture = createScreenshotCollectionFixture('skill-explorer')
+    return { ...fixture, items: fixture.items.map((item, index) => ({
+      ...item,
+      presentation: { ...item.presentation!, sections: [{
+        kind: 'base', heading: null, lines: [
+          { label: 'to Wendigo Totem', minimum: 1, maximum: 1, unit: '', tone: 'skill', prefix: '+', suffix: '' },
+          ...Array.from({ length: index % 2 === 0 ? 45 : 0 }, (_, line) => ({
+            label: 'Fire Resistance', minimum: line + 1, maximum: line + 1, unit: '%' as const, tone: 'standard' as const, prefix: '+', suffix: ''
+          }))
+        ]
+      }] }
+    })) }
+  }
   if (name === 'tooltip-versions') {
     const fixture = createScreenshotCollectionFixture('search-help')
     const source = fixture.items[0]!

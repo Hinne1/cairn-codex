@@ -3337,6 +3337,10 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
           const { verifyTooltipVersions } = await import('./tooltip-version-verification')
           await verifyTooltipVersions(window.webContents)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_TOOLTIP_SCROLL === '1') {
+          const { verifyTooltipScrolling } = await import('./tooltip-scroll-verification')
+          await verifyTooltipScrolling(window.webContents)
+        }
         const renderedState = await window.webContents.executeJavaScript(`({
           heading: document.querySelector('.hero h2')?.textContent,
           results: document.querySelector('.explorer-result-count, .result-count')?.textContent,

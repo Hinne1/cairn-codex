@@ -45,6 +45,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   dispense: [items: SupplySelectionItem[], mode: SupplyControls['mode']]
 }>()
@@ -271,6 +272,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
           :title="item.catalogItem ? 'Hover for the full in-game tooltip' : undefined"
           @mouseenter="queueTooltip(item, $event)"
           @mousemove="emit('move-tooltip', $event)"
+          @wheel="emit('scroll-tooltip', $event)"
           @mouseleave="emit('hide-tooltip')"
           @focusin="queueTooltip(item, $event)"
           @focusout="emit('hide-tooltip')"

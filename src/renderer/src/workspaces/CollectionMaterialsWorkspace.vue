@@ -41,6 +41,7 @@ const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement]
   'show-tooltip': [item: CollectionItem, element: HTMLElement]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem, referenceInstanceKey?: string]
   'retrieve-live': [id: string]
@@ -215,6 +216,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
           :class="{ missing: !isCollectionOwned(item), 'awakening-available': itemAvailableByAwakeningOnly(item), legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare', component: item.rarity === 'component', consumable: item.rarity === 'consumable' }"
           @mouseenter="emit('queue-tooltip', item, $event)"
           @mousemove="emit('move-tooltip', $event)"
+          @wheel="emit('scroll-tooltip', $event)"
           @mouseleave="emit('hide-tooltip')"
         >
           <div class="item-mark" aria-hidden="true">

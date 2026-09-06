@@ -17,6 +17,7 @@ export function presentScreenshotCollection(
       return { ...snapshot, basis, items: createFixture(fixtureName).items }
     case 'bounded-grid-a11y':
     case 'tooltip-versions':
+    case 'tooltip-scroll':
     case 'workspace-queries':
     case 'mi-workshop':
       return { ...snapshot, basis }

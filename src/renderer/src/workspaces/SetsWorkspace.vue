@@ -15,6 +15,7 @@ const props = defineProps<{ session: SetsSession; available: boolean }>()
 const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem]
 }>()
@@ -161,6 +162,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
             aria-describedby="item-tooltip"
             @mouseenter="emit('queue-tooltip', item, $event)"
             @mousemove="emit('move-tooltip', $event)"
+            @wheel="emit('scroll-tooltip', $event)"
             @mouseleave="emit('hide-tooltip')"
             @focus="emit('queue-tooltip', item, $event)"
             @blur="emit('hide-tooltip')"
@@ -190,6 +192,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
           aria-describedby="item-tooltip"
           @mouseenter="emit('queue-tooltip', change.item, $event)"
           @mousemove="emit('move-tooltip', $event)"
+          @wheel="emit('scroll-tooltip', $event)"
           @mouseleave="emit('hide-tooltip')"
           @focus="emit('queue-tooltip', change.item, $event)"
           @blur="emit('hide-tooltip')"

@@ -65,14 +65,24 @@ rendered DOM at wide and compact widths. The focused gate is part of `npm run ve
 
 Viewport-bounded item tooltips keep focus on the describing item so assistive technology retains the
 full item-detail description. Pointer users can enter the tooltip and wheel its visible scrollbar;
-keyboard users can use Page Up/Down while the item stays focused. Contained overscroll keeps ordinary
-wheel input available elsewhere on the page, and leaving both the source item and tooltip dismisses it
+keyboard users can use Page Up/Down while the item stays focused. The shared direction-aware wheel
+policy honors Display's page-continuation/containment preference at overflowing boundaries. Short
+tooltips always permit page scrolling. Shift/horizontal input stays available to research tables;
+ordinary wheel input elsewhere remains with the page. Leaving both source and tooltip dismisses it
 after the shared grace period.
 
 Escape keeps tooltips dismissed while the pointer stays still, including when removing the overlay
 uncovers its source. Moving within that source resumes the normal hover delay; moving elsewhere
 discards the old request. A new keyboard focus change also permits inspection again. The shared
 dismissal controller is covered by the real-pointer/keyboard version gate at 1,440px and 520px.
+
+All item sources forward wheel input through the same `tooltip-scroll.ts` policy; the complete
+entry-point inventory lives in `workspace-ui.md`. Farming and Planner MI Sources expose the same
+description on their existing item buttons, and Oracle evidence buttons also name `item-tooltip`.
+`test:tooltip-scroll` covers pixel/line/page modes, fractional deltas, queued edges and repeated
+reversals. `test:tooltip-scroll:electron` checks tooltip and page offsets with native input across
+Collection, Skill Explorer, Planner Table and Journey at both widths and both boundary settings,
+plus focused Page Up/Down, short content and reduced motion. It runs in full verification.
 
 Original/Awakened tooltip versions switch with V while the describing item stays focused.
 Pointer users can click the version summary, including while a search field retains focus;

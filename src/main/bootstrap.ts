@@ -14,6 +14,7 @@ import { isGlossarySourceUrl } from '../shared/glossary-sources';
 import type { ApplicationVerification } from './application-runtime.ts';
 import { captureDiagnosticScreenshot } from './screenshot-diagnostics.ts';
 import { CATALOG_PRESENTATION_VERSION, ROLL_ANALYSIS_VERSION } from './catalog-versions.ts';
+import { readMapLocationIndex, mapLocationIndexIsFresh } from './map-location-index-cache.ts';
 import { IPC_CHANNELS, type ArchiveBackupEntry, type ArchiveBackupActionResult, type CharacterSaveProfile, type CollectionBasis, type CollectionSnapshot, type DismantlingPreview, type GrimDawnDiscovery, type GdiaImportProgress, type GdiaImportResult, type IngestResult, type ItemRollAnalysis, type LiveGameStatus, type OperationHistoryPage, type OperationHistoryRequest, type PreferenceLoadReport, type SpecialRecoveryDestination, type MapRegionLocation, type RetrievalResult, type RendererErrorReport, type ObservedStashItem, type StagingTabInspection, type StartupPhaseEvent, type StartupStatus, type VaultListItem, type VaultItemPage, type VaultPageRequest, type VaultSummary, type WriteSafetyStatus } from '@shared/contracts';
 
 import { presentCollection, type LiveVaultPayload } from './collection-presentation.ts';
@@ -1273,40 +1274,6 @@ async function loadMapLocationIndex(
     `[map-index] ${rebuilt.regionCount} regions, ${rebuilt.placedRecordCount} placed game records`
   )
   return rebuilt
-}
-
-async function readMapLocationIndex(path: string): Promise<MapLocationIndex | null> {
-  try {
-    const parsed = JSON.parse(await readFile(path, 'utf8')) as MapLocationIndex
-    if (
-      parsed.version !== 8 ||
-      !Array.isArray(parsed.archives) ||
-      !parsed.sourceLocations ||
-      typeof parsed.sourceLocations !== 'object'
-    ) {
-      return null
-    }
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-async function mapLocationIndexIsFresh(index: MapLocationIndex): Promise<boolean> {
-  try {
-    for (const archive of index.archives) {
-      const current = await stat(archive.path)
-      if (
-        current.size !== archive.length ||
-        Math.abs(current.mtimeMs - Date.parse(archive.lastWriteUtc)) > 1_000
-      ) {
-        return false
-      }
-    }
-    return index.archives.length > 0
-  } catch {
-    return false
-  }
 }
 
 async function collectionStashesAreFresh(snapshot: CollectionSnapshot): Promise<boolean> {

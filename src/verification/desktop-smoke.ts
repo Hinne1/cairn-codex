@@ -229,7 +229,8 @@ export async function runSmokeTest(
       ])
     )
     const unresolvedMiSources = monsterInfrequents.filter(
-      (item) => !item.acquisition?.sources.some((source) => source.startsWith('Dropped by '))
+      (item) => !item.acquisition?.sources.some((source) =>
+        source.startsWith('Dropped by ') || source.startsWith('Found in '))
     )
     if (
       monsterInfrequents.length < 1_600 ||
@@ -239,7 +240,7 @@ export async function runSmokeTest(
         (item) => item.acquisition?.sources[0] !== 'Dropped by Frostsnarl the Chosen'
       )
     ) {
-      throw new Error('Monster Infrequent source traversal did not resolve every live MI tier.')
+      throw new Error(`Monster Infrequent source traversal failed: ${monsterInfrequents.length} tiers, ${unresolvedMiSources.length} without monster/container sources, ${frostsnarlTiers.length} Frostsnarl tiers.`)
     }
     if (
       skillRareTiers.get('Weaver Ring')?.length !== 7 ||

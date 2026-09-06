@@ -29,6 +29,10 @@ internal static class AcquisitionResolverSelfTest
     private const string ChestItemTable = "records/items/loottables/fixture_chest_item_table.dbr";
     private const string ChestBroadPool = "records/items/loottables/fixture_chest_broad_pool.dbr";
     private const string DistantChestMonster = "records/creatures/enemies/fixture_chest_monster.dbr";
+    private const string RoutedChestItem = "records/items/gearhead/fixture_routed_chest_item.dbr";
+    private const string RoutedItemTable = "records/items/loottables/fixture_routed_chest_item.dbr";
+    private const string ChestRoutingTable = "records/items/lootchests/chestloottables/fixture_routing_table.dbr";
+    private const string PlacedChest = "records/items/lootchests/fixture_placed_chest.dbr";
 
     public static AcquisitionResolverSelfTestResult Run()
     {
@@ -93,6 +97,20 @@ internal static class AcquisitionResolverSelfTest
               chest.SourceRecords.SequenceEqual([DirectChest]),
             "A distant monster outranked a directly actionable container.");
 
+        var routedChest = Resolve(RoutedChestItem);
+        Check(routedChest.Sources.SequenceEqual(["Found in Fixture Chest"]),
+            "An unnamed chest routing table hid its placed chest source.");
+        Check(routedChest.SourceRecords.SequenceEqual([PlacedChest]),
+            "A chest routing table leaked into actionable map source records.");
+        var labeledRecords = FixtureRecords().ToDictionary(pair => pair.Key, pair => pair.Value);
+        labeledRecords[ChestRoutingTable] = Source(ChestRoutingTable, "",
+            ("FileDescription", Text("Fixture routing metadata")), ("lootName1", Text(RoutedItemTable)));
+        var labeledChest = ItemCatalogBuilder.BuildAcquisition(RoutedChestItem,
+            ItemCatalogBuilder.BuildAcquisitionReferences(labeledRecords), labeledRecords, tags, knownFormulas: null);
+        Check(labeledChest.Sources.SequenceEqual(routedChest.Sources) &&
+              labeledChest.SourceRecords.SequenceEqual(routedChest.SourceRecords),
+            "A debug label turned a chest routing table into a placed source.");
+
         return new AcquisitionResolverSelfTestResult(
             Passed: true,
             Assertions: assertions,
@@ -136,7 +154,12 @@ internal static class AcquisitionResolverSelfTest
             [DirectChest] = Source(DirectChest, "LootContainer", ("description", Text("tagChest")), ("lootName1", Text(ChestItem))),
             [ChestItemTable] = Source(ChestItemTable, "LootItemTable_DynWeight", ("lootName1", Text(ChestItem))),
             [ChestBroadPool] = Source(ChestBroadPool, "LootMasterTable", ("lootName1", Text(ChestItemTable))),
-            [DistantChestMonster] = Source(DistantChestMonster, "Monster", ("description", Text("tagDistantMonster")), ("lootTable", Text(ChestBroadPool)))
+            [DistantChestMonster] = Source(DistantChestMonster, "Monster", ("description", Text("tagDistantMonster")), ("lootTable", Text(ChestBroadPool))),
+            [RoutedChestItem] = Source(RoutedChestItem, "Item"),
+            [RoutedItemTable] = Source(RoutedItemTable, "LootItemTable_DynWeight", ("lootName1", Text(RoutedChestItem))),
+            // Installed chest routing records may have no ARZ class at all.
+            [ChestRoutingTable] = Source(ChestRoutingTable, "", ("lootName1", Text(RoutedItemTable))),
+            [PlacedChest] = Source(PlacedChest, "LootContainer", ("description", Text("tagChest")), ("lootTable", Text(ChestRoutingTable)))
         };
 
     private static CatalogSourceRecord Source(

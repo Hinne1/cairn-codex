@@ -1,5 +1,15 @@
 # Release test matrix
 
+## Native build prerequisite alignment (#181, 2026-09-06)
+
+The read-only preflight passed on a clean pinned GDIA checkout with v143 compiler
+14.43.34808, Windows SDK 10.0.22621.0 and Boost 1.78.0. A compile-only run completed
+with zero compiler errors, then correctly rejected its differing output SHA-256.
+The shipped hook, injector, and allowlists remain unchanged; no candidate was injected.
+Synthetic prerequisite gates reject missing compiler/ATL/SDK/Boost components and
+incorrect versions before patch application. This is build-tool evidence, not live
+compatibility or byte-for-byte reproduction of the old shipping DLL.
+
 ## Shared tooltip wheel policy (#131, 2026-09-06)
 
 The deterministic policy gate covers source/overlay input, both boundary preferences,

@@ -3,7 +3,7 @@
 export function createTooltipDismissal() {
   let dismissed = false
   let pointer: { x: number; y: number } | null = null
-  let hovered: { source: HTMLElement; resume: () => void } | null = null
+  let hovered: { source: HTMLElement; resume: (event: PointerEvent) => void } | null = null
 
   function reset(): void {
     dismissed = false
@@ -25,11 +25,11 @@ export function createTooltipDismissal() {
     cancelHover(): void {
       hovered = null
     },
-    allowHover(event: MouseEvent, resume: (source: HTMLElement) => void): boolean {
+    allowHover(event: MouseEvent, resume: (event: PointerEvent) => void): boolean {
       // Only pointermove establishes movement. Compatibility mouseenter can round
       // fractional pointer coordinates and can also fire without physical movement.
       const source = event.currentTarget
-      if (source instanceof HTMLElement) hovered = { source, resume: () => resume(source) }
+      if (source instanceof HTMLElement) hovered = { source, resume }
       return !dismissed
     },
     pointerMoved(event: PointerEvent): void {
@@ -39,7 +39,7 @@ export function createTooltipDismissal() {
       const request = hovered
       reset()
       if (request?.source.isConnected && event.target instanceof Node && request.source.contains(event.target)) {
-        request.resume()
+        request.resume(event)
       } else {
         hovered = null
       }

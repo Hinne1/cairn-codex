@@ -66,11 +66,13 @@ export async function verifyTooltipVersions(contents: WebContents): Promise<void
       assert.equal(await title(), 'Version Test Original', 'Returning to the source reopens its tooltip')
       const sourcePoint = await point(`${card('original')} .item-copy`)
       for (let movement = 1; movement <= 2; movement += 1) {
+        const previousLeft = await evaluate(`document.querySelector('.game-tooltip').getBoundingClientRect().left`)
         await key('Escape')
         assert.equal(await title(), undefined, 'Escape dismisses without leaving the original source')
         await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sourcePoint.x + movement * 2, y: sourcePoint.y })
         await settle()
         assert.equal(await title(), 'Version Test Original', 'Movement within an already-hovered source reopens after each dismissal')
+        assert.ok(Math.abs(await evaluate(`document.querySelector('.game-tooltip').getBoundingClientRect().left`) - previousLeft) <= 3, 'Rearming preserves the pointer anchor rather than jumping to the source edge')
       }
     }
     await key('Escape')

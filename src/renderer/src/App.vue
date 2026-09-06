@@ -2783,7 +2783,7 @@ function queueTooltip(
   anchor: MouseEvent | FocusEvent | HTMLElement,
   copy?: Pick<ObservedStashItem, 'prefixRecord' | 'suffixRecord'>
 ): void {
-  if (anchor instanceof MouseEvent && !tooltipDismissal.allowHover(anchor, source => queueTooltip(item, source, copy))) return
+  if (anchor instanceof MouseEvent && !tooltipDismissal.allowHover(anchor, event => queueTooltip(item, event, copy))) return
   cancelTooltipHide()
   cancelTooltip()
   positionTooltip(anchor)

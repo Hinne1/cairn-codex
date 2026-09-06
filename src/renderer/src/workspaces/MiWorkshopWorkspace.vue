@@ -37,6 +37,7 @@ const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement, copy: ObservedStashItem]
   'show-tooltip': [item: CollectionItem, element: HTMLElement, copy: ObservedStashItem]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem, referenceInstanceKey?: string]
 }>()
@@ -218,6 +219,7 @@ defineExpose({ syncNativeControls })
           class="mi-table-row"
           @mouseenter="emit('queue-tooltip', row.base, $event, row.leader)"
           @mousemove="emit('move-tooltip', $event)"
+          @wheel="emit('scroll-tooltip', $event)"
           @mouseleave="emit('hide-tooltip')"
         >
           <span role="gridcell">

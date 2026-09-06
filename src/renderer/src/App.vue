@@ -72,6 +72,7 @@ import { createNotificationService, type AppNotification } from './notification-
 import { resolveActiveCharacter } from './live-presence'
 import { preferredScrollBehavior } from './motion-preference'
 import { createTooltipDismissal } from './tooltip-dismissal'
+import { tooltipWheelIntent } from './tooltip-scroll'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
 import { collectionRequestKey } from '@shared/collection-request'
 import {
@@ -2783,7 +2784,11 @@ function queueTooltip(
   anchor: MouseEvent | FocusEvent | HTMLElement,
   copy?: Pick<ObservedStashItem, 'prefixRecord' | 'suffixRecord'>
 ): void {
-  if (anchor instanceof MouseEvent && !tooltipDismissal.allowHover(anchor, event => queueTooltip(item, event, copy))) return
+  if (!(anchor instanceof MouseEvent)) {
+    showTooltip(item, anchor, copy)
+    return
+  }
+  if (!tooltipDismissal.allowHover(anchor, event => queueTooltip(item, event, copy))) return
   cancelTooltipHide()
   cancelTooltip()
   positionTooltip(anchor)
@@ -2864,6 +2869,7 @@ let tooltipScrollFrame: number | null = null
 function cancelTooltipScrollAnimation(): void {
   if (tooltipScrollFrame !== null) cancelAnimationFrame(tooltipScrollFrame)
   tooltipScrollFrame = null
+  tooltipWheelTarget = null
 }
 
 function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
@@ -2872,6 +2878,7 @@ function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
     tooltip.scrollTop = target
     return
   }
+  tooltipWheelTarget = target
   const initial = tooltip.scrollTop
   const distance = target - initial
   const started = performance.now()
@@ -2879,64 +2886,38 @@ function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
     const progress = Math.min(1, (now - started) / 120)
     tooltip.scrollTop = initial + distance * (1 - Math.pow(1 - progress, 3))
     if (progress < 1) tooltipScrollFrame = requestAnimationFrame(tick)
-    else tooltipScrollFrame = null
+    else {
+      tooltipScrollFrame = null
+      tooltipWheelTarget = null
+    }
   }
   tooltipScrollFrame = requestAnimationFrame(tick)
 }
 
 function scrollTooltip(event: WheelEvent): void {
-  if (event.shiftKey || event.ctrlKey || event.metaKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
   const tooltip = tooltipElement.value
-  if (!tooltip || tooltip.scrollHeight <= tooltip.clientHeight) return
-  const maximumScrollTop = tooltip.scrollHeight - tooltip.clientHeight
-  const boundaryTolerance = 1
-  const directWheel = event.currentTarget === tooltip
-  if (directWheel) {
-    tooltipWheelTarget = null
-    cancelTooltipScrollAnimation()
-  }
-  const actualScrollTop = tooltip.scrollTop
-  const queuedBoundaryPending = !directWheel && tooltipWheelTarget !== null && (
-    (event.deltaY < 0 && tooltipWheelTarget <= boundaryTolerance && actualScrollTop > boundaryTolerance) ||
-    (event.deltaY > 0 && tooltipWheelTarget >= maximumScrollTop - boundaryTolerance && actualScrollTop < maximumScrollTop - boundaryTolerance)
-  )
-  if (queuedBoundaryPending) {
-    event.preventDefault()
-    event.stopPropagation()
+  if (!tooltip) return
+  const intent = tooltipWheelIntent(event, {
+    top: tooltip.scrollTop,
+    height: tooltip.clientHeight,
+    scrollHeight: tooltip.scrollHeight,
+    target: tooltipWheelTarget,
+    direct: event.currentTarget === tooltip,
+    boundary: tooltipBoundaryScroll.value,
+    pageHeight: window.innerHeight
+  })
+  if (intent.kind === 'native') {
+    if (!event.shiftKey && !event.ctrlKey && !event.metaKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)) cancelTooltipScrollAnimation()
     return
   }
-  const currentScrollTop = directWheel ? tooltip.scrollTop : (tooltipWheelTarget ?? tooltip.scrollTop)
-  const atBoundary =
-    (event.deltaY < 0 && actualScrollTop <= boundaryTolerance) ||
-    (event.deltaY > 0 && actualScrollTop >= maximumScrollTop - boundaryTolerance)
-  if (atBoundary) {
-    if (tooltipBoundaryScroll.value === 'contain' || directWheel) {
-      event.preventDefault()
-      event.stopPropagation()
-    }
-    // Chromium does not consistently chain wheel input from this fixed overlay.
-    // Own direct-tooltip handoff to avoid both a stuck page and double scrolling.
-    if (directWheel && tooltipBoundaryScroll.value === 'page') {
-      const pageDelta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? event.deltaY * window.innerHeight : event.deltaY
-      window.scrollBy({ top: pageDelta, behavior: preferredScrollBehavior() })
-    }
-    return
-  }
-  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-    ? event.deltaY * 16
-    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-      ? event.deltaY * tooltip.clientHeight
-      : event.deltaY
-  const nextScrollTop = Math.max(
-    0,
-    Math.min(currentScrollTop + delta, maximumScrollTop)
-  )
-  if (nextScrollTop === currentScrollTop) return
   event.preventDefault()
   event.stopPropagation()
-  tooltipWheelTarget = nextScrollTop
-  animateTooltipScroll(tooltip, nextScrollTop)
+  if (intent.kind === 'tooltip') animateTooltipScroll(tooltip, intent.top)
+  else if (intent.kind === 'contain') cancelTooltipScrollAnimation()
+  else if (intent.kind === 'page') {
+    cancelTooltipScrollAnimation()
+    window.scrollBy({ top: intent.delta, behavior: preferredScrollBehavior() })
+  }
 }
 
 function scrollTooltipFromKeyboard(event: KeyboardEvent): boolean {
@@ -2953,6 +2934,7 @@ function scrollTooltipFromKeyboard(event: KeyboardEvent): boolean {
     Math.min(tooltip.scrollTop + direction * Math.max(40, tooltip.clientHeight * 0.8), tooltip.scrollHeight - tooltip.clientHeight)
   )
   if (nextScrollTop === tooltip.scrollTop) return false
+  cancelTooltipScrollAnimation()
   event.preventDefault()
   event.stopPropagation()
   tooltip.scrollTop = nextScrollTop
@@ -3481,6 +3463,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @queue-tooltip="queueTooltip"
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @scroll-tooltip="scrollTooltip"
         @open-item="openItem"
         @retrieve-live="retrieveArchivedCopyLive"
         @open-roll-help="openGlossary()"
@@ -3518,6 +3501,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
         @build-plan="sendOracleCandidateToPlanner"
+        @scroll-tooltip="scrollTooltip"
         @inspect-skill="inspectOracleSkill"
       />
 
@@ -3553,6 +3537,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
+        @scroll-tooltip="scrollTooltip"
       />
 
       <SuppliesWorkspace
@@ -3578,6 +3563,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @dispense="retrieveSupplies"
+        @scroll-tooltip="scrollTooltip"
       />
 
       <DismantlingWorkspace
@@ -3601,6 +3587,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @queue-tooltip="queueTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
+        @scroll-tooltip="scrollTooltip"
       />
 
       <GlossaryWorkspace
@@ -3706,6 +3693,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
+        @scroll-tooltip="scrollTooltip"
       />
     </main>
     </WorkspaceErrorBoundary>

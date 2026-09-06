@@ -33,6 +33,7 @@ const emit = defineEmits<{
   'open-set': [name: string]
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem]
   'build-plan': [candidate: OracleCandidate]
@@ -151,7 +152,23 @@ function surprise(): void {
           <header><div><span class="oracle-readiness">{{ readinessLabel(candidate.readiness) }}</span><h3>{{ candidate.title }}</h3><p><span>{{ styleLabel(candidate.style) }}</span><span :title="candidate.masteries.join(' + ')">{{ candidate.className }}</span></p></div><div class="oracle-score" :title="candidate.summary"><strong>{{ candidate.score }}</strong><small>stash fit</small></div></header>
           <p class="oracle-summary">{{ candidate.summary }}</p>
           <div v-if="candidate.sets.length" class="oracle-set-progress"><button v-for="set in candidate.sets" :key="set.name" type="button" :class="{ complete: set.owned === set.total }" :title="`Open ${set.name} and inspect every set bonus`" @click="emit('open-set', set.name)"><strong>{{ set.name }}</strong><small>{{ set.owned }}/{{ set.total }}<template v-if="!set.capstoneUnlocked"> · capstone {{ set.capstonePieces }}</template></small></button></div>
-          <div class="oracle-evidence"><p><span>Strongest evidence</span><small>{{ candidate.ownedCore }}/{{ candidate.coreSize }} core signals archived</small></p><div><button v-for="evidence in candidate.evidence.slice(0, 7)" :key="evidence.item.record" type="button" :class="{ owned: evidence.owned, missing: !evidence.owned }" :title="evidence.reasons.join(' · ')" @mouseenter="emit('queue-tooltip', evidence.item, $event)" @mousemove="emit('move-tooltip', $event)" @mouseleave="emit('hide-tooltip')" @focus="emit('queue-tooltip', evidence.item, $event)" @blur="emit('hide-tooltip')" @click="emit('open-item', evidence.item)"><img v-if="iconUrlForItem(evidence.item)" :src="iconUrlForItem(evidence.item)!" alt="" /><span><strong>{{ evidence.item.name }}</strong><small>{{ evidence.owned ? (ownershipLabelForItem(evidence.item) ?? 'Archived') : 'Missing' }} · {{ evidence.reasons.slice(0, 2).join(' · ') }}</small></span></button></div></div>
+          <div class="oracle-evidence"><p><span>Strongest evidence</span><small>{{ candidate.ownedCore }}/{{ candidate.coreSize }} core signals archived</small></p><div>
+            <button
+              v-for="evidence in candidate.evidence.slice(0, 7)"
+              :key="evidence.item.record"
+              type="button"
+              :class="{ owned: evidence.owned, missing: !evidence.owned }"
+              :title="evidence.reasons.join(' · ')"
+              aria-describedby="item-tooltip"
+              @mouseenter="emit('queue-tooltip', evidence.item, $event)"
+              @mousemove="emit('move-tooltip', $event)"
+              @mouseleave="emit('hide-tooltip')"
+              @focus="emit('queue-tooltip', evidence.item, $event)"
+              @blur="emit('hide-tooltip')"
+              @wheel="emit('scroll-tooltip', $event)"
+              @click="emit('open-item', evidence.item)"
+            ><img v-if="iconUrlForItem(evidence.item)" :src="iconUrlForItem(evidence.item)!" alt="" /><span><strong>{{ evidence.item.name }}</strong><small>{{ evidence.owned ? (ownershipLabelForItem(evidence.item) ?? 'Archived') : 'Missing' }} · {{ evidence.reasons.slice(0, 2).join(' · ') }}</small></span></button>
+          </div></div>
           <div v-if="candidate.conflicts.length" class="oracle-conflicts"><strong>Choices required</strong><span v-for="conflict in candidate.conflicts" :key="conflict">{{ conflict }}</span></div>
           <div v-if="candidate.relatedSkills.length" class="oracle-related"><small>Also supported</small><span v-for="skill in candidate.relatedSkills" :key="skill">{{ skill }}</span></div>
           <footer><button type="button" @click="emit('build-plan', candidate)">Build a shopping list</button><button type="button" @click="emit('inspect-skill', candidate.skill)">Inspect {{ candidate.skill }}</button></footer>

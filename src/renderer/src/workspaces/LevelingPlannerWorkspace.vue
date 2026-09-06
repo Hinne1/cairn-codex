@@ -342,6 +342,10 @@ function searchErrorMessage(query: CompiledSearchQuery): string | null {
               @mouseenter="queueTooltip(item, $event)"
               @mousemove="moveTooltip"
               @mouseleave="scheduleTooltipHide"
+              @wheel="scrollTooltip"
+              aria-describedby="item-tooltip"
+              @focus="showTooltip(item, $event.currentTarget as HTMLElement)"
+              @blur="scheduleTooltipHide"
               @click="openItem(item)"
             >
               <img v-if="itemIconUrl(item)" :src="itemIconUrl(item)!" alt="" @error="handleItemIconError(item)" />

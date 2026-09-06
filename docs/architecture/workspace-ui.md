@@ -186,7 +186,7 @@ sufficient.
 ## Item tooltips
 
 All item-bearing workspaces use the single global item-tooltip pipeline in `App.vue`:
-`queueTooltip`, `moveTooltip`, `scheduleTooltipHide`, and the `item-tooltip` presentation.
+`queueTooltip`, `moveTooltip`, `scheduleTooltipHide`, `scrollTooltip`, and the `item-tooltip` presentation.
 Affixes are passed through the same pipeline as copy context. Do not add workspace-local item
 tooltip markup; extend the shared presentation contract when a new stat or section is needed.
 
@@ -194,11 +194,46 @@ The tooltip remains global because only one hover target can be active at a time
 mouse-wheel scrolling, viewport placement, held details, affix composition, and item links must
 behave identically everywhere.
 
-Dense research tables use a narrower pointer contract: only the prominent item picture queues the
-global tooltip. Names, types, actions, and ordinary data cells remain free for reading, selection,
-and page scrolling. Moving off the picture schedules the same global dismissal used elsewhere.
+Dense research tables use the complete left item-identity cell (picture, name, and type) as the
+pointer source. Ordinary data cells remain free for reading, selection, and page scrolling.
+Moving off the identity cell schedules the same global dismissal used elsewhere.
 Keyboard focus stays on the bounded result row, which keeps `item-tooltip` as its accessible
 description without adding the decorative picture as another Tab stop.
+
+`tooltip-scroll.ts` defines the shared direction-aware wheel policy. An overflowing tooltip
+owns vertical input from either its active source or the overlay while it can move in that
+direction. At a visible boundary, Display chooses page continuation or containment. A queued
+animation must reach its boundary before handing off; reversing direction starts from the
+visible position. Pixel deltas are preserved, line deltas use 16px, and page deltas use the
+height of the destination (tooltip or page). Shift/horizontal and Ctrl/Meta wheel input keep
+their existing owners. Reduced motion applies tooltip offsets immediately.
+
+Direct wheel input over the fixed overlay explicitly hands off to the page, because Chromium
+does not reliably chain it. This includes short tooltips with no scroll range, regardless of
+the boundary preference. Source forwarding never captures wheel input over adjacent content.
+Local table wrappers contain horizontal overscroll only, so source boundaries can continue into
+the page. Keyboard focus opens descriptions immediately; pointer hover uses the shared 180ms delay.
+The shared 90ms leave grace, viewport placement, held details, version switching, and affix
+composition remain independent of this policy.
+
+### Tooltip entry-point inventory
+
+| Surface | Pointer source | Keyboard description | Wheel adapter |
+| --- | --- | --- | --- |
+| Collection / Components & Consumables | Item card | Bounded gridcell | Shared `scroll-tooltip` |
+| Skill Explorer / Planner Table | Complete left identity cell | Bounded row | Shared `scroll-tooltip` |
+| Planner Journey | Item picture | Bounded row | Shared `scroll-tooltip` |
+| Planner MI Sources | Area item button | Same button | Shared `scroll-tooltip` |
+| MI Workshop | Comparison row, with the reference copy's affixes | Bounded row | Shared `scroll-tooltip` |
+| Supplies | Supply card | Bounded gridcell | Shared `scroll-tooltip` |
+| Sets | Member and member-FX buttons | Same buttons | Shared `scroll-tooltip` |
+| Stash Oracle | Evidence item button | Same button | Shared `scroll-tooltip` |
+| Collection Farming | Route item button | Same button | Shared `scroll-tooltip` |
+| Global overlay | Tooltip body | Description stays on source | Direct `scrollTooltip` |
+
+There is one `.game-tooltip` portal and one vertical overflow rule. Research tables retain
+their independent horizontal scroller. Inspection drawers, Transfers and Dismantling use
+their own item-detail/action surfaces and do not add a second hover tooltip implementation.
 
 ## Workspace ownership and extraction
 
@@ -327,7 +362,7 @@ unlocks by record/mode, keep individual potion copies and return 60 options per 
 counts. Bulk boost selection returns only eligible active-mode IDs and metadata. `App.vue` supplies
 narrow query/selection/dispense adapters, active-character/transfer readiness and the global tooltip
 adapter; the workspace never reaches preload directly. Back/Forward restores typed controls, and
-Supplies retains delayed tooltips for pointer and keyboard focus. Exact transfer payloads remain
+  Supplies retains delayed pointer tooltips and immediate keyboard descriptions. Exact transfer payloads remain
 authoritative in the existing main-process transfer services.
 
 MI Workshop owns its typed query, affix-quality filter, selected comparison metric, sort, direction,

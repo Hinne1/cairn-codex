@@ -1,5 +1,21 @@
 # Release test matrix
 
+## Shared tooltip wheel policy (#131, 2026-09-06)
+
+The deterministic policy gate covers source/overlay input, both boundary preferences,
+pixel/line/page deltas, fractional motion, queued edges, accumulated bursts and reversals.
+Native Electron input passes at 1440px and 520px in Collection, Skill Explorer, Planner
+Table, Planner Journey and MI Workshop. It asserts tooltip and page offsets for middle
+scrolling, top/bottom boundaries and short content, through both the source and overlay.
+Grace-path entry, focused Page Up/Down, reduced motion and empty/reset search also pass.
+The generated fixture has 126 items and 72 MI copies; Collection mounts 48 cards.
+MI's local horizontal wrapper permits vertical page continuation. Farming's generated
+214-route fixture retains 50 mounted rows and verifies immediate keyboard tooltip
+placement at both widths, alongside paging, empty/reset search and item activation.
+All checks run in `test:tooltip-scroll:electron`, included in full verification. No
+personal profile, archive, save or live game is used. Full integration evidence is
+recorded in the PR.
+
 ## Exact-copy favorites (#50, 2026-09-05)
 
 Synthetic SQLite and validated domain-service tests cover migration from schema14, restart,

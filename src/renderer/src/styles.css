@@ -583,10 +583,11 @@ main { width: min(1920px, 100%); margin: 0 auto; padding: 42px 48px 64px; }
 .tooltip-header .awakening-availability { color: #ead39c; font-size: 13px; }
 .tooltip-awakening-sigil { margin-right: 3px; }
 .tooltip-header strong { color: #f0bc54; font-weight: 500; text-transform: capitalize; }
-.tooltip-version-summary { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin: 9px 0 3px 54px; color: #cdbb96; }
+.tooltip-version-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 9px 0 3px 54px; padding: 5px; border-radius: var(--cc-radius-sm); color: #cdbb96; cursor: pointer; }
+.tooltip-version-summary:hover { background: var(--cc-surface-1); outline: 1px solid var(--cc-border-emphasis); }
 .tooltip-version-summary small { display: block; color: #9f8450; font: 8px Inter, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
 .tooltip-version-summary strong { color: #d8b869; font-size: 13px; font-weight: 500; }
-.tooltip-version-summary b { color: #d5a74a; font: 10px Inter, sans-serif; font-weight: 500; }
+.tooltip-version-summary b { max-width: 7ch; color: #d5a74a; font: 10px Inter, sans-serif; font-weight: 500; text-align: center; }
 .tooltip-section { margin-top: 11px; }
 .tooltip-section + .tooltip-section { padding-top: 2px; }
 .tooltip-section.section-skill-modifier, .tooltip-section.section-visual-modifier, .tooltip-section.granted-skill, .tooltip-acquisition { padding-top: 10px; border-top: 1px solid rgba(112, 91, 55, 0.28); }

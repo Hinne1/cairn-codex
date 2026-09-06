@@ -68,3 +68,11 @@ full item-detail description. Pointer users can enter the tooltip and wheel its 
 keyboard users can use Page Up/Down while the item stays focused. Contained overscroll keeps ordinary
 wheel input available elsewhere on the page, and leaving both the source item and tooltip dismisses it
 after the shared grace period.
+
+Original/Awakened tooltip versions switch with V while the describing item stays focused.
+Pointer users can click the version summary, including while a search field retains focus;
+the duplicate pointer shortcut does not move focus into the tooltip or add a Tab stop.
+The summary names its counterpart and says “Click or press V.” Typing, composition, held-key
+repeats, and Ctrl/Meta/Alt combinations do not activate the V shortcut. Missing counterparts
+have no switch affordance. `npm run test:tooltip-versions:electron` covers both input paths
+through the real global tooltip at wide and compact widths.

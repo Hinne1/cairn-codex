@@ -2544,6 +2544,7 @@ function itemVersionCounterpart(item: CollectionItem): CollectionItem | null {
 function showItemVersion(item: CollectionItem): void {
   const counterpart = itemVersionCounterpart(item)
   if (!counterpart) return
+  cancelTooltip()
   cancelTooltipHide()
   tooltipDetailsHeld.value = false
   tooltipCopyAffixes.value = null
@@ -2990,7 +2991,9 @@ function handleEscape(event: KeyboardEvent): void {
   }
   if (
     event.key.toLocaleLowerCase() === 'v' &&
+    !event.defaultPrevented &&
     !event.repeat &&
+    !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing &&
     !isTypingTarget(event.target) &&
     tooltipItem.value &&
     itemVersionCounterpart(tooltipItem.value)
@@ -3731,13 +3734,15 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         <div
           v-if="itemVersionCounterpart(tooltipItem)"
           class="tooltip-version-summary"
+          @mousedown.prevent
+          @click.stop="showItemVersion(tooltipItem)"
         >
           <span class="awakening-sigil"><i /></span>
           <span>
             <small>{{ tooltipItem.upgradeRecord ? 'Awakened version' : 'Original version' }}</small>
             <strong>{{ itemVersionCounterpart(tooltipItem)?.name }} · {{ tooltipItem.upgradeRecord ? 'Legendary' : 'Epic' }}</strong>
           </span>
-          <b>[V]</b>
+          <b>Click or press V</b>
         </div>
 
         <template v-if="tooltipItem.presentation">

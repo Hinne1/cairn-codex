@@ -3,6 +3,25 @@ import { CATALOG_PRESENTATION_VERSION } from '../main/catalog-versions.ts'
 import { workspaceQueryCollection } from './workspace-query-collection.ts'
 
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'tooltip-versions') {
+    const fixture = createScreenshotCollectionFixture('search-help')
+    const source = fixture.items[0]!
+    const template: CollectionItem = { ...source, presentation: { ...source.presentation!, sections: [{
+      kind: 'base', heading: null, lines: Array.from({ length: 45 }, (_, index) => ({
+        label: 'Fire Resistance', minimum: index + 1, maximum: index + 1, unit: '%', tone: 'standard', prefix: '+', suffix: ''
+      }))
+    }] } }
+    const baseRecord = 'records/items/synthetic/version_original.dbr'
+    const awakenedRecord = 'records/items/synthetic/version_awakened.dbr'
+    const items: CollectionItem[] = [
+      { ...template, record: baseRecord, name: 'Version Test Original', rarity: 'epic', upgradeRecord: awakenedRecord },
+      { ...template, record: awakenedRecord, name: 'Version Test Awakened', rarity: 'legendary', baseVersionRecord: baseRecord },
+      { ...template, record: 'records/items/synthetic/version_unpaired.dbr', name: 'Version Test Unpaired', upgradeRecord: 'records/items/synthetic/missing.dbr' }
+    ]
+    return { ...fixture, items, rarities: ['epic', 'legendary'].map(rarity => ({
+      rarity: rarity as 'epic' | 'legendary', total: items.filter(item => item.rarity === rarity).length, collected: 0, availableCopies: 0
+    })) }
+  }
   if (name === 'workspace-queries') return workspaceQueryCollection(createScreenshotCollectionFixture('search-help'))
   if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
   if (name === 'settings') {

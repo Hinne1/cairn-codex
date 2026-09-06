@@ -11,6 +11,11 @@ import { buildPlannerRows, buildPlannerResearchRows } from './planner-results.ts
 
 export type LevelingPlannerControls = Extract<AppRoute, { workspace: 'planner' }>['controls']
 
+export type CharacterDiscoveryResult =
+  | { status: 'success'; characters: CharacterSaveProfile[] }
+  | { status: 'failed'; error: string }
+  | { status: 'busy' }
+
 export interface LevelingPlannerDependencies {
   initialPreferences: AppPreferencesV1
   items: () => CollectionItem[]
@@ -44,6 +49,8 @@ export function createLevelingPlannerSession(options: LevelingPlannerDependencie
 
   const plannerProfiles = ref<PlannerProfile[]>(structuredClone(initialPreferences.planner.profiles))
   const selectedPlannerProfileId = ref(initialPreferences.planner.selectedProfileId)
+  let selectionRevision = 0
+  watch(selectedPlannerProfileId, () => { selectionRevision += 1 }, { flush: 'sync' })
   const initialPlannerProfile = plannerProfiles.value.find((profile) => profile.id === selectedPlannerProfileId.value)
     ?? plannerProfiles.value[0]
   const plannerSkills = ref<string[]>([...(initialPlannerProfile?.skills ?? ['Wendigo Totem'])])
@@ -287,14 +294,17 @@ export function createLevelingPlannerSession(options: LevelingPlannerDependencie
     plannerSetupOpen.value = true
   }
 
-  async function loadCharacterProfiles(): Promise<void> {
-    if (characterImportLoading.value) return
+  async function loadCharacterProfiles(): Promise<CharacterDiscoveryResult> {
+    if (characterImportLoading.value) return { status: 'busy' }
     characterImportLoading.value = true
     characterImportError.value = null
     try {
-      discoveredCharacters.value = await options.listCharacters()
+      const characters = await options.listCharacters()
+      discoveredCharacters.value = characters
+      return { status: 'success', characters }
     } catch (error) {
       characterImportError.value = options.readableError(error)
+      return { status: 'failed', error: characterImportError.value }
     } finally {
       characterImportLoading.value = false
     }
@@ -339,16 +349,37 @@ export function createLevelingPlannerSession(options: LevelingPlannerDependencie
   async function refreshSelectedCharacterProfile(): Promise<void> {
     const profile = selectedPlannerProfile.value
     if (profile?.source !== 'character' || !profile.characterPath) return
-    await loadCharacterProfiles()
-    const character = discoveredCharacters.value.find((candidate) =>
-      candidate.path.localeCompare(profile.characterPath!, undefined, { sensitivity: 'base' }) === 0
+    const characterPath = profile.characterPath
+    const revision = selectionRevision
+    const result = await loadCharacterProfiles()
+    // A refresh belongs to the selection that started it. Switching away (even
+    // back again) or deleting that plan cancels application of the result.
+    const current = selectedPlannerProfile.value
+    if (selectionRevision !== revision || current?.id !== profile.id ||
+      current.source !== 'character' || current.characterPath !== characterPath) return
+    if (result.status === 'busy') return
+    if (result.status === 'failed') {
+      options.reportProblem(`The character save could not be refreshed: ${result.error}. The existing plan was not changed.`)
+      return
+    }
+    const character = result.characters.find((candidate) =>
+      candidate.path.localeCompare(characterPath, undefined, { sensitivity: 'base' }) === 0
     )
     if (!character) {
       options.reportProblem('The source character save could not be found. The existing plan was not changed.')
       return
     }
-    importCharacterProfile(character)
-    options.reportSuccess(`Refreshed ${profile.name} from its character save.`)
+    if (character.error) {
+      options.reportProblem(`The character save could not be read: ${character.error}. The existing plan was not changed.`)
+      return
+    }
+    const refreshed = createCharacterPlannerProfile({
+      character, existing: current, skillNames: skillNames.value,
+      classOptions: plannerClassOptions.value, id: current.id, modifiedAt: new Date().toISOString()
+    })
+    plannerProfiles.value = plannerProfiles.value.map((candidate) => candidate.id === current.id ? refreshed : candidate)
+    selectPlannerProfile(current.id)
+    options.reportSuccess(`Refreshed ${current.name} from its character save.`)
   }
 
   function deletePlannerProfile(): void {

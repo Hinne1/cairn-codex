@@ -51,7 +51,7 @@
     "test:oracle-workspace": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-oracle-workspace.mjs",
     "test:dismantling-workspace": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-dismantling-workspace.mjs",
     "test:skill-explorer-workspace": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-skill-explorer-workspace.mjs",
-    "test:leveling-planner-workspace": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-leveling-planner-workspace.mjs",
+    "test:leveling-planner-workspace": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-leveling-planner-workspace.mjs && node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-planner-refresh.mjs",
     "test:research-toolbars:electron": "install-electron && node ./scripts/test-research-toolbars-electron.mjs && npm run test:damage-types:electron",
     "test:research-workspace-parity": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-research-workspace-parity.mjs && npm run test:item-context-menu",
     "test:item-context-menu": "node --experimental-strip-types --disable-warning=ExperimentalWarning ./scripts/test-item-context-menu.mjs",

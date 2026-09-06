@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { basename, join, relative, resolve } from 'node:path'
-import { extractFile, listPackage } from '@electron/asar'
+import { basename, join, relative, resolve, sep } from 'node:path'
+import { extractFile, listPackage, statFile } from '@electron/asar'
 import { readPeImports } from './pe-imports.mjs'
 import { assertReleaseEntry } from './release-entry-boundary.mjs'
+import { assertPackageDataPath } from './artifact-data-policy.mjs'
 
 const root = resolve(process.argv[2] ?? '')
 if (!process.argv[2]) throw new Error('Usage: node scripts/audit-package.mjs <package-directory>')
@@ -27,13 +28,13 @@ try {
   await stat(join(root, 'LICENSE.electron.txt'))
 }
 
-const forbiddenExtensions = new Set(['.db', '.sqlite', '.sqlite3', '.gsh', '.gst', '.bak', '.dmp'])
-const forbiddenSegments = ['backups', 'live-adapter', 'live-receipts', 'item-icons', 'quarantine']
 const files = []
 
 async function visit(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name)
+    assertPackageDataPath(relative(root, path))
+    if (entry.isSymbolicLink()) throw new Error(`Linked package entry cannot be audited safely: ${relative(root, path)}`)
     if (entry.isDirectory()) await visit(path)
     else files.push(path)
   }
@@ -54,15 +55,15 @@ try {
 for (const path of files) {
   const local = relative(root, path).replaceAll('\\', '/').toLowerCase()
   assertReleaseEntry(local, /\.(js|cjs|mjs|map)$/.test(local) ? await readFile(path, 'utf8') : '')
-  const extension = local.slice(local.lastIndexOf('.'))
-  if (forbiddenExtensions.has(extension) || forbiddenSegments.some((part) => local.split('/').includes(part))) {
-    throw new Error(`Personal or game-state data is present in the package: ${local}`)
-  }
 }
 
 for (const path of archiveEntries) {
-  assertReleaseEntry(path, /\.(js|cjs|mjs|map)$/.test(path)
-    ? extractFile(archivePath, path.replace(/^\//, '')).toString('utf8') : '')
+  assertPackageDataPath(path, { inAsar: true })
+  const internalPath = path.replace(/^\//, '').replaceAll('/', sep)
+  const entry = statFile(archivePath, internalPath, false)
+  if ('link' in entry) throw new Error(`Linked ASAR entry cannot be audited safely: ${path}`)
+  assertReleaseEntry(path, /\.(js|cjs|mjs|map)$/i.test(path)
+    ? extractFile(archivePath, internalPath).toString('utf8') : '')
 }
 
 const expected = {
@@ -122,7 +123,7 @@ for (const path of appFiles) {
 }
 for (const entry of archiveEntries) {
   if (!/\.(?:js|cjs|css|html|json)$/i.test(entry)) continue
-  const text = extractFile(archivePath, entry.replace(/^\//, '').replaceAll('/', '\\')).toString('utf8')
+  const text = extractFile(archivePath, entry.replace(/^\//, '').replaceAll('/', sep)).toString('utf8')
   if (/C:\\Users\\Hinne|Hinne\\AppData|Documents\\My Games\\Grim Dawn/i.test(text)) {
     throw new Error(`A personal machine path is embedded in resources/app.asar:${entry}.`)
   }

@@ -313,6 +313,23 @@ Captures are generated under `local-cache/collection-owner-test-*`. No personal 
 archive, game asset, live process or transfer is used. Legacy trivia/modal focus debt remains
 tracked by #16; this extraction does not claim that migration.
 
+## Rainbow damage presentation (#136)
+
+`test:damage-types` checks every family alias, longest-name matches, direct/DOT pairs, numeric
+and conversion wording, source/target spans, Energy Burn and non-damage names. It checks
+160 foreground/surface contrast pairs plus theme rejection and protected-token overrides.
+`test:damage-types:electron` mounts the production presentation components with synthetic
+stats, research tables, Planner Journey and the glossary at 1440px and 520px under the
+default and alternate accent themes. Screenshots cover tooltip typography, conversions,
+unavailable rows, empty results and the color legend. The generated 20k research fixture
+mounts 50 rows: 98 ms wide and 90 ms compact on the implementation host.
+
+The existing roll-profile and Collection-owner Electron gates check Enter/Space disclosures,
+full textual category names, single-line perfect scores in 186px card content, zero quality,
+the exact reference copy, and 520px at 125% zoom. The 20k-copy fixture mounts 48 cards and
+updates in 473–503 ms including settling. Captures use disposable profiles under
+`local-cache/damage-types-test-*`, `roll-profile-test-*`, and `collection-owner-test-*`.
+
 ## Sidebar edge and icon regression
 
 The focused workspace shell is exercised at wide and compact widths. The gate requires the

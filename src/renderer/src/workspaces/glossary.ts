@@ -8,6 +8,7 @@ export interface GlossarySection {
   table?: { caption: string; headings: readonly string[]; rows: readonly (readonly string[])[] }
   expandable?: boolean
   caution?: boolean
+  damageLegend?: boolean
 }
 
 export interface GlossaryEntry {
@@ -31,6 +32,14 @@ export const glossaryEntries: readonly GlossaryEntry[] = [{
     explanation: '78% is the average quality of the included rolls. 98th is the estimated percentile of that average among sampled rolls of the same item template. A 78% average can already be rare; it is not 78% of an item’s power.'
   },
   sections: [
+    {
+      id: 'damage-colors', title: 'Damage colors & roll icons', damageLegend: true,
+      paragraphs: [
+        'Damage types use the familiar Rainbow Filter palette throughout the tools. Paired damage types share a color; Pierce and Bleeding remain separate roll scores even though both use red-orange. Vitality and Pierce use brighter text shades to stay readable on dark backgrounds.',
+        'Compact cards show a colored icon followed by quality and percentile. The sword means Offense, the shield Defense, the wolf Pet, the compass Utility, and the shield with a bolt Retaliation. Open Roll details to read every category name and score, or hover a score for its explanation. Full names also remain available to screen readers.',
+        'Colors identify damage families, not item rarity, roll quality, or build suitability. Conversions color their source and target separately. Damage type names remain written out in item details and tooltips.'
+      ]
+    },
     {
       id: 'what-is-rated', title: 'What the numbers tell you',
       paragraphs: ['An actual value is the bonus on your copy, such as 9 Vitality damage. A variable roll can differ between copies; a fixed bonus cannot. Quality describes where a variable value sits between its sampled minimum (0%) and maximum (100%).'],

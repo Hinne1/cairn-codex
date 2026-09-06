@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
 import ResearchSkillFx from './ResearchSkillFx.vue'
+import DamageText from './DamageText.vue'
 import { itemSkillVisualTransformations } from '../workspaces/skill-explorer'
 import type {
   ResearchItemTableColumn,
@@ -178,7 +179,7 @@ function scrollTableHorizontally(event: WheelEvent): void {
           <span role="gridcell" class="research-modifiers">
             <ResearchSkillFx :item="row.item" />
             <span v-for="(fact, index) in row.modifiers.filter(fact => fact.kind !== 'visual')" :key="`${fact.kind}:${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'" :data-modifier-kind="fact.kind">
-              <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}{{ fact.text }}
+              <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}<DamageText v-if="fact.kind !== 'rank'" :text="fact.text" :types-only="Boolean(fact.targetDamageType)" /><template v-else>{{ fact.text }}</template>
             </span>
             <small v-if="row.modifiers.length === 0 && itemSkillVisualTransformations(row.item).length === 0">—</small>
           </span>

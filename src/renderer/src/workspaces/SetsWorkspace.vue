@@ -8,6 +8,7 @@ import SemanticBadge from '../components/SemanticBadge.vue'
 import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import { formatPresentationLine } from '../item-presentation'
+import PresentationLine from '../components/PresentationLine.vue'
 import { setItemBadges, setItemDiscovered, setItemUnqualified, setRarity, setReadiness } from '../set-semantics'
 import { setCompletionPercent, setLevelLabel, setMemberVisualChanges, type SetsSession } from './sets'
 const props = defineProps<{ session: SetsSession; available: boolean }>()
@@ -208,12 +209,12 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
           <div class="set-tier-base">
             <h4>({{ tier.requiredPieces }}) Set</h4>
             <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div v-if="tier.petLines?.length" class="set-tier-group pet-bonus">
               <h5>Bonus to All Pets</h5>
               <p v-for="(line, index) in tier.petLines" :key="`pet:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </div>
@@ -228,7 +229,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
               <SemanticBadge v-if="modifier.kind === 'visual-modifier'" tone="fx" compact>FX change</SemanticBadge>
             </h5>
             <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
           </div>
           <div v-if="tier.grantedSkill" class="set-tier-group skill-bonus">
@@ -236,7 +237,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
             <p v-if="tier.grantedSkill.trigger">{{ tier.grantedSkill.trigger }}</p>
             <p v-if="tier.grantedSkill.description">{{ tier.grantedSkill.description }}</p>
             <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div
               v-for="linked in tier.grantedSkill.linkedSkills ?? []"
@@ -246,7 +247,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
               <h6>{{ linked.name }}</h6>
               <p v-if="linked.description">{{ linked.description }}</p>
               <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </div>

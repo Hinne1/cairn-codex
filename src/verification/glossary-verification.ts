@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import type { WebContents } from 'electron'
+import { glossarySources } from '../shared/glossary-sources'
 
 // Used only by the dedicated verification entry.
 export async function verifyGlossary(contents: WebContents): Promise<void> {
@@ -83,7 +84,7 @@ export async function verifyGlossary(contents: WebContents): Promise<void> {
     await evaluate(`history.forward()`)
     await settle()
     await assertEntry()
-    await check(`document.querySelectorAll('.glossary-sources a[target="_blank"][rel="noopener noreferrer"]').length === 3`, 'Sources must be accessible external links')
+    await check(`document.querySelectorAll('.glossary-sources a[target="_blank"][rel="noopener noreferrer"]').length === ${glossarySources.length}`, 'Sources must be accessible external links')
     if (await evaluate('innerWidth <= 900')) {
       await key('[data-destination-id="glossary"]', 'Tab')
       await evaluate(`document.querySelector('[data-destination-id="glossary"]').focus()`)

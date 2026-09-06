@@ -35,6 +35,11 @@ The measured evidence and product/architecture follow-up are tracked in
 
 ## Build and package
 
+- The tag workflow must pass live dependency-security controls and the current
+  lockfile audit before verification and package creation. Package commands never
+  publish implicitly; publication is a separate final step after artifact audits.
+  The manifest records provenance, not completion of the manual release matrix.
+
 - [x] TypeScript and Vue production builds pass.
 - [x] The packaged helper is self-contained and does not require a separately
       installed .NET runtime.

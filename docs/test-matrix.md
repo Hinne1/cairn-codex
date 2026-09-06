@@ -378,6 +378,6 @@ only the toolbar announcing. Search counts are atomic, navigation SVGs are decor
 emulated reduced motion disables smooth scrolling. The companion contract and existing focused
 workspace gates cover paging, stable keys, filters, setup, notification deduplication and priority.
 
-Dialog captures are written to `local-cache/ui-benchmark/accessibility-*.png`; final route
-captures also go to `local-cache/accessibility-audit`. All profiles and data are disposable.
+Dialog and final route captures are preserved under `local-cache/accessibility-audit` before
+the next benchmark resets its temporary working directory. All profiles and data are disposable.
 The audit verifies Chromium semantics and behavior, not recorded screen-reader speech.

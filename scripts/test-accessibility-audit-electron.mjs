@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { copyFile, mkdir } from 'node:fs/promises'
+import { copyFile, mkdir, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const captures = resolve('local-cache/accessibility-audit')
@@ -14,6 +14,12 @@ for (const [width, recovery] of [[1440, false], [520, false], [520, true]]) {
   ], { cwd: resolve('.'), env: { ...process.env, CAIRN_CODEX_SCREENSHOT_VERIFY_A11Y_AUDIT: '1' }, stdio: 'inherit', windowsHide: true })
   if (result.error) throw result.error
   assert.equal(result.status, 0, `Accessibility audit: ${name}`)
-  await copyFile(resolve(`local-cache/ui-benchmark/${name}.png`), resolve(captures, `${name}.png`))
+  // Each benchmark resets its working directory; preserve every modal capture
+  // before the next viewport starts.
+  for (const file of await readdir(resolve('local-cache/ui-benchmark'))) {
+    if (file.startsWith(name) && file.endsWith('.png')) {
+      await copyFile(resolve('local-cache/ui-benchmark', file), resolve(captures, file))
+    }
+  }
 }
 console.log('Core keyboard, modal, accessibility-tree and motion audit passed at wide and compact widths.')

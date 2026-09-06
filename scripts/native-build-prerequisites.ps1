@@ -59,8 +59,11 @@ function ConvertTo-CairnMSBuildValue {
   param([string] $Value)
   # Escape MSBuild's special characters, including list separators, once. This
   # is an MSBuild property value passed as one argument, never shell source.
-  [regex]::Replace($Value, '[%$@();''?*]', {
+  $escaped = [regex]::Replace($Value, '[%$@();''?*]', {
     param($match)
     '%' + ([int][char]$match.Value).ToString('X2')
   })
+  # Windows PowerShell 5.1 can leave a trailing backslash escaping its generated
+  # closing quote for paths with spaces. Let MSBuild decode that final separator.
+  $escaped -replace '\\$', '%5C'
 }

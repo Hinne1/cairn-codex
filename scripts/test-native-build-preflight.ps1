@@ -67,6 +67,9 @@ $script = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-live-hook.ps1
 if ((ConvertTo-CairnMSBuildValue 'C:\two words;C:\%24$(ignored)') -cne 'C:\two words%3BC:\%2524%24%28ignored%29') {
   throw 'MSBuild paths must preserve spaces and escape list/expression characters exactly once.'
 }
+if ((ConvertTo-CairnMSBuildValue 'C:\two words\') -cne 'C:\two words%5C') {
+  throw 'SDK roots with spaces must survive Windows PowerShell 5.1 argument quoting.'
+}
 foreach ($property in @('IncludePath', 'LibraryPath', 'UniversalCRTSdkDir', 'UCRTVersion')) {
   if (-not $script.Contains("/p:$property=")) { throw "Validated native inputs must override upstream $property." }
 }

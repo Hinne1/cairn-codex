@@ -20,8 +20,11 @@ test. `-DisposableWindows` is an explicit operator assertion, not VM detection.
 
 ## Use a fresh Windows x64 VM
 
-Use a disposable Windows 10 or 11 VM/account with no Cairn installation, profile,
-shortcut, running portable copy, personal saves or shared writable host folders.
+Use a fresh disposable Windows 10 or 11 VM with a disposable account, or a wholly
+disposable test machine, with no Cairn installation, profile, shortcut, running
+portable copy, personal saves or shared writable host folders. A separate account
+on an ordinary contributor host is insufficient: prerequisite installation, UAC
+and other machine-wide installer effects still reach that host.
 Start from a snapshot with no development SDKs or Visual C++ x64 runtime. Preserve
 Defender and SmartScreen defaults. Copy the audited artifacts and matching source
 checkout/test dependencies into the VM. Test both supported Windows versions.

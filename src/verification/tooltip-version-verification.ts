@@ -76,9 +76,11 @@ export async function verifyTooltipVersions(contents: WebContents): Promise<void
     }
     await key('v', 0, true)
     assert.equal(await title(), 'Version Test Awakened', 'Held V does not repeatedly toggle')
-    await evaluate(`(() => { for (const option of ['isComposing', 'prevented']) { const event = new KeyboardEvent('keydown', { key: 'v', bubbles: true, cancelable: true, isComposing: option === 'isComposing' }); if (option === 'prevented') event.preventDefault(); document.activeElement.dispatchEvent(event); } })()`)
-    await settle()
-    assert.equal(await title(), 'Version Test Awakened', 'Composition and handled keyboard events do not toggle')
+    for (const option of ['isComposing', 'prevented']) {
+      await evaluate(`(() => { const event = new KeyboardEvent('keydown', { key: 'v', bubbles: true, cancelable: true, isComposing: ${option === 'isComposing'} }); if (${option === 'prevented'}) event.preventDefault(); document.activeElement.dispatchEvent(event); })()`)
+      await settle()
+      assert.equal(await title(), 'Version Test Awakened', `${option} keyboard events do not toggle`)
+    }
     await key('v')
     assert.equal(await title(), 'Version Test Original', 'Focused item switches back')
     assert.equal(await evaluate(`document.activeElement?.getAttribute('data-result-key')`), 'records/items/synthetic/version_original.dbr', 'Version switching retains source focus')

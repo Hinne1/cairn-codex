@@ -1278,6 +1278,9 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
           `)
         }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_FARMING_PAGING === '1') {
+          window.webContents.debugger.attach('1.3')
+          await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+          try {
           interactionTimings.farmingPagingMs = await window.webContents.executeJavaScript(`
             (async () => {
               const started = performance.now()
@@ -1369,7 +1372,10 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               const focusRect = item.getBoundingClientRect()
               const expectedTop = Math.max(14, Math.min(focusRect.top, innerHeight - Math.min(760, innerHeight - 28) - 14))
               if (!focusedTooltip || Math.abs(focusedTooltip.getBoundingClientRect().top - expectedTop) > 1) {
-                throw new Error('Collection Farming keyboard focus did not anchor its tooltip to the source.')
+                throw new Error('Collection Farming keyboard focus did not anchor its tooltip to the source: ' + JSON.stringify({
+                  sourceTop: focusRect.top, expectedTop, actualTop: focusedTooltip?.getBoundingClientRect().top,
+                  focused: document.activeElement === item, documentFocused: document.hasFocus()
+                }))
               }
               const expectedItemName = item.textContent?.trim()
               item.click()
@@ -1384,6 +1390,9 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
               return performance.now() - started
             })()
           `)
+          } finally {
+            window.webContents.debugger.detach()
+          }
         }
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_SUPPLY_SELECTION === '1') {
           await window.webContents.executeJavaScript(`

@@ -381,3 +381,29 @@ workspace gates cover paging, stable keys, filters, setup, notification deduplic
 Dialog and final route captures are preserved under `local-cache/accessibility-audit` before
 the next benchmark resets its temporary working directory. All profiles and data are disposable.
 The audit verifies Chromium semantics and behavior, not recorded screen-reader speech.
+
+## Item context menus and shared row states (#135)
+
+`test:item-context-menu` verifies keyboard entry, independent action capabilities, current-state
+labels, plan/global scope descriptions, and viewport clamping. `test:item-context-menu:electron`
+runs the real application with 20,000 generated catalog items at 1440px and 520px, including
+compact 125% zoom. Both gates are included in full verification.
+
+The native gate opens Skills, Planner Table and Journey menus through Shift+F10, the Menu key,
+right-click and visible More actions. It checks the named accessibility-tree menu, arrow/Home/End
+navigation, Enter/Space actions, Escape and comparison focus return, forward/reverse Tab, tooltip
+dismissal, outside click, scroll-away retention, source filtering, and actual plan switching.
+Favorite, ignored-only and combined labels and computed stripes are checked in both Planner views,
+including the compact sticky cell. Existing visible favorite controls remain independently usable.
+Filtering to one ignored base and restoring it exercises normal and empty result states.
+
+At standard zoom, measured Skills navigation took 857ms and Planner navigation 587–596ms,
+including 580ms of prescribed settling. Menu opening took 191–196ms including 180ms settling.
+Skills mounts 50 of 20,000 items; the level-filtered Planner mounts 50 of 15,992 tiers in each
+view. Cached startup paint took 1.25–1.32s and interactivity 1.30–1.36s. Neither width produced
+document overflow. Timings are implementation-host observations, not performance thresholds.
+
+Per-state screenshots and performance reports are preserved in
+`local-cache/item-context-verification` before each benchmark resets its disposable profile.
+The fixture has no personal archives, assets or game process; menu operations only exercise
+existing planner preferences in that disposable profile.

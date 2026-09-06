@@ -19,6 +19,7 @@ export function presentScreenshotCollection(
     case 'tooltip-versions':
     case 'tooltip-scroll':
     case 'accessibility-audit':
+    case 'item-context-menu':
     case 'workspace-queries':
     case 'mi-workshop':
       return { ...snapshot, basis }

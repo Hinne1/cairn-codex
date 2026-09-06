@@ -24,6 +24,7 @@ const emit = defineEmits<{
   'move-tooltip': [event: MouseEvent]
   'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
+  'dismiss-tooltip': []
   'open-item': [item: CollectionItem]
   'icon-error': [item: CollectionItem]
 }>()
@@ -248,6 +249,7 @@ function searchErrorMessage(query: CompiledSearchQuery): string | null {
         v-if="plannerDisplay === 'table'"
         v-model:page="plannerPage"
         :rows="plannerResearchRows"
+        :context-key="selectedPlannerProfileId"
         :icon-url-for-item="itemIconUrl"
         :sort="plannerSortMode"
         :direction="plannerSortDirection"
@@ -265,6 +267,7 @@ function searchErrorMessage(query: CompiledSearchQuery): string | null {
         @move-tooltip="moveTooltip"
         @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @dismiss-tooltip="emit('dismiss-tooltip')"
         @favorite="togglePlannerFavorite"
         @ignore="togglePlannerIgnored"
       />
@@ -272,6 +275,7 @@ function searchErrorMessage(query: CompiledSearchQuery): string | null {
         v-else
         v-model:page="plannerPage"
         :rows="plannerResearchRows"
+        :context-key="selectedPlannerProfileId"
         :icon-url-for-item="itemIconUrl"
         :ignored-view="plannerShowIgnored"
         @activate="openItem"
@@ -280,6 +284,7 @@ function searchErrorMessage(query: CompiledSearchQuery): string | null {
         @move-tooltip="moveTooltip"
         @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @dismiss-tooltip="emit('dismiss-tooltip')"
         @favorite="togglePlannerFavorite"
         @ignore="togglePlannerIgnored"
       />

@@ -2943,6 +2943,11 @@ function hideTooltip(): void {
   cancelTooltipScrollAnimation()
 }
 
+function dismissItemMenuTooltip(): void {
+  tooltipDismissal.dismiss()
+  hideTooltip()
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
@@ -3476,6 +3481,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @dismiss-tooltip="dismissItemMenuTooltip"
         @open-item="openItem"
       />
 
@@ -3508,6 +3514,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @dismiss-tooltip="dismissItemMenuTooltip"
         @open-item="openItem"
         @icon-error="handleItemIconError"
       />

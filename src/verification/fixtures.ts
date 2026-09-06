@@ -4,6 +4,20 @@ import { ROLL_ANALYSIS_VERSION } from '../shared/roll-analysis.ts'
 import { workspaceQueryCollection } from './workspace-query-collection.ts'
 
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'item-context-menu') {
+    const fixture = createScreenshotCollectionFixture('skill-explorer')
+    const planner = createScreenshotCollectionFixture('planner')
+    const items = Array.from({ length: 20_000 }, (_, index): CollectionItem => ({
+      ...fixture.items[index % fixture.items.length]!,
+      record: `records/items/synthetic/context_${index}.dbr`,
+      name: `Context Item ${String(index + 1).padStart(5, '0')}`
+    }))
+    return { ...fixture, items, skillClassNames: planner.skillClassNames,
+      skillMasteries: { ...fixture.skillMasteries, ...planner.skillMasteries },
+      rarities: fixture.rarities.map(summary => ({ ...summary,
+      total: items.filter(item => item.rarity === summary.rarity).length
+    })) }
+  }
   if (name === 'accessibility-audit') {
     const fixture = createScreenshotCollectionFixture('tooltip-scroll')
     const [base, awakened] = createScreenshotCollectionFixture('tooltip-versions').items

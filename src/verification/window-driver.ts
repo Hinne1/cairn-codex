@@ -3366,6 +3366,10 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
           const { verifyAccessibilityAudit } = await import('./accessibility-audit')
           await verifyAccessibilityAudit(window.webContents)
         }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_ITEM_CONTEXT === '1') {
+          const { verifyItemContextMenus } = await import('./item-context-verification')
+          Object.assign(interactionTimings, await verifyItemContextMenus(window.webContents))
+        }
         const renderedState = await window.webContents.executeJavaScript(`({
           heading: document.querySelector('.hero h2')?.textContent,
           results: document.querySelector('.explorer-result-count, .result-count')?.textContent,

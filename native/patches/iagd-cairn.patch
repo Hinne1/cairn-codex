@@ -107,7 +107,7 @@ index 34d6bfb..558df27 100644
      wchar_t tmpfolder[MAX_PATH]; // "%appdata%\..\local\temp\"
      GetTempPath(MAX_PATH, tmpfolder);
 diff --git a/HookDll/Hook/InventorySack_AddItem.cpp b/HookDll/Hook/InventorySack_AddItem.cpp
-index ee3b0ed..ad368a8 100644
+index ee3b0ed..8758e00 100644
 --- a/HookDll/Hook/InventorySack_AddItem.cpp
 +++ b/HookDll/Hook/InventorySack_AddItem.cpp
 @@ -51,6 +51,8 @@ InventorySack_AddItem::GameEngine_Update InventorySack_AddItem::dll_GameEngine_U
@@ -221,30 +221,57 @@ index ee3b0ed..ad368a8 100644
  		fnPlayDropSound(item);
  		return true;
  	}
-@@ -769,6 +779,73 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+@@ -730,6 +740,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+ 		// a transition, and is deliberately outside the m_isActive gate so the log is
+ 		// comparable between "IA attached and active" and "IA attached but idle".
+ 		fnLogWorldStateTransition((GAME::GameEngine*)This, L"GameEngine::Update");
++		auto reportActiveCharacter = [](const std::wstring& currentName) {
++			boost::lock_guard<boost::mutex> guard(m_mutex);
++			if (currentName == m_activeCharacterName) return;
++			m_activeCharacterName = currentName;
++			DataItemPtr characterEvent(new DataItem(
++				TYPE_CAIRN_ACTIVE_CHARACTER,
++				(unsigned int)(currentName.size() * sizeof(wchar_t)),
++				(char*)currentName.c_str()));
++			m_dataQueue->push(characterEvent);
++			SetEvent(m_hEvent);
++		};
+ 
+ 		// IA not running? Continue
+ 		if (!m_isActive) {
+@@ -741,6 +762,7 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+ 		if (!fnIsWorldAlive((GAME::GameEngine*)This)) {
+ 			//LogToFile(L"Debug: NotReady");
+ 			m_isTransferStashOpen = false; // Just to be on the safe side
++			reportActiveCharacter(L"");
  			return dll_GameEngine_Update(This, v);
  		}
  
+@@ -755,6 +777,7 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+ 		auto engine = fnGetEngine();
+ 		if (engine == nullptr) {
+ 			LogToFile(LogLevel::INFO, L"Debug: NoEngine");
++			reportActiveCharacter(L"");
+ 			return dll_GameEngine_Update(This, v);
+ 		}
+ 
+@@ -766,8 +789,65 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+ 			LogToFile(LogLevel::WARNING,
+ 				L"GameInfo is null (world tearing down?), skipping IA work this tick. msSinceLastAddItem="
+ 				+ std::to_wstring(fnMsSinceLastAddItem()));
++			reportActiveCharacter(L"");
+ 			return dll_GameEngine_Update(This, v);
+ 		}
++		GAME::Player* player = fnGetMainPlayer((GAME::GameEngine*)This);
++		const wchar_t* playerName = player == nullptr ? nullptr : fnGetPlayerName(player);
++		reportActiveCharacter(playerName == nullptr ? L"" : playerName);
++
 +		// Cairn augments are soulbound and cannot travel through the shared transfer
 +		// stash. Files with the explicit cairn-personal- prefix are instead delivered
 +		// to the current character's inventory. The file remains in outgoing when no
 +		// player is available, and is returned to ingoing if the inventory is full.
 +		{
 +			boost::lock_guard<boost::mutex> guard(m_mutex);
-+			GAME::Player* player = fnGetMainPlayer((GAME::GameEngine*)This);
-+			if (player != nullptr) {
-+				const wchar_t* playerName = fnGetPlayerName(player);
-+				const std::wstring currentName = playerName == nullptr ? L"" : playerName;
-+				if (!currentName.empty() && currentName != m_activeCharacterName) {
-+					m_activeCharacterName = currentName;
-+					DataItemPtr characterEvent(new DataItem(
-+						TYPE_CAIRN_ACTIVE_CHARACTER,
-+						(unsigned int)(currentName.size() * sizeof(wchar_t)),
-+						(char*)currentName.data()));
-+					m_dataQueue->push(characterEvent);
-+					SetEvent(m_hEvent);
-+				}
-+			}
 +			if (player != nullptr && !m_personalDepositQueue.empty()) {
 +				bool success = false;
 +				for (auto it = m_personalDepositQueue.begin(); it != m_personalDepositQueue.end(); ++it) {
@@ -291,11 +318,10 @@ index ee3b0ed..ad368a8 100644
 +				m_personalDepositQueue.clear();
 +			}
 +		}
-+
+ 
  		if (m_isTransferStashOpen) {
  			void* sackPtr = GetSackToDepositTo((GAME::GameEngine*)This);
- 			if (sackPtr != nullptr) {
-@@ -825,17 +902,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+@@ -825,17 +905,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
  				if (!m_depositQueue.empty()) {
  					if (success) {
  						if (m_depositQueue.size() == 1) {
@@ -316,7 +342,7 @@ index ee3b0ed..ad368a8 100644
  
  					}
  					// fnPlayDropSound(item);
-@@ -910,7 +987,13 @@ void InventorySack_AddItem::ThreadMain(void*) {
+@@ -910,7 +990,13 @@ void InventorySack_AddItem::ThreadMain(void*) {
  
  					if (boost::algorithm::ends_with(filename, ".csv")) {
  						LogToFile(LogLevel::INFO, std::wstring(L"Found file: ") + std::wstring(entry.path().c_str()));

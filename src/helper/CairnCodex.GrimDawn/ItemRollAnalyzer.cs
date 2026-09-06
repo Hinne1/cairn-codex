@@ -363,6 +363,9 @@ internal static class ItemRollAnalyzer
                 {
                     familyGroups = familyGroups.Concat(elementalOffense);
                 }
+                familyGroups = familyGroups.Concat(categorized
+                    .Where(group => RollCategoryClassifier.SharesResistanceWithDot(field(group.Group), family.Key))
+                    .Select(group => group.Group));
                 AddCategoryDefinition(
                     definitions,
                     $"offense:{family.Key}",
@@ -605,7 +608,7 @@ internal sealed record ItemRollAnalysis(
     IReadOnlyList<RolledStat> PetStats,
     IReadOnlyList<string> UnmodeledFields,
     IReadOnlyList<RolledProcLine> ProcLines,
-    int ModelVersion = 9)
+    int ModelVersion = 10)
 {
     public static ItemRollAnalysis Unsupported(ItemRollInput item, string reason) =>
         new(

@@ -1,4 +1,5 @@
 import { computed, createApp, h, ref, shallowRef } from 'vue'
+import { ROLL_ANALYSIS_VERSION } from '../../src/shared/roll-analysis.ts'
 import CollectionDashboard from '../../src/renderer/src/workspaces/CollectionDashboard.vue'
 import CollectionMaterials from '../../src/renderer/src/workspaces/CollectionMaterialsWorkspace.vue'
 import Sets from '../../src/renderer/src/workspaces/SetsWorkspace.vue'
@@ -24,7 +25,7 @@ const makeItem = index => ({ ...template.items[0], record: `records/synthetic/ow
   bestRollPercentile: 50, pinnedInstanceKey: null, recipeUnlocked: false, availableViaAwakening: false })
 const makeCopy = (index, baseRecord) => ({ sourcePath: 'Synthetic transfer.gst', tabIndex: 0, itemIndex: index,
   baseRecord, instanceKey: `copy-${index}`, seed: index, prefixRecord: 'synthetic-prefix', suffixRecord: '',
-  rollAnalysis: { trusted: true, modelVersion: 9, categoryScores: [], stats: [{ field: 'offensiveFire',
+  rollAnalysis: { trusted: true, modelVersion: ROLL_ANALYSIS_VERSION, categoryScores: [], stats: [{ field: 'offensiveFire',
     value: index % 11, rollable: true, observedMinimum: 0, observedMaximum: 10, estimatedPercentile: 50 }], petStats: [] } })
 const snapshot = shallowRef(null)
 const copies = shallowRef([])

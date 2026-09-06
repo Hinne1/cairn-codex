@@ -1,6 +1,7 @@
 import type { OperationHistoryOutcome } from '@shared/contracts'
 import type { OracleReadiness, OracleStyle } from './stash-oracle'
 import { glossaryEntry } from './workspaces/glossary.ts'
+import { ROLL_DAMAGE_TYPES, type RollDamageType } from '../../shared/roll-analysis.ts'
 
 export const APP_ROUTE_VERSION = 1 as const
 export const APP_ROUTE_HASH_KEY = 'cc-route'
@@ -24,8 +25,7 @@ export type OwnershipFilter = 'all' | 'owned' | 'missing'
 export type RarityFilter = 'all' | 'epic' | 'legendary' | 'mi' | 'double-rare' | 'rare' | 'recipe'
 export type SortDirection = 'asc' | 'desc'
 export type CollectionRollFocus =
-  | 'offense' | 'physical' | 'pierce' | 'bleeding' | 'fire' | 'cold' | 'lightning'
-  | 'acid' | 'vitality' | 'aether' | 'chaos' | 'elemental' | 'retaliation' | 'defense' | 'utility' | 'pet'
+  | RollDamageType | 'offense' | 'retaliation' | 'defense' | 'utility' | 'pet'
 export type RollSortMode = `roll-${CollectionRollFocus}`
 export type SortMode = 'name' | 'level' | 'completion' | 'recent' | RollSortMode
 export type SetProgressFilter = 'all' | 'complete' | 'progress' | 'unstarted'
@@ -186,8 +186,7 @@ const ownershipFilters: readonly OwnershipFilter[] = ['all', 'owned', 'missing']
 const rarityFilters: readonly RarityFilter[] = ['all', 'epic', 'legendary', 'mi', 'double-rare', 'rare', 'recipe']
 const directions: readonly SortDirection[] = ['asc', 'desc']
 const rollSortModes: readonly RollSortMode[] = [
-  'roll-offense', 'roll-physical', 'roll-pierce', 'roll-bleeding', 'roll-fire', 'roll-cold',
-  'roll-lightning', 'roll-acid', 'roll-vitality', 'roll-aether', 'roll-chaos', 'roll-elemental',
+  'roll-offense', ...ROLL_DAMAGE_TYPES.map(({ id }) => `roll-${id}` as const),
   'roll-retaliation', 'roll-defense', 'roll-utility', 'roll-pet'
 ]
 const sortModes: readonly SortMode[] = ['name', 'level', 'completion', 'recent', ...rollSortModes]

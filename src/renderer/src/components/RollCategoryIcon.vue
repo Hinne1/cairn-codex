@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RollCategoryScore } from '@shared/contracts'
+import { isDamageOverTime } from '../../../shared/roll-analysis.ts'
 
 defineProps<{ category: RollCategoryScore['category']; damageType?: string | null }>()
 </script>
@@ -14,6 +15,10 @@ defineProps<{ category: RollCategoryScore['category']; damageType?: string | nul
         <path d="M8 15a4 4 0 0 0 4 4" />
       </template>
       <path v-else-if="damageType === 'pierce'" d="m21 3-4 11-3-4-4-3zM14 10 3 21M3 16v5h5" />
+      <template v-else-if="isDamageOverTime(damageType)">
+        <path d="M5 3h14M5 21h14M7 3v4l10 10v4M17 3v4L7 17v4" />
+        <path d="M9 6h6M9 18h6" />
+      </template>
       <path v-else d="m8 16 12-12v5L11 18M6 13l5 5M3 21l5-5M3 18l3 3" />
     </template>
     <template v-else-if="category === 'defense'">

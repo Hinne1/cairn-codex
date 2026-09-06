@@ -2,12 +2,16 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import ToolHeader from '../components/ToolHeader.vue'
 import { glossaryEntries, glossaryEntry } from './glossary'
-import { DAMAGE_FAMILIES, damageStyle } from '../damage-types'
+import { DAMAGE_FAMILIES, damageFamily, damageStyle } from '../damage-types'
+import { ROLL_DAMAGE_TYPES } from '../../../shared/roll-analysis.ts'
 import RollCategoryIcon from '../components/RollCategoryIcon.vue'
 
 const props = defineProps<{ entryId: string }>()
 const emit = defineEmits<{ 'select-entry': [id: string] }>()
 const entry = computed(() => glossaryEntry(props.entryId))
+const damageLegend = DAMAGE_FAMILIES.map(family => ({ ...family,
+  types: ROLL_DAMAGE_TYPES.filter(type => damageFamily(type.id) === family.id)
+}))
 const heading = ref<HTMLElement | null>(null)
 const focusEntry = () => nextTick(() => heading.value?.focus())
 onMounted(focusEntry)
@@ -58,12 +62,10 @@ function jumpTo(id: string): void {
           <summary v-if="section.expandable">{{ section.title }}</summary>
           <h4 v-else tabindex="-1">{{ section.title }}</h4>
           <ul v-if="section.damageLegend" class="damage-legend" aria-label="Rainbow Filter damage colors">
-            <li v-for="family in DAMAGE_FAMILIES" :key="family.id" :style="damageStyle(family.id)">
-              <template v-if="family.id === 'pierce'">
-                <span class="damage-legend-type"><RollCategoryIcon category="offense" damage-type="pierce" />Pierce</span>
-                <span class="damage-legend-type"><RollCategoryIcon category="offense" damage-type="bleeding" />Bleeding</span>
-              </template>
-              <template v-else><RollCategoryIcon category="offense" :damage-type="family.id" />{{ family.label }}</template>
+            <li v-for="family in damageLegend" :key="family.id" :style="damageStyle(family.id)">
+              <span v-for="type in family.types" :key="type.id" class="damage-legend-type">
+                <RollCategoryIcon category="offense" :damage-type="type.id" />{{ type.label }}
+              </span>
             </li>
           </ul>
           <template v-for="(paragraph, index) in section.paragraphs" :key="paragraph">

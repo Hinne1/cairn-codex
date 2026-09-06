@@ -1,4 +1,5 @@
 import { glossarySources } from '../../../shared/glossary-sources.ts'
+import { ROLL_ANALYSIS_VERSION } from '../../../shared/roll-analysis.ts'
 
 export interface GlossarySection {
   id: string
@@ -35,9 +36,9 @@ export const glossaryEntries: readonly GlossaryEntry[] = [{
     {
       id: 'damage-colors', title: 'Damage colors & roll icons', damageLegend: true,
       paragraphs: [
-        'Damage types use the familiar Rainbow Filter palette throughout the tools. Paired damage types share a color; Pierce and Bleeding remain separate roll scores even though both use red-orange. Vitality and Pierce use brighter text shades to stay readable on dark backgrounds.',
-        'Compact cards show a colored icon followed by quality and percentile. The arrowhead identifies Pierce and the blood drop identifies Bleeding, so their shared color does not hide which score belongs to your build. Other offense scores use a sword. The shield means Defense, the wolf Pet, the compass Utility, and the shield with a bolt Retaliation. Open Roll details to read every category name and score, or hover a score for its explanation. Full names also remain available to screen readers.',
-        'Each damage type has one roll score for the exact base item, prefix, and suffix together. Same-type contributions are combined before that score is calculated; adding Bleeding on an affix does not create another Bleeding score. Pierce and Bleeding are rated separately.',
+        'Damage types use the familiar Rainbow Filter palette throughout the tools. Direct damage and damage over time (DoT) remain separate roll scores even when they share a color. Vitality and Pierce use brighter text shades to stay readable on dark backgrounds.',
+        'Compact cards show a colored icon followed by quality and percentile. An hourglass identifies Internal Trauma, Burn, Frostburn, Electrocute, Poison, and Vitality Decay. Bleeding keeps its blood drop, Pierce its arrowhead, and other offense scores use a sword. The shield means Defense, the wolf Pet, the compass Utility, and the shield with a bolt Retaliation. Open Roll details to read every category name and score, or hover a score for its explanation. Full names also remain available to screen readers.',
+        'Each damage type has one roll score for the exact base item, prefix, and suffix together. Same-type contributions are combined before that score is calculated; adding Poison on an affix does not create another Poison score. Acid and Poison are rated separately, as are the other direct-damage and DoT types. Older combined ratings wait for recalculation before appearing in category scores or sorts.',
         'Colors identify damage families, not item rarity, roll quality, or build suitability. Conversions color their source and target separately. Damage type names remain written out in item details and tooltips.'
       ]
     },
@@ -61,7 +62,7 @@ export const glossaryEntries: readonly GlossaryEntry[] = [{
       id: 'categories', title: 'Choose the category your build uses',
       paragraphs: ['There is no universal “best” score. A multi-type item can roll well for one damage family and poorly for another. Categories appear only when they contain rated variable stats.'],
       bullets: [
-        'Offense: separate damage-family scores such as Pierce, Bleeding, or Fire. Shared offensive rolls, including Offensive Ability and attack/cast speed, contribute to every present offense family. Damage-over-time rolls follow their family, such as Burn with Fire.',
+        'Offense: separate damage-type scores, including distinct Physical/Internal Trauma, Fire/Burn, Cold/Frostburn, Lightning/Electrocute, Acid/Poison, and Vitality/Vitality Decay scores. Pierce and Bleeding are also separate. Shared offensive rolls, including Offensive Ability and attack/cast speed, contribute to every present offense type. DoT amount, damage bonus, and duration rolls contribute only to that DoT type.',
         'Retaliation: its own category, not part of ordinary offense. It matters greatly to retaliation builds, but not to most others.',
         'Defense: defensive rolls such as resistances, health, and Defensive Ability.',
         'Utility: other modeled rolls, including energy and miscellaneous benefits. Newly modeled fields without a more specific classification fall back here.',
@@ -81,7 +82,7 @@ export const glossaryEntries: readonly GlossaryEntry[] = [{
     {
       id: 'calculation', title: 'How the calculation works', expandable: true,
       paragraphs: [
-        'Roll model v9 evaluates 4,096 deterministic seeds for the exact item template. Reusing the same seeds makes results repeatable and preserves relationships between stats rolled together. These are sample estimates, not exhaustive probabilities for every possible drop.',
+        `Roll model v${ROLL_ANALYSIS_VERSION} evaluates 4,096 deterministic seeds for the exact item template. Reusing the same seeds makes results repeatable and preserves relationships between stats rolled together. These are sample estimates, not exhaustive probabilities for every possible drop.`,
         'For each variable stat: quality = 100 × (actual − sampled minimum) ÷ (sampled maximum − sampled minimum), clamped to 0–100. Fixed stats and unavailable or untrusted values are excluded, not scored as zero. The sampled endpoints are not a guarantee of the theoretical limits.',
         'For a displayed min/max damage range, normalize each variable member separately, leave fixed members out, then average the remaining members. Count that displayed range once. For example, member qualities of 50% and 100% form one 75% group; if one member is fixed, only the variable member counts.',
         'Average the included groups with equal weight to obtain a category’s quality. Calculate that same average for every sampled seed, then rank the copy against those averages. Category rarity is not a rank of the old average of per-stat percentiles.',
@@ -104,7 +105,7 @@ export const glossaryEntries: readonly GlossaryEntry[] = [{
       id: 'elemental', title: 'Elemental is shared, not a fourth element', expandable: true,
       paragraphs: [
         'Flat Elemental damage divides equally into Fire, Cold, and Lightning. For example, 30 Elemental damage means 10 of each. A +30% Elemental damage bonus instead gives the full +30% to each of those three types.',
-        'In the rating, shared Elemental rolls contribute to any present Fire, Cold, or Lightning family, and an Elemental score remains available for the shared rolls themselves. Shared offensive stats also contribute. The normalized quality and percentile are never divided by three: dividing a damage value is different from rating how well it rolled.'
+        'In the rating, Elemental damage rolls contribute to any present Fire, Cold, or Lightning score, and an Elemental score remains available for the shared rolls themselves. These damage bonuses do not contribute to Burn, Frostburn, or Electrocute scores. Elemental resistance reduction does contribute to those DoT scores; Physical resistance reduction likewise contributes to Internal Trauma. Shared offensive stats also contribute. The normalized quality and percentile are never divided by three: dividing a damage value is different from rating how well it rolled.'
       ]
     }
   ],

@@ -10,6 +10,7 @@ import OnboardingDialog from './components/OnboardingDialog.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import { formatPresentationLine } from './item-presentation'
+import PresentationLine from './components/PresentationLine.vue'
 import { createItemInspectionSession } from './inspection/item-inspection'
 import ItemInspectionDrawer from './inspection/ItemInspectionDrawer.vue'
 import { applyCopyFavorite, createCopyFavorites } from './inspection/copy-favorites'
@@ -3752,7 +3753,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               :key="`${line.label}:${index}`"
               :class="`tone-${line.tone}`"
             >
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
           </section>
 
@@ -3779,7 +3780,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
             >
               <h5>({{ tier.requiredPieces }}) Set</h5>
               <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
               <div v-if="tier.petLines?.length" class="tooltip-set-subsection">
                 <h6>Bonus to All Pets</h6>
@@ -3788,7 +3789,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                   :key="`pet:${line.label}:${index}`"
                   :class="`tone-${line.tone}`"
                 >
-                  {{ formatPresentationLine(line) }}
+                  <PresentationLine :line="line" />
                 </p>
               </div>
               <div
@@ -3798,7 +3799,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               >
                 <h6>{{ modifier.heading }}</h6>
                 <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
-                  {{ formatPresentationLine(line) }}
+                  <PresentationLine :line="line" />
                 </p>
               </div>
               <div v-if="tier.grantedSkill" class="tooltip-set-subsection granted-skill">
@@ -3810,7 +3811,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                   {{ tier.grantedSkill.description }}
                 </p>
                 <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
-                  {{ formatPresentationLine(line) }}
+                  <PresentationLine :line="line" />
                 </p>
                 <div
                   v-for="linked in tier.grantedSkill.linkedSkills ?? []"
@@ -3820,7 +3821,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                   <h6>{{ linked.name }}</h6>
                   <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
                   <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                    {{ formatPresentationLine(line) }}
+                    <PresentationLine :line="line" />
                   </p>
                 </div>
               </div>
@@ -3843,7 +3844,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               :key="`${line.label}:${index}`"
               :class="`tone-${line.tone}`"
             >
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div
               v-for="linked in tooltipItem.presentation.grantedSkill.linkedSkills ?? []"
@@ -3853,7 +3854,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               <h5>{{ linked.name }}</h5>
               <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
               <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </section>
@@ -3879,7 +3880,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                 :key="`${line.label}:${index}`"
                 :class="`tone-${line.tone}`"
               >
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </template>
@@ -3897,7 +3898,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               :key="`${line.label}:${index}`"
               :class="`tone-${line.tone}`"
             >
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div
               v-for="linked in affix.presentation.grantedSkill.linkedSkills ?? []"
@@ -3907,7 +3908,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               <h6>{{ linked.name }}</h6>
               <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
               <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </div>

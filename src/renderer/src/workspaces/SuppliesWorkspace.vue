@@ -13,6 +13,7 @@ import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
 import ToolHeader from '../components/ToolHeader.vue'
+import SupplyEffects from '../components/SupplyEffects.vue'
 import { searchGuidance } from '../search-guidance'
 import {
   changeSupplyCategory,
@@ -291,15 +292,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
           <span class="supply-card-copy">
             <strong>{{ item.name }}</strong>
             <small>{{ item.detail }}</small>
-            <ul v-if="item.effects.length" class="supply-effects">
-              <li v-for="(effect, index) in item.effects" :key="`${item.record}:${index}`">
-                {{ effect }}
-              </li>
-              <li v-if="item.effectCount > item.effects.length" class="more">
-                +{{ item.effectCount - item.effects.length }} more in tooltip
-              </li>
-            </ul>
-            <small v-else class="supply-no-effects">No visible stat effect is indexed.</small>
+            <SupplyEffects :effects="item.effects" :details="item.effectDetails" :total="item.effectCount" />
           </span>
           <b>{{ item.reusable ? '∞' : item.stackCount }}</b>
         </article>

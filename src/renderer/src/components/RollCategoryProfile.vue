@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { RollCategoryScore } from '@shared/contracts'
 import { categoryScoreDescription, formatCategoryScore, rollCategoryLabel } from '../roll-rating'
 import RollCategoryIcon from './RollCategoryIcon.vue'
+import { damageFamily, damageStyle } from '../damage-types'
 
 const props = withDefaults(defineProps<{
   scores?: readonly RollCategoryScore[]
@@ -42,20 +43,22 @@ const hidden = computed(() => {
       v-for="score in visible"
       :key="score.key"
       class="roll-category-score"
-      :class="`category-${score.category}`"
+      :class="[`category-${score.category}`, { 'icon-only': compact && (score.category !== 'offense' || damageFamily(score.damageType)) }]"
+      :style="score.category === 'offense' ? damageStyle(score.damageType) : undefined"
       :title="categoryScoreDescription(score)"
     >
       <span class="roll-category-label"><RollCategoryIcon :category="score.category" /><small>{{ rollCategoryLabel(score) }}</small></span>
       <strong>{{ formatCategoryScore(score) }}</strong>
     </span>
-    <details v-if="hidden.length" class="roll-category-more" @click.stop @keydown.enter.stop @keydown.space.stop>
-      <summary :aria-label="`${hidden.length} more roll categories`">+{{ hidden.length }}</summary>
+    <details v-if="compact || hidden.length" class="roll-category-more" @click.stop @keydown.enter.stop @keydown.space.stop>
+      <summary :aria-label="compact ? 'Roll details: category names and scores' : `${hidden.length} more roll categories`">{{ compact ? 'Roll details' : `+${hidden.length}` }}</summary>
       <div class="roll-category-overflow">
         <span
-          v-for="score in hidden"
+          v-for="score in compact ? available : hidden"
           :key="score.key"
           class="roll-category-score"
           :class="`category-${score.category}`"
+          :style="score.category === 'offense' ? damageStyle(score.damageType) : undefined"
           :title="categoryScoreDescription(score)"
         >
           <span class="roll-category-label"><RollCategoryIcon :category="score.category" /><small>{{ rollCategoryLabel(score) }}</small></span>
@@ -74,6 +77,7 @@ const hidden = computed(() => {
 }
 
 .roll-category-score {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--cc-space-2);
@@ -82,12 +86,13 @@ const hidden = computed(() => {
   border: 1px solid var(--cc-border-default);
   border-radius: var(--cc-radius-sm);
   background: var(--cc-surface-1);
+  color: var(--cc-accent);
 }
 
-.roll-category-label { display: inline-flex; min-width: 0; align-items: center; gap: var(--cc-space-1); color: var(--cc-text-muted); }
+.roll-category-label { display: inline-flex; min-width: 0; align-items: center; gap: var(--cc-space-1); color: inherit; }
 .roll-category-score small {
   overflow: hidden;
-  color: var(--cc-text-muted);
+  color: inherit;
   font-size: var(--cc-font-size-2xs);
   letter-spacing: .04em;
   text-overflow: ellipsis;
@@ -97,15 +102,15 @@ const hidden = computed(() => {
 
 .roll-category-score strong {
   margin-left: auto;
-  color: var(--cc-accent);
+  color: inherit;
   font: 650 var(--cc-font-size-md) var(--cc-font-interface);
   white-space: nowrap;
 }
 
-.category-defense strong { color: var(--cc-info); }
-.category-retaliation strong { color: var(--cc-warning); }
-.category-utility strong { color: var(--semantic-fx); }
-.category-pet strong { color: var(--cc-success); }
+.category-defense { color: var(--cc-info); }
+.category-retaliation { color: var(--cc-warning); }
+.category-utility { color: var(--semantic-fx); }
+.category-pet { color: var(--cc-success); }
 
 .compact {
   display: grid;
@@ -123,6 +128,17 @@ const hidden = computed(() => {
   background: transparent;
 }
 .compact .roll-category-score strong { margin-left: 0; }
+.compact .roll-category-score.icon-only { flex-direction: row; align-items: center; }
+.compact .icon-only strong { font-size: var(--cc-font-size-sm); }
+.icon-only small {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 .roll-category-more {
   align-self: center;
@@ -157,6 +173,8 @@ const hidden = computed(() => {
 
 .compact .roll-category-overflow {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
+.compact .roll-category-overflow .roll-category-score { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.compact .roll-category-overflow small { white-space: normal; }
 </style>

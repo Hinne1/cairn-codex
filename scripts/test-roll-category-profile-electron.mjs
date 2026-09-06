@@ -30,6 +30,7 @@ if (!process.versions.electron) {
           window.fixtureEvents = { activations: 0, escapes: 0 }
           const section = (id, props) => h('section', {
             id,
+            style: id === 'narrow' ? 'width:186px' : undefined,
             onClick: () => window.fixtureEvents.activations++,
             onKeydown: (event) => { if (event.key === 'Escape') window.fixtureEvents.escapes++ }
           }, [h('h2', id), h(Profile, props)])
@@ -37,6 +38,7 @@ if (!process.versions.electron) {
             section('empty', { scores: [] }),
             section('normal', { scores: scores.slice(0, 2) }),
             section('perfect', { scores: [{ ...scores[0], qualityPercent: 100, estimatedPercentile: 250 / 3, combinationPercentile: 250 / 3 }] }),
+            section('narrow', { scores: scores.slice(0, 2).map(score => ({ ...score, qualityPercent: 100, combinationPercentile: 100 })), compact: true }),
             section('overflow', { scores, maxVisible: 4 }),
             section('families', { scores, maxVisible: 5, preferredKey: 'elemental', compact: true }),
             section('compact', { scores, maxVisible: 2, compact: true })
@@ -119,6 +121,11 @@ if (!process.versions.electron) {
         assert.equal(await evaluate("document.querySelectorAll('#normal details').length"), 0)
         assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#families .roll-category-profile > .roll-category-score .roll-category-icon'), icon=>icon.dataset.category)"), ['offense', 'defense', 'pet', 'utility', 'retaliation'])
         assert.match(await evaluate("document.querySelector('#families .roll-category-score').textContent"), /Elemental/)
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('#narrow .icon-only')).every(score=>score.scrollWidth<=score.clientWidth && score.getBoundingClientRect().height<=20)"), true, 'perfect scores must fit on one line even in the narrowest card columns')
+        await evaluate("document.querySelector('#narrow summary').focus()")
+        await key('Enter')
+        assert.match(await evaluate("document.querySelector('#narrow .roll-category-overflow').innerText"), /Fire[\s\S]*Cold/i, 'full names remain available even when no categories were hidden')
+        await key('Space')
         assert.equal(await evaluate("Array.from(document.querySelectorAll('.roll-category-icon')).every(icon=>icon.getAttribute('aria-hidden')==='true' && icon.getAttribute('focusable')==='false')"), true, 'icons are decorative; the adjacent text supplies the category name')
         assert.match(await evaluate("document.querySelector('#perfect').innerText"), /100% \(83rd\)/,
           'a perfect discrete roll must show full quality, separately from rarity')

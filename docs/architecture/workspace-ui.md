@@ -460,6 +460,36 @@ Collection completion and qualified readiness are separate concepts. A learned r
 owned awakening base may qualify a missing set piece for readiness, but neither counts as that
 piece being discovered. Surfaces must name those qualifications explicitly.
 
+## Damage colors and compact roll profiles
+
+`damage-types.ts` owns the Rainbow Filter family map, aliases, protected damage tokens, and
+stat-text tokenizer. Physical/Internal Trauma, Pierce/Bleeding, and the other direct/DOT
+pairs share a hue. Pierce and Vitality use brighter text variants; `semantic-tokens.ts`
+rejects themes that reduce any damage color below 4.5:1 on a supported content surface.
+Application tones and item rarity remain separate tokens.
+
+Render structured stats through `PresentationLine.vue`. It preserves the original numeric
+formatting, prefix, suffix and wording, while excluding skill/mastery/visual names from
+damage tokenization. The global tooltip (including affixes, sets, pets and granted skills),
+Sets and copy inspection share this component. `DamageText.vue` handles projected stat text
+in research tables, Planner Journey and comparison labels. Only known type-only fields such
+as a conversion target opt into type-only matching. Conversion spans identify source and
+target independently. Do not apply the tokenizer to item names, flavor prose or skill names,
+or introduce view-local damage matching.
+
+Supplies retain the original `effects` strings for search and compatibility, and carry optional
+`effectDetails` for the same five visible effects through the typed workspace page contract.
+`SupplyEffects.vue` uses this stat provenance to render structured lines without treating flavor
+text or granted-skill names as stats. Missing provenance falls back to the original plain text.
+Ignored research rows and locked Supplies dim their pictures only; their damage text stays
+opaque. Reference-copy backgrounds use contrast-checked surface tokens.
+
+Compact `RollCategoryProfile` scores use a colored category icon and a single-line value.
+Full category names remain in the accessibility tree and in a keyboard-operable Roll details
+disclosure, including when all categories fit. Unknown offense types keep a visible label.
+The glossary provides the shared color legend and icon explanations. Colors never change
+score calculation, trust rules, archive ordering or the exact reference-copy selection.
+
 ## Adding a workspace
 
 1. Register an optional tool once in `workspaceToolDefinitions`; the shared sidebar derives its

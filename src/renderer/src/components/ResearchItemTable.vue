@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
 import ResearchSkillFx from './ResearchSkillFx.vue'
+import DamageText from './DamageText.vue'
 import { itemSkillVisualTransformations } from '../workspaces/skill-explorer'
 import type {
   ResearchItemTableColumn,
@@ -178,7 +179,7 @@ function scrollTableHorizontally(event: WheelEvent): void {
           <span role="gridcell" class="research-modifiers">
             <ResearchSkillFx :item="row.item" />
             <span v-for="(fact, index) in row.modifiers.filter(fact => fact.kind !== 'visual')" :key="`${fact.kind}:${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'" :data-modifier-kind="fact.kind">
-              <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}{{ fact.text }}
+              <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}<DamageText v-if="fact.kind !== 'rank'" :text="fact.text" :types-only="Boolean(fact.targetDamageType)" /><template v-else>{{ fact.text }}</template>
             </span>
             <small v-if="row.modifiers.length === 0 && itemSkillVisualTransformations(row.item).length === 0">—</small>
           </span>
@@ -267,7 +268,7 @@ function scrollTableHorizontally(event: WheelEvent): void {
 .research-item-table :deep(.bounded-results-item) { border-radius: 0; transition: background var(--cc-transition-fast); }
 .research-item-table :deep(.bounded-results-item:hover) { background: var(--cc-accent-surface-hover); }
 .research-table-row.favorite { box-shadow: inset 3px 0 var(--cc-accent); }
-.research-table-row.ignored { opacity: .7; }
+.research-table-row.ignored .research-item-picture { opacity: .7; }
 .research-item-identity { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--cc-space-4); align-items: center; }
 .research-item-picture {
   display: grid;

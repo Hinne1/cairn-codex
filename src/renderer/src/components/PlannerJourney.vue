@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
 import ResearchSkillFx from './ResearchSkillFx.vue'
+import DamageText from './DamageText.vue'
 import type { ResearchItemTableRow } from '../workspaces/research-item-table'
 
 const props = withDefaults(defineProps<{
@@ -95,7 +96,7 @@ function handleImageError(item: CollectionItem): void {
               <span class="planner-journey-facts">
                 <ResearchSkillFx :item="row.item" />
                 <em v-for="(fact, factIndex) in row.supports" :key="`${fact.text}:${factIndex}`">{{ fact.label }} {{ fact.text }}</em>
-                <span v-for="fact in row.modifiers.filter(fact => fact.kind !== 'visual').slice(0, 1)" :key="fact.text"><b>{{ fact.label }}</b> {{ fact.text }}</span>
+                <span v-for="fact in row.modifiers.filter(fact => fact.kind !== 'visual').slice(0, 1)" :key="fact.text"><b>{{ fact.label }}</b> <DamageText v-if="fact.kind !== 'rank'" :text="fact.text" :types-only="Boolean(fact.targetDamageType)" /><template v-else>{{ fact.text }}</template></span>
                 <span v-if="row.acquisition[0]"><b>{{ row.acquisition[0].label }}</b>{{ row.acquisition[0].label ? ' · ' : '' }}{{ row.acquisition[0].text }}</span>
               </span>
             </span>
@@ -173,7 +174,7 @@ function handleImageError(item: CollectionItem): void {
   background: var(--cc-tone-surface);
 }
 .planner-journey-row.favorite .planner-journey-card { border-color: var(--cc-accent-border); box-shadow: inset 3px 0 var(--cc-accent); }
-.planner-journey-row.ignored { opacity: .7; }
+.planner-journey-row.ignored .planner-journey-picture { opacity: .7; }
 .planner-journey-picture {
   display: grid;
   width: 58px;

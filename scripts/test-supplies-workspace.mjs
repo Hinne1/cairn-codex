@@ -155,6 +155,9 @@ const eligibleAugment = augmentOptions.find((item) => item.id.startsWith('augmen
 const archivedRune = augmentOptions.find((item) => item.id === 'rune-a')
 assert.equal(eligibleAugment?.eligible, true)
 assert.deepEqual(eligibleAugment?.effects, ['75% Vitality Damage'])
+assert.deepEqual(eligibleAugment?.effectDetails.map(effect => effect.text), eligibleAugment?.effects)
+assert.equal(eligibleAugment?.effectDetails[0].line.label, 'Vitality Damage')
+assert.ok(eligibleAugment.effectDetails.length <= 5, 'stat provenance stays within the visible effect limit')
 assert.match(eligibleAugment?.detail ?? '', /Available to Avaa/)
 assert.doesNotMatch(archivedRune?.detail ?? '', /stored/)
 

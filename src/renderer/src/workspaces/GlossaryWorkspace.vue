@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import ToolHeader from '../components/ToolHeader.vue'
 import { glossaryEntries, glossaryEntry } from './glossary'
+import { DAMAGE_FAMILIES, damageStyle } from '../damage-types'
+import RollCategoryIcon from '../components/RollCategoryIcon.vue'
 
 const props = defineProps<{ entryId: string }>()
 const emit = defineEmits<{ 'select-entry': [id: string] }>()
@@ -55,6 +57,11 @@ function jumpTo(id: string): void {
           :class="{ 'glossary-caution': section.caution }">
           <summary v-if="section.expandable">{{ section.title }}</summary>
           <h4 v-else tabindex="-1">{{ section.title }}</h4>
+          <ul v-if="section.damageLegend" class="damage-legend" aria-label="Rainbow Filter damage colors">
+            <li v-for="family in DAMAGE_FAMILIES" :key="family.id" :style="damageStyle(family.id)">
+              <RollCategoryIcon category="offense" />{{ family.label }}
+            </li>
+          </ul>
           <template v-for="(paragraph, index) in section.paragraphs" :key="paragraph">
             <p>{{ paragraph }}</p>
             <table v-if="index === 0 && section.table">
@@ -105,6 +112,8 @@ caption { text-align: left; color: var(--cc-text-muted); margin-bottom: var(--cc
 th, td { text-align: left; padding: var(--cc-space-3); border-bottom: 1px solid var(--cc-border-subtle); }
 th { color: var(--cc-text-strong); }
 .glossary-sources { padding-top: var(--cc-space-6); border-top: 1px solid var(--cc-border-subtle); }
+.damage-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--cc-space-3); padding: 0; list-style: none; }
+.damage-legend li { display: flex; align-items: center; gap: var(--cc-space-3); margin: 0; }
 a { color: var(--cc-accent-strong); text-decoration: underline; text-underline-offset: 3px; }
 button:focus-visible, summary:focus-visible, a:focus-visible, [tabindex='-1']:focus-visible { outline: 2px solid var(--cc-focus); outline-offset: 3px; }
 @media (max-width: 1100px) {

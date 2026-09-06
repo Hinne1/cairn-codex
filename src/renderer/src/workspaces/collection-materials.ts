@@ -4,6 +4,7 @@ import type { CompiledSearchQuery, SearchDocument } from '@shared/search-query'
 import { isCollectionOwned } from '../../../shared/collection-availability.ts'
 import type { AppRoute, CollectionRollFocus, RollSortMode, SortMode } from '../app-route'
 import { rollCategoryScores } from '../roll-rating.ts'
+import { ROLL_DAMAGE_TYPES } from '../../../shared/roll-analysis.ts'
 
 export type CollectionControls = Extract<AppRoute, { workspace: 'collection' }>['controls']
 export type MaterialsControls = Extract<AppRoute, { workspace: 'materials' }>['controls']
@@ -16,17 +17,7 @@ export const collectionCategories = [
 
 export const collectionRollSortOptions: ReadonlyArray<{ value: RollSortMode, label: string }> = [
   { value: 'roll-offense', label: 'Offense · strongest type' },
-  { value: 'roll-physical', label: 'Offense · Physical' },
-  { value: 'roll-pierce', label: 'Offense · Pierce' },
-  { value: 'roll-bleeding', label: 'Offense · Bleeding' },
-  { value: 'roll-fire', label: 'Offense · Fire' },
-  { value: 'roll-cold', label: 'Offense · Cold' },
-  { value: 'roll-lightning', label: 'Offense · Lightning' },
-  { value: 'roll-acid', label: 'Offense · Acid' },
-  { value: 'roll-vitality', label: 'Offense · Vitality' },
-  { value: 'roll-aether', label: 'Offense · Aether' },
-  { value: 'roll-chaos', label: 'Offense · Chaos' },
-  { value: 'roll-elemental', label: 'Offense · Elemental' },
+  ...ROLL_DAMAGE_TYPES.map(({ id, label }) => ({ value: `roll-${id}` as const, label: `Offense · ${label}` })),
   { value: 'roll-retaliation', label: 'Retaliation' },
   { value: 'roll-defense', label: 'Defense' },
   { value: 'roll-utility', label: 'Utility' },

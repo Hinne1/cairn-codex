@@ -16,6 +16,10 @@ export function presentScreenshotCollection(
     case 'skill-explorer':
       return { ...snapshot, basis, items: createFixture(fixtureName).items }
     case 'bounded-grid-a11y':
+    case 'tooltip-versions':
+    case 'tooltip-scroll':
+    case 'accessibility-audit':
+    case 'item-context-menu':
     case 'workspace-queries':
     case 'mi-workshop':
       return { ...snapshot, basis }

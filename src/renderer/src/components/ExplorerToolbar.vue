@@ -57,6 +57,11 @@ function applySearchExample(example: string): void {
   })
 }
 
+function clearSearch(): void {
+  emit('update:modelValue', '')
+  void nextTick(() => searchInput.value?.focus())
+}
+
 async function positionSearchHelpPanel(): Promise<void> {
   if (!searchHelpDetails.value?.open || !searchHelpSummary.value || !searchHelpPanel.value) return
   const gap = 16
@@ -168,7 +173,7 @@ onBeforeUnmount(() => {
           v-if="modelValue"
           type="button"
           :aria-label="`Clear ${searchLabel.toLocaleLowerCase()}`"
-          @click="emit('update:modelValue', '')"
+          @click="clearSearch"
         >×</button>
       </span>
       <p v-if="searchError" :id="searchErrorId" class="explorer-search-error" role="alert">{{ searchError }}</p>
@@ -179,7 +184,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="explorer-toolbar-results">
-      <output class="explorer-result-count" aria-live="polite">
+      <output class="explorer-result-count" aria-live="polite" aria-atomic="true">
         <span class="explorer-result-value">
           <span v-if="loading" class="explorer-result-spinner" aria-hidden="true" />
           <strong>{{ resultCount.toLocaleString() }}</strong>

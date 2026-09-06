@@ -1,5 +1,6 @@
 <script setup lang="ts" generic="T">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { isItemContextShortcut, type ItemContextRequest } from '../item-context-menu'
 import {
   createBoundedResultWindow,
   moveBoundedResultKey,
@@ -22,6 +23,7 @@ const props = withDefaults(defineProps<{
   layout?: 'list' | 'grid' | 'table'
   loading?: boolean
   error?: string | null
+  announceError?: boolean
   emptyTitle?: string
   emptyDetail?: string
   selectionMode?: BoundedSelectionMode
@@ -31,6 +33,7 @@ const props = withDefaults(defineProps<{
   navigable?: boolean
   interactive?: boolean
   itemDescribedBy?: string
+  itemContextMenu?: boolean
   keyboardColumns?: number
 }>(), {
   page: 1,
@@ -41,6 +44,7 @@ const props = withDefaults(defineProps<{
   layout: 'list',
   loading: false,
   error: null,
+  announceError: true,
   emptyTitle: 'No results',
   emptyDetail: 'Try changing the search or filters.',
   selectionMode: 'none',
@@ -50,6 +54,7 @@ const props = withDefaults(defineProps<{
   navigable: false,
   interactive: false,
   itemDescribedBy: undefined,
+  itemContextMenu: false,
   keyboardColumns: 1
 })
 
@@ -59,6 +64,7 @@ const emit = defineEmits<{
   activate: [key: BoundedResultKey, item: T]
   'item-focus': [key: BoundedResultKey, item: T, element: HTMLElement]
   'item-blur': [key: BoundedResultKey, item: T, event: FocusEvent]
+  'item-context': [request: ItemContextRequest<T>]
   retry: []
 }>()
 
@@ -214,6 +220,10 @@ function visibleGridColumns(): number {
 }
 
 function handleKeydown(event: KeyboardEvent, entry: { key: BoundedResultKey, item: T }): void {
+  if (props.itemContextMenu && isItemContextShortcut(event)) {
+    openItemContext(event, entry)
+    return
+  }
   if (event.target !== event.currentTarget) return
   const intent = event.key === 'Home' ? 'first'
     : event.key === 'End' ? 'last'
@@ -233,6 +243,14 @@ function handleKeydown(event: KeyboardEvent, entry: { key: BoundedResultKey, ite
     if (entryDisabled(entry)) return
     activateEntry(entry)
   }
+}
+
+function openItemContext(event: MouseEvent | KeyboardEvent, entry: { key: BoundedResultKey, item: T }): void {
+  if (!props.itemContextMenu || entryDisabled(entry) || !(event.currentTarget instanceof HTMLElement)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const source = event instanceof KeyboardEvent && event.target instanceof HTMLElement ? event.target : event.currentTarget
+  emit('item-context', { ...entry, source, ...(event instanceof MouseEvent ? { point: { x: event.clientX, y: event.clientY } } : {}) })
 }
 
 function changePage(page: number): void {
@@ -399,7 +417,7 @@ onBeforeUnmount(() => continuousObserver?.disconnect())
       </slot>
     </div>
 
-    <div v-else-if="error" class="bounded-results-state is-error" role="alert">
+    <div v-else-if="error" class="bounded-results-state is-error" :role="announceError ? 'alert' : undefined">
       <slot name="error" :message="error" :retry="() => emit('retry')">
         <strong>Results could not be loaded.</strong>
         <p>{{ error }}</p>
@@ -452,6 +470,7 @@ onBeforeUnmount(() => continuousObserver?.disconnect())
         @blur="!usesGridSemantics && emit('item-blur', entry.key, entry.item, $event)"
         @click="!usesGridSemantics && activateEntry(entry)"
         @keydown="!usesGridSemantics && handleKeydown($event, entry)"
+        @contextmenu="!usesGridSemantics && openItemContext($event, entry)"
       >
         <div
           v-if="usesGridSemantics"
@@ -468,6 +487,7 @@ onBeforeUnmount(() => continuousObserver?.disconnect())
           @blur="emit('item-blur', entry.key, entry.item, $event)"
           @click="activateEntry(entry)"
           @keydown="handleKeydown($event, entry)"
+          @contextmenu="openItemContext($event, entry)"
         >
           <slot
             name="item"
@@ -521,7 +541,7 @@ onBeforeUnmount(() => continuousObserver?.disconnect())
 .bounded-results-collection.is-table { display: grid; }
 .bounded-results-collection.is-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--cc-result-card-min-width, 260px), 100%), 1fr));
   gap: var(--cc-space-5);
 }
 .bounded-results-row,

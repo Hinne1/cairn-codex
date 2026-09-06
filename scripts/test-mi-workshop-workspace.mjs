@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, ref } from 'vue'
 import { compileSearchQuery } from '../src/shared/search-query.ts'
+import { ROLL_ANALYSIS_VERSION } from '../src/shared/roll-analysis.ts'
 import {
   buildMiMetricOptions,
   compareCopiesByMiMetric,
@@ -52,6 +53,7 @@ function analysis(overall, base, prefix, suffix, fire, petHealth = null) {
     seed: overall,
     supported: true,
     trusted: true,
+    modelVersion: ROLL_ANALYSIS_VERSION,
     reason: null,
     percentileSampleSize: 100,
     overallEstimatedPercentile: overall,

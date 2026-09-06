@@ -13,7 +13,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Self-contained helper publish failed.' }
   & (Join-Path $PSScriptRoot 'prepare-vc-redist.ps1') -OutputDirectory $prerequisiteRoot
   & (Join-Path $PSScriptRoot 'prepare-builder-app.ps1')
-  & npx.cmd electron-builder --projectDir dist\builder-app --win nsis
+  & npx.cmd electron-builder --projectDir dist\builder-app --win nsis --publish never
   if ($LASTEXITCODE -ne 0) { throw 'NSIS installer build failed.' }
   & node (Join-Path $PSScriptRoot 'audit-package.mjs') (Join-Path $projectRoot 'dist\builder\win-unpacked')
   if ($LASTEXITCODE -ne 0) { throw 'Installer payload audit failed.' }

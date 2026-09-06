@@ -78,6 +78,13 @@ full verification, but are not a dependency-security verdict. A new advisory aff
 the patched control will intentionally require investigation, not an automatic exception.
 The provider's coverage differs from npm's own audit; this is explicitly an OSV verdict.
 
+The tag release workflow runs those same blocking controls and live audit before
+verification, packaging, or publication; a separate CI run is not its security gate.
+`test:release-policy` locks the ordering and failure semantics in both workflows.
+Build-only packaging always passes `--publish never` to electron-builder, including
+when the host has a tag and inherited GitHub credentials. Only the explicit final
+release workflow step publishes the audited artifacts.
+
 For installed-game integration checks:
 
 ```powershell
@@ -113,6 +120,7 @@ part of the documented manual live matrix.
 - [ ] The change is focused and documented.
 - [ ] `npm.cmd run verify` passes.
 - [ ] UI changes were checked at multiple window sizes and zoom levels.
+- [ ] Changed controls retain accessible names, selected state, keyboard focus, and one error announcement owner; meaningful metadata meets the shared contrast contract.
 - [ ] Database changes are idempotent when a profile is reopened.
 - [ ] Transfer changes include rejection, timeout, retry, and uncertain-outcome
       behavior—not only the happy path.

@@ -10,7 +10,7 @@ import { assertReleaseEntry, releaseVerificationBoundary } from './release-entry
 import { verificationEnvironment } from './verification-environment.mjs'
 import { MainOperationCoordinator } from '../src/main/operation-coordinator.ts'
 
-const expected = { 'search-help': 1, onboarding: 1, settings: 1, 'bounded-grid-a11y': 120,
+const expected = { 'search-help': 1, onboarding: 1, settings: 1, 'bounded-grid-a11y': 120, 'tooltip-versions': 3, 'tooltip-scroll': 126,
   'farming-routes': 226, planner: 120, 'sets-bounded': 404, 'sets-semantics': 7,
   'mi-workshop': 6, 'skill-explorer': 120 }
 const root = await mkdtemp(join(tmpdir(), 'cairn-verification-boundary-'))
@@ -65,4 +65,4 @@ try {
 } finally {
   await rm(root, { recursive: true, force: true })
 }
-console.log('Verification boundary passed: ten deterministic cache-readable fixtures, exact MI copies, indirect-import rejection, and artifact controls.')
+console.log('Verification boundary passed: deterministic cache-readable fixtures, exact MI copies, indirect-import rejection, and artifact controls.')

@@ -13,6 +13,7 @@ import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
 import ToolHeader from '../components/ToolHeader.vue'
+import SupplyEffects from '../components/SupplyEffects.vue'
 import { searchGuidance } from '../search-guidance'
 import {
   changeSupplyCategory,
@@ -44,6 +45,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   dispense: [items: SupplySelectionItem[], mode: SupplyControls['mode']]
 }>()
@@ -236,8 +238,8 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
         {{ mode === 'live' ? liveStatusLabel : offlineReady ? 'Offline staging ready' : 'Offline staging locked' }}
       </span>
       <div class="segmented-control" aria-label="Supply transfer method">
-        <button type="button" :class="{ active: mode === 'live' }" @click="mode = 'live'">Live</button>
-        <button type="button" :class="{ active: mode === 'offline' }" @click="mode = 'offline'">Offline</button>
+        <button type="button" :class="{ active: mode === 'live' }" :aria-pressed="mode === 'live'" @click="mode = 'live'">Live</button>
+        <button type="button" :class="{ active: mode === 'offline' }" :aria-pressed="mode === 'offline'" @click="mode = 'offline'">Offline</button>
       </div>
     </div>
     <BoundedResultSurface
@@ -249,6 +251,7 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
       :total-count="loading ? Math.max(data.total, page * 60) : data.total"
       :loading="loading"
       :error="searchError || loadError"
+      :announce-error="!searchError"
       :get-key="item => item.id"
       :page-size="60"
       :selection-disabled="busy || loading || selectionBusy"
@@ -270,12 +273,14 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
           :title="item.catalogItem ? 'Hover for the full in-game tooltip' : undefined"
           @mouseenter="queueTooltip(item, $event)"
           @mousemove="emit('move-tooltip', $event)"
+          @wheel="emit('scroll-tooltip', $event)"
           @mouseleave="emit('hide-tooltip')"
           @focusin="queueTooltip(item, $event)"
           @focusout="emit('hide-tooltip')"
         >
           <input
             type="checkbox"
+            :aria-label="`Select ${item.name}`"
             :checked="selected"
             :disabled="busy || selectionBusy || !item.eligible"
             @click.stop
@@ -291,21 +296,13 @@ function queueTooltip(item: SupplyOption, event: MouseEvent | FocusEvent | HTMLE
           <span class="supply-card-copy">
             <strong>{{ item.name }}</strong>
             <small>{{ item.detail }}</small>
-            <ul v-if="item.effects.length" class="supply-effects">
-              <li v-for="(effect, index) in item.effects" :key="`${item.record}:${index}`">
-                {{ effect }}
-              </li>
-              <li v-if="item.effectCount > item.effects.length" class="more">
-                +{{ item.effectCount - item.effects.length }} more in tooltip
-              </li>
-            </ul>
-            <small v-else class="supply-no-effects">No visible stat effect is indexed.</small>
+            <SupplyEffects :effects="item.effects" :details="item.effectDetails" :total="item.effectCount" />
           </span>
           <b>{{ item.reusable ? '∞' : item.stackCount }}</b>
         </article>
       </template>
     </BoundedResultSurface>
-    <p v-if="selectionError" class="vault-notice error">{{ selectionError }}</p>
+    <p v-if="selectionError" class="vault-notice error" role="alert">{{ selectionError }}</p>
     <button
       class="supply-dispense"
       type="button"

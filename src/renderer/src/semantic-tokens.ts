@@ -1,3 +1,5 @@
+import { DAMAGE_TOKENS, DAMAGE_TOKEN_COLORS } from './damage-types.ts'
+
 export type SemanticTone =
   | 'epic'
   | 'legendary'
@@ -71,6 +73,7 @@ export const THEME_COLOR_TOKENS = [
 ] as const
 
 export const PROTECTED_GAMEPLAY_TOKENS = [
+  ...DAMAGE_TOKENS,
   '--gd-rarity-epic',
   '--gd-rarity-legendary',
   '--semantic-level',
@@ -178,6 +181,7 @@ export const CAIRN_THEME_TOKENS: ThemeTokenValues = {
 }
 
 export const CAIRN_GAMEPLAY_TOKENS: ProtectedGameplayTokenValues = {
+  ...DAMAGE_TOKEN_COLORS,
   '--gd-rarity-epic': '#338cce',
   '--gd-rarity-legendary': '#b653ff',
   '--semantic-level': '#d0b574',
@@ -198,6 +202,14 @@ export const CAIRN_THEME_MANIFEST: ThemeManifestV1 = {
   colorScheme: 'dark',
   tokens: {}
 }
+
+// Every opaque surface behind damage text, including hover/selected research rows.
+export const DAMAGE_TEXT_SURFACES = [
+  '--cc-canvas', '--cc-canvas-deep', '--cc-surface-1', '--cc-surface-2', '--cc-surface-3',
+  '--cc-surface-raised', '--cc-surface-input', '--cc-accent-surface', '--cc-accent-surface-hover',
+  '--cc-success-surface', '--cc-warning-surface', '--cc-danger-surface', '--cc-info-surface',
+  '--cc-tone-green-surface', '--cc-tone-blue-surface', '--cc-tone-ember-surface'
+] as const satisfies readonly ThemeColorToken[]
 
 const themeTokenSet = new Set<string>(THEME_COLOR_TOKENS)
 const protectedTokenSet = new Set<string>(PROTECTED_GAMEPLAY_TOKENS)
@@ -337,16 +349,17 @@ export function resolveThemeManifest(input: unknown): ResolvedTheme {
         }]
       : []
   })
-  const gameplayContrastIssues = PROTECTED_GAMEPLAY_TOKENS.flatMap((token) => {
-    const ratio = contrastRatio(CAIRN_GAMEPLAY_TOKENS[token], tokens['--cc-surface-1'])
+  const gameplayContrastIssues = PROTECTED_GAMEPLAY_TOKENS.flatMap((token) => (token.startsWith('--gd-damage-')
+    ? DAMAGE_TEXT_SURFACES : ['--cc-surface-1'] as const).flatMap((background) => {
+    const ratio = contrastRatio(CAIRN_GAMEPLAY_TOKENS[token], tokens[background])
     return ratio + Number.EPSILON < 4.5
       ? [{
           code: 'insufficient-contrast' as const,
           token,
-          message: `${token} must retain at least 4.5:1 contrast against --cc-surface-1; received ${ratio.toFixed(2)}:1.`
+          message: `${token} must retain at least 4.5:1 contrast against ${background}; received ${ratio.toFixed(2)}:1.`
         }]
       : []
-  })
+  }))
   if (contrastIssues.length > 0 || gameplayContrastIssues.length > 0) {
     return cairnFallback([...issues, ...contrastIssues, ...gameplayContrastIssues])
   }

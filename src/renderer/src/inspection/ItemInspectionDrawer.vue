@@ -10,8 +10,11 @@ import { researchItemTypeLabel, researchRarityLabel } from '../workspaces/resear
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import RollCategoryProfile from '../components/RollCategoryProfile.vue'
 import { rollCategoryScores } from '../roll-rating'
-import { formatPresentationLine } from '../item-presentation'
+import { ROLL_ANALYSIS_VERSION } from '../../../shared/roll-analysis.ts'
+import PresentationLine from '../components/PresentationLine.vue'
+import DamageText from '../components/DamageText.vue'
 import { isAvailableViaAwakening } from '../../../shared/collection-availability'
+import { useModalDialogFocus } from '../modal-focus'
 
 const props = defineProps<{
   session: ItemInspectionSession
@@ -43,6 +46,9 @@ const {
   comparisonItemStats, comparisonPetStats, copyAffixDelta
 } = props.session
 const copyPage = ref(1)
+const dialog = ref<HTMLElement | null>(null)
+const modalFocus = useModalDialogFocus(dialog, { onEscape: () => props.session.close() })
+watch(() => Boolean(selectedItem.value), open => open ? modalFocus.activate() : modalFocus.deactivate(), { immediate: true, flush: 'post' })
 watch([selectedItem, selectedMiMetric, selectedMiMetricDirection, comparisonReferenceCopy], () => { copyPage.value = 1 })
 function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
   return item.availableCount === 0 && isAvailableViaAwakening(item)
@@ -56,7 +62,7 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
 
 <template>
   <div v-if="selectedItem" class="drawer-backdrop comparison-backdrop" @click.self="session.close()">
-    <aside class="item-drawer comparison-workspace" :aria-label="selectedItem.name + ' copy comparison'">
+    <aside ref="dialog" class="item-drawer comparison-workspace" role="dialog" tabindex="-1" aria-modal="true" :aria-label="selectedItem.name + ' copy comparison'" @keydown="modalFocus.handleKeydown">
       <button class="drawer-close" type="button" aria-label="Close comparison" @click="session.close()">×</button>
       <header class="comparison-heading">
         <img v-if="itemIconUrl(selectedItem)" :src="itemIconUrl(selectedItem)!" alt="" @error="emit('icon-error', selectedItem)" />
@@ -200,7 +206,7 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
                   :max-visible="5"
                 />
                 <span v-if="!rollCategoryScores(copy.rollAnalysis).length" class="copy-roll-unscored">
-                  {{ copy.rollAnalysis?.trusted ? ((copy.rollAnalysis.modelVersion ?? 0) < 9 ? 'Quality recalculation pending' : 'No variable rolls') : 'Unscored' }}
+                  {{ copy.rollAnalysis?.trusted ? (copy.rollAnalysis.modelVersion !== ROLL_ANALYSIS_VERSION ? 'Quality recalculation pending' : 'No variable rolls') : 'Unscored' }}
                 </span>
               </div>
               <p
@@ -239,7 +245,7 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
                   <div v-for="section in activeCopyAffix.presentation?.sections ?? []" :key="`${activeCopyAffixTarget.record}:${section.kind}:${section.heading}`" class="copy-affix-section">
                     <h4 v-if="section.heading">{{ section.heading }}</h4>
                     <p v-for="line in section.lines" :key="`${line.label}:${line.minimum}:${line.maximum}`" :class="`tone-${line.tone}`">
-                      {{ formatPresentationLine(line) }}
+                      <PresentationLine :line="line" />
                     </p>
                   </div>
                 </template>
@@ -283,7 +289,7 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
               <div class="stat-list">
                 <div v-for="stat in comparisonItemStats(copy)" :key="stat.key" class="stat-row" :class="{ missing: stat.missingFromCopy }">
                   <div class="stat-heading">
-                    <span>{{ stat.label }}</span>
+                    <DamageText :text="stat.label" />
                     <strong :title="stat.rankDescription">{{ stat.valueLabel }}<template v-if="stat.qualityPercent !== null"> · {{ stat.qualityPercent.toFixed(0) }}%<template v-if="stat.rankLabel"> ({{ stat.rankLabel }})</template></template><template v-else> · fixed</template></strong>
                   </div>
                   <div class="stat-delta" :class="`delta-${stat.deltaTone}`">
@@ -301,7 +307,7 @@ function awakeningAvailabilityLabel(item: CollectionItem): string {
               <div class="stat-list">
                 <div v-for="stat in comparisonPetStats(copy)" :key="`pet:${stat.key}`" class="stat-row pet-stat-row" :class="{ missing: stat.missingFromCopy }">
                   <div class="stat-heading">
-                    <span>{{ stat.label }}</span>
+                    <DamageText :text="stat.label" />
                     <strong :title="stat.rankDescription">{{ stat.valueLabel }}<template v-if="stat.qualityPercent !== null"> · {{ stat.qualityPercent.toFixed(0) }}%<template v-if="stat.rankLabel"> ({{ stat.rankLabel }})</template></template><template v-else> · fixed</template></strong>
                   </div>
                   <div class="stat-delta" :class="`delta-${stat.deltaTone}`">

@@ -5,7 +5,7 @@ import type {
   VaultListItem
 } from './contracts.ts'
 import type { CompiledSearchQuery, SearchDocument } from './search-query.ts'
-import type { SupplyCharacter, SupplyOption, SupplyQueryRequest, SupplySlotFilter } from './workspace-query-contracts.ts'
+import type { SupplyCharacter, SupplyEffect, SupplyOption, SupplyQueryRequest, SupplySlotFilter } from './workspace-query-contracts.ts'
 
 export type SupplyArchiveItem = Pick<VaultListItem, 'id' | 'baseRecord' | 'name' | 'rarity' | 'slot' | 'state' | 'isHardcore' | 'reusable' | 'stackCount'>
 
@@ -23,6 +23,7 @@ export interface SupplyViewOptions {
 export interface SupplyPresentationIndexEntry {
   item: CollectionItem
   effects: string[]
+  effectDetails: SupplyEffect[]
   searchText: string
 }
 
@@ -74,7 +75,7 @@ export function createSupplyOptions(options: SupplyViewOptions): SupplyOption[] 
   if (options.controls.category === 'augments') {
     const factionAugments = [...presentationByRecord.values()]
       .filter(({ item }) => item.slot === 'augment')
-      .map(({ item, effects, searchText }): SupplyOption & { searchText: string } => {
+      .map(({ item, effects, effectDetails, searchText }): SupplyOption & { searchText: string } => {
         const requirements = item.acquisition?.factions ?? []
         const eligible = Boolean(options.activeCharacter && requirements.some((requirement) =>
           requirement.kind !== 'blueprint' && characterMeetsReputation(
@@ -103,6 +104,7 @@ export function createSupplyOptions(options: SupplyViewOptions): SupplyOption[] 
           source: 'faction',
           catalogItem: item,
           effects: effects.slice(0, 5),
+          effectDetails: effectDetails.slice(0, 5),
           effectCount: effects.length,
           searchText
         }
@@ -188,6 +190,7 @@ function archiveSupplyOption(
     source: 'archive',
     catalogItem,
     effects: effects.slice(0, 5),
+    effectDetails: presentation?.effectDetails.slice(0, 5) ?? [],
     effectCount: effects.length
   }
 }
@@ -195,7 +198,8 @@ function archiveSupplyOption(
 export function buildSupplyCatalogIndex(catalogItems: readonly CollectionItem[]): Map<string, SupplyPresentationIndexEntry> {
   const index = new Map<string, SupplyPresentationIndexEntry>()
   for (const item of catalogItems) {
-    const effects = supplyEffectLines(item)
+    const effectDetails = supplyEffectLines(item)
+    const effects = effectDetails.map(effect => effect.text)
     const requirements = (item.acquisition?.factions ?? [])
       .flatMap((requirement) => [requirement.faction, requirement.reputation])
     const searchText = [
@@ -206,25 +210,25 @@ export function buildSupplyCatalogIndex(catalogItems: readonly CollectionItem[])
       ...requirements,
       ...effects
     ].join(' ').toLocaleLowerCase()
-    index.set(item.record.toLocaleLowerCase(), { item, effects, searchText })
+    index.set(item.record.toLocaleLowerCase(), { item, effects, effectDetails, searchText })
   }
   return index
 }
 
-function supplyEffectLines(item: CollectionItem): string[] {
-  const flavor = item.presentation?.flavorText ? [item.presentation.flavorText] : []
+function supplyEffectLines(item: CollectionItem): SupplyEffect[] {
+  const flavor = item.presentation?.flavorText ? [{ text: item.presentation.flavorText }] : []
   const direct = (item.presentation?.sections ?? [])
     .flatMap((section) => section.lines.map((line) => {
       const formatted = formatPresentationLine(line)
-      return section.kind === 'pet' ? `Pets · ${formatted}` : formatted
+      return section.kind === 'pet' ? { text: `Pets · ${formatted}`, line, scope: 'pet' as const } : { text: formatted, line }
     }))
   const granted = item.presentation?.grantedSkill
   if (!granted) return [...flavor, ...direct]
   return [
     ...flavor,
     ...direct,
-    `Grants ${granted.name}${granted.trigger ? ` (${granted.trigger})` : ''}`,
-    ...granted.lines.map(formatPresentationLine)
+    { text: `Grants ${granted.name}${granted.trigger ? ` (${granted.trigger})` : ''}` },
+    ...granted.lines.map(line => ({ text: formatPresentationLine(line), line }))
   ]
 }
 

@@ -1,5 +1,31 @@
 # Release test matrix
 
+## Native build prerequisite alignment (#181, 2026-09-06)
+
+The read-only preflight passed on a clean pinned GDIA checkout with v143 compiler
+14.43.34808, Windows SDK 10.0.22621.0 and Boost 1.78.0. A compile-only run completed
+with zero compiler errors, then correctly rejected its differing output SHA-256.
+The shipped hook, injector, and allowlists remain unchanged; no candidate was injected.
+Synthetic prerequisite gates reject missing compiler/ATL/SDK/Boost components and
+incorrect versions before patch application. This is build-tool evidence, not live
+compatibility or byte-for-byte reproduction of the old shipping DLL.
+
+## Shared tooltip wheel policy (#131, 2026-09-06)
+
+The deterministic policy gate covers source/overlay input, both boundary preferences,
+pixel/line/page deltas, fractional motion, queued edges, accumulated bursts and reversals.
+Native Electron input passes at 1440px and 520px in Collection, Skill Explorer, Planner
+Table, Planner Journey and MI Workshop. It asserts tooltip and page offsets for middle
+scrolling, top/bottom boundaries and short content, through both the source and overlay.
+Grace-path entry, focused Page Up/Down, reduced motion and empty/reset search also pass.
+The generated fixture has 126 items and 72 MI copies; Collection mounts 48 cards.
+MI's local horizontal wrapper permits vertical page continuation. Farming's generated
+214-route fixture retains 50 mounted rows and verifies immediate keyboard tooltip
+placement at both widths, alongside paging, empty/reset search and item activation.
+All checks run in `test:tooltip-scroll:electron`, included in full verification. No
+personal profile, archive, save or live game is used. Full integration evidence is
+recorded in the PR.
+
 ## Exact-copy favorites (#50, 2026-09-05)
 
 Synthetic SQLite and validated domain-service tests cover migration from schema14, restart,
@@ -313,9 +339,108 @@ Captures are generated under `local-cache/collection-owner-test-*`. No personal 
 archive, game asset, live process or transfer is used. Legacy trivia/modal focus debt remains
 tracked by #16; this extraction does not claim that migration.
 
+## Rainbow damage presentation (#136)
+
+`test:damage-types` checks every family alias, longest-name matches, direct/DOT pairs, numeric
+and conversion wording, source/target spans, Energy Burn and non-damage names. It checks
+160 foreground/surface contrast pairs plus theme rejection and protected-token overrides.
+`test:damage-types:electron` mounts the production presentation components with synthetic
+stats, research tables, Planner Journey and the glossary at 1440px and 520px under the
+default and alternate accent themes. Screenshots cover tooltip typography, conversions,
+unavailable rows, empty results and the color legend. The generated 20k research fixture
+mounts 50 rows in 86–99 ms on the implementation host. Additional cases check ignored rows,
+locked Supplies, typed supply stat provenance versus flavor/granted names, legacy plain-text
+fallback, and all ten colors against both rendered reference-card gradient endpoints.
+
+The existing roll-profile and Collection-owner Electron gates check Enter/Space disclosures,
+full textual category names, single-line perfect scores in 186px card content, zero quality,
+the exact reference copy, and 520px at 125% zoom. The 20k-copy fixture mounts 48 cards and
+updates in 473–503 ms including settling. Captures use disposable profiles under
+`local-cache/damage-types-test-*`, `roll-profile-test-*`, and `collection-owner-test-*`.
+The full synthetic MI Workshop gate also catches hidden labels escaping the local table
+scroller; compact labels are positioned relative to their own score and pass at 520px.
+
 ## Sidebar edge and icon regression
 
 The focused workspace shell is exercised at wide and compact widths. The gate requires the
 sidebar to begin at the left viewport edge, every visible destination to use the shared semantic
 SVG family at a legible size, and every icon-only destination to expose its label on hover and
 keyboard focus. The same run verifies density restoration and rejects document-level overflow.
+
+## Core keyboard and announcement audit (#16)
+
+`test:accessibility:electron`, included in full verification, uses native Chromium input and
+the accessibility tree against 135 generated catalog items with scored copies, set members,
+and an Epic/awakened pair. It runs at 1440px and at 520px with 125% zoom, plus a compact startup
+recovery run. Collection mounts 48 cards; search reaches zero and restores the same bounded set.
+
+The audit checks comparison, tool customization, to-do, trivia, recovery and Advanced Search:
+named dialog semantics, opening focus, both Tab wrap directions with visible targets, escaped
+focus containment, blocked application Back, Escape and invoker/fallback restoration. It also
+checks middle roll-summary traversal, focus repair after “View Epic base” replaces the item,
+and deletion of the focused to-do. Transfers section controls, Sets member inspection, Planner
+view controls, and Settings debug logging activate through the keyboard.
+
+Real Settings success messages preserve their live containers and populate exactly one
+notification channel. Presentation-only injected job events change phase text without repeating
+per-item counters. Invalid Supplies/Dismantling queries retain both visual error locations with
+only the toolbar announcing. Search counts are atomic, navigation SVGs are decorative, and
+emulated reduced motion disables smooth scrolling. The companion contract and existing focused
+workspace gates cover paging, stable keys, filters, setup, notification deduplication and priority.
+
+Dialog and final route captures are preserved under `local-cache/accessibility-audit` before
+the next benchmark resets its temporary working directory. All profiles and data are disposable.
+The audit verifies Chromium semantics and behavior, not recorded screen-reader speech.
+
+## Item context menus and shared row states (#135)
+
+`test:item-context-menu` verifies keyboard entry, independent action capabilities, current-state
+labels, plan/global scope descriptions, and viewport clamping. `test:item-context-menu:electron`
+runs the real application with 20,000 generated catalog items at 1440px and 520px, including
+compact 125% zoom. Both gates are included in full verification.
+
+The native gate opens Skills, Planner Table and Journey menus through Shift+F10, the Menu key,
+right-click and visible More actions. It checks the named accessibility-tree menu, arrow/Home/End
+navigation, Enter/Space actions, Escape and comparison focus return, forward/reverse Tab, tooltip
+dismissal, outside click, scroll-away retention, source filtering, and actual plan switching.
+Favorite, ignored-only and combined labels and computed stripes are checked in both Planner views,
+including the compact sticky cell. Existing visible favorite controls remain independently usable.
+Filtering to one ignored base and restoring it exercises normal and empty result states.
+
+At standard zoom, measured Skills navigation took 857ms and Planner navigation 587–596ms,
+including 580ms of prescribed settling. Menu opening took 191–196ms including 180ms settling.
+Skills mounts 50 of 20,000 items; the level-filtered Planner mounts 50 of 15,992 tiers in each
+view. Cached startup paint took 1.25–1.32s and interactivity 1.30–1.36s. Neither width produced
+document overflow. Timings are implementation-host observations, not performance thresholds.
+
+Per-state screenshots and performance reports are preserved in
+`local-cache/item-context-verification` before each benchmark resets its disposable profile.
+The fixture has no personal archives, assets or game process; menu operations only exercise
+existing planner preferences in that disposable profile.
+
+## Workspace accessibility follow-through (#197)
+
+The existing `test:workspace-queries:electron` now adds native Space/Enter and Chromium AX checks
+for enabled, item-named Supplies checkboxes; pressed Supplies methods, Transfers sections/methods,
+and Collection categories; and Tab-to-Clear returning focus to the surviving search input.
+Onboarding is explicitly dismissed before those workspace interactions.
+
+The disposable verification process replaces only supply-selection and preview handlers: supply
+selection rejects, while the preview first returns a deterministic typed result, then rejects.
+Local errors expose one alert each. No dispensing, helper lookup, archive write, or transfer occurs;
+the existing database checks still require 20,145 ingested fixture copies and an empty operation
+journal. The injected handlers are removed when this verification owner exits.
+
+Rendered metadata checks composite ancestor surfaces and gradient endpoints, including selected
+Supplies cards and attached Dismantling rows. They cover supply detail/more/no-effect text, empty
+preview help, and populated cost/distribution/reward/rule metadata. Minimum contrast on the
+implementation host was 6.61:1 for Supplies and 6.92:1 for Dismantling at both 1440px and 520px.
+The generated archive keeps Dismantling at 120 mounted copies and Supplies at 60 cards. The
+existing query sequence took 4.50–4.71s including its prescribed waits; cached paint took
+1.28–1.32s and interactivity 1.32–1.36s. No document overflow was observed.
+
+Selection, success-preview, rejected-action, selected-mode and Clear-focus screenshots are
+preserved alongside the reports in `local-cache/workspace-query-verification`. Hidden-window
+captures allow the compositor to settle before retaining the image. The current workspace audit
+in `architecture/design-foundation.md` explicitly retains #198's Oracle/Transfers fixture gaps
+and #199's source-empty wording follow-up; this pass does not close umbrella #45.

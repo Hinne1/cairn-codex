@@ -92,6 +92,9 @@ if (!process.versions.electron) {
         await act("collectionOwnerFixture.workspace.value='sets'; collectionOwnerFixture.setCount(1000); collectionOwnerFixture.sets.restoreRoute({query:'',progress:'all',feature:'all',sort:'name',direction:'asc',page:2})")
         assert.equal(await run("document.querySelectorAll('.set-card').length"), 50)
         assert.equal(await run("collectionOwnerFixture.sets.currentPage.value"), 2)
+        assert.equal(await run("document.querySelector('.sets-workspace .tool-header h2').textContent"), 'Sets')
+        const columns = await run("getComputedStyle(document.querySelector('.set-results .is-grid')).gridTemplateColumns.split(' ').length")
+        assert.equal(columns, width === 1440 ? 2 : 1, 'set cards need readable widths, including at compact zoom')
         assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
         await act('window.scrollTo(0, 0)')
         await capture('sets-' + captureSize)
@@ -105,9 +108,85 @@ if (!process.versions.electron) {
         await act("collectionOwnerFixture.sets.restoreRoute({query:'',progress:'all',feature:'all',sort:'name',direction:'asc',page:1}); collectionOwnerFixture.setCount(0)")
         assert.equal(await run("document.querySelectorAll('.set-card').length"), 0)
         assert.match(await run("document.querySelector('.bounded-results-state').textContent"), /No sets/)
+        await capture('sets-empty-' + captureSize)
+        await act("collectionOwnerFixture.setCount(5); collectionOwnerFixture.snapshot.value={...collectionOwnerFixture.snapshot.value,items:collectionOwnerFixture.snapshot.value.items.map(item=>({...item,name:'A very long synthetic set member name with an unusually long suffix',setName:'A very long synthetic set name with an unusually long suffix'}))}")
+        assert.equal(await run("Array.from(document.querySelectorAll('.set-card, .set-card li button')).every(element=>element.scrollWidth <= element.clientWidth)"), true)
+        await act("document.querySelector('.set-card li button').focus()")
+        await key('Enter')
+        assert.equal(await run("Boolean(document.querySelector('.item-drawer'))"), true)
+        await act("collectionOwnerFixture.inspection.close(); collectionOwnerFixture.snapshot.value=null")
+        assert.equal(await run("document.querySelector('.tool-header h2').textContent"), 'Sets')
+        assert.match(await run("document.querySelector('.bounded-results-state').textContent"), /unavailable/)
+        await act("collectionOwnerFixture.workspace.value='materials'; collectionOwnerFixture.setCount(120)")
+        assert.equal(await run("document.querySelector('.tool-header h2').textContent"), 'Components & Consumables')
+        assert.equal(await run("document.querySelectorAll('.item-card').length"), 48)
+        assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
+        await capture('materials-' + captureSize)
+        await act("document.querySelector('.catalog-results .bounded-results-item').focus()")
+        await key('Enter')
+        assert.equal(await run("Boolean(document.querySelector('.item-drawer'))"), true)
+        await act("collectionOwnerFixture.inspection.close(); collectionOwnerFixture.setCount(0)")
+        assert.match(await run("document.querySelector('.bounded-results-state').textContent"), /No matching components/)
+        await capture('materials-empty-' + captureSize)
+        await act("collectionOwnerFixture.snapshot.value=null")
+        assert.equal(await run("document.querySelector('.tool-header h2').textContent"), 'Components & Consumables')
+        assert.match(await run("document.querySelector('.bounded-results-state').textContent"), /unavailable/)
+        await act("collectionOwnerFixture.workspace.value='mi'; collectionOwnerFixture.setCount(120)")
+        assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
+        assert.equal(await run("Array.from(document.querySelectorAll('.tool-header, .tool-header-aside')).every(element=>element.scrollWidth <= element.clientWidth)"), true)
+        await capture('header-actions-' + captureSize)
       }
 
+      for (const [width, zoom] of [[1440, 1], [520, 1], [520, 1.25]]) {
+        window.setContentSize(width, 1000)
+        window.webContents.setZoomFactor(zoom)
+        await act(`collectionOwnerFixture.workspace.value='collection'; collectionOwnerFixture.setCount(120);
+          collectionOwnerFixture.controls.value={...collectionOwnerFixture.controls.value,sort:'roll-fire',ownership:'owned',page:1};
+          { const template=collectionOwnerFixture.copies.value[0];
+            const scores=['fire','cold','lightning','defense','utility','pet','retaliation'].map((key,index)=>({key,category:index<3?'offense':key,damageType:index<3?key:null,qualityPercent:index===0?90:index===3?0:20+index,combinationPercentile:50,statCount:2}));
+            collectionOwnerFixture.copies.value=[{...template,instanceKey:'reference-fire',rollAnalysis:{...template.rollAnalysis,categoryScores:scores}},
+              {...template,instanceKey:'different-copy',itemIndex:1,rollAnalysis:{...template.rollAnalysis,categoryScores:scores.map(score=>({...score,qualityPercent:score.key==='fire'?40:99}))}}]; }
+          window.scrollTo(0,0)`)
+        const profile = '.item-card .card-roll-profile'
+        assert.equal(await run(`document.querySelectorAll('${profile} > .roll-category-profile > .roll-category-score').length`), 5)
+        assert.deepEqual(await run(`Array.from(document.querySelectorAll('${profile} > .roll-category-profile > .roll-category-score .roll-category-icon'),icon=>icon.dataset.category)`), ['offense','defense','pet','utility','retaliation'])
+        assert.match(await run(`document.querySelector('${profile} .category-defense strong').textContent`), /^0%/,
+          'all categories must belong to the chosen fire reference, not the 99% defense on another physical copy')
+        assert.deepEqual(await run("Array.from(document.querySelectorAll('.card-roll-profile, .card-roll-profile .roll-category-score')).filter(element=>element.checkVisibility() && element.scrollWidth>element.clientWidth).map(element=>({text:element.textContent,width:element.clientWidth,scroll:element.scrollWidth}))"), [])
+        await act("document.querySelector('.item-card').scrollIntoView({block:'start'})")
+        await capture('collection-rolls-' + width + (zoom === 1 ? '' : '-zoom125'))
+        await act(`document.querySelector('${profile} summary').focus()`)
+        await key('Enter')
+        assert.equal(await run(`document.querySelector('${profile} details').open`), true)
+        assert.equal(await run("document.querySelector('.item-drawer')===null"), true, 'expanding additional categories must not open the item')
+        assert.match(await run(`document.querySelector('${profile} .roll-category-overflow').innerText`), /Cold/i)
+        assert.equal(await run(`Array.from(document.querySelectorAll('${profile} .roll-category-score')).every(element=>element.scrollWidth<=element.clientWidth)`), true)
+        await act("document.querySelector('.catalog-results .bounded-results-item').focus()")
+        await key('Enter')
+        assert.equal(await run("collectionOwnerFixture.inspection.selectedReferenceInstanceKey.value"), 'reference-fire')
+        await act("collectionOwnerFixture.inspection.close(); collectionOwnerFixture.copies.value=collectionOwnerFixture.copies.value.map(copy=>({...copy,rollAnalysis:{...copy.rollAnalysis,trusted:false}}))")
+        assert.equal(await run(`document.querySelectorAll('${profile}').length`), 0)
+        assert.match(await run("document.querySelector('.card-roll-score.dim').textContent"), /Fire —/)
+        const start=Date.now()
+        await act(`collectionOwnerFixture.setCount(20000); collectionOwnerFixture.controls.value={...collectionOwnerFixture.controls.value,sort:'name'};
+          { const template=collectionOwnerFixture.copies.value[0];
+            collectionOwnerFixture.copies.value=collectionOwnerFixture.snapshot.value.items.map((item,index)=>({...template,baseRecord:item.record,instanceKey:'roll-'+index,itemIndex:index,rollAnalysis:{...template.rollAnalysis,categoryScores:['fire','defense','pet','utility'].map((key,i)=>({key,category:i===0?'offense':key,damageType:i===0?'fire':null,qualityPercent:70+i,combinationPercentile:90,statCount:2}))}})); }`)
+        assert.equal(await run("document.querySelectorAll('.item-card').length"), 48)
+        assert.equal(await run(`document.querySelectorAll('${profile}').length`), 48)
+        assert.equal(await run("document.documentElement.scrollWidth<=innerWidth"), true)
+        assert.ok(Date.now()-start<5000)
+        console.log('Roll profiles '+width+' zoom '+zoom+': 20k copies, 48 cards, '+(Date.now()-start)+'ms including settle')
+      }
       window.webContents.setZoomFactor(1)
+      for (const width of [1000, 900, 800]) {
+        window.setContentSize(width, 1000)
+        await act("collectionOwnerFixture.workspace.value='header'")
+        assert.equal(await run("document.querySelector('.tool-header-copy').getBoundingClientRect().right + 31 <= document.querySelector('.tool-heading-summary').getBoundingClientRect().left"), true,
+          'the nested Supplies summary must retain the header gap instead of overlapping its title')
+        assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
+        await capture('supplies-header-' + width)
+      }
+      await act("collectionOwnerFixture.workspace.value='sets'")
       await act('collectionOwnerFixture.setCount(1)')
       await act(`collectionOwnerFixture.openCopies(4); collectionOwnerFixture.copies.value = collectionOwnerFixture.copies.value.map((copy, index) => ({...copy, instanceKey:'identical-payload', sourcePath: index < 2 ? 'vault://copy-' + index : 'synthetic.gst', itemIndex: index < 2 ? 0 : index - 2})); collectionOwnerFixture.inspection.restore(collectionOwnerFixture.snapshot.value.items[0].record, 'identical-payload')`)
       assert.equal(await run("document.querySelectorAll('.copy-card').length"), 4, 'identical fingerprints must render distinct physical copies')
@@ -115,12 +194,12 @@ if (!process.versions.electron) {
       await act("collectionOwnerFixture.inspection.close()")
       for (const width of [1440, 520]) {
         window.setContentSize(width, 1000)
-        for (const workspace of ['collection', 'sets']) {
+        for (const workspace of ['collection', 'materials', 'sets']) {
           const start = Date.now()
           await act("collectionOwnerFixture.workspace.value=" + JSON.stringify(workspace) + "; collectionOwnerFixture.setCount(20000)")
-          const selector = workspace === 'collection' ? '.item-card' : '.set-card'
+          const selector = workspace === 'sets' ? '.set-card' : '.item-card'
           const mounted = await run("document.querySelectorAll(" + JSON.stringify(selector) + ").length")
-          assert.equal(mounted, workspace === 'collection' ? 48 : 50)
+          assert.equal(mounted, workspace === 'sets' ? 50 : 48)
           assert.equal(await run("document.documentElement.scrollWidth <= innerWidth"), true)
           assert.ok(Date.now() - start < 5000)
           console.log(workspace + ' ' + width + ': 20k archive, ' + mounted + ' mounted, ' + (Date.now() - start) + 'ms including settle')

@@ -5,14 +5,17 @@ import { isAvailableViaAwakening } from '../../../shared/collection-availability
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import SemanticBadge from '../components/SemanticBadge.vue'
+import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import { formatPresentationLine } from '../item-presentation'
+import PresentationLine from '../components/PresentationLine.vue'
 import { setItemBadges, setItemDiscovered, setItemUnqualified, setRarity, setReadiness } from '../set-semantics'
 import { setCompletionPercent, setLevelLabel, setMemberVisualChanges, type SetsSession } from './sets'
 const props = defineProps<{ session: SetsSession; available: boolean }>()
 const emit = defineEmits<{
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem]
 }>()
@@ -28,6 +31,12 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
 </script>
 
 <template>
+  <section class="sets-workspace" aria-label="Item sets">
+  <ToolHeader
+    eyebrow="Collection progress"
+    title="Sets"
+    description="Track missing pieces, review set bonuses, and see which sets are ready to equip."
+  />
   <ExplorerToolbar
     v-if="available"
     class="collection-explorer-toolbar"
@@ -90,8 +99,8 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
     :items="visibleSets"
     :get-key="set => set.record"
     :page-size="50"
-    empty-title="No sets match these filters"
-    empty-detail="Try changing the current search or set filters."
+    :empty-title="available ? 'No sets match these filters' : 'Set collection is unavailable'"
+    :empty-detail="available ? 'Try changing the current search or set filters.' : 'Refresh your collection to load set progress.'"
     label="Item sets"
     layout="grid"
   >
@@ -153,6 +162,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
             aria-describedby="item-tooltip"
             @mouseenter="emit('queue-tooltip', item, $event)"
             @mousemove="emit('move-tooltip', $event)"
+            @wheel="emit('scroll-tooltip', $event)"
             @mouseleave="emit('hide-tooltip')"
             @focus="emit('queue-tooltip', item, $event)"
             @blur="emit('hide-tooltip')"
@@ -182,6 +192,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
           aria-describedby="item-tooltip"
           @mouseenter="emit('queue-tooltip', change.item, $event)"
           @mousemove="emit('move-tooltip', $event)"
+          @wheel="emit('scroll-tooltip', $event)"
           @mouseleave="emit('hide-tooltip')"
           @focus="emit('queue-tooltip', change.item, $event)"
           @blur="emit('hide-tooltip')"
@@ -201,12 +212,12 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
           <div class="set-tier-base">
             <h4>({{ tier.requiredPieces }}) Set</h4>
             <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div v-if="tier.petLines?.length" class="set-tier-group pet-bonus">
               <h5>Bonus to All Pets</h5>
               <p v-for="(line, index) in tier.petLines" :key="`pet:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </div>
@@ -221,7 +232,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
               <SemanticBadge v-if="modifier.kind === 'visual-modifier'" tone="fx" compact>FX change</SemanticBadge>
             </h5>
             <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
           </div>
           <div v-if="tier.grantedSkill" class="set-tier-group skill-bonus">
@@ -229,7 +240,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
             <p v-if="tier.grantedSkill.trigger">{{ tier.grantedSkill.trigger }}</p>
             <p v-if="tier.grantedSkill.description">{{ tier.grantedSkill.description }}</p>
             <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div
               v-for="linked in tier.grantedSkill.linkedSkills ?? []"
@@ -239,7 +250,7 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
               <h6>{{ linked.name }}</h6>
               <p v-if="linked.description">{{ linked.description }}</p>
               <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </div>
@@ -248,4 +259,5 @@ function itemAvailableByAwakeningOnly(item: CollectionItem): boolean {
       </article>
     </template>
   </BoundedResultSurface>
+  </section>
 </template>

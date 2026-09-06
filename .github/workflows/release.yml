@@ -11,7 +11,7 @@ permissions:
 jobs:
   windows-release:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +21,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - run: npm ci
+      - name: Install locked dependencies
+        timeout-minutes: 5
+        run: npm ci --no-audit --fetch-retries=1 --fetch-timeout=15000
       - name: Verify tag matches package version
         shell: pwsh
         run: |
@@ -29,8 +31,19 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne "v$version") {
             throw "Tag $env:GITHUB_REF_NAME does not match package version $version."
           }
-      - run: npm run verify
-      - run: npm run package:release
+      - run: npm run test:dependency-audit
+      - name: Verify live OSV vulnerability controls
+        timeout-minutes: 5
+        run: npm run test:dependency-audit:live
+      - name: Audit locked dependencies with OSV (high and critical gate)
+        timeout-minutes: 3
+        run: npm run audit:dependencies
+      - name: Verify repository
+        timeout-minutes: 35
+        run: npm run verify
+      - name: Build and audit release artifacts
+        timeout-minutes: 20
+        run: npm run package:release
       - uses: actions/upload-artifact@v4
         with:
           name: cairn-codex-${{ github.ref_name }}-win-x64

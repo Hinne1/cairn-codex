@@ -153,6 +153,7 @@ runGate('Custom accessible modal focus', [
 runGate('Accessible modal focus', [
   '--electron-source', '--fixture', 'search-help', '--query', 'wendigo',
   '--category', 'Collection', '--open-search-help', '--verify-responsive-tools',
+  '--dismiss-onboarding',
   '--assert-no-overflow', '--disable-gpu',
   '--width', '520', '--height', '900', '--screenshot-name', 'accessible-dialog-focus'
 ])

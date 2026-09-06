@@ -198,6 +198,7 @@ function formatPercentile(value: number | null | undefined): string { return val
           :page-size="120"
           :loading="loading"
           :error="searchError || loadError"
+          :announce-error="!searchError"
           :selected-keys="selectedIds"
           :selection-disabled="busy || selectionBusy"
           label="Dismantling candidate copies"
@@ -234,7 +235,7 @@ function formatPercentile(value: number | null | undefined): string { return val
         <button class="dismantling-run" type="button" :disabled="busy || !pageReady || selectionBusy || selectedIds.length === 0" @click="buildPreview">
           {{ busy ? 'Reading installed loot tables…' : `Preview ${selectedIds.length.toLocaleString()} selected` }}
         </button>
-        <p v-if="error" class="vault-notice error">{{ error }}</p>
+        <p v-if="error" class="vault-notice error" role="alert">{{ error }}</p>
         <template v-if="preview">
           <div class="dismantling-costs">
             <article><small>Iron fee</small><strong>{{ preview.ironCost.toLocaleString() }}</strong></article>

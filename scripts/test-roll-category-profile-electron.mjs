@@ -3,6 +3,12 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+const dotPairs = [['physical', 'internal-trauma', 'Physical', 'Internal Trauma'],
+  ['pierce', 'bleeding', 'Pierce', 'Bleeding'],
+  ['fire', 'burn', 'Fire', 'Burn'], ['cold', 'frostburn', 'Cold', 'Frostburn'],
+  ['lightning', 'electrocute', 'Lightning', 'Electrocute'], ['acid', 'poison', 'Acid', 'Poison'],
+  ['vitality', 'vitality-decay', 'Vitality', 'Vitality Decay']]
+
 // Mount the production Vue component, with production styles, in a disposable
 // Electron profile. This test never opens the application or reads game data.
 if (!process.versions.electron) {
@@ -23,13 +29,23 @@ if (!process.versions.electron) {
           import Profile from ${JSON.stringify(component)}
           import ${JSON.stringify(tokens)}
           import ${JSON.stringify(styles)}
-          const scores = ['fire', 'cold', 'lightning', 'elemental', 'defense', 'utility', 'pet'].map((key, index) => ({
+          const scores = ['fire', 'cold', 'lightning', 'elemental', 'defense', 'utility', 'pet', 'retaliation'].map((key, index) => ({
             key, category: index < 4 ? 'offense' : key, damageType: index < 4 ? key : null,
             qualityPercent: 70 + index, estimatedPercentile: 70 + index, combinationPercentile: 90 + index, statCount: 2
+          }))
+          const separateDamageScores = ['pierce', 'bleeding'].map((damageType, index) => ({
+            key: 'offense:' + damageType, category: 'offense', damageType,
+            qualityPercent: 39 + index * 12, combinationPercentile: 28 + index * 25, statCount: 2
+          }))
+          const dotPairs = ${JSON.stringify(dotPairs)}
+          const pairScores = pair => pair.slice(0, 2).map((damageType, index) => ({
+            key: 'offense:' + damageType, category: 'offense', damageType,
+            qualityPercent: index ? 100 : 10, combinationPercentile: index ? 100 : 20, statCount: 2
           }))
           window.fixtureEvents = { activations: 0, escapes: 0 }
           const section = (id, props) => h('section', {
             id,
+            style: id === 'narrow' || id === 'damage-types' || id.startsWith('dot-') ? 'width:186px' : undefined,
             onClick: () => window.fixtureEvents.activations++,
             onKeydown: (event) => { if (event.key === 'Escape') window.fixtureEvents.escapes++ }
           }, [h('h2', id), h(Profile, props)])
@@ -37,7 +53,13 @@ if (!process.versions.electron) {
             section('empty', { scores: [] }),
             section('normal', { scores: scores.slice(0, 2) }),
             section('perfect', { scores: [{ ...scores[0], qualityPercent: 100, estimatedPercentile: 250 / 3, combinationPercentile: 250 / 3 }] }),
+            section('narrow', { scores: scores.slice(0, 2).map(score => ({ ...score, qualityPercent: 100, combinationPercentile: 100 })), compact: true }),
+            section('damage-types', { scores: separateDamageScores, compact: true }),
+            h('div', { id: 'all-dot-pairs', style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(186px,1fr));gap:24px' },
+              dotPairs.map(pair => section('dot-' + pair[1], { scores: pairScores(pair), compact: true }))),
+            section('many-types', { scores: dotPairs.flatMap(pairScores), maxVisible: 4, preferredKey: 'offense:poison', compact: true }),
             section('overflow', { scores, maxVisible: 4 }),
+            section('families', { scores, maxVisible: 5, preferredKey: 'elemental', compact: true }),
             section('compact', { scores, maxVisible: 2, compact: true })
           ]) }).mount('#app')
         `)
@@ -110,12 +132,71 @@ if (!process.versions.electron) {
       await window.loadFile(join(testRoot, 'page/index.html'))
       window.webContents.debugger.attach('1.3')
       await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
-      for (const width of [1440, 520]) {
+      for (const [width, zoom] of [[1440, 1], [520, 1], [520, 1.25]]) {
         window.setContentSize(width, 1000)
+        window.webContents.setZoomFactor(zoom)
         await settle()
         assert.equal(await evaluate("document.querySelectorAll('#empty .roll-category-profile').length"), 0)
         assert.equal(await evaluate("document.querySelectorAll('#normal .roll-category-score').length"), 2)
         assert.equal(await evaluate("document.querySelectorAll('#normal details').length"), 0)
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#families .roll-category-profile > .roll-category-score .roll-category-icon'), icon=>icon.dataset.category)"), ['offense', 'defense', 'pet', 'utility', 'retaliation'])
+        assert.match(await evaluate("document.querySelector('#families .roll-category-score').textContent"), /Elemental/)
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('#narrow .icon-only')).every(score=>score.scrollWidth<=score.clientWidth && score.getBoundingClientRect().height<=20)"), true, 'perfect scores must fit on one line even in the narrowest card columns')
+        await evaluate("document.querySelector('#narrow summary').focus()")
+        await key('Enter')
+        assert.match(await evaluate("document.querySelector('#narrow .roll-category-overflow').innerText"), /Fire[\s\S]*Cold/i, 'full names remain available even when no categories were hidden')
+        await key('Space')
+        const durationShapes = new Set()
+        for (const [direct, dot, directLabel, dotLabel] of dotPairs) {
+          const selector = '#dot-' + dot
+          const icons = await evaluate(`Array.from(document.querySelectorAll('${selector} .roll-category-profile > .roll-category-score'), score => ({
+            type: score.querySelector('svg').dataset.damageType, shape: score.querySelector('svg').innerHTML,
+            label: score.querySelector('small').textContent, color: getComputedStyle(score).color,
+            fits: score.scrollWidth <= score.clientWidth && score.getBoundingClientRect().height <= 20
+          }))`)
+          assert.deepEqual(icons.map(icon => icon.type), [direct, dot])
+          assert.deepEqual(icons.map(icon => icon.label), [directLabel, dotLabel])
+          assert.equal(icons[0].color, icons[1].color)
+          assert.notEqual(icons[0].shape, icons[1].shape, dot + ' needs a distinct same-color shape')
+          durationShapes.add(icons[1].shape)
+          assert.ok(icons.every(icon => icon.fits), 'perfect DoT scores fit the compact card')
+          await evaluate(`document.querySelector('${selector} summary').focus()`)
+          await key('Enter')
+          assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('${selector} .roll-category-overflow svg'), icon => icon.innerHTML)`), icons.map(icon => icon.shape))
+          assert.equal(await evaluate(`Array.from(document.querySelectorAll('${selector} .roll-category-overflow .roll-category-score')).every(score => score.scrollWidth <= score.clientWidth)`), true)
+          assert.ok((await evaluate(`document.querySelector('${selector} .roll-category-overflow').innerText`)).includes(dotLabel.toUpperCase()))
+          await key('Space')
+        }
+        assert.equal(durationShapes.size, 1, 'all seven DoTs, including Bleeding, use the same icon')
+        await evaluate("document.querySelector('#all-dot-pairs').scrollIntoView({block:'start'})")
+        await writeFile(join(testRoot, `profile-dot-pairs-${width}-${zoom}.png`), await captureFrame())
+        assert.match(await evaluate("document.querySelector('#many-types .roll-category-profile > .roll-category-score').textContent"), /Poison/)
+        await evaluate("document.querySelector('#many-types summary').focus()")
+        await key('Enter')
+        assert.equal(await evaluate("document.querySelectorAll('#many-types .roll-category-overflow .roll-category-score').length"), 14)
+        assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true)
+        await key('Space')
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('.roll-category-icon')).every(icon=>icon.getAttribute('aria-hidden')==='true' && icon.getAttribute('focusable')==='false')"), true, 'icons are decorative; the adjacent text supplies the category name')
+        const damageIcons = await evaluate(`Array.from(document.querySelectorAll('#damage-types .roll-category-profile > .roll-category-score'), score => ({
+          type: score.querySelector('svg').dataset.damageType,
+          shape: score.querySelector('svg').innerHTML,
+          label: score.querySelector('small').textContent,
+          color: getComputedStyle(score).color,
+          title: score.title,
+          fits: score.scrollWidth <= score.clientWidth
+        }))`)
+        assert.deepEqual(damageIcons.map(icon => icon.type), ['pierce', 'bleeding'], 'different damage types remain separate scores')
+        assert.deepEqual(damageIcons.map(icon => icon.label), ['Pierce', 'Bleeding'], 'full accessible names identify each score')
+        assert.equal(damageIcons[0].color, damageIcons[1].color, 'the shared Rainbow color is retained')
+        assert.notEqual(damageIcons[0].shape, damageIcons[1].shape, 'the icon shapes distinguish same-color damage types')
+        assert.ok(damageIcons.every(icon => icon.title.startsWith(icon.label + ':') && icon.fits), 'compact names and scores retain explanations without overflowing')
+        await evaluate("document.querySelector('#damage-types summary').focus()")
+        await key('Enter')
+        assert.match(await evaluate("document.querySelector('#damage-types .roll-category-overflow').innerText"), /Pierce[\s\S]*39% \(28th\)[\s\S]*Bleeding[\s\S]*51% \(53rd\)/i)
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#damage-types .roll-category-overflow svg'), icon => icon.innerHTML)"), damageIcons.map(icon => icon.shape), 'expanded profiles use the same distinct icons')
+        await evaluate("document.querySelector('#damage-types').scrollIntoView({block:'center'})")
+        await writeFile(join(testRoot, `profile-damage-types-${width}.png`), await captureFrame())
+        await key('Space')
         assert.match(await evaluate("document.querySelector('#perfect').innerText"), /100% \(83rd\)/,
           'a perfect discrete roll must show full quality, separately from rarity')
         for (const id of ['overflow', 'compact']) {
@@ -137,7 +218,7 @@ if (!process.versions.electron) {
         }
         assert.equal(await evaluate('window.fixtureEvents.activations'), 0, 'disclosure activation must not open the containing item')
       }
-      console.log(JSON.stringify({ passed: true, widths: [1440, 520], empty: true, keyboardDisclosure: true, focusVisible: true, noOverflow: true, screenshotDirectory: testRoot }))
+      console.log(JSON.stringify({ passed: true, widths: [1440, 520], zoom: [1, 1.25], dotPairs: 7, empty: true, keyboardDisclosure: true, focusVisible: true, noOverflow: true, screenshotDirectory: testRoot }))
       window.destroy()
       app.exit(0)
     } catch (error) {

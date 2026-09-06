@@ -1,8 +1,76 @@
 import type { CollectionItem, CollectionSnapshot, ObservedStashItem } from '../shared/contracts.ts'
 import { CATALOG_PRESENTATION_VERSION } from '../main/catalog-versions.ts'
+import { ROLL_ANALYSIS_VERSION } from '../shared/roll-analysis.ts'
 import { workspaceQueryCollection } from './workspace-query-collection.ts'
 
 export function createScreenshotCollectionFixture(name: string): CollectionSnapshot {
+  if (name === 'item-context-menu') {
+    const fixture = createScreenshotCollectionFixture('skill-explorer')
+    const planner = createScreenshotCollectionFixture('planner')
+    const items = Array.from({ length: 20_000 }, (_, index): CollectionItem => ({
+      ...fixture.items[index % fixture.items.length]!,
+      record: `records/items/synthetic/context_${index}.dbr`,
+      name: `Context Item ${String(index + 1).padStart(5, '0')}`
+    }))
+    return { ...fixture, items, skillClassNames: planner.skillClassNames,
+      skillMasteries: { ...fixture.skillMasteries, ...planner.skillMasteries },
+      rarities: fixture.rarities.map(summary => ({ ...summary,
+      total: items.filter(item => item.rarity === summary.rarity).length
+    })) }
+  }
+  if (name === 'accessibility-audit') {
+    const fixture = createScreenshotCollectionFixture('tooltip-scroll')
+    const [base, awakened] = createScreenshotCollectionFixture('tooltip-versions').items
+    return { ...fixture, items: [...fixture.items, ...createScreenshotCollectionFixture('sets-semantics').items,
+      { ...base!, name: 'Accessible Epic Base', availableCount: 1 },
+      { ...awakened!, name: 'Accessible Awakened Item', availableCount: 0,
+        availableViaAwakening: true, awakeningSourceRecord: base!.record,
+        awakeningSourceName: 'Accessible Epic Base', awakeningSourceAvailableCount: 1 }
+    ], observedItems: [...fixture.observedItems.map((copy): ObservedStashItem => ({ ...copy,
+      rollAnalysis: copy.rollAnalysis ? { ...copy.rollAnalysis, categoryScores: [
+        ...(copy.rollAnalysis.categoryScores ?? []),
+        { key: 'offense:cold', category: 'offense', damageType: 'cold', estimatedPercentile: 60,
+          qualityPercent: 60, statCount: 1, combinationPercentile: 60 }
+      ] } : null
+    })), { ...fixture.observedItems[0]!, baseRecord: base!.record, instanceKey: 'a11y-epic-base',
+      prefixRecord: '', suffixRecord: '', rollAnalysis: null }] }
+  }
+  if (name === 'tooltip-scroll') {
+    const fixture = createScreenshotCollectionFixture('skill-explorer')
+    const workshop = createScreenshotCollectionFixture('mi-workshop')
+    return { ...fixture, scannedStashes: workshop.scannedStashes, availableStashes: workshop.availableStashes,
+      observedItems: workshop.observedItems, affixes: workshop.affixes, affixSummary: workshop.affixSummary,
+      rarities: [...fixture.rarities, ...workshop.rarities], items: [...fixture.items.map((item, index): CollectionItem => ({
+      ...item,
+      presentation: { ...item.presentation!, sections: [{
+        kind: 'base', heading: null, lines: [
+          { label: 'to Wendigo Totem', minimum: 1, maximum: 1, unit: '', tone: 'skill', prefix: '+', suffix: '' },
+          ...Array.from({ length: index % 2 === 0 ? 45 : 0 }, (_, line) => ({
+            label: 'Fire Resistance', minimum: line + 1, maximum: line + 1, unit: '%' as const, tone: 'standard' as const, prefix: '+', suffix: ''
+          }))
+        ]
+      }] }
+    })), ...workshop.items] }
+  }
+  if (name === 'tooltip-versions') {
+    const fixture = createScreenshotCollectionFixture('search-help')
+    const source = fixture.items[0]!
+    const template: CollectionItem = { ...source, presentation: { ...source.presentation!, sections: [{
+      kind: 'base', heading: null, lines: Array.from({ length: 45 }, (_, index) => ({
+        label: 'Fire Resistance', minimum: index + 1, maximum: index + 1, unit: '%', tone: 'standard', prefix: '+', suffix: ''
+      }))
+    }] } }
+    const baseRecord = 'records/items/synthetic/version_original.dbr'
+    const awakenedRecord = 'records/items/synthetic/version_awakened.dbr'
+    const items: CollectionItem[] = [
+      { ...template, record: baseRecord, name: 'Version Test Original', rarity: 'epic', upgradeRecord: awakenedRecord },
+      { ...template, record: awakenedRecord, name: 'Version Test Awakened', rarity: 'legendary', baseVersionRecord: baseRecord },
+      { ...template, record: 'records/items/synthetic/version_unpaired.dbr', name: 'Version Test Unpaired', upgradeRecord: 'records/items/synthetic/missing.dbr' }
+    ]
+    return { ...fixture, items, rarities: ['epic', 'legendary'].map(rarity => ({
+      rarity: rarity as 'epic' | 'legendary', total: items.filter(item => item.rarity === rarity).length, collected: 0, availableCopies: 0
+    })) }
+  }
   if (name === 'workspace-queries') return workspaceQueryCollection(createScreenshotCollectionFixture('search-help'))
   if (name === 'onboarding') return createScreenshotCollectionFixture('search-help')
   if (name === 'settings') {
@@ -441,7 +509,7 @@ export function createScreenshotCollectionFixture(name: string): CollectionSnaps
         affixRerolls: 0,
         instanceKey: `fixture-mi-${index}`,
         rollAnalysis: {
-          modelVersion: 9,
+          modelVersion: ROLL_ANALYSIS_VERSION,
           baseRecord: base.record,
           prefixRecord: prefix.records[0]!,
           suffixRecord: suffix.records[0]!,

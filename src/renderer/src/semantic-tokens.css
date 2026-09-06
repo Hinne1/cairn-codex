@@ -124,6 +124,16 @@
   --cc-tone-ember-glow: color-mix(in srgb, var(--cc-tone-ember-accent), transparent 80%);
 
   /* Grim Dawn gameplay semantics remain distinct from application chrome. */
+  --gd-damage-physical: #f1e78c;
+  --gd-damage-pierce: #ff5722;
+  --gd-damage-elemental: #fff62c;
+  --gd-damage-cold: #00ffff;
+  --gd-damage-fire: #f3a44d;
+  --gd-damage-acid: #92cc00;
+  --gd-damage-lightning: #6a91e0;
+  --gd-damage-vitality: #e57878;
+  --gd-damage-chaos: #bd94c6;
+  --gd-damage-aether: #80ffd5;
   --gd-rarity-epic: #338cce;
   --gd-rarity-legendary: #b653ff;
   --semantic-level: #d0b574;

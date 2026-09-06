@@ -6,7 +6,9 @@ import { compileSearchQuery, type SearchDocument } from '@shared/search-query'
 import { searchQueryOptions, searchSchemas } from '@shared/search-schema'
 import BoundedResultSurface from '../components/BoundedResultSurface.vue'
 import ExplorerToolbar from '../components/ExplorerToolbar.vue'
-import { formatCategoryScore, rollCategoryLabel } from '../roll-rating'
+import RollCategoryProfile from '../components/RollCategoryProfile.vue'
+import { rollCategoryLabel, rollCategoryScores } from '../roll-rating'
+import ToolHeader from '../components/ToolHeader.vue'
 import { searchGuidance } from '../search-guidance'
 import {
   collectionRollSortOptions,
@@ -19,8 +21,9 @@ import {
   type CollectionRollSummaries
 } from './collection-materials'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   mode: 'collection' | 'materials'
+  available?: boolean
   items: readonly CollectionItem[]
   doubleRareMiBaseRecords: ReadonlySet<string>
   favoriteRecords?: ReadonlySet<string>
@@ -31,13 +34,14 @@ const props = defineProps<{
   rollSummaries?: CollectionRollSummaries
   liveReady: boolean
   retrievalBusy: boolean
-}>()
+}>(), { available: true })
 
 const emit = defineEmits<{
   'open-roll-help': []
   'queue-tooltip': [item: CollectionItem, event: MouseEvent | FocusEvent | HTMLElement]
   'show-tooltip': [item: CollectionItem, element: HTMLElement]
   'move-tooltip': [event: MouseEvent]
+  'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
   'open-item': [item: CollectionItem, referenceInstanceKey?: string]
   'retrieve-live': [id: string]
@@ -142,7 +146,7 @@ function rollSummaryTitle(item: CollectionItem): string {
   const miCaveat = item.rarity === 'mi'
     ? ' This rates the variable values on that exact base, prefix, and suffix; it does not rate whether those affixes suit a build.'
     : ''
-  return `${context} among available copies. First value: average range quality (0% minimum, 100% maximum). Parentheses: percentile of that quality average for this exact item template. Opening the card uses that copy as the reference.${miCaveat}`
+  return `${context} among available copies. All shown categories belong to that same reference copy. First value: average range quality (0% minimum, 100% maximum). Parentheses: percentile of that quality average for this exact item template, not a drop chance. Opening the card uses that copy as the reference.${miCaveat}`
 }
 
 function showFocusedTooltip(_key: string | number, item: CollectionItem, element: HTMLElement): void {
@@ -152,13 +156,20 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
 
 <template>
   <section class="collection-materials-workspace" :aria-label="mode === 'materials' ? 'Components and consumables' : 'Item collection'">
+    <ToolHeader
+      v-if="mode === 'materials'"
+      eyebrow="Crafting supplies"
+      title="Components & Consumables"
+      description="Browse your components, crafting materials, and learned potion formulas."
+    />
     <nav v-if="mode === 'collection'" class="category-tabs" aria-label="Item categories">
-      <button v-for="option in collectionCategories" :key="option" type="button" :class="{ active: option === category }" @click="category = option">
+      <button v-for="option in collectionCategories" :key="option" type="button" :class="{ active: option === category }" :aria-pressed="option === category" @click="category = option">
         <span>{{ option }}</span><small>{{ categoryProgress(option) }}</small>
       </button>
     </nav>
 
     <ExplorerToolbar
+      v-if="available"
       v-model="query"
       v-bind="mode === 'materials' ? searchGuidance.materials : searchGuidance.collection"
       class="collection-explorer-toolbar"
@@ -180,7 +191,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
     </ExplorerToolbar>
 
     <p v-if="mode === 'collection'" class="roll-help-note">
-      Quality is not build suitability.
+      Each card shows rolls from one reference copy. Quality is not build suitability.
       <button type="button" class="roll-help-link" @click="emit('open-roll-help')">How item rolls are rated → Glossary</button>
     </p>
     <BoundedResultSurface
@@ -189,8 +200,8 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
       :items="rows"
       :get-key="item => item.record"
       :page-size="48"
-      :empty-title="mode === 'materials' ? 'No matching components or consumables' : 'No matching collection items'"
-      empty-detail="Try changing the current search or filters."
+      :empty-title="!available ? 'Collection is unavailable' : mode === 'materials' ? 'No matching components or consumables' : 'No matching collection items'"
+      :empty-detail="available ? 'Try changing the current search or filters.' : 'Refresh your collection to load components and consumables.'"
       :label="mode === 'materials' ? 'Components and consumables' : `${category} collection items`"
       layout="grid"
       interactive
@@ -205,6 +216,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
           :class="{ missing: !isCollectionOwned(item), 'awakening-available': itemAvailableByAwakeningOnly(item), legendary: item.rarity === 'legendary', epic: item.rarity === 'epic', mi: item.rarity === 'mi', rare: item.rarity === 'rare', component: item.rarity === 'component', consumable: item.rarity === 'consumable' }"
           @mouseenter="emit('queue-tooltip', item, $event)"
           @mousemove="emit('move-tooltip', $event)"
+          @wheel="emit('scroll-tooltip', $event)"
           @mouseleave="emit('hide-tooltip')"
         >
           <div class="item-mark" aria-hidden="true">
@@ -218,11 +230,16 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
             <small v-if="item.upgradeRecord" class="awakening-label">Awakenable</small>
             <small v-if="item.setName">{{ item.setName }}</small>
           </div>
-          <div class="card-result">
-            <span v-if="mode !== 'materials' && rollSummary(item)" class="card-roll-score" :title="rollSummaryTitle(item)">
-              <small>{{ rollCategoryLabel(rollSummary(item)!.score) }} roll</small>
-              <strong>{{ formatCategoryScore(rollSummary(item)!.score) }}</strong>
-            </span>
+          <div class="card-result" :class="{ 'has-roll-profile': mode !== 'materials' }">
+            <div v-if="mode !== 'materials' && rollSummary(item)" class="card-roll-profile" :title="rollSummaryTitle(item)">
+              <small class="card-roll-context">Reference · best {{ rollCategoryLabel(rollSummary(item)!.score) }}</small>
+              <RollCategoryProfile
+                :scores="rollCategoryScores(rollSummary(item)!.copy.rollAnalysis)"
+                :preferred-key="rollSummary(item)!.score.key"
+                :max-visible="5"
+                compact
+              />
+            </div>
             <span v-else-if="mode !== 'materials'" class="card-roll-score dim" :title="rollSummaryTitle(item)">{{ selectedRollLabel ?? 'Rolls' }} —</span>
             <strong v-if="item.availableCount > 0">{{ item.availableCount }} {{ mode === 'materials' ? (item.slot === 'potion-formula' ? 'learned' : 'stored') : item.availableCount === 1 ? 'copy' : 'copies' }}</strong>
             <strong v-else-if="itemAvailableByAwakeningOnly(item)" class="awakening-available">{{ awakeningAvailabilityLabel(item) }}</strong>

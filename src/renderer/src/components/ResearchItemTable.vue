@@ -3,6 +3,10 @@ import { ref } from 'vue'
 import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
 import ResearchSkillFx from './ResearchSkillFx.vue'
+import DamageText from './DamageText.vue'
+import ItemContextMenu from './ItemContextMenu.vue'
+import ItemRowState from './ItemRowState.vue'
+import { useItemContextMenu } from '../use-item-context-menu'
 import { itemSkillVisualTransformations } from '../workspaces/skill-explorer'
 import type {
   ResearchItemTableColumn,
@@ -22,6 +26,7 @@ const props = withDefaults(defineProps<{
   sortColumns?: Partial<Record<ResearchItemTableColumn, string>>
   actions?: boolean
   ignoredView?: boolean
+  contextKey?: string
 }>(), {
   page: 1,
   pagination: 'pages',
@@ -29,7 +34,8 @@ const props = withDefaults(defineProps<{
   direction: 'asc',
   sortColumns: () => ({}),
   actions: false,
-  ignoredView: false
+  ignoredView: false,
+  contextKey: 'research'
 })
 
 const emit = defineEmits<{
@@ -41,9 +47,21 @@ const emit = defineEmits<{
   'move-tooltip': [event: MouseEvent]
   'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
+  'dismiss-tooltip': []
   favorite: [item: CollectionItem]
   ignore: [item: CollectionItem]
 }>()
+
+const root = ref<HTMLElement | null>(null)
+const { request: menuRequest, row: menuRow, actions: menuActions, open: openMenu, openButton, dismiss: dismissMenu, execute: executeMenu } = useItemContextMenu({
+  root, rows: () => props.rows, context: () => props.contextKey, plannerActions: () => props.actions,
+  dismissTooltip: () => emit('dismiss-tooltip'),
+  execute: (action, item) => {
+    if (action === 'inspect') emit('activate', item)
+    else if (action === 'favorite') emit('favorite', item)
+    else emit('ignore', item)
+  }
+})
 
 const columns: readonly { key: ResearchItemTableColumn, label: string }[] = [
   { key: 'item', label: 'Item' },
@@ -74,7 +92,7 @@ function ariaSort(column: ResearchItemTableColumn): 'ascending' | 'descending' |
 }
 
 function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, element: HTMLElement): void {
-  emit('show-tooltip', row.item, element)
+  if (!menuRequest.value) emit('show-tooltip', row.item, element)
 }
 
 function scrollTableHorizontally(event: WheelEvent): void {
@@ -91,7 +109,8 @@ function scrollTableHorizontally(event: WheelEvent): void {
 </script>
 
 <template>
-  <div class="research-table-region">
+  <div ref="root" class="research-table-region">
+    <ItemContextMenu v-if="menuRequest && menuRow" :key="menuRequest.key" :request="menuRequest" :name="menuRow.item.name" :actions="menuActions" @action="executeMenu" @dismiss="dismissMenu" />
     <p :id="`${label.replace(/[^a-z0-9]+/gi, '-').toLocaleLowerCase()}-scroll-help`" class="dense-table-scroll-hint">
       Wide comparison table. Focus this region and use Left/Right Arrow, Shift + mouse wheel, or its scrollbar to inspect every field. Item previews open from the item cell.
     </p>
@@ -109,11 +128,13 @@ function scrollTableHorizontally(event: WheelEvent): void {
       tabindex="0"
       layout="table"
       interactive
+      item-context-menu
       item-described-by="item-tooltip"
       @update:page="emit('update:page', $event)"
       @activate="(_key, row) => emit('activate', row.item)"
       @item-focus="showFocusedTooltip"
       @item-blur="emit('hide-tooltip')"
+      @item-context="openMenu"
       @wheel.shift="scrollTableHorizontally"
     >
       <template #header>
@@ -138,11 +159,11 @@ function scrollTableHorizontally(event: WheelEvent): void {
         </div>
       </template>
       <template #item="{ item: row }">
-        <div class="research-table-row" :class="{ favorite: row.favorite, ignored: row.ignored, 'is-unavailable': !row.available }">
+        <div class="research-table-row item-row-state" :class="{ 'is-favorite': row.favorite, 'is-ignored': row.ignored, 'is-unavailable': !row.available }">
           <span
             role="gridcell"
             class="research-item"
-            @mouseenter="emit('queue-tooltip', row.item, $event)"
+            @mouseenter="!menuRequest && emit('queue-tooltip', row.item, $event)"
             @mousemove="emit('move-tooltip', $event)"
             @mouseleave="emit('hide-tooltip')"
             @wheel="emit('scroll-tooltip', $event)"
@@ -155,14 +176,17 @@ function scrollTableHorizontally(event: WheelEvent): void {
               <span class="research-item-copy">
                 <strong :class="['gd-rarity-name', `rarity-${row.item.rarity}`]">{{ row.item.name }}</strong>
                 <small>{{ row.itemType }}</small>
-                <span v-if="actions" class="research-item-actions">
+                <ItemRowState :favorite="row.favorite" :ignored="row.ignored" />
+                <span class="research-item-actions">
                   <button
+                    v-if="actions"
                     type="button"
                     :class="{ active: row.favorite }"
                     :aria-label="`${row.favorite ? 'Unfavorite' : 'Favorite'} ${row.item.name}`"
                     @click.stop="emit('favorite', row.item)"
                   >★ <span>Favorite</span></button>
-                  <button type="button" @click.stop="emit('ignore', row.item)">{{ ignoredView ? 'Restore' : 'Ignore' }}</button>
+                  <button v-if="actions" type="button" @click.stop="emit('ignore', row.item)">{{ ignoredView ? 'Restore' : 'Ignore' }}</button>
+                  <button type="button" class="item-more-actions" :aria-label="`More actions for ${row.item.name}`" aria-haspopup="menu" :aria-expanded="menuRequest?.key === row.item.record" @click.stop="openButton(row, $event)"><span aria-hidden="true">···</span></button>
                 </span>
               </span>
             </span>
@@ -178,7 +202,7 @@ function scrollTableHorizontally(event: WheelEvent): void {
           <span role="gridcell" class="research-modifiers">
             <ResearchSkillFx :item="row.item" />
             <span v-for="(fact, index) in row.modifiers.filter(fact => fact.kind !== 'visual')" :key="`${fact.kind}:${fact.label}:${fact.text}:${index}`" :data-tone="fact.tone ?? 'default'" :data-modifier-kind="fact.kind">
-              <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}{{ fact.text }}
+              <b v-if="fact.label">{{ fact.label }}</b>{{ fact.label ? ' ' : '' }}<DamageText v-if="fact.kind !== 'rank'" :text="fact.text" :types-only="Boolean(fact.targetDamageType)" /><template v-else>{{ fact.text }}</template>
             </span>
             <small v-if="row.modifiers.length === 0 && itemSkillVisualTransformations(row.item).length === 0">—</small>
           </span>
@@ -266,8 +290,6 @@ function scrollTableHorizontally(event: WheelEvent): void {
 }
 .research-item-table :deep(.bounded-results-item) { border-radius: 0; transition: background var(--cc-transition-fast); }
 .research-item-table :deep(.bounded-results-item:hover) { background: var(--cc-accent-surface-hover); }
-.research-table-row.favorite { box-shadow: inset 3px 0 var(--cc-accent); }
-.research-table-row.ignored { opacity: .7; }
 .research-item-identity { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--cc-space-4); align-items: center; }
 .research-item-picture {
   display: grid;
@@ -326,12 +348,12 @@ function scrollTableHorizontally(event: WheelEvent): void {
     z-index: 1;
     left: 0;
     background: var(--cc-surface-2);
-    box-shadow: 1px 0 var(--cc-border-default);
+    box-shadow: var(--cc-item-state-shadow, inset 0 0 transparent), 1px 0 var(--cc-border-default);
   }
   .research-table-header > span:first-child { z-index: 3; background: var(--cc-surface-3); }
   .research-item-identity { grid-template-columns: 54px minmax(0, 1fr); }
   .research-item-picture { width: 54px; height: 54px; }
   .research-item-picture img { max-width: 48px; max-height: 48px; }
-  .research-item-actions button span { display: none; }
+  .research-item-actions button:not(.item-more-actions) span { display: none; }
 }
 </style>

@@ -167,7 +167,9 @@ sufficient.
 - Fields, aliases, value kinds, common values, help, and builder controls come from
   `src/shared/search-schema.ts`. Parser options and Search tips are derived from that schema;
   workspace-local copies are not allowed. Unknown fields and invalid numeric comparisons
-  produce an inline error and preserve the unfiltered result surface while the user edits.
+  produce an inline error. Local projections preserve the unfiltered result surface while the
+  user edits. Remote Supplies and Dismantling queries deliberately clear stale pages and disable
+  selection/actions until the query is valid; their toolbar owns the error announcement.
 - `src/shared/advanced-search.ts` translates between the shared expression tree and a flat rule
   form. Syntax outside that form's representable subset stays visible as a preserved clause and
   must never be silently discarded.
@@ -186,7 +188,7 @@ sufficient.
 ## Item tooltips
 
 All item-bearing workspaces use the single global item-tooltip pipeline in `App.vue`:
-`queueTooltip`, `moveTooltip`, `scheduleTooltipHide`, and the `item-tooltip` presentation.
+`queueTooltip`, `moveTooltip`, `scheduleTooltipHide`, `scrollTooltip`, and the `item-tooltip` presentation.
 Affixes are passed through the same pipeline as copy context. Do not add workspace-local item
 tooltip markup; extend the shared presentation contract when a new stat or section is needed.
 
@@ -194,11 +196,46 @@ The tooltip remains global because only one hover target can be active at a time
 mouse-wheel scrolling, viewport placement, held details, affix composition, and item links must
 behave identically everywhere.
 
-Dense research tables use a narrower pointer contract: only the prominent item picture queues the
-global tooltip. Names, types, actions, and ordinary data cells remain free for reading, selection,
-and page scrolling. Moving off the picture schedules the same global dismissal used elsewhere.
+Dense research tables use the complete left item-identity cell (picture, name, and type) as the
+pointer source. Ordinary data cells remain free for reading, selection, and page scrolling.
+Moving off the identity cell schedules the same global dismissal used elsewhere.
 Keyboard focus stays on the bounded result row, which keeps `item-tooltip` as its accessible
 description without adding the decorative picture as another Tab stop.
+
+`tooltip-scroll.ts` defines the shared direction-aware wheel policy. An overflowing tooltip
+owns vertical input from either its active source or the overlay while it can move in that
+direction. At a visible boundary, Display chooses page continuation or containment. A queued
+animation must reach its boundary before handing off; reversing direction starts from the
+visible position. Pixel deltas are preserved, line deltas use 16px, and page deltas use the
+height of the destination (tooltip or page). Shift/horizontal and Ctrl/Meta wheel input keep
+their existing owners. Reduced motion applies tooltip offsets immediately.
+
+Direct wheel input over the fixed overlay explicitly hands off to the page, because Chromium
+does not reliably chain it. This includes short tooltips with no scroll range, regardless of
+the boundary preference. Source forwarding never captures wheel input over adjacent content.
+Local table wrappers contain horizontal overscroll only, so source boundaries can continue into
+the page. Keyboard focus opens descriptions immediately; pointer hover uses the shared 180ms delay.
+The shared 90ms leave grace, viewport placement, held details, version switching, and affix
+composition remain independent of this policy.
+
+### Tooltip entry-point inventory
+
+| Surface | Pointer source | Keyboard description | Wheel adapter |
+| --- | --- | --- | --- |
+| Collection / Components & Consumables | Item card | Bounded gridcell | Shared `scroll-tooltip` |
+| Skill Explorer / Planner Table | Complete left identity cell | Bounded row | Shared `scroll-tooltip` |
+| Planner Journey | Item picture | Bounded row | Shared `scroll-tooltip` |
+| Planner MI Sources | Area item button | Same button | Shared `scroll-tooltip` |
+| MI Workshop | Comparison row, with the reference copy's affixes | Bounded row | Shared `scroll-tooltip` |
+| Supplies | Supply card | Bounded gridcell | Shared `scroll-tooltip` |
+| Sets | Member and member-FX buttons | Same buttons | Shared `scroll-tooltip` |
+| Stash Oracle | Evidence item button | Same button | Shared `scroll-tooltip` |
+| Collection Farming | Route item button | Same button | Shared `scroll-tooltip` |
+| Global overlay | Tooltip body | Description stays on source | Direct `scrollTooltip` |
+
+There is one `.game-tooltip` portal and one vertical overflow rule. Research tables retain
+their independent horizontal scroller. Inspection drawers, Transfers and Dismantling use
+their own item-detail/action surfaces and do not add a second hover tooltip implementation.
 
 ## Workspace ownership and extraction
 
@@ -327,7 +364,7 @@ unlocks by record/mode, keep individual potion copies and return 60 options per 
 counts. Bulk boost selection returns only eligible active-mode IDs and metadata. `App.vue` supplies
 narrow query/selection/dispense adapters, active-character/transfer readiness and the global tooltip
 adapter; the workspace never reaches preload directly. Back/Forward restores typed controls, and
-Supplies retains delayed tooltips for pointer and keyboard focus. Exact transfer payloads remain
+  Supplies retains delayed pointer tooltips and immediate keyboard descriptions. Exact transfer payloads remain
 authoritative in the existing main-process transfer services.
 
 MI Workshop owns its typed query, affix-quality filter, selected comparison metric, sort, direction,
@@ -433,7 +470,7 @@ Collection, MI Workshop, and copy comparison offer concise roll-help links. Open
 the current drawer without modifying the previous session-history entry or saved reference pin;
 Back restores the prior filters and exact viewed copy. Glossary state is not a saved preference.
 
-The initial guide explains model-v9 range quality separately from midrank percentile, deterministic
+The initial guide explains current-model range quality separately from midrank percentile, deterministic
 sampling, fixed-member exclusion, grouped damage ranges, offense families, Elemental damage,
 retaliation/pet separation, and exact-template MI limitations. The primary example is `78% (98th)`;
 the optional 7/8/9 table illustrates why maximum quality can have an 83rd-percentile rank.
@@ -459,6 +496,89 @@ must use distinct semantic tones instead of workspace-local pill styles.
 Collection completion and qualified readiness are separate concepts. A learned recipe or an
 owned awakening base may qualify a missing set piece for readiness, but neither counts as that
 piece being discovered. Surfaces must name those qualifications explicitly.
+
+## Damage colors and compact roll profiles
+
+`damage-types.ts` owns the Rainbow Filter family map, aliases, protected damage tokens, and
+stat-text tokenizer. Physical/Internal Trauma, Pierce/Bleeding, and the other direct/DOT
+pairs share a hue. Pierce and Vitality use brighter text variants; `semantic-tokens.ts`
+rejects themes that reduce any damage color below 4.5:1 on a supported content surface.
+Application tones and item rarity remain separate tokens.
+
+Render structured stats through `PresentationLine.vue`. It preserves the original numeric
+formatting, prefix, suffix and wording, while excluding skill/mastery/visual names from
+damage tokenization. The global tooltip (including affixes, sets, pets and granted skills),
+Sets and copy inspection share this component. `DamageText.vue` handles projected stat text
+in research tables, Planner Journey and comparison labels. Only known type-only fields such
+as a conversion target opt into type-only matching. Conversion spans identify source and
+target independently. Do not apply the tokenizer to item names, flavor prose or skill names,
+or introduce view-local damage matching.
+
+Supplies retain the original `effects` strings for search and compatibility, and carry optional
+`effectDetails` for the same five visible effects through the typed workspace page contract.
+`SupplyEffects.vue` uses this stat provenance to render structured lines without treating flavor
+text or granted-skill names as stats. Missing provenance falls back to the original plain text.
+Ignored research rows retain full picture and text opacity, with an explicit shared state
+marker. Locked Supplies dim their pictures only; their damage text stays opaque.
+Reference-copy backgrounds use contrast-checked surface tokens.
+
+Compact `RollCategoryProfile` scores use a colored category icon and a single-line value.
+Pierce uses an arrowhead; all seven DoTs, including Bleeding, use the same hourglass.
+Their shared Rainbow colors do not merge category identities. Same-type base/prefix/suffix contributions are already
+combined by the stat engine before category scoring. Both compact and expanded profiles
+pass the score's damage type to the shared icon, and the glossary shows each direct/DoT pair.
+Full category names remain in the accessibility tree and in a keyboard-operable Roll details
+disclosure, including when all categories fit. Unknown offense types keep a visible label.
+The glossary provides the shared color legend and icon explanations. Colors never change
+score calculation, trust rules, archive ordering or the exact reference-copy selection.
+
+`shared/roll-analysis.ts` owns the current rating version (v10), type labels, DoT identity,
+and stable selector order. Route normalization and Collection sort options derive from it;
+MI metrics derive from the same current category scores. The helper classifier recognizes
+`offensiveSlow*` fields before their direct tokens: Internal Trauma, Burn, Frostburn,
+Electrocute, Poison, and Vitality Decay each have an independent quality average and sampled
+combination percentile. Flat amount, percentage damage and duration remain within that DoT.
+Universal offensive groups retain their existing behavior. Elemental damage groups support
+Fire/Cold/Lightning only; Elemental resistance reduction also supports their DoTs, and Physical
+resistance reduction also supports Internal Trauma. Pet and retaliation remain separate.
+
+The helper model version and shared TS version must match. `rollCategoryScores` accepts only
+trusted current-model categories, so old merged scores cannot affect badges, category metrics,
+or reference-copy selection while bounded archive hydration recalculates them. Per-stat bounds
+and explicitly labeled legacy percentile metrics remain usable. The existing version-based
+candidate query retries unfinished batches after restart in both SC and HC; only rating JSON
+changes, without schema or exact payload changes. Generated reopen/partial-batch regressions
+cover this in `test:roll-rating`.
+Native-stash ratings instead live in the source snapshot. `CollectionService.getCached` marks
+an outdated analyzed copy stale for the requested stash sources and leaves refresh to the normal
+caller, preserving live-mode deferral. Archive views keep using bounded vault hydration. Current
+native ratings and intentionally unscored/ineligible items do not cause repeated scans; service
+tests cover the upgrade, deferred read, persisted refresh and reopen.
+
+## Item actions and row states
+
+The shared search Clear control returns focus to its input after removing the query. Collection
+categories, Supplies methods and Transfers sections/methods expose their selected state through
+`aria-pressed`, matching Planner view controls. Separately focusable selection checkboxes name
+their item. Asynchronous selection/preview failures have one local alert owner; stale-result
+guards continue to prevent errors from a previous workspace context appearing in the current one.
+
+`BoundedResultSurface` exposes an opt-in typed item-context event. Shared research rows use
+`useItemContextMenu` and `ItemContextMenu` for right-click, Menu/Shift+F10 and a visible More
+actions button. Skills supports Inspect; Planner Table and Journey additionally support the
+existing global favorite and current-plan base exclusion operations. Menu descriptions state
+those scopes; there is no new per-copy or per-tier preference. Existing visible controls remain.
+
+Opening a menu dismisses the global tooltip. Arrow keys and Home/End move through actions;
+Enter/Space activate, Escape restores the invoker, and Tab continues from the invoker in the
+normal page order. Inspection hands focus to the shared comparison dialog. Outside clicks,
+viewport movement, source removal, and plan changes dismiss stale menus. Scroll dismissal
+restores focus without jumping the viewport. If the source disappears, a surviving result or
+workspace control receives focus. The menu measures and clamps itself to the viewport.
+
+`ItemRowState` supplies shared Favorite and Ignored in this plan labels and independent inset
+stripes. Combined states display both markers, including in the compact sticky identity cell.
+Rarity names, damage text, pictures, and selected/focused row treatments keep their own roles.
 
 ## Adding a workspace
 

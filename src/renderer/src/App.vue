@@ -10,6 +10,7 @@ import OnboardingDialog from './components/OnboardingDialog.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import WorkspaceErrorBoundary from './components/WorkspaceErrorBoundary.vue'
 import { formatPresentationLine } from './item-presentation'
+import PresentationLine from './components/PresentationLine.vue'
 import { createItemInspectionSession } from './inspection/item-inspection'
 import ItemInspectionDrawer from './inspection/ItemInspectionDrawer.vue'
 import { applyCopyFavorite, createCopyFavorites } from './inspection/copy-favorites'
@@ -70,6 +71,9 @@ import { useCollectionCopies } from './collection-copies'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { resolveActiveCharacter } from './live-presence'
 import { preferredScrollBehavior } from './motion-preference'
+import { useModalDialogFocus } from './modal-focus'
+import { createTooltipDismissal } from './tooltip-dismissal'
+import { tooltipWheelIntent } from './tooltip-scroll'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
 import { collectionRequestKey } from '@shared/collection-request'
 import {
@@ -422,6 +426,16 @@ const todoOpen = ref(false)
 const triviaOpen = ref(false)
 const todoDraft = ref('')
 const todoInput = ref<HTMLInputElement | null>(null)
+const toolSettingsDialog = ref<HTMLElement | null>(null)
+const todoDialog = ref<HTMLElement | null>(null)
+const safeModeFocus = useModalDialogFocus(safeModeDialog, { onEscape: dismissSafeModeOffer })
+const toolSettingsFocus = useModalDialogFocus(toolSettingsDialog, { onEscape: () => { toolSettingsOpen.value = false } })
+const todoFocus = useModalDialogFocus(todoDialog, {
+  initialFocus: () => todoInput.value,
+  onEscape: () => { todoOpen.value = false }
+})
+watch(toolSettingsOpen, open => open ? toolSettingsFocus.activate() : toolSettingsFocus.deactivate(), { flush: 'post' })
+watch(todoOpen, open => open ? todoFocus.activate() : todoFocus.deactivate(), { flush: 'post' })
 const todos = ref<TodoItem[]>(structuredClone(initialPreferences.notes.todos))
 const manualDisconnectProcessId = ref<number | null>(null)
 const liveDisconnectPending = ref(false)
@@ -438,6 +452,7 @@ const tooltipElement = ref<HTMLElement | null>(null)
 const tooltipDetailsHeld = ref(false)
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
+const tooltipDismissal = createTooltipDismissal()
 let liveSyncTimer: ReturnType<typeof setInterval> | null = null
 let liveLifecycleTimer: ReturnType<typeof setInterval> | null = null
 let liveSyncInFlight = false
@@ -924,12 +939,11 @@ watch([onboardingOpen, appInitializing], ([open, initializing]) => {
   document.body.classList.toggle('onboarding-active', open && !initializing)
 })
 
-watch(safeModeOfferOpen, async (open) => {
+watch(safeModeOfferOpen, (open) => {
   document.body.classList.toggle('safe-mode-offer-active', open)
-  if (!open) return
-  await nextTick()
-  safeModeDialog.value?.focus()
-})
+  if (open) safeModeFocus.activate()
+  else safeModeFocus.deactivate()
+}, { immediate: true, flush: 'post' })
 
 async function reportStartupPhase(phase: StartupPhaseEvent): Promise<void> {
   try {
@@ -975,6 +989,8 @@ onMounted(async () => {
   window.addEventListener('pageshow', handlePageShow)
   window.addEventListener('keydown', handleEscape)
   window.addEventListener('keyup', handleTooltipKeyUp)
+  window.addEventListener('pointermove', tooltipDismissal.pointerMoved, true)
+  window.addEventListener('focusin', tooltipDismissal.focusChanged, true)
   window.addEventListener('wheel', handleZoomWheel, { passive: false })
   stopBackgroundJobUpdates = window.cairnCodex.onBackgroundJobChanged(retainBackgroundJob)
   stopArchiveRecoveryUpdates = window.cairnCodex.onArchiveRecoveryChanged(() => {
@@ -1077,6 +1093,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pageshow', handlePageShow)
   window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('keyup', handleTooltipKeyUp)
+  window.removeEventListener('pointermove', tooltipDismissal.pointerMoved, true)
+  window.removeEventListener('focusin', tooltipDismissal.focusChanged, true)
   window.removeEventListener('wheel', handleZoomWheel)
   cancelTooltip()
   cancelTooltipHide()
@@ -1169,22 +1187,6 @@ function resetInterfacePreferences(): void {
   resetUiPreferences(localStorage)
   reportSuccess('Reset interface preferences. Planner profiles, to-dos, sources, and archive data were preserved. Reloading CC…')
   window.setTimeout(() => window.location.reload(), 250)
-}
-
-function trapSafeModeFocus(event: KeyboardEvent): void {
-  const dialog = safeModeDialog.value
-  if (!dialog) return
-  const candidates = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled])')]
-  if (!candidates.length) return
-  const first = candidates[0]!
-  const last = candidates[candidates.length - 1]!
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
 }
 
 async function setDebugLogging(enabled: boolean): Promise<void> {
@@ -1434,12 +1436,10 @@ function storeTodos(): void {
   preferenceRepository.update('notes', { todos: todos.value.map((todo) => ({ ...todo })) })
 }
 
-async function openTodos(): Promise<void> {
+function openTodos(): void {
   todoOpen.value = true
   triviaOpen.value = false
   showConnectionDiagnostics.value = false
-  await nextTick()
-  todoInput.value?.focus()
 }
 
 function openTrivia(): void {
@@ -2543,6 +2543,7 @@ function itemVersionCounterpart(item: CollectionItem): CollectionItem | null {
 function showItemVersion(item: CollectionItem): void {
   const counterpart = itemVersionCounterpart(item)
   if (!counterpart) return
+  cancelTooltip()
   cancelTooltipHide()
   tooltipDetailsHeld.value = false
   tooltipCopyAffixes.value = null
@@ -2775,6 +2776,11 @@ function queueTooltip(
   anchor: MouseEvent | FocusEvent | HTMLElement,
   copy?: Pick<ObservedStashItem, 'prefixRecord' | 'suffixRecord'>
 ): void {
+  if (!(anchor instanceof MouseEvent)) {
+    showTooltip(item, anchor, copy)
+    return
+  }
+  if (!tooltipDismissal.allowHover(anchor, event => queueTooltip(item, event, copy))) return
   cancelTooltipHide()
   cancelTooltip()
   positionTooltip(anchor)
@@ -2835,6 +2841,7 @@ function cancelTooltipHide(): void {
 }
 
 function scheduleTooltipHide(): void {
+  tooltipDismissal.cancelHover()
   cancelTooltip()
   cancelTooltipHide()
   tooltipHideTimer = setTimeout(hideTooltip, 90)
@@ -2854,6 +2861,7 @@ let tooltipScrollFrame: number | null = null
 function cancelTooltipScrollAnimation(): void {
   if (tooltipScrollFrame !== null) cancelAnimationFrame(tooltipScrollFrame)
   tooltipScrollFrame = null
+  tooltipWheelTarget = null
 }
 
 function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
@@ -2862,6 +2870,7 @@ function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
     tooltip.scrollTop = target
     return
   }
+  tooltipWheelTarget = target
   const initial = tooltip.scrollTop
   const distance = target - initial
   const started = performance.now()
@@ -2869,64 +2878,38 @@ function animateTooltipScroll(tooltip: HTMLElement, target: number): void {
     const progress = Math.min(1, (now - started) / 120)
     tooltip.scrollTop = initial + distance * (1 - Math.pow(1 - progress, 3))
     if (progress < 1) tooltipScrollFrame = requestAnimationFrame(tick)
-    else tooltipScrollFrame = null
+    else {
+      tooltipScrollFrame = null
+      tooltipWheelTarget = null
+    }
   }
   tooltipScrollFrame = requestAnimationFrame(tick)
 }
 
 function scrollTooltip(event: WheelEvent): void {
-  if (event.shiftKey || event.ctrlKey || event.metaKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
   const tooltip = tooltipElement.value
-  if (!tooltip || tooltip.scrollHeight <= tooltip.clientHeight) return
-  const maximumScrollTop = tooltip.scrollHeight - tooltip.clientHeight
-  const boundaryTolerance = 1
-  const directWheel = event.currentTarget === tooltip
-  if (directWheel) {
-    tooltipWheelTarget = null
-    cancelTooltipScrollAnimation()
-  }
-  const actualScrollTop = tooltip.scrollTop
-  const queuedBoundaryPending = !directWheel && tooltipWheelTarget !== null && (
-    (event.deltaY < 0 && tooltipWheelTarget <= boundaryTolerance && actualScrollTop > boundaryTolerance) ||
-    (event.deltaY > 0 && tooltipWheelTarget >= maximumScrollTop - boundaryTolerance && actualScrollTop < maximumScrollTop - boundaryTolerance)
-  )
-  if (queuedBoundaryPending) {
-    event.preventDefault()
-    event.stopPropagation()
+  if (!tooltip) return
+  const intent = tooltipWheelIntent(event, {
+    top: tooltip.scrollTop,
+    height: tooltip.clientHeight,
+    scrollHeight: tooltip.scrollHeight,
+    target: tooltipWheelTarget,
+    direct: event.currentTarget === tooltip,
+    boundary: tooltipBoundaryScroll.value,
+    pageHeight: window.innerHeight
+  })
+  if (intent.kind === 'native') {
+    if (!event.shiftKey && !event.ctrlKey && !event.metaKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)) cancelTooltipScrollAnimation()
     return
   }
-  const currentScrollTop = directWheel ? tooltip.scrollTop : (tooltipWheelTarget ?? tooltip.scrollTop)
-  const atBoundary =
-    (event.deltaY < 0 && actualScrollTop <= boundaryTolerance) ||
-    (event.deltaY > 0 && actualScrollTop >= maximumScrollTop - boundaryTolerance)
-  if (atBoundary) {
-    if (tooltipBoundaryScroll.value === 'contain' || directWheel) {
-      event.preventDefault()
-      event.stopPropagation()
-    }
-    // Chromium does not consistently chain wheel input from this fixed overlay.
-    // Own direct-tooltip handoff to avoid both a stuck page and double scrolling.
-    if (directWheel && tooltipBoundaryScroll.value === 'page') {
-      const pageDelta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? event.deltaY * window.innerHeight : event.deltaY
-      window.scrollBy({ top: pageDelta, behavior: preferredScrollBehavior() })
-    }
-    return
-  }
-  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-    ? event.deltaY * 16
-    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-      ? event.deltaY * tooltip.clientHeight
-      : event.deltaY
-  const nextScrollTop = Math.max(
-    0,
-    Math.min(currentScrollTop + delta, maximumScrollTop)
-  )
-  if (nextScrollTop === currentScrollTop) return
   event.preventDefault()
   event.stopPropagation()
-  tooltipWheelTarget = nextScrollTop
-  animateTooltipScroll(tooltip, nextScrollTop)
+  if (intent.kind === 'tooltip') animateTooltipScroll(tooltip, intent.top)
+  else if (intent.kind === 'contain') cancelTooltipScrollAnimation()
+  else if (intent.kind === 'page') {
+    cancelTooltipScrollAnimation()
+    window.scrollBy({ top: intent.delta, behavior: preferredScrollBehavior() })
+  }
 }
 
 function scrollTooltipFromKeyboard(event: KeyboardEvent): boolean {
@@ -2943,6 +2926,7 @@ function scrollTooltipFromKeyboard(event: KeyboardEvent): boolean {
     Math.min(tooltip.scrollTop + direction * Math.max(40, tooltip.clientHeight * 0.8), tooltip.scrollHeight - tooltip.clientHeight)
   )
   if (nextScrollTop === tooltip.scrollTop) return false
+  cancelTooltipScrollAnimation()
   event.preventDefault()
   event.stopPropagation()
   tooltip.scrollTop = nextScrollTop
@@ -2957,6 +2941,11 @@ function hideTooltip(): void {
   tooltipDetailsHeld.value = false
   tooltipWheelTarget = null
   cancelTooltipScrollAnimation()
+}
+
+function dismissItemMenuTooltip(): void {
+  tooltipDismissal.dismiss()
+  hideTooltip()
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -2989,7 +2978,9 @@ function handleEscape(event: KeyboardEvent): void {
   }
   if (
     event.key.toLocaleLowerCase() === 'v' &&
+    !event.defaultPrevented &&
     !event.repeat &&
+    !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing &&
     !isTypingTarget(event.target) &&
     tooltipItem.value &&
     itemVersionCounterpart(tooltipItem.value)
@@ -3020,6 +3011,7 @@ function handleEscape(event: KeyboardEvent): void {
     todoOpen.value = false
     return
   }
+  tooltipDismissal.dismiss()
   hideTooltip()
   showConnectionDiagnostics.value = false
   selectedRecord.value = null
@@ -3192,12 +3184,13 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
       </div>
     </header>
 
-    <p
-      v-if="notificationAnnouncement"
-      :key="notificationAnnouncement.id"
-      class="visually-hidden"
-      :role="notificationAnnouncement.assertive ? 'alert' : 'status'"
-    >{{ notificationAnnouncement.text }}</p>
+    <p class="visually-hidden notification-status" role="status" aria-atomic="true">
+      <span v-if="notificationAnnouncement && !notificationAnnouncement.assertive" :key="notificationAnnouncement.id">{{ notificationAnnouncement.text }}</span>
+    </p>
+    <p class="visually-hidden notification-alert" role="alert" aria-atomic="true">
+      <span v-if="notificationAnnouncement?.assertive" :key="notificationAnnouncement.id">{{ notificationAnnouncement.text }}</span>
+    </p>
+    <p class="visually-hidden background-status" role="status" aria-atomic="true">{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</p>
     <aside v-if="currentNotification" class="growl-stack" aria-label="Notification">
       <article class="growl" :class="currentNotification.severity">
         <span><strong>{{ currentNotification.title }}</strong>{{ currentNotification.message }}</span>
@@ -3240,7 +3233,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         aria-modal="true"
         aria-labelledby="safe-mode-offer-title"
         aria-describedby="safe-mode-offer-description"
-        @keydown.tab="trapSafeModeFocus"
+        @keydown="safeModeFocus.handleKeydown"
       >
         <p class="section-label">Startup recovery</p>
         <h2 id="safe-mode-offer-title">CC has had trouble starting.</h2>
@@ -3278,7 +3271,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
     />
 
     <div v-if="toolSettingsOpen" class="tool-settings-backdrop" @click.self="toolSettingsOpen = false">
-      <section class="tool-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="tool-settings-title">
+      <section ref="toolSettingsDialog" class="tool-settings-dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="tool-settings-title" @keydown="toolSettingsFocus.handleKeydown">
         <header>
           <div>
             <p class="section-label">Workspace</p>
@@ -3316,7 +3309,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
     />
 
     <div v-if="todoOpen" class="todo-backdrop" @click.self="todoOpen = false">
-      <section class="todo-dialog" role="dialog" aria-modal="true" aria-labelledby="todo-title">
+      <section ref="todoDialog" class="todo-dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="todo-title" @keydown="todoFocus.handleKeydown">
         <header>
           <div>
             <p class="section-label">CC scratchpad</p>
@@ -3388,7 +3381,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
     >
     <FailureProbe v-if="simulateWorkspaceFailure" />
     <main>
-      <section v-if="appInitializing || activeBackgroundJob" class="background-scan" aria-live="polite">
+      <section v-if="appInitializing || activeBackgroundJob" class="background-scan">
         <span class="scan-spinner" aria-hidden="true" />
         <div>
           <strong>{{ appInitializing && !snapshot ? 'Opening Cairn Codex' : activeBackgroundJob?.progress.label }}</strong>
@@ -3450,10 +3443,11 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
       />
 
       <CollectionMaterialsWorkspace
-        v-if="snapshot && (activeView === 'collection' || activeView === 'materials')"
+        v-if="activeView === 'materials' || (snapshot && activeView === 'collection')"
         v-model:controls="activeCollectionMaterialsControls"
         :mode="activeView === 'materials' ? 'materials' : 'collection'"
-        :items="activeView === 'materials' ? (snapshot.materials ?? []) : snapshot.items"
+        :available="Boolean(snapshot)"
+        :items="activeView === 'materials' ? (snapshot?.materials ?? []) : (snapshot?.items ?? [])"
         :double-rare-mi-base-records="doubleRareMiBaseRecords"
         :favorite-records="favoriteRecords"
         :search-document-for-item="itemStructuredSearchDocument"
@@ -3467,6 +3461,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @queue-tooltip="queueTooltip"
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @scroll-tooltip="scrollTooltip"
         @open-item="openItem"
         @retrieve-live="retrieveArchivedCopyLive"
         @open-roll-help="openGlossary()"
@@ -3486,6 +3481,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @dismiss-tooltip="dismissItemMenuTooltip"
         @open-item="openItem"
       />
 
@@ -3504,6 +3500,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
         @build-plan="sendOracleCandidateToPlanner"
+        @scroll-tooltip="scrollTooltip"
         @inspect-skill="inspectOracleSkill"
       />
 
@@ -3517,6 +3514,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @scroll-tooltip="scrollTooltip"
         @hide-tooltip="scheduleTooltipHide"
+        @dismiss-tooltip="dismissItemMenuTooltip"
         @open-item="openItem"
         @icon-error="handleItemIconError"
       />
@@ -3539,6 +3537,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
+        @scroll-tooltip="scrollTooltip"
       />
 
       <SuppliesWorkspace
@@ -3564,6 +3563,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @dispense="retrieveSupplies"
+        @scroll-tooltip="scrollTooltip"
       />
 
       <DismantlingWorkspace
@@ -3587,6 +3587,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @queue-tooltip="queueTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
+        @scroll-tooltip="scrollTooltip"
       />
 
       <GlossaryWorkspace
@@ -3692,6 +3693,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         @move-tooltip="moveTooltip"
         @hide-tooltip="scheduleTooltipHide"
         @open-item="openItem"
+        @scroll-tooltip="scrollTooltip"
       />
     </main>
     </WorkspaceErrorBoundary>
@@ -3729,13 +3731,15 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         <div
           v-if="itemVersionCounterpart(tooltipItem)"
           class="tooltip-version-summary"
+          @mousedown.prevent
+          @click.stop="showItemVersion(tooltipItem)"
         >
           <span class="awakening-sigil"><i /></span>
           <span>
             <small>{{ tooltipItem.upgradeRecord ? 'Awakened version' : 'Original version' }}</small>
             <strong>{{ itemVersionCounterpart(tooltipItem)?.name }} · {{ tooltipItem.upgradeRecord ? 'Legendary' : 'Epic' }}</strong>
           </span>
-          <b>[V]</b>
+          <b>Click or press V</b>
         </div>
 
         <template v-if="tooltipItem.presentation">
@@ -3751,7 +3755,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               :key="`${line.label}:${index}`"
               :class="`tone-${line.tone}`"
             >
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
           </section>
 
@@ -3778,7 +3782,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
             >
               <h5>({{ tier.requiredPieces }}) Set</h5>
               <p v-for="(line, index) in tier.lines" :key="`${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
               <div v-if="tier.petLines?.length" class="tooltip-set-subsection">
                 <h6>Bonus to All Pets</h6>
@@ -3787,7 +3791,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                   :key="`pet:${line.label}:${index}`"
                   :class="`tone-${line.tone}`"
                 >
-                  {{ formatPresentationLine(line) }}
+                  <PresentationLine :line="line" />
                 </p>
               </div>
               <div
@@ -3797,7 +3801,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               >
                 <h6>{{ modifier.heading }}</h6>
                 <p v-for="(line, index) in modifier.lines" :key="`${line.label}:${index}`">
-                  {{ formatPresentationLine(line) }}
+                  <PresentationLine :line="line" />
                 </p>
               </div>
               <div v-if="tier.grantedSkill" class="tooltip-set-subsection granted-skill">
@@ -3809,7 +3813,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                   {{ tier.grantedSkill.description }}
                 </p>
                 <p v-for="(line, index) in tier.grantedSkill.lines" :key="`${line.label}:${index}`">
-                  {{ formatPresentationLine(line) }}
+                  <PresentationLine :line="line" />
                 </p>
                 <div
                   v-for="linked in tier.grantedSkill.linkedSkills ?? []"
@@ -3819,7 +3823,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                   <h6>{{ linked.name }}</h6>
                   <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
                   <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                    {{ formatPresentationLine(line) }}
+                    <PresentationLine :line="line" />
                   </p>
                 </div>
               </div>
@@ -3842,7 +3846,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               :key="`${line.label}:${index}`"
               :class="`tone-${line.tone}`"
             >
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div
               v-for="linked in tooltipItem.presentation.grantedSkill.linkedSkills ?? []"
@@ -3852,7 +3856,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               <h5>{{ linked.name }}</h5>
               <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
               <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </section>
@@ -3878,7 +3882,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
                 :key="`${line.label}:${index}`"
                 :class="`tone-${line.tone}`"
               >
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </template>
@@ -3896,7 +3900,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               :key="`${line.label}:${index}`"
               :class="`tone-${line.tone}`"
             >
-              {{ formatPresentationLine(line) }}
+              <PresentationLine :line="line" />
             </p>
             <div
               v-for="linked in affix.presentation.grantedSkill.linkedSkills ?? []"
@@ -3906,7 +3910,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
               <h6>{{ linked.name }}</h6>
               <p v-if="linked.description" class="skill-description">{{ linked.description }}</p>
               <p v-for="(line, index) in linked.lines" :key="`${linked.name}:${line.label}:${index}`">
-                {{ formatPresentationLine(line) }}
+                <PresentationLine :line="line" />
               </p>
             </div>
           </div>

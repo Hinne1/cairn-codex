@@ -10,7 +10,7 @@ let creations = 0
 const skillItems = [{ record: 'synthetic-skill', availableCount: 2 }]
 const createFixture = name => { assert.equal(name, 'skill-explorer'); creations++; return { items: skillItems } }
 for (const basis of ['archive', 'stashes']) {
-  for (const fixture of ['mi-workshop', 'bounded-grid-a11y']) {
+  for (const fixture of ['mi-workshop', 'bounded-grid-a11y', 'accessibility-audit']) {
     const result = presentScreenshotCollection(snapshot, basis, 'capture.png', fixture, createFixture)
     assert.equal(result.basis, basis)
     assert.strictEqual(result.observedItems, copies)

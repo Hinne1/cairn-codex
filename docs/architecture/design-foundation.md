@@ -5,6 +5,42 @@ the semantic theme foundation in issue #15. The interaction rules remain normati
 `workspace-ui.md`; this audit identifies where presentation still diverges and orders the work
 needed to make those rules visible throughout the application.
 
+## Current review (2026-09-06)
+
+The 2026-09-01 table below is historical migration evidence, not the current acceptance result.
+The shared sidebar, bounded surfaces, workspace extraction, research toolbar, damage presentation,
+tooltip wheel/dismissal, and core focus migrations have now been implemented. The current review
+uses synthetic data only. The following matrix names the current gates and remaining evidence
+limits; #45 remains open until #198 and #199 complete.
+
+| Workspace | Current presentation and evidence | Remaining audit limit |
+| --- | --- | --- |
+| Collection | Dashboard plus shared explorer and category controls; 48/20,000 cards, filter-empty, keyboard grid, comparison and Clear-focus checks. | Source-empty wording is #199. |
+| Sets | Shared ToolHeader/explorer, reduced card density, readiness badges; 50/202 sets in application captures and 50/20,000 in the owner gate, paging/empty/inspection. | Source-empty wording is #199. |
+| Components & Consumables | Shared ToolHeader/explorer and collection card owner; owner gate mounts 48/20,000 components, with normal/empty and narrow checks. Application query fixture has no materials and supplies empty-only evidence. | Source-empty wording is #199. |
+| Skill Explorer | Shared research toolbar/table, labeled local scroller and item menu; 50/20,000 rows, filter-empty, native keyboard/combobox/menu checks. | No new production deviation found. |
+| Leveling Planner | Same toolbar/Table and shared Journey states/actions; 50/15,992 level-filtered tiers from 20,000 items, filter-empty, Table/Journey/MI Sources history and focus checks. | No new production deviation found. |
+| MI Workshop | Shared header/explorer, local table scroller and global tooltip; 50/72 generated combinations, filter-empty and source/metric/view restoration. Owner gate adds 20k projection coverage. | No new production deviation found. |
+| Stash Oracle | Shared header/explorer/grid, three generated recommendations and filter-empty; keyboard grid and global tooltip. | Generated paging beyond the 12-card limit remains #198. |
+| Supplies | Shared header/explorer, named checkboxes, explicit method state and local rejection alert; 60/142 visible supply groups, selection/paging/normal/empty checks. | Source fixture holds 145 supply copies; this is not 20k distinct supplies. |
+| Collection Farming | Shared header/explorer/cards; 50/214 routes, one-route and filter-empty states, paging and keyboard item inspection. | No new production deviation found. |
+| Dismantling Lab | Shared header/explorer and bounded selection; 120/20,000 copies, SC/HC filtering, selection/empty states, readable metadata and preview rejection alert. | Source-empty wording is #199. |
+| Transfers | Focused system workspace with shared header/explorer, explicit selected sections/methods and persistent Collection route; native section/method and empty-action checks. | Populated journal/quarantine normal/large evidence remains #198; source-empty wording is #199. |
+| Settings | Focused system workspace with shared header/controls and Collection route; normal, safe/disabled, recovery, success notification and keyboard checks. | Raw/large result states are not applicable. |
+
+The referenced production-component and application gates run at 1440px and 520px and reject
+document overflow. Dense tables intentionally retain labeled local scrolling and a sticky item
+identity. Core dialogs, roll profiles and menus add compact 125% checks. Filter-empty means zero
+rendered results after a valid impossible query, not a claim that every source-empty message is
+already distinct. Chromium accessibility-tree assertions are not recorded screen-reader speech.
+
+The final independent review found the remaining checkbox, selected-state, Clear-focus,
+announcement and metadata-contrast gaps addressed in #197 without changing the reviewed layouts.
+`test:workspace-queries:electron` preserves focused state captures in
+`local-cache/workspace-query-verification`; menu and modal captures have separate preserved
+directories documented in the test matrix. Historical personal-profile scale counts are not
+substitutes for the two generated-fixture gaps above.
+
 ## Foundation model
 
 `src/renderer/src/semantic-tokens.css` provides the static Cairn fallback palette, while

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { extname, resolve } from 'node:path'
+import { isForbiddenDataFile } from './artifact-data-policy.mjs'
 
 const root = resolve('.')
 const git = spawnSync(
@@ -11,9 +12,6 @@ const git = spawnSync(
 )
 if (git.status !== 0) throw new Error(git.stderr || 'git ls-files failed.')
 const files = git.stdout.split('\0').filter(Boolean)
-const forbiddenExtensions = new Set([
-  '.db', '.sqlite', '.sqlite3', '.gsh', '.gst', '.dmp', '.pdb', '.csv', '.arz', '.arc', '.tex'
-])
 const allowedBinaries = new Map([
   ['src/helper/CairnCodex.GrimDawn/native/ItemAssistantHook_x64.dll', '419b53fdff4e75dafb98f9066a0271da0f0c937b5b02e5beca2e39af527a34c5'],
   ['src/helper/CairnCodex.GrimDawn/native/DllInjector64.exe', '569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c']
@@ -21,7 +19,7 @@ const allowedBinaries = new Map([
 
 for (const file of files) {
   const extension = extname(file).toLowerCase()
-  if (forbiddenExtensions.has(extension)) {
+  if (isForbiddenDataFile(file)) {
     throw new Error(`Forbidden game or personal-data file is tracked: ${file}`)
   }
   const info = await stat(resolve(root, file))

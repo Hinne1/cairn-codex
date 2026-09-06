@@ -7,6 +7,7 @@ const MODAL_FOCUSABLE_SELECTOR = [
   'input:not([disabled]):not([type="hidden"])',
   'select:not([disabled])',
   'textarea:not([disabled])',
+  'summary',
   'iframe',
   'object',
   'embed',
@@ -85,6 +86,7 @@ export function useModalDialogFocus(
 ): ModalDialogFocus {
   let active = false
   let previouslyFocused: HTMLElement | null = null
+  let observer: MutationObserver | null = null
 
   function focusInitial(): void {
     const dialog = root.value
@@ -93,26 +95,43 @@ export function useModalDialogFocus(
     target.focus({ preventScroll: true })
   }
 
-  function retainFocus(event: FocusEvent): void {
+  function repairFocus(): void {
     const dialog = root.value
-    if (!active || !dialog || dialog.contains(event.target as Node | null)) return
+    if (!active || !dialog?.isConnected) return
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && dialog.contains(focused) &&
+      !focused.matches(':disabled') && !focused.closest('[hidden], [inert]') && focused.getClientRects().length) return
     const target = options.initialFocus?.() ?? modalFocusableElements(dialog)[0] ?? dialog
-    target.focus({ preventScroll: true })
+    target.focus()
   }
+
+  function retainFocus(): void { repairFocus() }
 
   function activate(): void {
     if (active) return
     previouslyFocused = options.restoreFocus?.() ?? (
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body && document.activeElement !== document.documentElement
+        ? document.activeElement : null
     )
     active = true
     document.addEventListener('focusin', retainFocus, true)
-    void nextTick(focusInitial)
+    void nextTick(() => {
+      focusInitial()
+      if (!active || !root.value) return
+      // Removing a focused control does not emit focusin. Repair after Vue's DOM
+      // update without replacing the original dialog invoker.
+      observer = new MutationObserver(repairFocus)
+      observer.observe(root.value, { childList: true, subtree: true, attributes: true,
+        attributeFilter: ['disabled', 'hidden', 'inert', 'open'] })
+    })
   }
 
   function deactivate(restore = true): void {
     if (!active && !previouslyFocused) return
     active = false
+    observer?.disconnect()
+    observer = null
     document.removeEventListener('focusin', retainFocus, true)
     const target = options.restoreFocus?.() ?? previouslyFocused
     previouslyFocused = null
@@ -143,7 +162,7 @@ export function useModalDialogFocus(
     )
     if (!target) return
     event.preventDefault()
-    target.focus({ preventScroll: true })
+    target.focus()
   }
 
   onBeforeUnmount(() => deactivate())

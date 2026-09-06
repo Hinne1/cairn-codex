@@ -45,6 +45,12 @@ Build inputs:
 - Injector SHA-256:
   `569e6bdde51148b29aece0491366e9aa4c21cf2f11279a94c815e2b958cfe10c`
 
+`scripts/build-live-hook.ps1` defaults to the SDK and toolset above and checks the
+compiler, ATL, SDK headers/libraries/tools, and Boost before applying any patch.
+Use `-PreflightOnly` for a read-only prerequisite and patch-applicability check.
+Explicit SDK/compiler overrides remain subject to the same expected output hash;
+compilation and preflight do not qualify a replacement binary for injection.
+
 The hook redirects `GetIagdFolder()` from GDIA's local-app-data directory to
 `%APPDATA%\cairn-codex\live-adapter`. It also reports the exact active character
 name and recognizes an explicit `cairn-personal-` queue prefix. Those personal

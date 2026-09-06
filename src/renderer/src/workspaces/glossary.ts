@@ -36,7 +36,8 @@ export const glossaryEntries: readonly GlossaryEntry[] = [{
       id: 'damage-colors', title: 'Damage colors & roll icons', damageLegend: true,
       paragraphs: [
         'Damage types use the familiar Rainbow Filter palette throughout the tools. Paired damage types share a color; Pierce and Bleeding remain separate roll scores even though both use red-orange. Vitality and Pierce use brighter text shades to stay readable on dark backgrounds.',
-        'Compact cards show a colored icon followed by quality and percentile. The sword means Offense, the shield Defense, the wolf Pet, the compass Utility, and the shield with a bolt Retaliation. Open Roll details to read every category name and score, or hover a score for its explanation. Full names also remain available to screen readers.',
+        'Compact cards show a colored icon followed by quality and percentile. The arrowhead identifies Pierce and the blood drop identifies Bleeding, so their shared color does not hide which score belongs to your build. Other offense scores use a sword. The shield means Defense, the wolf Pet, the compass Utility, and the shield with a bolt Retaliation. Open Roll details to read every category name and score, or hover a score for its explanation. Full names also remain available to screen readers.',
+        'Each damage type has one roll score for the exact base item, prefix, and suffix together. Same-type contributions are combined before that score is calculated; adding Bleeding on an affix does not create another Bleeding score. Pierce and Bleeding are rated separately.',
         'Colors identify damage families, not item rarity, roll quality, or build suitability. Conversions color their source and target separately. Damage type names remain written out in item details and tooltips.'
       ]
     },

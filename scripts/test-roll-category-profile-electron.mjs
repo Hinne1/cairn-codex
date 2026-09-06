@@ -27,10 +27,14 @@ if (!process.versions.electron) {
             key, category: index < 4 ? 'offense' : key, damageType: index < 4 ? key : null,
             qualityPercent: 70 + index, estimatedPercentile: 70 + index, combinationPercentile: 90 + index, statCount: 2
           }))
+          const separateDamageScores = ['pierce', 'bleeding'].map((damageType, index) => ({
+            key: 'offense:' + damageType, category: 'offense', damageType,
+            qualityPercent: 39 + index * 12, combinationPercentile: 28 + index * 25, statCount: 2
+          }))
           window.fixtureEvents = { activations: 0, escapes: 0 }
           const section = (id, props) => h('section', {
             id,
-            style: id === 'narrow' ? 'width:186px' : undefined,
+            style: id === 'narrow' || id === 'damage-types' ? 'width:186px' : undefined,
             onClick: () => window.fixtureEvents.activations++,
             onKeydown: (event) => { if (event.key === 'Escape') window.fixtureEvents.escapes++ }
           }, [h('h2', id), h(Profile, props)])
@@ -39,6 +43,7 @@ if (!process.versions.electron) {
             section('normal', { scores: scores.slice(0, 2) }),
             section('perfect', { scores: [{ ...scores[0], qualityPercent: 100, estimatedPercentile: 250 / 3, combinationPercentile: 250 / 3 }] }),
             section('narrow', { scores: scores.slice(0, 2).map(score => ({ ...score, qualityPercent: 100, combinationPercentile: 100 })), compact: true }),
+            section('damage-types', { scores: separateDamageScores, compact: true }),
             section('overflow', { scores, maxVisible: 4 }),
             section('families', { scores, maxVisible: 5, preferredKey: 'elemental', compact: true }),
             section('compact', { scores, maxVisible: 2, compact: true })
@@ -127,6 +132,26 @@ if (!process.versions.electron) {
         assert.match(await evaluate("document.querySelector('#narrow .roll-category-overflow').innerText"), /Fire[\s\S]*Cold/i, 'full names remain available even when no categories were hidden')
         await key('Space')
         assert.equal(await evaluate("Array.from(document.querySelectorAll('.roll-category-icon')).every(icon=>icon.getAttribute('aria-hidden')==='true' && icon.getAttribute('focusable')==='false')"), true, 'icons are decorative; the adjacent text supplies the category name')
+        const damageIcons = await evaluate(`Array.from(document.querySelectorAll('#damage-types .roll-category-profile > .roll-category-score'), score => ({
+          type: score.querySelector('svg').dataset.damageType,
+          shape: score.querySelector('svg').innerHTML,
+          label: score.querySelector('small').textContent,
+          color: getComputedStyle(score).color,
+          title: score.title,
+          fits: score.scrollWidth <= score.clientWidth
+        }))`)
+        assert.deepEqual(damageIcons.map(icon => icon.type), ['pierce', 'bleeding'], 'different damage types remain separate scores')
+        assert.deepEqual(damageIcons.map(icon => icon.label), ['Pierce', 'Bleeding'], 'full accessible names identify each score')
+        assert.equal(damageIcons[0].color, damageIcons[1].color, 'the shared Rainbow color is retained')
+        assert.notEqual(damageIcons[0].shape, damageIcons[1].shape, 'the icon shapes distinguish same-color damage types')
+        assert.ok(damageIcons.every(icon => icon.title.startsWith(icon.label + ':') && icon.fits), 'compact names and scores retain explanations without overflowing')
+        await evaluate("document.querySelector('#damage-types summary').focus()")
+        await key('Enter')
+        assert.match(await evaluate("document.querySelector('#damage-types .roll-category-overflow').innerText"), /Pierce[\s\S]*39% \(28th\)[\s\S]*Bleeding[\s\S]*51% \(53rd\)/i)
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('#damage-types .roll-category-overflow svg'), icon => icon.innerHTML)"), damageIcons.map(icon => icon.shape), 'expanded profiles use the same distinct icons')
+        await evaluate("document.querySelector('#damage-types').scrollIntoView({block:'center'})")
+        await writeFile(join(testRoot, `profile-damage-types-${width}.png`), await captureFrame())
+        await key('Space')
         assert.match(await evaluate("document.querySelector('#perfect').innerText"), /100% \(83rd\)/,
           'a perfect discrete roll must show full quality, separately from rarity')
         for (const id of ['overflow', 'compact']) {

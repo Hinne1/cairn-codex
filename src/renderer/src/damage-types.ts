@@ -2,6 +2,7 @@
 // https://github.com/WareBare/WanezGD_Tools/blob/master/app/data/gd-colorcodes.json
 // https://github.com/WareBare/WanezRainbowFiles/blob/main/text_en/tags_ui.txt
 // Pierce and Vitality use lighter text variants for the application's dark surfaces.
+// Rainbow color groups are independent of score identity: Pierce and Bleeding stay separate scores.
 export const DAMAGE_FAMILIES = [
   { id: 'physical', label: 'Physical / Internal Trauma', code: 'K', source: '#f1e78c', color: '#f1e78c', aliases: ['physical', 'internal trauma', 'trauma'] },
   { id: 'pierce', label: 'Pierce / Bleeding', code: 'R', source: '#ff4200', color: '#ff5722', aliases: ['pierce', 'piercing', 'bleeding', 'bleed'] },

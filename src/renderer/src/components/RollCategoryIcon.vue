@@ -10,11 +10,7 @@ defineProps<{ category: RollCategoryScore['category']; damageType?: string | nul
     stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
     aria-hidden="true" focusable="false">
     <template v-if="category === 'offense'">
-      <template v-if="damageType === 'bleeding'">
-        <path d="M12 3c-2 4-7 8-7 12a7 7 0 0 0 14 0c0-4-5-8-7-12Z" />
-        <path d="M8 15a4 4 0 0 0 4 4" />
-      </template>
-      <path v-else-if="damageType === 'pierce'" d="m21 3-4 11-3-4-4-3zM14 10 3 21M3 16v5h5" />
+      <path v-if="damageType === 'pierce'" d="m21 3-4 11-3-4-4-3zM14 10 3 21M3 16v5h5" />
       <template v-else-if="isDamageOverTime(damageType)">
         <path d="M5 3h14M5 21h14M7 3v4l10 10v4M17 3v4L7 17v4" />
         <path d="M9 6h6M9 18h6" />

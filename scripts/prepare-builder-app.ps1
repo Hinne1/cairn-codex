@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$identity = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-identity.json') -Raw | ConvertFrom-Json
 $stageRoot = Join-Path $projectRoot 'dist\builder-app'
 $distRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'dist')).TrimEnd('\')
 $resolvedStage = [System.IO.Path]::GetFullPath($stageRoot)
@@ -33,8 +34,8 @@ $stagePackage = [ordered]@{
   main = './out/main/index.js'
   type = 'module'
   build = [ordered]@{
-    appId = 'com.hinnestolzenberg.cairncodex'
-    productName = 'Cairn Codex'
+    appId = [string]$identity.appId
+    productName = [string]$identity.productName
     electronVersion = '43.3.0'
     asar = $true
     directories = [ordered]@{ output = '../builder' }
@@ -51,12 +52,13 @@ $stagePackage = [ordered]@{
       artifactName = 'Cairn-Codex-${version}-Setup.${ext}'
     }
     nsis = [ordered]@{
+      guid = [string]$identity.installerGuid
       oneClick = $false
       perMachine = $false
       allowToChangeInstallationDirectory = $true
       createDesktopShortcut = $true
       createStartMenuShortcut = $true
-      shortcutName = 'Cairn Codex'
+      shortcutName = [string]$identity.shortcutName
       installerIcon = 'build/icon.ico'
       uninstallerIcon = 'build/icon.ico'
       installerHeaderIcon = 'build/icon.ico'

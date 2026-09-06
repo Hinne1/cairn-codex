@@ -9,6 +9,7 @@ Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsof
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $packageScript = Join-Path $PSScriptRoot 'package-windows.ps1'
 $packageJson = Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
+$identity = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-identity.json') -Raw | ConvertFrom-Json
 $version = [string]$packageJson.version
 $packageRoot = Join-Path $projectRoot 'dist\package\Cairn Codex-win32-x64'
 $releaseRoot = Join-Path $projectRoot 'dist\release'
@@ -89,6 +90,8 @@ $injectorPath = Join-Path $packageRoot 'resources\helper\native\DllInjector64.ex
 $vcRedistManifest = Get-Content (Join-Path $packageRoot 'resources\prerequisites\vc-redist-manifest.json') -Raw | ConvertFrom-Json
 $manifest = [ordered]@{
   product = 'Cairn Codex'
+  appId = [string]$identity.appId
+  installerGuid = [string]$identity.installerGuid
   version = $version
   platform = 'win-x64'
   artifact = Split-Path $zipPath -Leaf

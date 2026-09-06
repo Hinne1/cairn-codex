@@ -35,6 +35,12 @@ The measured evidence and product/architecture follow-up are tracked in
 
 ## Build and package
 
+Checked historical rows below describe existing capabilities and previous beta
+evidence. They do not qualify a new artifact. Before a full release, record the
+current candidate's [disposable Windows installer qualification](installer-qualification.md)
+and the per-build live recovery matrix. Local preparation now omits the real
+installer lifecycle and runs synthetic installer safety checks instead.
+
 - The tag workflow must pass live dependency-security controls and the current
   lockfile audit before verification and package creation. Package commands never
   publish implicitly; publication is a separate final step after artifact audits.

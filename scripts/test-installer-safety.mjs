@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const root = fileURLToPath(new URL('../', import.meta.url))
+const read = (name) => readFileSync(new URL(name, import.meta.url), 'utf8')
+const identity = JSON.parse(read('installer-identity.json'))
+const pkg = JSON.parse(read('../package.json'))
+const { UUID } = createRequire(import.meta.url)('builder-util-runtime')
+assert.equal(identity.installerGuid, UUID.v5(identity.appId, UUID.parse('50e065bc-3134-11e6-9bab-38c9862bdaf3')))
+assert.equal(identity.appId, pkg.build.appId)
+assert.equal(identity.productName, pkg.build.productName)
+assert.equal(identity.userDataName, pkg.name)
+const builder = read('prepare-builder-app.ps1')
+assert.match(builder, /guid = \[string\]\$identity\.installerGuid/)
+assert.match(builder, /deleteAppDataOnUninstall = \$false/)
+assert.match(read('test-release.ps1'), /npm.cmd run test:installer-safety/)
+assert.doesNotMatch(read('test-release.ps1'), /npm.cmd run test:installer(?:\s|$)/)
+assert.doesNotMatch(read('test-release.ps1'), /test-installer\.ps1/)
+const lifecycle = read('test-installer.ps1')
+assert.doesNotMatch(lifecycle, /Remove-Item|Stop-Process|taskkill|previousUninstaller/i)
+assert.equal((lifecycle.match(/Assert-CairnNoRunningApplication/g) ?? []).length, 3)
+assert.match(lifecycle, /@\('\/S', '\/currentuser', "\/D=\$installRoot"\)/)
+assert.match(lifecycle, /@\('\/S', '\/currentuser'\)/)
+if (process.platform !== 'win32') throw new Error('Installer safety qualification tests require Windows')
+// The only lifecycle invocation deliberately omits authorization and a real artifact.
+const refusal = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', './scripts/test-installer.ps1', '-InstallerPath', 'MUST-NOT-EXECUTE.exe'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 30_000 })
+assert.ifError(refusal.error)
+assert.notEqual(refusal.status, 0)
+assert.match(refusal.stderr + refusal.stdout, /requires -DisposableWindows/)
+const cases = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', './scripts/test-installer-safety.ps1'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 60_000 })
+assert.ifError(cases.error)
+assert.equal(cases.status, 0, cases.stderr + cases.stdout)
+console.log(cases.stdout.trim())
+console.log('Production identity and default refusal passed. Real installer qualification remains manual in a disposable VM.')

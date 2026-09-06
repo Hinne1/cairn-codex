@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { BackgroundJobCoordinator } from '../src/main/background-jobs.ts'
 import { runCollectionRefresh } from '../src/main/ipc/collection-refresh-jobs.ts'
 import { CollectionSession } from '../src/renderer/src/collection-session.ts'
+import { ROLL_ANALYSIS_VERSION } from '../src/shared/roll-analysis.ts'
 import {
   ItemAssistantImportCanceledError,
   ItemAssistantImportInProgressError,
@@ -615,6 +616,39 @@ for (const kind of ['scan', 'rebuild']) {
   await service.scan({ sourcePaths: [], basis: 'stashes' })
   assert.equal(written.catalogPresentationVersion, 7)
   assert.equal(written.items[0].acquisition.crafting.knownSoftcore, true)
+}
+
+// Native-stash ratings are cached in the source snapshot, not the vault rows
+// hydrated for archive views. A model upgrade must enter normal deferred refresh.
+for (const version of [9, undefined]) {
+  let cached = { ...collectionSnapshot('old-native-rolls'), observedItems: [
+    { sourcePath: 'synthetic-sc', baseRecord: 'records/gear.dbr', rollAnalysis: { trusted: true, modelVersion: version } },
+    { sourcePath: 'synthetic-hc', baseRecord: 'records/gear.dbr', rollAnalysis: { trusted: true, modelVersion: version } },
+    { sourcePath: 'synthetic-sc', baseRecord: 'records/ineligible.dbr', rollAnalysis: null }
+  ] }
+  let scans = 0
+  const dependencies = collectionDependencies({
+    cache: { read: async () => cached, write: async snapshot => { cached = snapshot } },
+    scanner: { scanInstalledData: async () => {
+      scans++
+      return { ...cached, observedItems: cached.observedItems.map(copy => ({ ...copy,
+        rollAnalysis: copy.rollAnalysis && { ...copy.rollAnalysis, modelVersion: ROLL_ANALYSIS_VERSION }
+      })) }
+    } }
+  })
+  const service = new CollectionService(dependencies)
+  const native = { sourcePaths: [], basis: 'stashes' }
+  const archive = await service.getCached({ ...native, basis: 'archive' })
+  assert.equal(archive.cacheNeedsRefresh, false, 'archive model refresh belongs to bounded vault hydration')
+  const old = await service.getCached(native)
+  assert.equal(old.cacheNeedsRefresh, true, 'otherwise-fresh native v9 cache must request recalculation')
+  assert.equal(old.cachedDataAsOfUtc, cached.scannedAtUtc)
+  assert.equal(scans, 0, 'cache reads only signal refresh; the existing caller owns live-mode deferral')
+  await service.scan(native)
+  const reopened = new CollectionService(dependencies)
+  assert.equal((await reopened.getCached(native)).cacheNeedsRefresh, false, 'current native ratings and ineligible items must not cause repeated scans')
+  assert.equal(scans, 1)
+  assert.deepEqual(cached.observedItems.map(copy => copy.sourcePath), ['synthetic-sc', 'synthetic-hc', 'synthetic-sc'])
 }
 
 // Learned recipes are monotonic even when a later scan has only a partial view

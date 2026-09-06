@@ -6,6 +6,7 @@ import type {
   GrimDawnDiscovery
 } from '../../shared/contracts.ts'
 import { copyCollectionRequest, type CollectionRequestContext } from '../../shared/collection-request.ts'
+import { ROLL_ANALYSIS_VERSION } from '../../shared/roll-analysis.ts'
 
 export const ARCHIVE_ROLL_HYDRATION_BATCH_LIMIT = 256
 
@@ -327,9 +328,14 @@ export class CollectionService {
       this.dependencies.freshness.isMapIndexFresh(),
       this.dependencies.freshness.areSourcesFresh(snapshot)
     ])
-    const cacheNeedsRefresh =
-      !presentationFresh || !mapIndexFresh || !sourcesFresh || snapshot.cacheNeedsRefresh === true
     const projected = this.dependencies.projector.projectSources(snapshot, request.sourcePaths)
+    // Archive ratings hydrate from vault rows. Native-stash ratings live in the
+    // source snapshot and need the normal scan path (including its live-mode deferral).
+    // Ineligible items intentionally have no analysis and must not force endless scans.
+    const rollsFresh = request.basis !== 'stashes' || projected.observedItems.every(item =>
+      !item.rollAnalysis || item.rollAnalysis.modelVersion === ROLL_ANALYSIS_VERSION)
+    const cacheNeedsRefresh =
+      !presentationFresh || !mapIndexFresh || !sourcesFresh || !rollsFresh || snapshot.cacheNeedsRefresh === true
     return {
       ...(await this.dependencies.projector.present(projected, request.basis)),
       cacheNeedsRefresh,

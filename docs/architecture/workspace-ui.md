@@ -511,6 +511,11 @@ and explicitly labeled legacy percentile metrics remain usable. The existing ver
 candidate query retries unfinished batches after restart in both SC and HC; only rating JSON
 changes, without schema or exact payload changes. Generated reopen/partial-batch regressions
 cover this in `test:roll-rating`.
+Native-stash ratings instead live in the source snapshot. `CollectionService.getCached` marks
+an outdated analyzed copy stale for the requested stash sources and leaves refresh to the normal
+caller, preserving live-mode deferral. Archive views keep using bounded vault hydration. Current
+native ratings and intentionally unscored/ineligible items do not cause repeated scans; service
+tests cover the upgrade, deferred read, persisted refresh and reopen.
 
 ## Adding a workspace
 

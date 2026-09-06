@@ -7,7 +7,12 @@ export function workspaceQueryCollection(template: CollectionSnapshot): Collecti
     contentPack: 'base', levelRequirement: 50, itemLevel: 50, availableCount: 5000, discovered: true }))
   const supplies = ['writ', 'potion', 'rune'].map(slot => ({ ...template.items[0]!,
     record: `records/synthetic/query_${slot}.dbr`, name: `Synthetic ${slot}`, rarity: 'supply' as const,
-    slot, contentPack: 'base', availableCount: 1, discovered: true, supplySlotFamilies: ['weapon' as const] }))
+    slot, contentPack: 'base', availableCount: 1, discovered: true, supplySlotFamilies: ['weapon' as const],
+    presentation: { ...template.items[0]!.presentation!, sections: slot === 'rune' ? [] : [{
+      kind: 'base' as const, heading: null, lines: ['Fire', 'Cold', 'Lightning', 'Acid', 'Vitality', 'Aether', 'Chaos'].map(label => ({
+        label: `${label} Resistance`, minimum: 5, maximum: 5, unit: '%' as const, tone: 'standard' as const, prefix: '+', suffix: ''
+      }))
+    }] } }))
   const stash = { path: 'C:\\Synthetic QA\\workspace-queries\\transfer.gst', isHardcore: false,
     modLabel: 'Synthetic', itemCount: 0, lastWriteUtc: '2026-09-05T00:00:00.000Z', sha256: 'a'.repeat(64) }
   return { ...template, items: gear, plannerItems: [], supplies, observedItems: [],

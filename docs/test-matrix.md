@@ -407,3 +407,30 @@ Per-state screenshots and performance reports are preserved in
 `local-cache/item-context-verification` before each benchmark resets its disposable profile.
 The fixture has no personal archives, assets or game process; menu operations only exercise
 existing planner preferences in that disposable profile.
+
+## Workspace accessibility follow-through (#197)
+
+The existing `test:workspace-queries:electron` now adds native Space/Enter and Chromium AX checks
+for enabled, item-named Supplies checkboxes; pressed Supplies methods, Transfers sections/methods,
+and Collection categories; and Tab-to-Clear returning focus to the surviving search input.
+Onboarding is explicitly dismissed before those workspace interactions.
+
+The disposable verification process replaces only supply-selection and preview handlers: supply
+selection rejects, while the preview first returns a deterministic typed result, then rejects.
+Local errors expose one alert each. No dispensing, helper lookup, archive write, or transfer occurs;
+the existing database checks still require 20,145 ingested fixture copies and an empty operation
+journal. The injected handlers are removed when this verification owner exits.
+
+Rendered metadata checks composite ancestor surfaces and gradient endpoints, including selected
+Supplies cards and attached Dismantling rows. They cover supply detail/more/no-effect text, empty
+preview help, and populated cost/distribution/reward/rule metadata. Minimum contrast on the
+implementation host was 6.61:1 for Supplies and 6.92:1 for Dismantling at both 1440px and 520px.
+The generated archive keeps Dismantling at 120 mounted copies and Supplies at 60 cards. The
+existing query sequence took 4.50–4.71s including its prescribed waits; cached paint took
+1.28–1.32s and interactivity 1.32–1.36s. No document overflow was observed.
+
+Selection, success-preview, rejected-action, selected-mode and Clear-focus screenshots are
+preserved alongside the reports in `local-cache/workspace-query-verification`. Hidden-window
+captures allow the compositor to settle before retaining the image. The current workspace audit
+in `architecture/design-foundation.md` explicitly retains #198's Oracle/Transfers fixture gaps
+and #199's source-empty wording follow-up; this pass does not close umbrella #45.

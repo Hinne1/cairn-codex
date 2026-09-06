@@ -1,8 +1,9 @@
 import type { BrowserWindow } from 'electron'
+import { verifyWorkflowAccessibility } from './workflow-a11y-verification'
 
 /** Exercises real components and IPC against the disposable 20k archive fixture. */
 export async function verifyWorkspaceQueries(window: BrowserWindow): Promise<Record<string, number>> {
-  return window.webContents.executeJavaScript(`
+  const timings = await window.webContents.executeJavaScript(`
     (async () => {
       const started = performance.now()
       const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -103,4 +104,5 @@ export async function verifyWorkspaceQueries(window: BrowserWindow): Promise<Rec
       return { workspaceQueriesMs: performance.now() - started, dismantlingMountedRows, suppliesMountedRows }
     })()
   `)
+  return { ...timings, ...await verifyWorkflowAccessibility(window) }
 }

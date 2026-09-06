@@ -163,7 +163,7 @@ function showFocusedTooltip(_key: string | number, item: CollectionItem, element
       description="Browse your components, crafting materials, and learned potion formulas."
     />
     <nav v-if="mode === 'collection'" class="category-tabs" aria-label="Item categories">
-      <button v-for="option in collectionCategories" :key="option" type="button" :class="{ active: option === category }" @click="category = option">
+      <button v-for="option in collectionCategories" :key="option" type="button" :class="{ active: option === category }" :aria-pressed="option === category" @click="category = option">
         <span>{{ option }}</span><small>{{ categoryProgress(option) }}</small>
       </button>
     </nav>

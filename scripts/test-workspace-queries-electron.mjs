@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { readFile, mkdir, copyFile } from 'node:fs/promises'
+import { readFile, mkdir, copyFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -10,7 +10,7 @@ for (const width of [1440, 520]) {
   const name = `workspace-queries-${width}`
   const result = spawnSync(process.execPath, [resolve('scripts/benchmark-ui.mjs'),
     '--allow-windows-sandbox-fallback', '--electron-source', '--fixture', 'workspace-queries',
-    '--query', 'synthetic', '--enable-all-tools', '--verify-workspace-queries',
+    '--query', 'synthetic', '--enable-all-tools', '--dismiss-onboarding', '--verify-workspace-queries',
     '--assert-no-overflow', '--disable-gpu', '--width', String(width), '--height', '1000',
     '--scroll-target', '.supply-results', '--screenshot-name', name
   ], { cwd: resolve('.'), env: process.env, stdio: 'inherit', windowsHide: true })
@@ -26,12 +26,14 @@ for (const width of [1440, 520]) {
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM vault_item WHERE state != 'ingested'").get().count, 0)
     assert.equal(database.prepare('SELECT COUNT(*) AS count FROM operation_journal').get().count, 0)
   } finally { database.close() }
-  await copyFile(resolve(`local-cache/ui-benchmark/${name}.png`), resolve(captures, `${name}.png`))
+  for (const file of await readdir(resolve('local-cache/ui-benchmark'))) {
+    if (file.startsWith(name) && file.endsWith('.png')) await copyFile(resolve('local-cache/ui-benchmark', file), resolve(captures, file))
+  }
   await copyFile(resolve('local-cache/ui-benchmark/performance.json'), resolve(captures, `${name}.json`))
   const dismantlingName = `dismantling-queries-${width}`
   const capture = spawnSync(process.execPath, [resolve('scripts/benchmark-ui.mjs'),
     '--allow-windows-sandbox-fallback', '--electron-source', '--fixture', 'workspace-queries',
-    '--query', 'synthetic', '--enable-all-tools', '--category', 'Dismantling Lab',
+    '--query', 'synthetic', '--enable-all-tools', '--dismiss-onboarding', '--category', 'Dismantling Lab',
     '--expected-bounded-total', '20000', '--expected-bounded-mounted', '120',
     '--assert-no-overflow', '--disable-gpu', '--width', String(width), '--height', '1000',
     '--scroll-target', '.dismantling-candidates', '--screenshot-name', dismantlingName

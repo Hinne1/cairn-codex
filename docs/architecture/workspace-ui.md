@@ -167,7 +167,9 @@ sufficient.
 - Fields, aliases, value kinds, common values, help, and builder controls come from
   `src/shared/search-schema.ts`. Parser options and Search tips are derived from that schema;
   workspace-local copies are not allowed. Unknown fields and invalid numeric comparisons
-  produce an inline error and preserve the unfiltered result surface while the user edits.
+  produce an inline error. Local projections preserve the unfiltered result surface while the
+  user edits. Remote Supplies and Dismantling queries deliberately clear stale pages and disable
+  selection/actions until the query is valid; their toolbar owns the error announcement.
 - `src/shared/advanced-search.ts` translates between the shared expression tree and a flat rule
   form. Syntax outside that form's representable subset stays visible as a preserved clause and
   must never be silently discarded.
@@ -554,6 +556,12 @@ native ratings and intentionally unscored/ineligible items do not cause repeated
 tests cover the upgrade, deferred read, persisted refresh and reopen.
 
 ## Item actions and row states
+
+The shared search Clear control returns focus to its input after removing the query. Collection
+categories, Supplies methods and Transfers sections/methods expose their selected state through
+`aria-pressed`, matching Planner view controls. Separately focusable selection checkboxes name
+their item. Asynchronous selection/preview failures have one local alert owner; stale-result
+guards continue to prevent errors from a previous workspace context appearing in the current one.
 
 `BoundedResultSurface` exposes an opt-in typed item-context event. Shared research rows use
 `useItemContextMenu` and `ItemContextMenu` for right-click, Menu/Shift+F10 and a visible More

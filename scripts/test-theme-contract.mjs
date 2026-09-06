@@ -205,7 +205,7 @@ for (const [index, color] of gameplayColors.entries()) {
 // foundation work may reduce it, while new literal workspace colors fail the build.
 const legacyStyles = await readFile(legacyStylesPath, 'utf8')
 const legacyLiteralCount = (legacyStyles.match(colorLiteral) ?? []).length
-const legacyLiteralCeiling = 1214
+const legacyLiteralCeiling = 1180
 if (legacyLiteralCount > legacyLiteralCeiling) {
   throw new Error(
     `styles.css contains ${legacyLiteralCount} literal colors; the migration ceiling is ${legacyLiteralCeiling}. ` +

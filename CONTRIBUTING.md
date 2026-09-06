@@ -113,6 +113,7 @@ part of the documented manual live matrix.
 - [ ] The change is focused and documented.
 - [ ] `npm.cmd run verify` passes.
 - [ ] UI changes were checked at multiple window sizes and zoom levels.
+- [ ] Changed controls retain accessible names, selected state, keyboard focus, and one error announcement owner; meaningful metadata meets the shared contrast contract.
 - [ ] Database changes are idempotent when a profile is reopened.
 - [ ] Transfer changes include rejection, timeout, retry, and uncertain-outcome
       behavior—not only the happy path.

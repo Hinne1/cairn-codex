@@ -86,13 +86,13 @@ function toggleVaultItem(id: string): void {
     </ToolHeader>
 
     <nav class="transfer-section-tabs" aria-label="Transfer workspace">
-      <button type="button" :class="{ active: section === 'ingest-history' }" @click="section = 'ingest-history'">
+      <button type="button" :class="{ active: section === 'ingest-history' }" :aria-pressed="section === 'ingest-history'" @click="section = 'ingest-history'">
         <strong>Ingest history</strong><small>Read-only · items entering CC</small>
       </button>
-      <button type="button" :class="{ active: section === 'dispense-history' }" @click="section = 'dispense-history'">
+      <button type="button" :class="{ active: section === 'dispense-history' }" :aria-pressed="section === 'dispense-history'" @click="section = 'dispense-history'">
         <strong>Dispense history</strong><small>Read-only · items sent to Grim Dawn</small>
       </button>
-      <button type="button" :class="{ active: section === 'quarantine' }" @click="section = 'quarantine'">
+      <button type="button" :class="{ active: section === 'quarantine' }" :aria-pressed="section === 'quarantine'" @click="section = 'quarantine'">
         <strong>Quarantined items</strong><small>{{ quarantineVaultPage.total.toLocaleString() }} available for recovery</small>
       </button>
     </nav>
@@ -158,11 +158,11 @@ function toggleVaultItem(id: string): void {
 
     <template v-else>
       <nav class="transfer-mode-tabs" aria-label="Quarantine return method">
-        <button type="button" :class="{ active: mode === 'live' }" @click="mode = 'live'">
+        <button type="button" :class="{ active: mode === 'live' }" :aria-pressed="mode === 'live'" @click="mode = 'live'">
           <span><strong>Live game</strong><small>Return to the verified in-game deposit tab</small></span>
           <em :class="`state-${liveStatus?.state ?? 'unavailable'}`">{{ gameConnectionLabel }}</em>
         </button>
-        <button type="button" :class="{ active: mode === 'offline' }" @click="mode = 'offline'">
+        <button type="button" :class="{ active: mode === 'offline' }" :aria-pressed="mode === 'offline'" @click="mode = 'offline'">
           <span><strong>Offline stash</strong><small>Return through an atomic shared-stash write</small></span>
           <em :class="{ ready: writeSafety?.permitted }">{{ writeSafety?.permitted ? 'Ready' : 'Locked' }}</em>
         </button>

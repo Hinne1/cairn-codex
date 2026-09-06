@@ -107,7 +107,7 @@ index 34d6bfb..558df27 100644
      wchar_t tmpfolder[MAX_PATH]; // "%appdata%\..\local\temp\"
      GetTempPath(MAX_PATH, tmpfolder);
 diff --git a/HookDll/Hook/InventorySack_AddItem.cpp b/HookDll/Hook/InventorySack_AddItem.cpp
-index ee3b0ed..8758e00 100644
+index ee3b0ed..0020a84 100644
 --- a/HookDll/Hook/InventorySack_AddItem.cpp
 +++ b/HookDll/Hook/InventorySack_AddItem.cpp
 @@ -51,6 +51,8 @@ InventorySack_AddItem::GameEngine_Update InventorySack_AddItem::dll_GameEngine_U
@@ -128,15 +128,19 @@ index ee3b0ed..8758e00 100644
  	}
  	else {
  		LogToFile(LogLevel::INFO, L"Grim is not parsed, skipping message..");
-@@ -159,6 +161,7 @@ void InventorySack_AddItem::SetActive(bool isActive)
+@@ -159,6 +161,11 @@ void InventorySack_AddItem::SetActive(bool isActive)
  {
  	bool isActivating = isActive && !m_isActive;
  	m_isActive = isActive;
-+	if (isActivating) m_activeCharacterName.clear();
++	if (isActivating) {
++		// The update hook compares and reports this string under the same mutex.
++		boost::lock_guard<boost::mutex> guard(m_mutex);
++		m_activeCharacterName.clear();
++	}
  
  	// IA has been shut down, start the thread now
  	if (isActivating) {
-@@ -325,6 +328,8 @@ static void DumpReplicaInfo(const GAME::ItemReplicaInfo& item) {
+@@ -325,6 +332,8 @@ static void DumpReplicaInfo(const GAME::ItemReplicaInfo& item) {
  }
  
  bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
@@ -145,7 +149,7 @@ index ee3b0ed..8758e00 100644
  
  	if (!m_isGrimDawnParsed) {
  		m_isGrimDawnParsed = m_settingsReader.GetIsGrimDawnParsed();
-@@ -332,14 +337,14 @@ bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
+@@ -332,14 +341,14 @@ bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
  			DisplayMessage(L"Item not looted", L"Grim Dawn not parsed");
  			return false;
  		} else {
@@ -164,7 +168,7 @@ index ee3b0ed..8758e00 100644
  		// DumpReplicaInfo(item);
  		return false;
  	}
-@@ -353,34 +358,39 @@ bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
+@@ -353,34 +362,39 @@ bool InventorySack_AddItem::IsRelevant(const GAME::ItemReplicaInfo& item) {
  		else if (item.baseRecord.find("records/storyelements/questassets/q000_torso.dbr") != std::string::npos) {} // Gazer Man
  		else if (item.baseRecord.find("records/endlessdungeon/items/q001_torso.dbr") != std::string::npos) {} // Miss Gazer Man
  		else {
@@ -212,7 +216,7 @@ index ee3b0ed..8758e00 100644
  		return false;
  	}
  
-@@ -593,7 +603,7 @@ bool InventorySack_AddItem::HandleItem(void* stash, GAME::Item* item) {
+@@ -593,7 +607,7 @@ bool InventorySack_AddItem::HandleItem(void* stash, GAME::Item* item) {
  
  	std::wstring modName = GetModName(gameInfo);
  	if (Persist(replica, fnGetHardcore(gameInfo), modName, gameTextLines)) {
@@ -221,7 +225,7 @@ index ee3b0ed..8758e00 100644
  		fnPlayDropSound(item);
  		return true;
  	}
-@@ -730,6 +740,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+@@ -730,6 +744,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
  		// a transition, and is deliberately outside the m_isActive gate so the log is
  		// comparable between "IA attached and active" and "IA attached but idle".
  		fnLogWorldStateTransition((GAME::GameEngine*)This, L"GameEngine::Update");
@@ -239,7 +243,7 @@ index ee3b0ed..8758e00 100644
  
  		// IA not running? Continue
  		if (!m_isActive) {
-@@ -741,6 +762,7 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+@@ -741,6 +766,7 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
  		if (!fnIsWorldAlive((GAME::GameEngine*)This)) {
  			//LogToFile(L"Debug: NotReady");
  			m_isTransferStashOpen = false; // Just to be on the safe side
@@ -247,7 +251,7 @@ index ee3b0ed..8758e00 100644
  			return dll_GameEngine_Update(This, v);
  		}
  
-@@ -755,6 +777,7 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+@@ -755,6 +781,7 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
  		auto engine = fnGetEngine();
  		if (engine == nullptr) {
  			LogToFile(LogLevel::INFO, L"Debug: NoEngine");
@@ -255,7 +259,7 @@ index ee3b0ed..8758e00 100644
  			return dll_GameEngine_Update(This, v);
  		}
  
-@@ -766,8 +789,65 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+@@ -766,8 +793,65 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
  			LogToFile(LogLevel::WARNING,
  				L"GameInfo is null (world tearing down?), skipping IA work this tick. msSinceLastAddItem="
  				+ std::to_wstring(fnMsSinceLastAddItem()));
@@ -321,7 +325,7 @@ index ee3b0ed..8758e00 100644
  
  		if (m_isTransferStashOpen) {
  			void* sackPtr = GetSackToDepositTo((GAME::GameEngine*)This);
-@@ -825,17 +905,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
+@@ -825,17 +909,17 @@ void* __fastcall InventorySack_AddItem::Hooked_GameEngine_Update(void* This, int
  				if (!m_depositQueue.empty()) {
  					if (success) {
  						if (m_depositQueue.size() == 1) {
@@ -342,7 +346,7 @@ index ee3b0ed..8758e00 100644
  
  					}
  					// fnPlayDropSound(item);
-@@ -910,7 +990,13 @@ void InventorySack_AddItem::ThreadMain(void*) {
+@@ -910,7 +994,13 @@ void InventorySack_AddItem::ThreadMain(void*) {
  
  					if (boost::algorithm::ends_with(filename, ".csv")) {
  						LogToFile(LogLevel::INFO, std::wstring(L"Found file: ") + std::wstring(entry.path().c_str()));

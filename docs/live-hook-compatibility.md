@@ -165,6 +165,17 @@ identity clears or changes at each transition and unchanged names do not flood e
 complete the receipt-verified sacrificial-item round trip below and update the patch, bundled
 binary, provenance, allowlist, and regression fingerprints together. Issue #107 remains open.
 
+The follow-up in #182 protects the reconnect-time character-name reset with the
+same `m_mutex` used by the update hook's compare/assignment/event enqueue. The
+reset releases that lock before starting the queue worker. `SetActive` callers
+in `WorkerThreadMethod` run before queue draining and do not hold this mutex;
+the Wine initialization call also holds neither the inventory mutex nor the
+data-queue mutex. The update reporter finishes its lock scope before entering
+the separate delivery/queue scopes. No item payload, queue, receipt or shipping
+fingerprint changes are part of this source correction. Review and compilation
+do not qualify repeated reconnects or world transitions; those remain mandatory
+with the exact candidate in the disposable live matrix for #182 and #107.
+
 ## Planned local compatibility approval
 
 A future "Compatibility Lab" may let an advanced user approve an exact new

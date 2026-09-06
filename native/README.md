@@ -42,6 +42,8 @@ The script prints and pins the selected v143 compiler version for MSBuild. Use
 investigation. Different build inputs do not change the expected shipping hash:
 the script still rejects a differing output. It never copies a candidate into
 release resources, injects it, or changes compatibility allowlists.
+The compiler/ATL/SDK/Boost include and library lists override upstream's old
+machine-specific lists; Universal CRT uses the same explicitly selected SDK.
 
 The build reproduces the tracked source inputs; byte-for-byte reproduction of the
 old DLL is additionally subject to the output hash guard (including linker/debug

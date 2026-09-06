@@ -24,7 +24,10 @@ $files = @(
   (Join-Path $inputs.VisualStudioRoot 'MSBuild\Microsoft\VC\v170\Platforms\x64\PlatformToolsets\v143\Toolset.props'),
   (Join-Path $inputs.VisualStudioRoot "VC\Tools\MSVC\$compilerVersion\bin\HostX86\x64\cl.exe"),
   (Join-Path $inputs.VisualStudioRoot "VC\Tools\MSVC\$compilerVersion\bin\HostX86\x64\link.exe"),
+  (Join-Path $inputs.VisualStudioRoot "VC\Tools\MSVC\$compilerVersion\include\vector"),
+  (Join-Path $inputs.VisualStudioRoot "VC\Tools\MSVC\$compilerVersion\lib\x64\msvcrt.lib"),
   (Join-Path $inputs.VisualStudioRoot "VC\Tools\MSVC\$compilerVersion\atlmfc\include\atlbase.h"),
+  (Join-Path $inputs.VisualStudioRoot "VC\Tools\MSVC\$compilerVersion\atlmfc\lib\x64\atls.lib"),
   (Join-Path $inputs.WindowsSdkRoot "Include\$sdkVersion\um\Windows.h"),
   (Join-Path $inputs.WindowsSdkRoot "Include\$sdkVersion\shared\sdkddkver.h"),
   (Join-Path $inputs.WindowsSdkRoot "Include\$sdkVersion\ucrt\stdio.h"),
@@ -61,10 +64,16 @@ $explicit = Get-CairnNativeBuildPrerequisites @inputs -VCToolsVersion $compilerV
 if ($explicit.VCToolsVersion -ne $compilerVersion) { throw 'Explicit installed compiler selection failed.' }
 
 $script = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-live-hook.ps1') -Raw
+if ((ConvertTo-CairnMSBuildValue 'C:\two words;C:\%24$(ignored)') -cne 'C:\two words%3BC:\%2524%24%28ignored%29') {
+  throw 'MSBuild paths must preserve spaces and escape list/expression characters exactly once.'
+}
+foreach ($property in @('IncludePath', 'LibraryPath', 'UniversalCRTSdkDir', 'UCRTVersion')) {
+  if (-not $script.Contains("/p:$property=")) { throw "Validated native inputs must override upstream $property." }
+}
 if ($script.IndexOf('$prerequisites = Get-CairnNativeBuildPrerequisites') -gt $script.IndexOf('& git -C $upstream apply $patchPath')) {
   throw 'Prerequisite rejection must precede patch application.'
 }
 if ($script -notmatch 'if \(\$PreflightOnly\)' -or $script -notmatch '\$actual -ne \$ExpectedSha256.ToLowerInvariant\(\)') {
   throw 'Read-only preflight and expected output hash rejection must remain available.'
 }
-Write-Host 'Native build prerequisite gates passed: documented defaults, 13 missing components, wrong SDK/compiler/Boost, and explicit compiler selection. No native build or injection was executed.'
+Write-Host 'Native build prerequisite gates passed: documented defaults, 16 missing components, wrong SDK/compiler/Boost, explicit compiler selection and escaped authoritative build paths. No native build or injection was executed.'

@@ -26,7 +26,7 @@ function Get-CairnNativeBuildPrerequisites {
     throw 'VCToolsVersion must identify an installed Visual Studio 2022 v143 compiler (14.3x or 14.4x).'
   }
   $compilerRoot = Join-Path $VisualStudioRoot "VC\Tools\MSVC\$VCToolsVersion"
-  foreach ($file in @('bin\HostX86\x64\cl.exe', 'bin\HostX86\x64\link.exe', 'atlmfc\include\atlbase.h')) {
+  foreach ($file in @('bin\HostX86\x64\cl.exe', 'bin\HostX86\x64\link.exe', 'include\vector', 'lib\x64\msvcrt.lib', 'atlmfc\include\atlbase.h', 'atlmfc\lib\x64\atls.lib')) {
     Assert-CairnNativeBuildFile (Join-Path $compilerRoot $file) "v143 compiler/ATL component $VCToolsVersion"
   }
   foreach ($file in @(
@@ -48,8 +48,19 @@ function Get-CairnNativeBuildPrerequisites {
     MSBuild = $msbuild
     PlatformToolset = 'v143'
     VCToolsVersion = $VCToolsVersion
+    CompilerRoot = $compilerRoot
     WindowsSdkRoot = (Resolve-Path -LiteralPath $WindowsSdkRoot).Path
     WindowsSdkVersion = $WindowsSdkVersion
     BoostRoot = (Resolve-Path -LiteralPath $BoostRoot).Path
   }
+}
+
+function ConvertTo-CairnMSBuildValue {
+  param([string] $Value)
+  # Escape MSBuild's special characters, including list separators, once. This
+  # is an MSBuild property value passed as one argument, never shell source.
+  [regex]::Replace($Value, '[%$@();''?*]', {
+    param($match)
+    '%' + ([int][char]$match.Value).ToString('X2')
+  })
 }

@@ -2459,6 +2459,7 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
           await window.webContents.executeJavaScript(`
             (async () => {
               const waitForFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+              if (document.querySelector('.onboarding-dialog')) throw new Error('Dismiss onboarding before testing the search controls behind it.')
               const details = document.querySelector('.explorer-search-help')
               const summary = details?.querySelector('summary')
               if (!(details instanceof HTMLDetailsElement) || !(summary instanceof HTMLElement)) {
@@ -3360,6 +3361,10 @@ export async function captureWindowWhenReady(window: BrowserWindow, path: string
         if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_TOOLTIP_SCROLL === '1') {
           const { verifyTooltipScrolling } = await import('./tooltip-scroll-verification')
           await verifyTooltipScrolling(window.webContents)
+        }
+        if (process.env.CAIRN_CODEX_SCREENSHOT_VERIFY_A11Y_AUDIT === '1') {
+          const { verifyAccessibilityAudit } = await import('./accessibility-audit')
+          await verifyAccessibilityAudit(window.webContents)
         }
         const renderedState = await window.webContents.executeJavaScript(`({
           heading: document.querySelector('.hero h2')?.textContent,

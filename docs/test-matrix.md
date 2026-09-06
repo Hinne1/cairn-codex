@@ -356,3 +356,28 @@ The focused workspace shell is exercised at wide and compact widths. The gate re
 sidebar to begin at the left viewport edge, every visible destination to use the shared semantic
 SVG family at a legible size, and every icon-only destination to expose its label on hover and
 keyboard focus. The same run verifies density restoration and rejects document-level overflow.
+
+## Core keyboard and announcement audit (#16)
+
+`test:accessibility:electron`, included in full verification, uses native Chromium input and
+the accessibility tree against 135 generated catalog items with scored copies, set members,
+and an Epic/awakened pair. It runs at 1440px and at 520px with 125% zoom, plus a compact startup
+recovery run. Collection mounts 48 cards; search reaches zero and restores the same bounded set.
+
+The audit checks comparison, tool customization, to-do, trivia, recovery and Advanced Search:
+named dialog semantics, opening focus, both Tab wrap directions with visible targets, escaped
+focus containment, blocked application Back, Escape and invoker/fallback restoration. It also
+checks middle roll-summary traversal, focus repair after “View Epic base” replaces the item,
+and deletion of the focused to-do. Transfers section controls, Sets member inspection, Planner
+view controls, and Settings debug logging activate through the keyboard.
+
+Real Settings success messages preserve their live containers and populate exactly one
+notification channel. Presentation-only injected job events change phase text without repeating
+per-item counters. Invalid Supplies/Dismantling queries retain both visual error locations with
+only the toolbar announcing. Search counts are atomic, navigation SVGs are decorative, and
+emulated reduced motion disables smooth scrolling. The companion contract and existing focused
+workspace gates cover paging, stable keys, filters, setup, notification deduplication and priority.
+
+Dialog and final route captures are preserved under `local-cache/accessibility-audit` before
+the next benchmark resets its temporary working directory. All profiles and data are disposable.
+The audit verifies Chromium semantics and behavior, not recorded screen-reader speech.

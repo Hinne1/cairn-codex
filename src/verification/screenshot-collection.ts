@@ -18,6 +18,7 @@ export function presentScreenshotCollection(
     case 'bounded-grid-a11y':
     case 'tooltip-versions':
     case 'tooltip-scroll':
+    case 'accessibility-audit':
     case 'workspace-queries':
     case 'mi-workshop':
       return { ...snapshot, basis }

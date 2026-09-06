@@ -198,6 +198,7 @@ function formatPercentile(value: number | null | undefined): string { return val
           :page-size="120"
           :loading="loading"
           :error="searchError || loadError"
+          :announce-error="!searchError"
           :selected-keys="selectedIds"
           :selection-disabled="busy || selectionBusy"
           label="Dismantling candidate copies"

@@ -37,7 +37,9 @@ assert.equal(preferredScrollBehavior(false), 'smooth')
 const componentPaths = [
   '../src/renderer/src/components/AdvancedSearchDialog.vue',
   '../src/renderer/src/components/OnboardingDialog.vue',
-  '../src/renderer/src/components/PlannerSetupDialog.vue'
+  '../src/renderer/src/components/PlannerSetupDialog.vue',
+  '../src/renderer/src/workspaces/CollectionTriviaDialog.vue',
+  '../src/renderer/src/inspection/ItemInspectionDrawer.vue'
 ]
 const [components, controller, app, tokens, boundedResults] = await Promise.all([
   Promise.all(componentPaths.map(async (path) => ({
@@ -63,11 +65,11 @@ assert.match(controller, /isModalHistoryShortcut\(event\)/u)
 assert.match(controller, /previouslyFocused/u)
 assert.match(controller, /connectedModalFocusTarget\(target, fallback\)/u)
 
-const legacyAppDialogCount = (app.match(/role="dialog"/gu) ?? []).length
-const legacyTrivia = await readFile(new URL('../src/renderer/src/workspaces/CollectionTriviaDialog.vue', import.meta.url), 'utf8')
-assert.equal(legacyAppDialogCount, 3, 'App retains three legacy dialogs after trivia extraction.')
-assert.equal(legacyAppDialogCount + (legacyTrivia.match(/role="dialog"/gu) ?? []).length, 4,
-  'The extracted trivia dialog remains tracked accessibility debt; extraction must not disguise it as a focus migration.')
+for (const controller of ['safeModeFocus', 'toolSettingsFocus', 'todoFocus']) {
+  assert.match(app, new RegExp(`const ${controller} = useModalDialogFocus`))
+  assert.ok(app.includes(`@keydown="${controller}.handleKeydown"`))
+}
+assert.doesNotMatch(app, /function trapSafeModeFocus/u, 'Startup recovery must not retain a second focus trap.')
 assert.doesNotMatch(app, /behavior:\s*['"]smooth['"]/u, 'JavaScript scrolling must honor reduced motion.')
 assert.match(app, /behavior: preferredScrollBehavior\(\)/u)
 
@@ -84,7 +86,7 @@ assert.match(boundedResults, /getBoundingClientRect\(\)\.top/u)
 console.log(JSON.stringify({
   passed: true,
   sharedDialogComponents: components.length,
-  legacyAppDialogs: legacyAppDialogCount,
+  sharedAppDialogs: 3,
   tabCycle: true,
   escapedFocusRecovery: true,
   focusRestoration: true,

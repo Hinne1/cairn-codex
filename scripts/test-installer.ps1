@@ -1,19 +1,48 @@
 param(
-  [string] $InstallerPath
+  [string] $InstallerPath,
+  [string] $ReleaseManifestPath,
+  [switch] $DisposableWindows,
+  [switch] $PreflightOnly
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $DisposableWindows -and -not $PreflightOnly) {
+  throw 'Installer qualification requires -DisposableWindows inside a fresh disposable Windows VM. This installer uses production registry and shortcut identities; /D alone is not isolation. See docs/installer-qualification.md.'
+}
+if (-not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitProcess -or [Environment]::OSVersion.Platform -ne 'Win32NT') {
+  throw 'Use 64-bit PowerShell on disposable Windows x64.'
+}
 Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -Force
 Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -Force
+. (Join-Path $PSScriptRoot 'installer-qualification-safety.ps1')
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$identity = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-identity.json') -Raw | ConvertFrom-Json
+$folders = Get-CairnQualificationFolders
+Assert-CairnInstallerRegistryEmpty @(Get-CairnInstallerRegistryRecords $identity.installerGuid)
+Assert-CairnNoRunningApplication
+foreach ($path in @(Get-CairnQualificationConflicts $folders $identity)) { Assert-CairnQualificationPath $path -MustBeAbsent }
+Assert-CairnNoPreviousQualification (Join-Path $projectRoot 'local-cache')
+if ($PreflightOnly) {
+  Write-Host 'Read-only preflight passed. No installer, uninstaller, cleanup, or qualification was run.'
+  return
+}
 $packageJson = Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
 $version = [string]$packageJson.version
 if (-not $InstallerPath) {
   $InstallerPath = Join-Path $projectRoot "dist\release\Cairn-Codex-$version-Setup.exe"
 }
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
-$testRoot = Join-Path $projectRoot 'local-cache\installer-lifecycle'
+if (-not $ReleaseManifestPath) { $ReleaseManifestPath = Join-Path $projectRoot "dist\release\Cairn-Codex-$version-win-x64.manifest.json" }
+$release = Get-Content -LiteralPath $ReleaseManifestPath -Raw | ConvertFrom-Json
+$installerHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($release.appId -ne $identity.appId -or $release.installerGuid -ne $identity.installerGuid -or
+    $release.platform -ne 'win-x64' -or $release.version -ne $version -or $release.dirty -isnot [bool] -or $release.dirty -or
+    $release.commit -notmatch '^[a-f0-9]{40}$' -or $release.installer -ne (Split-Path $InstallerPath -Leaf) -or
+    $release.installerSha256 -ne $installerHash) {
+  throw 'Installer does not match a clean release manifest and the production identity. Nothing was installed.'
+}
+$testRoot = Join-Path $projectRoot ('local-cache\installer-qualification-' + [Guid]::NewGuid().ToString('N'))
 $installRoot = Join-Path $testRoot 'installed'
 $profileRoot = Join-Path $testRoot 'profile'
 $screenshotPath = Join-Path $testRoot 'installed-first-run.png'
@@ -24,24 +53,36 @@ foreach ($path in @($testRoot, $installRoot, $profileRoot)) {
   }
 }
 
-if (Test-Path -LiteralPath $testRoot) {
-  $previousUninstaller = Join-Path $installRoot 'Uninstall Cairn Codex.exe'
-  if (Test-Path -LiteralPath $previousUninstaller) {
-    $previous = Start-Process -FilePath $previousUninstaller -ArgumentList @('/S') -WindowStyle Hidden -Wait -PassThru
-    if ($previous.ExitCode -ne 0) { throw "Previous test uninstaller exited with code $($previous.ExitCode)." }
-  }
-  Remove-Item -LiteralPath $testRoot -Recurse -Force
+Assert-CairnQualificationPath $testRoot -MustBeAbsent
+
+function Wait-QualificationProcess($Process, [string] $Stage) {
+  # Retain the handle so PowerShell can read the exit code after native exit.
+  $null = $Process.Handle
+  if (-not $Process.WaitForExit(180000)) { throw "$Stage timed out. Preserve this VM and its evidence; no process was killed or cleanup attempted." }
+  $Process.Refresh()
+  if ($Process.ExitCode -ne 0) { throw "$Stage exited with code $($Process.ExitCode). Preserve qualification evidence." }
 }
 New-Item -ItemType Directory -Path $installRoot, $profileRoot -Force | Out-Null
+$evidencePath = Join-Path $testRoot 'qualification.json'
+$evidence = [ordered]@{ status = 'started'; version = $version; commit = $release.commit; installerSha256 = $installerHash; startedUtc = [DateTime]::UtcNow.ToString('o') }
+$evidence | ConvertTo-Json | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+
+# Repeat volatile checks immediately before launching the production installer.
+Assert-CairnInstallerRegistryEmpty @(Get-CairnInstallerRegistryRecords $identity.installerGuid)
+Assert-CairnNoRunningApplication
+foreach ($path in @(Get-CairnQualificationConflicts $folders $identity)) { Assert-CairnQualificationPath $path -MustBeAbsent }
 
 Write-Host "Installing release candidate into $installRoot"
-$installer = Start-Process -FilePath $InstallerPath -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -Wait -PassThru
-if ($installer.ExitCode -ne 0) { throw "Installer exited with code $($installer.ExitCode)." }
+$installer = Start-Process -FilePath $InstallerPath -ArgumentList @('/S', '/currentuser', "/D=$installRoot") -WindowStyle Hidden -PassThru
+Wait-QualificationProcess $installer 'Installer'
 
 $appPath = Join-Path $installRoot 'Cairn Codex.exe'
 $uninstallerPath = Join-Path $installRoot 'Uninstall Cairn Codex.exe'
 if (-not (Test-Path -LiteralPath $appPath)) { throw 'Installed application executable was not created.' }
 if (-not (Test-Path -LiteralPath $uninstallerPath)) { throw 'Installed uninstaller was not created.' }
+$uninstallerHash = (Get-FileHash -LiteralPath $uninstallerPath -Algorithm SHA256).Hash
+Assert-CairnInstalledRegistration @(Get-CairnInstallerRegistryRecords $identity.installerGuid) $installRoot
+Assert-CairnInstalledShortcuts $folders $identity $appPath
 $prerequisiteRoot = Join-Path $installRoot 'resources\prerequisites'
 $vcRedist = Join-Path $prerequisiteRoot 'vc_redist.x64.exe'
 $vcManifestPath = Join-Path $prerequisiteRoot 'vc-redist-manifest.json'
@@ -56,8 +97,18 @@ if ($vcSignature.Status -ne 'Valid' -or $vcSignature.SignerCertificate.Subject -
   throw 'Installed VC++ prerequisite does not have a valid Microsoft signature.'
 }
 
-$sentinelPath = Join-Path $profileRoot 'preserve-on-uninstall.txt'
-Set-Content -LiteralPath $sentinelPath -Value 'Cairn user data must survive uninstall.' -Encoding UTF8
+$sentinelRoots = @($profileRoot)
+foreach ($base in @($folders.ApplicationData, $folders.LocalApplicationData)) {
+  foreach ($name in @($identity.userDataName, $identity.productName)) {
+    $path = Join-Path $base $name
+    Assert-CairnQualificationPath $path -MustBeAbsent
+    New-Item -ItemType Directory -Path $path | Out-Null
+    $sentinelRoots += $path
+  }
+}
+$sentinelContent = 'Cairn user data must survive uninstall: ' + [Guid]::NewGuid().ToString('N')
+$sentinelPaths = @($sentinelRoots | ForEach-Object { Join-Path $_ 'preserve-on-uninstall.txt' })
+foreach ($path in $sentinelPaths) { [IO.File]::WriteAllText($path, $sentinelContent) }
 Push-Location $projectRoot
 try {
   & node --experimental-strip-types --disable-warning=ExperimentalWarning (Join-Path $PSScriptRoot 'seed-verification-profile.mjs') $profileRoot
@@ -83,8 +134,8 @@ try {
   $env:CAIRN_CODEX_SCREENSHOT_ROUTE_HASH = '#cc-route=1&view=settings'
   $env:CAIRN_CODEX_SCREENSHOT_WAIT_FOR_SCAN = '0'
   Write-Host 'Launching the installed application with an isolated first-run profile.'
-  $application = Start-Process -FilePath $appPath -ArgumentList @("--user-data-dir=$profileRoot") -WindowStyle Hidden -Wait -PassThru
-  if ($application.ExitCode -ne 0) { throw "Installed application exited with code $($application.ExitCode)." }
+  $application = Start-Process -FilePath $appPath -ArgumentList @("--user-data-dir=`"$profileRoot`"") -WindowStyle Hidden -PassThru
+  Wait-QualificationProcess $application 'Installed application'
 } finally {
   foreach ($name in $operationalVariables) {
     [Environment]::SetEnvironmentVariable($name, $oldOperationalEnvironment[$name], 'Process')
@@ -97,12 +148,28 @@ if (-not (Test-Path -LiteralPath $screenshotPath)) { throw 'Installed applicatio
 if ((Get-Item -LiteralPath $screenshotPath).Length -lt 10kb) { throw 'Installed first-run screenshot is unexpectedly small.' }
 
 Write-Host 'Uninstalling the release candidate.'
-$uninstaller = Start-Process -FilePath $uninstallerPath -ArgumentList @('/S') -WindowStyle Hidden -Wait -PassThru
-if ($uninstaller.ExitCode -ne 0) { throw "Uninstaller exited with code $($uninstaller.ExitCode)." }
-for ($attempt = 0; $attempt -lt 50 -and (Test-Path -LiteralPath $appPath); $attempt += 1) {
-  Start-Sleep -Milliseconds 100
+Assert-CairnNoRunningApplication
+Assert-CairnInstalledRegistration @(Get-CairnInstallerRegistryRecords $identity.installerGuid) $installRoot
+Assert-CairnInstalledShortcuts $folders $identity $appPath
+# NSIS normally spawns a temporary copy and exits before actual removal. An
+# owned copy outside INSTDIR with _?= last runs the removal in the waited process.
+$ownedUninstaller = Join-Path $testRoot 'qualification-uninstaller.exe'
+Assert-CairnQualificationPath $ownedUninstaller -MustBeAbsent
+if ((Get-FileHash -LiteralPath $uninstallerPath -Algorithm SHA256).Hash -ne $uninstallerHash) { throw 'Installed uninstaller changed during qualification.' }
+Copy-Item -LiteralPath $uninstallerPath -Destination $ownedUninstaller
+if ((Get-FileHash -LiteralPath $ownedUninstaller -Algorithm SHA256).Hash -ne $uninstallerHash) { throw 'Qualification uninstaller copy failed verification.' }
+$uninstaller = Start-Process -FilePath $ownedUninstaller -ArgumentList @('/S', '/currentuser', "_?=$installRoot") -WindowStyle Hidden -PassThru
+Wait-QualificationProcess $uninstaller 'Uninstaller'
+Assert-CairnQualificationPath $installRoot -MustBeAbsent
+foreach ($path in $sentinelPaths) {
+  if (-not (Test-Path -LiteralPath $path) -or [IO.File]::ReadAllText($path) -cne $sentinelContent) { throw 'User-data sentinel was changed or removed by uninstall.' }
 }
-if (Test-Path -LiteralPath $appPath) { throw 'Application executable remains after uninstall.' }
-if (-not (Test-Path -LiteralPath $sentinelPath)) { throw 'User-data sentinel was removed by uninstall.' }
+Assert-CairnInstallerRegistryEmpty @(Get-CairnInstallerRegistryRecords $identity.installerGuid)
+foreach ($base in @($folders.DesktopDirectory, $folders.CommonDesktopDirectory, $folders.Programs, $folders.CommonPrograms)) {
+  Assert-CairnQualificationPath (Join-Path $base ($identity.shortcutName + '.lnk')) -MustBeAbsent
+}
+$evidence.status = 'passed'
+$evidence.completedUtc = [DateTime]::UtcNow.ToString('o')
+$evidence | ConvertTo-Json | Set-Content -LiteralPath $evidencePath -Encoding UTF8
 
 Write-Host "Installer lifecycle passed. Screenshot: $screenshotPath"

@@ -12,8 +12,9 @@ try {
   & npm.cmd run package:release
   if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed.' }
 
-  & npm.cmd run test:installer
-  if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle test failed.' }
+  & npm.cmd run test:installer-safety
+  if ($LASTEXITCODE -ne 0) { throw 'Installer qualification safety tests failed.' }
+  Write-Host 'Local release preparation passed. Production installer lifecycle requires a separate disposable Windows qualification run; see docs/installer-qualification.md.'
 } finally {
   Pop-Location
 }

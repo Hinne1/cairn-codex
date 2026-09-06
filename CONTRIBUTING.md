@@ -101,6 +101,12 @@ part of the documented manual live matrix.
 
 ## Change guidelines
 
+Local release preparation never runs the production installer. Use
+`npm.cmd run test:installer-safety` for synthetic safety checks and follow
+[installer qualification](docs/installer-qualification.md) in a fresh disposable
+Windows VM for the real lifecycle. `/D` and a custom user-data path alone do not
+isolate production installation, shortcut, process or default profile effects.
+
 - Keep the renderer behind the typed preload API. It must not gain direct
   filesystem or database access.
 - Preserve fail-closed behavior for unknown game, hook, and injector hashes.

@@ -205,7 +205,7 @@ assert.doesNotMatch(app, /const skillItemRows|const skillSuggestions|const skill
 assert.match(workspace, /defineModel<SkillExplorerControls>\('controls'/)
 assert.match(workspace, /<ExplorerToolbar[\s\S]*?<ResearchItemTable/)
 assert.match(table, /<BoundedResultSurface[\s\S]*?:page-size="50"/)
-assert.match(table, /class="research-item"[\s\S]*?@mouseenter="emit\('queue-tooltip', row\.item, \$event\)"/)
+assert.match(table, /class="research-item"[\s\S]*?@mouseenter="!menuRequest && emit\('queue-tooltip', row\.item, \$event\)"/)
 assert.doesNotMatch(table, /class="research-table-row"[^>]*@mouseenter/)
 assert.match(table, /function showFocusedTooltip[\s\S]*?emit\('show-tooltip', row\.item, element\)/)
 assert.match(table, /@item-focus="showFocusedTooltip"/)

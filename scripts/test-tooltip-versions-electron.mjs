@@ -16,5 +16,6 @@ for (const width of [1440, 520]) {
   if (result.error) throw result.error
   assert.equal(result.status, 0, `Tooltip version ${width} interaction gate`)
   await copyFile(resolve(`local-cache/ui-benchmark/${name}.png`), resolve(captures, `${name}.png`))
+  if (width === 520) await copyFile(resolve(`local-cache/ui-benchmark/${name}-zoom.png`), resolve(captures, `${name}-zoom.png`))
 }
 console.log('Tooltip version switching passed at wide and compact widths.')

@@ -112,6 +112,12 @@ export async function verifyTooltipVersions(contents: WebContents): Promise<void
       await key('v')
       assert.equal(await title(), 'Version Test Awakened', 'Switching works at 125% zoom')
       assert.ok(await evaluate(`(() => { const r = document.querySelector('.game-tooltip').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && document.documentElement.scrollWidth <= innerWidth })()`), 'Zoomed compact tooltip fits the viewport')
+      await writeFile(process.env.CAIRN_CODEX_SCREENSHOT_PATH!.replace(/\.png$/, '-zoom.png'), (await contents.capturePage()).toPNG())
+      // The outer benchmark validates its requested CSS viewport after this driver returns.
+      contents.setZoomFactor(1)
+      await evaluate(`document.activeElement.blur(); document.querySelector(${JSON.stringify(card('original'))}).focus()`)
+      await settle()
+      await key('v')
     }
   } catch (error) {
     await writeFile(process.env.CAIRN_CODEX_SCREENSHOT_PATH!.replace(/\.png$/, '-failure.png'), (await contents.capturePage()).toPNG())

@@ -516,8 +516,9 @@ Supplies retain the original `effects` strings for search and compatibility, and
 `effectDetails` for the same five visible effects through the typed workspace page contract.
 `SupplyEffects.vue` uses this stat provenance to render structured lines without treating flavor
 text or granted-skill names as stats. Missing provenance falls back to the original plain text.
-Ignored research rows and locked Supplies dim their pictures only; their damage text stays
-opaque. Reference-copy backgrounds use contrast-checked surface tokens.
+Ignored research rows retain full picture and text opacity, with an explicit shared state
+marker. Locked Supplies dim their pictures only; their damage text stays opaque.
+Reference-copy backgrounds use contrast-checked surface tokens.
 
 Compact `RollCategoryProfile` scores use a colored category icon and a single-line value.
 Pierce uses an arrowhead; all seven DoTs, including Bleeding, use the same hourglass.
@@ -551,6 +552,25 @@ an outdated analyzed copy stale for the requested stash sources and leaves refre
 caller, preserving live-mode deferral. Archive views keep using bounded vault hydration. Current
 native ratings and intentionally unscored/ineligible items do not cause repeated scans; service
 tests cover the upgrade, deferred read, persisted refresh and reopen.
+
+## Item actions and row states
+
+`BoundedResultSurface` exposes an opt-in typed item-context event. Shared research rows use
+`useItemContextMenu` and `ItemContextMenu` for right-click, Menu/Shift+F10 and a visible More
+actions button. Skills supports Inspect; Planner Table and Journey additionally support the
+existing global favorite and current-plan base exclusion operations. Menu descriptions state
+those scopes; there is no new per-copy or per-tier preference. Existing visible controls remain.
+
+Opening a menu dismisses the global tooltip. Arrow keys and Home/End move through actions;
+Enter/Space activate, Escape restores the invoker, and Tab continues from the invoker in the
+normal page order. Inspection hands focus to the shared comparison dialog. Outside clicks,
+viewport movement, source removal, and plan changes dismiss stale menus. Scroll dismissal
+restores focus without jumping the viewport. If the source disappears, a surviving result or
+workspace control receives focus. The menu measures and clamps itself to the viewport.
+
+`ItemRowState` supplies shared Favorite and Ignored in this plan labels and independent inset
+stripes. Combined states display both markers, including in the compact sticky identity cell.
+Rarity names, damage text, pictures, and selected/focused row treatments keep their own roles.
 
 ## Adding a workspace
 

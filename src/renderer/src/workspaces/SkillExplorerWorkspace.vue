@@ -40,6 +40,7 @@ const emit = defineEmits<{
   'move-tooltip': [event: MouseEvent]
   'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
+  'dismiss-tooltip': []
   'open-item': [item: CollectionItem]
 }>()
 
@@ -286,6 +287,7 @@ function changeSort(next: string): void {
     <ResearchItemTable
       v-model:page="page"
       :rows="researchRows"
+      :context-key="selectedSkill"
       :icon-url-for-item="iconUrlForItem"
       :sort="sort"
       :direction="direction"
@@ -300,6 +302,7 @@ function changeSort(next: string): void {
       @move-tooltip="emit('move-tooltip', $event)"
       @scroll-tooltip="emit('scroll-tooltip', $event)"
       @hide-tooltip="emit('hide-tooltip')"
+      @dismiss-tooltip="emit('dismiss-tooltip')"
     />
   </section>
 </template>

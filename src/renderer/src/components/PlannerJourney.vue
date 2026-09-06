@@ -4,6 +4,9 @@ import type { CollectionItem } from '@shared/contracts'
 import BoundedResultSurface from './BoundedResultSurface.vue'
 import ResearchSkillFx from './ResearchSkillFx.vue'
 import DamageText from './DamageText.vue'
+import ItemContextMenu from './ItemContextMenu.vue'
+import ItemRowState from './ItemRowState.vue'
+import { useItemContextMenu } from '../use-item-context-menu'
 import type { ResearchItemTableRow } from '../workspaces/research-item-table'
 
 const props = withDefaults(defineProps<{
@@ -11,9 +14,11 @@ const props = withDefaults(defineProps<{
   iconUrlForItem: (item: CollectionItem) => string | null
   page?: number
   ignoredView?: boolean
+  contextKey?: string
 }>(), {
   page: 1,
-  ignoredView: false
+  ignoredView: false,
+  contextKey: 'planner'
 })
 
 const emit = defineEmits<{
@@ -24,16 +29,28 @@ const emit = defineEmits<{
   'move-tooltip': [event: MouseEvent]
   'scroll-tooltip': [event: WheelEvent]
   'hide-tooltip': []
+  'dismiss-tooltip': []
   favorite: [item: CollectionItem]
   ignore: [item: CollectionItem]
 }>()
+
+const root = ref<HTMLElement | null>(null)
+const { request: menuRequest, row: menuRow, actions: menuActions, open: openMenu, openButton, dismiss: dismissMenu, execute: executeMenu } = useItemContextMenu({
+  root, rows: () => props.rows, context: () => props.contextKey, plannerActions: () => true,
+  dismissTooltip: () => emit('dismiss-tooltip'),
+  execute: (action, item) => {
+    if (action === 'inspect') emit('activate', item)
+    else if (action === 'favorite') emit('favorite', item)
+    else emit('ignore', item)
+  }
+})
 
 function startsMilestone(index: number, row: ResearchItemTableRow): boolean {
   return index === 0 || props.rows[index - 1]?.item.levelRequirement !== row.item.levelRequirement
 }
 
 function showFocusedTooltip(_key: string | number, row: ResearchItemTableRow, element: HTMLElement): void {
-  emit('show-tooltip', row.item, element)
+  if (!menuRequest.value) emit('show-tooltip', row.item, element)
 }
 
 const failedIconUrls = ref(new Set<string>())
@@ -51,7 +68,8 @@ function handleImageError(item: CollectionItem): void {
 </script>
 
 <template>
-  <section class="planner-journey" aria-label="Level-ordered build journey">
+  <section ref="root" class="planner-journey" aria-label="Level-ordered build journey">
+    <ItemContextMenu v-if="menuRequest && menuRow" :key="menuRequest.key" :request="menuRequest" :name="menuRow.item.name" :actions="menuActions" @action="executeMenu" @dismiss="dismissMenu" />
     <div class="planner-journey-summary">
       <span>Level-ordered build path</span>
       <span>{{ new Set(rows.map(row => row.item.levelRequirement)).size }} milestones · {{ rows.filter(row => row.item.rarity === 'mi').length }} MI targets</span>
@@ -68,21 +86,23 @@ function handleImageError(item: CollectionItem): void {
       label="Leveling Planner journey items"
       layout="list"
       interactive
+      item-context-menu
       item-described-by="item-tooltip"
       @update:page="emit('update:page', $event)"
       @activate="(_key, row) => emit('activate', row.item)"
       @item-focus="showFocusedTooltip"
       @item-blur="emit('hide-tooltip')"
+      @item-context="openMenu"
     >
       <template #item="{ item: row, index }">
-        <article class="planner-journey-row" :class="{ favorite: row.favorite, ignored: row.ignored, 'is-unavailable': !row.available }">
+        <article class="planner-journey-row item-row-state" :class="{ 'is-favorite': row.favorite, 'is-ignored': row.ignored, 'is-unavailable': !row.available }">
           <div class="planner-journey-level" :class="{ milestone: startsMilestone(index, row) }">
             <span v-if="startsMilestone(index, row)">Lv {{ row.item.levelRequirement }}</span>
           </div>
           <div class="planner-journey-card">
             <span
               class="planner-journey-picture"
-              @mouseenter="emit('queue-tooltip', row.item, $event)"
+              @mouseenter="!menuRequest && emit('queue-tooltip', row.item, $event)"
               @mousemove="emit('move-tooltip', $event)"
               @mouseleave="emit('hide-tooltip')"
               @wheel="emit('scroll-tooltip', $event)"
@@ -93,6 +113,7 @@ function handleImageError(item: CollectionItem): void {
             <span class="planner-journey-copy">
               <strong :class="['gd-rarity-name', `rarity-${row.item.rarity}`]">{{ row.item.name }}</strong>
               <small>{{ row.itemType }} · {{ row.item.slot }}</small>
+              <ItemRowState :favorite="row.favorite" :ignored="row.ignored" />
               <span class="planner-journey-facts">
                 <ResearchSkillFx :item="row.item" />
                 <em v-for="(fact, factIndex) in row.supports" :key="`${fact.text}:${factIndex}`">{{ fact.label }} {{ fact.text }}</em>
@@ -110,6 +131,7 @@ function handleImageError(item: CollectionItem): void {
                   @click.stop="emit('favorite', row.item)"
                 >★</button>
                 <button type="button" @click.stop="emit('ignore', row.item)">{{ ignoredView ? 'Restore' : 'Ignore' }}</button>
+                <button type="button" class="item-more-actions" :aria-label="`More actions for ${row.item.name}`" aria-haspopup="menu" :aria-expanded="menuRequest?.key === row.item.record" @click.stop="openButton(row, $event)"><span aria-hidden="true">···</span></button>
               </span>
             </span>
           </div>
@@ -173,8 +195,6 @@ function handleImageError(item: CollectionItem): void {
   color: var(--cc-text-secondary);
   background: var(--cc-tone-surface);
 }
-.planner-journey-row.favorite .planner-journey-card { border-color: var(--cc-accent-border); box-shadow: inset 3px 0 var(--cc-accent); }
-.planner-journey-row.ignored .planner-journey-picture { opacity: .7; }
 .planner-journey-picture {
   display: grid;
   width: 58px;

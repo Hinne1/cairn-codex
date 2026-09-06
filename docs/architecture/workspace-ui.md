@@ -298,6 +298,12 @@ same skill index used by Leveling Planner.
 Route restoration replaces the whole control snapshot; user edits reset to page one without a
 watcher overriding a restored page.
 
+Character discovery returns an explicit success, failure or busy result. Planner save refresh
+uses only the successful request's characters; a retained display cache cannot refresh a plan
+after failure. Missing or unreadable sources preserve the plan and report a problem. A refresh
+belongs to the selected plan that started it: switching away, navigating to another plan, or
+deleting it cancels application, including switching away and back while discovery is pending.
+
 Leveling Planner owns its controls, setup dialog, Table/Journey/MI Sources markup, and view-switch
 focus restoration in `LevelingPlannerWorkspace.vue`. Its shell-lifetime `leveling-planner.ts`
 session owns profiles, level drafts, skills, scoped exclusions, favorites, character discovery,

@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const dotPairs = [['physical', 'internal-trauma', 'Physical', 'Internal Trauma'],
+  ['pierce', 'bleeding', 'Pierce', 'Bleeding'],
   ['fire', 'burn', 'Fire', 'Burn'], ['cold', 'frostburn', 'Cold', 'Frostburn'],
   ['lightning', 'electrocute', 'Lightning', 'Electrocute'], ['acid', 'poison', 'Acid', 'Poison'],
   ['vitality', 'vitality-decay', 'Vitality', 'Vitality Decay']]
@@ -145,6 +146,7 @@ if (!process.versions.electron) {
         await key('Enter')
         assert.match(await evaluate("document.querySelector('#narrow .roll-category-overflow').innerText"), /Fire[\s\S]*Cold/i, 'full names remain available even when no categories were hidden')
         await key('Space')
+        const durationShapes = new Set()
         for (const [direct, dot, directLabel, dotLabel] of dotPairs) {
           const selector = '#dot-' + dot
           const icons = await evaluate(`Array.from(document.querySelectorAll('${selector} .roll-category-profile > .roll-category-score'), score => ({
@@ -156,6 +158,7 @@ if (!process.versions.electron) {
           assert.deepEqual(icons.map(icon => icon.label), [directLabel, dotLabel])
           assert.equal(icons[0].color, icons[1].color)
           assert.notEqual(icons[0].shape, icons[1].shape, dot + ' needs a distinct same-color shape')
+          durationShapes.add(icons[1].shape)
           assert.ok(icons.every(icon => icon.fits), 'perfect DoT scores fit the compact card')
           await evaluate(`document.querySelector('${selector} summary').focus()`)
           await key('Enter')
@@ -164,12 +167,13 @@ if (!process.versions.electron) {
           assert.ok((await evaluate(`document.querySelector('${selector} .roll-category-overflow').innerText`)).includes(dotLabel.toUpperCase()))
           await key('Space')
         }
+        assert.equal(durationShapes.size, 1, 'all seven DoTs, including Bleeding, use the same icon')
         await evaluate("document.querySelector('#all-dot-pairs').scrollIntoView({block:'start'})")
         await writeFile(join(testRoot, `profile-dot-pairs-${width}-${zoom}.png`), await captureFrame())
         assert.match(await evaluate("document.querySelector('#many-types .roll-category-profile > .roll-category-score').textContent"), /Poison/)
         await evaluate("document.querySelector('#many-types summary').focus()")
         await key('Enter')
-        assert.equal(await evaluate("document.querySelectorAll('#many-types .roll-category-overflow .roll-category-score').length"), 12)
+        assert.equal(await evaluate("document.querySelectorAll('#many-types .roll-category-overflow .roll-category-score').length"), 14)
         assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true)
         await key('Space')
         assert.equal(await evaluate("Array.from(document.querySelectorAll('.roll-category-icon')).every(icon=>icon.getAttribute('aria-hidden')==='true' && icon.getAttribute('focusable')==='false')"), true, 'icons are decorative; the adjacent text supplies the category name')
@@ -214,7 +218,7 @@ if (!process.versions.electron) {
         }
         assert.equal(await evaluate('window.fixtureEvents.activations'), 0, 'disclosure activation must not open the containing item')
       }
-      console.log(JSON.stringify({ passed: true, widths: [1440, 520], zoom: [1, 1.25], dotPairs: 6, empty: true, keyboardDisclosure: true, focusVisible: true, noOverflow: true, screenshotDirectory: testRoot }))
+      console.log(JSON.stringify({ passed: true, widths: [1440, 520], zoom: [1, 1.25], dotPairs: 7, empty: true, keyboardDisclosure: true, focusVisible: true, noOverflow: true, screenshotDirectory: testRoot }))
       window.destroy()
       app.exit(0)
     } catch (error) {

@@ -71,6 +71,7 @@ import { useCollectionCopies } from './collection-copies'
 import { createNotificationService, type AppNotification } from './notification-service'
 import { resolveActiveCharacter } from './live-presence'
 import { preferredScrollBehavior } from './motion-preference'
+import { useModalDialogFocus } from './modal-focus'
 import { createTooltipDismissal } from './tooltip-dismissal'
 import { tooltipWheelIntent } from './tooltip-scroll'
 import { CollectionSession, type CollectionPendingReads } from './collection-session'
@@ -425,6 +426,16 @@ const todoOpen = ref(false)
 const triviaOpen = ref(false)
 const todoDraft = ref('')
 const todoInput = ref<HTMLInputElement | null>(null)
+const toolSettingsDialog = ref<HTMLElement | null>(null)
+const todoDialog = ref<HTMLElement | null>(null)
+const safeModeFocus = useModalDialogFocus(safeModeDialog, { onEscape: dismissSafeModeOffer })
+const toolSettingsFocus = useModalDialogFocus(toolSettingsDialog, { onEscape: () => { toolSettingsOpen.value = false } })
+const todoFocus = useModalDialogFocus(todoDialog, {
+  initialFocus: () => todoInput.value,
+  onEscape: () => { todoOpen.value = false }
+})
+watch(toolSettingsOpen, open => open ? toolSettingsFocus.activate() : toolSettingsFocus.deactivate(), { flush: 'post' })
+watch(todoOpen, open => open ? todoFocus.activate() : todoFocus.deactivate(), { flush: 'post' })
 const todos = ref<TodoItem[]>(structuredClone(initialPreferences.notes.todos))
 const manualDisconnectProcessId = ref<number | null>(null)
 const liveDisconnectPending = ref(false)
@@ -928,12 +939,11 @@ watch([onboardingOpen, appInitializing], ([open, initializing]) => {
   document.body.classList.toggle('onboarding-active', open && !initializing)
 })
 
-watch(safeModeOfferOpen, async (open) => {
+watch(safeModeOfferOpen, (open) => {
   document.body.classList.toggle('safe-mode-offer-active', open)
-  if (!open) return
-  await nextTick()
-  safeModeDialog.value?.focus()
-})
+  if (open) safeModeFocus.activate()
+  else safeModeFocus.deactivate()
+}, { immediate: true, flush: 'post' })
 
 async function reportStartupPhase(phase: StartupPhaseEvent): Promise<void> {
   try {
@@ -1177,22 +1187,6 @@ function resetInterfacePreferences(): void {
   resetUiPreferences(localStorage)
   reportSuccess('Reset interface preferences. Planner profiles, to-dos, sources, and archive data were preserved. Reloading CC…')
   window.setTimeout(() => window.location.reload(), 250)
-}
-
-function trapSafeModeFocus(event: KeyboardEvent): void {
-  const dialog = safeModeDialog.value
-  if (!dialog) return
-  const candidates = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled])')]
-  if (!candidates.length) return
-  const first = candidates[0]!
-  const last = candidates[candidates.length - 1]!
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
 }
 
 async function setDebugLogging(enabled: boolean): Promise<void> {
@@ -1442,12 +1436,10 @@ function storeTodos(): void {
   preferenceRepository.update('notes', { todos: todos.value.map((todo) => ({ ...todo })) })
 }
 
-async function openTodos(): Promise<void> {
+function openTodos(): void {
   todoOpen.value = true
   triviaOpen.value = false
   showConnectionDiagnostics.value = false
-  await nextTick()
-  todoInput.value?.focus()
 }
 
 function openTrivia(): void {
@@ -3235,7 +3227,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
         aria-modal="true"
         aria-labelledby="safe-mode-offer-title"
         aria-describedby="safe-mode-offer-description"
-        @keydown.tab="trapSafeModeFocus"
+        @keydown="safeModeFocus.handleKeydown"
       >
         <p class="section-label">Startup recovery</p>
         <h2 id="safe-mode-offer-title">CC has had trouble starting.</h2>
@@ -3273,7 +3265,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
     />
 
     <div v-if="toolSettingsOpen" class="tool-settings-backdrop" @click.self="toolSettingsOpen = false">
-      <section class="tool-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="tool-settings-title">
+      <section ref="toolSettingsDialog" class="tool-settings-dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="tool-settings-title" @keydown="toolSettingsFocus.handleKeydown">
         <header>
           <div>
             <p class="section-label">Workspace</p>
@@ -3311,7 +3303,7 @@ function vaultCopyForObserved(copy: ObservedStashItem): VaultListItem | null {
     />
 
     <div v-if="todoOpen" class="todo-backdrop" @click.self="todoOpen = false">
-      <section class="todo-dialog" role="dialog" aria-modal="true" aria-labelledby="todo-title">
+      <section ref="todoDialog" class="todo-dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="todo-title" @keydown="todoFocus.handleKeydown">
         <header>
           <div>
             <p class="section-label">CC scratchpad</p>

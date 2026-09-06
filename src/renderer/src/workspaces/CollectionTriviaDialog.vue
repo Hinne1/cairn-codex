@@ -1,12 +1,17 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import type { CollectionTriviaFact } from './collection-dashboard'
-defineProps<{ open: boolean; collectionTrivia: readonly CollectionTriviaFact[] }>()
+import { useModalDialogFocus } from '../modal-focus'
+const props = defineProps<{ open: boolean; collectionTrivia: readonly CollectionTriviaFact[] }>()
 const emit = defineEmits<{ close: []; 'open-item': [record?: string] }>()
+const dialog = ref<HTMLElement | null>(null)
+const modalFocus = useModalDialogFocus(dialog, { onEscape: () => emit('close') })
+watch(() => props.open, open => open ? modalFocus.activate() : modalFocus.deactivate(), { immediate: true, flush: 'post' })
 </script>
 
 <template>
   <div v-if="open" class="trivia-backdrop" @click.self="emit('close')">
-    <section class="trivia-dialog" role="dialog" aria-modal="true" aria-labelledby="trivia-title">
+    <section ref="dialog" class="trivia-dialog" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="trivia-title" @keydown="modalFocus.handleKeydown">
       <header>
         <div>
           <p class="section-label">Collection trivia</p>

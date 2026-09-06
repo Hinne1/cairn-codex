@@ -112,6 +112,10 @@ try {
   }
 
   const live = await request('self-test-live-queue')
+  const characters = await request('self-test-character-reader')
+  if (!characters.passed || characters.assertions < 70 || characters.validVariants !== 6 || characters.rejectedVariants !== 6 || !characters.readOnly) {
+    throw new Error('Generated character-reader self-test failed.')
+  }
   if (
     !live.passed ||
     live.fields !== 18 ||
@@ -128,7 +132,7 @@ try {
     throw new Error('Native adapter fingerprints were not reported correctly.')
   }
 
-  console.log(JSON.stringify({ health, memory, write, dismantling, acquisition, itemPresentation, rollRatings, live }, null, 2))
+  console.log(JSON.stringify({ health, memory, write, dismantling, acquisition, itemPresentation, rollRatings, characters, live }, null, 2))
 } finally {
   child.stdin.end()
   lines.close()

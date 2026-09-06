@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { app } from "electron";
-import { type CharacterSaveProfile, type CollectionSnapshot } from "@shared/contracts";
+import { type CollectionSnapshot } from "@shared/contracts";
 import { isCollectionOwned, withAwakeningAvailability } from "@shared/collection-availability";
 import { withRecipeCollection, type LiveVaultPayload } from "../main/collection-presentation.ts";
 import { GrimDawnHelperClient } from "../main/grim-dawn/helper-client";
@@ -204,17 +204,9 @@ export async function runSmokeTest(
     ) {
       throw new Error('Component and consumable account stores were not indexed.')
     }
-    const characterProfiles = await helper.request<CharacterSaveProfile[]>('list-characters', {
-      installationPath: helperSnapshot.discovery.installations[0]?.path
-    })
-    const sanya = characterProfiles.find((profile) => profile.name === 'Sanya' && !profile.error)
-    if (
-      characterProfiles.length === 0 ||
-      characterProfiles.some((profile) => profile.error) ||
-      !sanya?.skills.some((skill) => skill.name === 'Devouring Swarm' && skill.level > 0) ||
-      !sanya.factions.some((faction) => faction.name === 'Devil\'s Crossing')
-    ) {
-      throw new Error('Read-only character loading did not validate current local and cloud saves.')
+    const characters = await helper.request<{ passed: boolean; assertions: number; validVariants: number; rejectedVariants: number; readOnly: boolean }>('self-test-character-reader')
+    if (!characters.passed || characters.assertions < 70 || characters.validVariants !== 6 || characters.rejectedVariants !== 6 || !characters.readOnly) {
+      throw new Error('Generated character-save decoding did not pass its read-only checks.')
     }
     const factionPlannerItems = helperSnapshot.plannerItems ?? []
     const chosenArcanespark = factionPlannerItems.find((item) => item.name === 'Chosen Arcanespark')
